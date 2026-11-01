@@ -29,8 +29,8 @@ function eventHeadline(ev: TelemetryEvent): string {
   if (evidence) return evidence.headline;
   if (ev.kind === "service.av.detected") return "Antivirus detection";
   if (ev.kind === "service.av.block_flow") return "Antivirus blocked flow";
-  if (ev.kind.startsWith("service.envoy.")) return "Envoy proxy event";
-  if (ev.kind.startsWith("service.nginx.")) return "Nginx proxy event";
+  if (ev.kind.startsWith("service.envoy.")) return "Forward-proxy event";
+  if (ev.kind.startsWith("service.nginx.")) return "Reverse-proxy event";
   if (ev.kind.startsWith("service.dhcp.")) return "DHCP service event";
   if (ev.kind.startsWith("service.")) return "System service event";
   if (ev.proto === "firewall") return "Firewall decision";
@@ -124,7 +124,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       if (controller.signal.aborted) return;
       if (!page) {
         setResult({ key: queryKey, events: [], nextCursor: "", truncated: false,
-          error: "Failed to load events. Check query bounds and engine availability." });
+          error: "Failed to load events. Check filters and traffic-monitoring availability." });
         return;
       }
       setResult((previous) => {
@@ -233,7 +233,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       {/* Filter bar */}
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3">
         <div className="w-full text-xs text-(--text-muted)">
-          Use Events for raw telemetry and service activity. Use Flows for active connections and Alerts for IDS triage.
+          Use Events for activity records and service activity. Use Flows for active connections and Alerts for IDS triage.
         </div>
         {FILTER_OPTIONS.map((option) => (
           <button
@@ -282,19 +282,24 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           onChange={(e) => setKindPrefix(e.target.value)}
           className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) outline-hidden focus-visible:shadow-focus-ring"
         />
-        {([
-          ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
-          ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
-          ["APDU ID", apdu, setAPDU], ["Protocol", protocol, setProtocol], ["Decision", decision, setDecision],
-          ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
-          ["Cursor", cursor, setCursor],
-        ] as const).map(([label, value, setValue]) => (
-          <label key={label} className="flex flex-col gap-1 text-xs text-(--text)">
-            {label}
-            <input aria-label={label} value={value} onChange={(e) => setValue(e.target.value)}
-              className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm outline-hidden" />
-          </label>
-        ))}
+        <details className="w-full rounded-xs border p-3" open={Boolean(sessionFilter || flowFilter || ruleId || mode || apdu || protocol || decision || verdict || since || cursor)}>
+          <summary className="cursor-pointer text-xs">Advanced event filters</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {([
+              ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
+              ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
+              ["APDU ID", apdu, setAPDU], ["Protocol", protocol, setProtocol], ["Decision", decision, setDecision],
+              ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
+              ["Cursor", cursor, setCursor],
+            ] as const).map(([label, value, setValue]) => (
+              <label key={label} className="flex flex-col gap-1 text-xs text-(--text)">
+                {label}
+                <input aria-label={label} value={value} onChange={(e) => setValue(e.target.value)}
+                  className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm outline-hidden" />
+              </label>
+            ))}
+          </div>
+        </details>
         <label className="flex items-center gap-2 text-xs text-(--text)">
           <input
             type="checkbox"
@@ -334,7 +339,8 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       {nextCursor && <button disabled={live || loading} onClick={() => void refresh(nextCursor)} className="mb-3 rounded-xs border px-3 py-1.5 text-sm disabled:opacity-50">{live ? "Pause live updates to load older evidence" : "Load older evidence"}</button>}
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-          {error}
+          Traffic records unavailable. Check filters and retry with Refresh.
+          <details className="mt-2"><summary className="cursor-pointer">Technical details</summary><p>{error}</p></details>
         </div>
       )}
       <div className="mb-3 flex flex-wrap gap-2 text-xs text-(--text)">
@@ -412,20 +418,26 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
                     </button>
                   )}
                 </div>
-                <div className="grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
+                <details className="rounded-xs border p-3 text-xs">
+                  <summary className="cursor-pointer">Message and session details</summary>
+                  <div className="mt-2 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                   {evidence.rows.map((row) => (
                     <div key={row.label} className="flex gap-2">
                       <span className="shrink-0 text-(--text-dim)">{row.label}</span>
                       <span className="break-all font-mono text-[11px] text-(--text)">{row.value}</span>
                     </div>
                   ))}
-                </div>
+                  </div>
+                </details>
               </div>
             )}
             {ev.attributes && (
-              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-(--text)">
-                {JSON.stringify(ev.attributes, null, 2)}
-              </pre>
+              <details className="mt-2 rounded-xs border p-3 text-xs">
+                <summary className="cursor-pointer">Event attributes (JSON)</summary>
+                <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-(--text)">
+                  {JSON.stringify(ev.attributes, null, 2)}
+                </pre>
+              </details>
             )}
           </div>
           );

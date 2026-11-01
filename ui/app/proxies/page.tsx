@@ -174,7 +174,7 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     confirm.open({
       title: "Delete site",
-      message: `Remove reverse proxy site "${name}"? This change takes effect when you save.`,
+      message: `Remove reverse proxy site "${name}"? This removes it from local edits only. Save to stage the removal, then commit to apply.`,
       confirmLabel: "Delete",
       variant: "danger",
       onConfirm: () => {
@@ -226,36 +226,43 @@ export default function ProxiesPage() {
           <div className="flex items-center gap-3">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
             <h2 className="text-sm font-semibold text-(--text)">Forward proxy (Envoy)</h2>
-            <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to emit request counts into telemetry." />
+            <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to report request counts." />
           </div>
           {loading ? (
             <div className="mt-3 space-y-2">
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-6 w-1/2" />
             </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {proxy?.envoy_running ? "yes" : "no"}{" "}
-                {proxy?.envoy_pid ? `(pid ${proxy.envoy_pid})` : ""}
+                Live running: {typeof proxy?.envoy_running === "boolean" ? (proxy.envoy_running ? "yes" : "no") : "Unknown"}{" "}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {(envoy?.rate_per_min ?? 0).toFixed(1)} / min
+                Rate: {typeof envoy?.rate_per_min === "number" ? envoy.rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs">
-                Errors: {(envoy?.errors_rate_per_min ?? 0).toFixed(1)} / min
+                Errors: {typeof envoy?.errors_rate_per_min === "number" ? envoy.errors_rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs text-(--text-dim)">
-                Telemetry: access logs when enabled.
+                Activity source: access logs when enabled.
               </p>
               {proxy?.envoy_last_error ? (
                 <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {proxy.envoy_last_error}
                 </div>
               ) : null}
-              <p className="mt-2 text-xs text-(--text-muted)">
-                Last start: {proxy?.envoy_last_start || "n/a"}
-              </p>
+              <details className="mt-2 rounded-xs border p-3 text-xs">
+                <summary className="cursor-pointer">Service details</summary>
+                <p>Software: Envoy</p>
+                <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
+                <p>Last start: {proxy?.envoy_last_start || "n/a"}</p>
+              </details>
               {envoy?.sparkline.length ? (
                 <div className="mt-4">
                   <Sparkline
@@ -280,29 +287,36 @@ export default function ProxiesPage() {
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-6 w-1/2" />
             </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {proxy?.nginx_running ? "yes" : "no"}{" "}
-                {proxy?.nginx_pid ? `(pid ${proxy.nginx_pid})` : ""}
+                Live running: {typeof proxy?.nginx_running === "boolean" ? (proxy.nginx_running ? "yes" : "no") : "Unknown"}{" "}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {(nginx?.rate_per_min ?? 0).toFixed(1)} / min
+                Rate: {typeof nginx?.rate_per_min === "number" ? nginx.rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs">
-                Errors: {(nginx?.errors_rate_per_min ?? 0).toFixed(1)} / min
+                Errors: {typeof nginx?.errors_rate_per_min === "number" ? nginx.errors_rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs text-(--text-dim)">
-                Telemetry: access logs from published apps.
+                Activity source: access logs from published apps.
               </p>
               {proxy?.nginx_last_error ? (
                 <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {proxy.nginx_last_error}
                 </div>
               ) : null}
-              <p className="mt-2 text-xs text-(--text-muted)">
-                Last start: {proxy?.nginx_last_start || "n/a"}
-              </p>
+              <details className="mt-2 rounded-xs border p-3 text-xs">
+                <summary className="cursor-pointer">Service details</summary>
+                <p>Software: Nginx</p>
+                <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>
+                <p>Last start: {proxy?.nginx_last_start || "n/a"}</p>
+              </details>
               {nginx?.sparkline.length ? (
                 <div className="mt-4">
                   <Sparkline
@@ -403,7 +417,7 @@ export default function ProxiesPage() {
                 <div>
                   <label className="flex items-center gap-2 text-sm font-medium text-(--text)">
                     Upstream proxy
-                    <InfoTip label="Optional upstream proxy URL for chaining (phased). Leave empty for direct egress." />
+                    <InfoTip label="Upstream chaining is not supported. Leave this empty; nonempty values cannot be saved." />
                   </label>
                   <input
                     type="text"

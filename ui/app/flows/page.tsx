@@ -13,7 +13,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { IdentificationBadge } from "./identification-badge";
 import { TagList } from "../../components/TagList";
 
-const UNAVAILABLE = "Flows unavailable — the engine could not be reached.";
+const UNAVAILABLE = "Flows unavailable — live traffic monitoring could not be reached.";
 
 /** Short form of an IEC 104 session ID ("<run>-<seq>"): run prefix and seq. */
 function shortSessionID(id: string): string {
@@ -132,7 +132,7 @@ function FlowsContent() {
       {!error && (loading ? <SkeletonList rows={4} /> : <>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
         <div className="w-full text-(--text-muted)">
-          Live flow summaries show active conversations, AV flags and the labels of the TAG rules that matched them. Use Events for raw telemetry and Alerts for IDS investigations.
+          Live flow summaries show active conversations, AV flags and the labels of the connection-label rules that matched them. Use Events for activity records and Alerts for IDS investigations.
         </div>
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           Total flows: {flows.length}

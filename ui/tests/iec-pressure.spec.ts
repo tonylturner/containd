@@ -58,7 +58,7 @@ for (const unavailable of [false, true]) {
           page.getByText("Denied command", { exact: true }),
         ).toBeVisible();
         await expect(
-          page.getByText("Bound / saturation", { exact: true }),
+          page.getByText("Capacity reached", { exact: true }),
         ).toBeVisible();
         if (process.env.IEC104_PRESSURE_SCREENSHOT)
           await page.screenshot({

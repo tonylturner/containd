@@ -24,6 +24,7 @@ export default function SystemSettingsPage() {
   const [caFile, setCAFile] = useState<File | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [trustDetails, setTrustDetails] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const showTips = useSyncExternalStore(subscribePrefs, getShowTips, () => true);
   const persistHistory = useSyncExternalStore(subscribePrefs, getPersistCLIHistory, () => false);
@@ -69,6 +70,7 @@ export default function SystemSettingsPage() {
     setError(null);
     setWarning(null);
     setStatus(null);
+    setTrustDetails(null);
     if (!caFile) {
       setError("Select a PEM bundle file.");
       return;
@@ -79,9 +81,11 @@ export default function SystemSettingsPage() {
       setError(res.error || "Failed to upload trusted CA bundle.");
     } else if (res.state === "stored") {
       const reason = res.warnings.length > 0 ? `: ${res.warnings.join("; ")}` : "";
-      setWarning(`Trusted CA bundle stored (revision ${res.revision}), but the engine did not apply it${reason}. The next commit retries it.`);
+      setWarning("Trust certificates saved but not active. Applying configuration retries activation.");
+      setTrustDetails(`Revision: ${res.revision}${reason}`);
     } else {
-      setStatus(`Trusted CA bundle applied by the engine (revision ${res.revision}).`);
+      setStatus("Trust certificates are active.");
+      setTrustDetails(`Revision: ${res.revision}`);
     }
   }
 
@@ -108,6 +112,11 @@ export default function SystemSettingsPage() {
         </div>
       )}
 
+      {trustDetails && <details className="mb-4 rounded-xs border p-3 text-sm">
+        <summary className="cursor-pointer">Trust update details</summary>
+        <p className="mt-2 break-all">{trustDetails}</p>
+      </details>}
+
       <div className="grid gap-4 md:grid-cols-2">
         <Card padding="lg">
           <div className="flex items-center justify-between">
@@ -127,9 +136,15 @@ export default function SystemSettingsPage() {
           )}
 
           <div className="mt-4 space-y-1 text-sm">
-            {view.rows.map((row) => (
+            {view.rows.filter((row) => row.label.startsWith("HTTP")).map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />
             ))}
+            <details className="rounded-xs border p-3">
+              <summary className="cursor-pointer">Certificate details</summary>
+              {view.rows.filter((row) => !row.label.startsWith("HTTP")).map((row) => (
+                <Row key={row.label} label={row.label} value={row.value} />
+              ))}
+            </details>
             {view.note && <p className="pt-1 text-xs text-amber">{view.note}</p>}
           </div>
 
@@ -242,9 +257,9 @@ export default function SystemSettingsPage() {
       </Card>
 
       <Card className="mt-4" padding="lg">
-        <p className="text-sm text-(--text)">
-          CLI shortcuts:
-        </p>
+        <details>
+        <summary className="cursor-pointer text-sm text-(--text)">Advanced management access</summary>
+        <p className="mt-2 text-sm">CLI shortcuts:</p>
         <pre className="mt-3 rounded-xs bg-(--surface) p-3 text-xs text-(--text)">
 show system{"\n"}
 set system mgmt listen &lt;addr&gt;{"\n"}
@@ -255,6 +270,7 @@ set system mgmt hsts &lt;true|false&gt; [max_age_seconds]{"\n"}
 set system ssh allow-password &lt;true|false&gt;{"\n"}
 commit
         </pre>
+        </details>
       </Card>
     </Shell>
   );

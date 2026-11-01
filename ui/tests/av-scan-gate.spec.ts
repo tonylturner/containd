@@ -122,9 +122,21 @@ test("an ICS decoder port is flagged before the save", async ({ page }) => {
   await openPage(page);
   const include = page.getByTestId("scan-include").first();
   await include.getByLabel("Destination ports").fill("80, 500-510");
-  await expect(include.getByText("500-510 covers ICS decoder port 502 (Modbus); the server refuses it.")).toBeVisible();
+  await expect(include.getByText("Port range 500-510 includes reserved industrial port 502 (Modbus); choose different ports.")).toBeVisible();
   await include.getByLabel("Destination ports").fill("80");
-  await expect(include.getByText(/covers ICS decoder port/)).toHaveCount(0);
+  await expect(include.getByText(/includes reserved industrial port/)).toHaveCount(0);
+});
+
+test("advanced scanner settings retain protocol and path controls", async ({ page }) => {
+  await mockAPI(page);
+  await openPage(page);
+  await expect(page.getByText("Socket path", { exact: true })).not.toBeVisible();
+  await page.getByText("Advanced local scanner settings", { exact: true }).click();
+  await expect(page.getByText("Socket path", { exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder("/run/clamav/clamd.sock")).toBeVisible();
+  await page.getByText("Advanced remote scanner settings", { exact: true }).click();
+  await expect(page.getByText(/REQMOD for uploads, RESPMOD for downloads/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add server", exact: true })).toBeVisible();
 });
 
 test("a refused scan selection shows the server's validation error", async ({ page }) => {
@@ -141,6 +153,7 @@ test("an open gate reports that it scans", async ({ page }) => {
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("open");
   await expect(gateBlock(page).getByText("Scanning the selected HTTP traffic.")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 2/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Active connections: 3")).toBeVisible();
   await expect(gateBlock(page).getByText("not scanning")).toHaveCount(0);
@@ -171,6 +184,7 @@ test("a refusing gate is a failure and names the listener and routing faults", a
   await expect(gateBlock(page).getByRole("status")).toHaveText("refusing");
   await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-critical/);
   await expect(gateBlock(page).getByText("selected connections are refused; ICS endpoints pass")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Listener [::1]:18100: down — bind: address already in use")).toBeVisible();
   await expect(gateBlock(page).getByText("Routing: fwmark rule: operation not permitted")).toBeVisible();
@@ -185,6 +199,7 @@ test("a passing gate says it is not scanning", async ({ page }) => {
   await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-warning/);
   await expect(gateBlock(page).getByText("not scanning", { exact: true })).toBeVisible();
   await expect(gateBlock(page).getByText("selected connections pass unscanned")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listener 127.0.0.1:18100: unavailable on this host")).toBeVisible();
 });
 
@@ -192,6 +207,7 @@ test("an off gate is neutral", async ({ page }) => {
   await mockAPI(page, { gate: gate({ state: "off", enabled: false, admit: "refuse", listeners: [], connections: 0 }) });
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("off");
-  await expect(gateBlock(page).getByText("Off: the data plane is not enforcing.")).toBeVisible();
+  await expect(gateBlock(page).getByText("Off: firewall enforcement is off.")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 0/0")).toBeVisible();
 });

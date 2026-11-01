@@ -25,7 +25,7 @@ export function SyslogEventStatusPanel({ events }: { events: SyslogEventProgress
                   <td className="pr-3">{row.failed}</td>
                   <td className={`pr-3 ${row.lost ? "text-rose-300" : ""}`}>{row.lost}</td>
                   <td className={`pr-3 ${row.continuity_unknown ? "text-amber" : ""}`}>{row.continuity_unknown}</td>
-                  <td className="pr-3 font-mono">Epoch: {row.epoch || "unknown"}<br />Offset: {row.offset}</td>
+                  <td className="pr-3 font-mono"><details><summary className="cursor-pointer">Technical details</summary>Source: {row.source}<br />Stream instance: {row.epoch || "unknown"}<br />Record position: {row.offset}</details></td>
                   <td className={row.last_error ? "text-rose-300" : "text-(--text-muted)"}>{row.last_error || "—"}</td>
                 </tr>
               ))}</tbody>

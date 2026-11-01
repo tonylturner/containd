@@ -76,3 +76,19 @@ test("audit failure appears in the shell without visiting Syslog or Audit", asyn
   await loaded;
   await expect(page.getByRole("status", { name: "Evidence health" })).toContainText("Operations continue");
 });
+
+test("audit technical fields retain exact values behind disclosures", async ({ page }) => {
+  await mock(page, "ok");
+  const record = { id: 1, timestamp: "2026-11-01T12:00:00Z", actor: "operator", source: "engine-raw",
+    action: "config.test_action", target: "test target", result: "raw_result: code=42" };
+  await page.route("**/api/v1/audit", (route) => route.fulfill({ json: [record] }));
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/audit"));
+  await page.goto("/audit/");
+  await loaded;
+  const row = page.getByRole("row").filter({ hasText: "test target" });
+  for (const [label, value] of [["Source details", record.source], ["Action details", record.action], ["Result details", record.result]]) {
+    await expect(row.getByText(value, { exact: true })).not.toBeVisible();
+    await row.getByText(label, { exact: true }).click();
+    await expect(row.getByText(value, { exact: true })).toBeVisible();
+  }
+});

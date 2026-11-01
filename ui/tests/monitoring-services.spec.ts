@@ -30,6 +30,7 @@ test("monitoring overview reads the typed services status", async ({ page }) => 
         faults: [],
         dns: { enabled: true, running: true, ...meter() },
         ntp: { enabled: true, running: false, ...meter() },
+        vpn: { wireguard_enabled: false },
         envoy: { note: "", ...meter([4]), rate_per_min: 2.5, errors_rate_per_min: 0.5 },
         av: { available: false, error: "engine unavailable" },
       };
@@ -45,5 +46,6 @@ test("monitoring overview reads the typed services status", async ({ page }) => 
   const tile = (label: string) => health.locator("div.rounded-lg").filter({ hasText: label });
   await expect(tile("DNS")).toContainText("running");
   await expect(tile("NTP")).toContainText("stopped");
-  await expect(tile("DHCP")).toContainText("off");
+  await expect(tile("DHCP")).toContainText("Unknown");
+  await expect(tile("VPN")).toContainText("Unknown");
 });

@@ -453,7 +453,7 @@ export default function VPNPage() {
               >
                 {interfaceStateStatus === "unavailable" ? "interface state unavailable" : interfaceStateStatus === "loading" ? "Loading…" : runtime ? (runtime.up ? "link up" : "link down") : "not present"}
               </Badge>
-              <Badge tone={wgStatus ? "ok" : "off"} title="WireGuard netlink API reachability">
+              <Badge tone={wgStatus ? "ok" : "off"} title="Tunnel status connection">
                 {wgStatus ? "api ok" : "api n/a"}
               </Badge>
             </div>
@@ -474,7 +474,7 @@ export default function VPNPage() {
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
             <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
               When enabled and not quarantined, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
-              (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
+              (default <span className="font-mono">wan</span>) so clients can connect after these settings are applied.
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -595,19 +595,21 @@ export default function VPNPage() {
               />
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+            <details className="rounded-xs border p-3">
+              <summary className="cursor-pointer text-sm">Advanced peer settings</summary>
+              <label htmlFor="wireguard-peers" className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Peers (JSON)
                 <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
               </label>
               <textarea
+                id="wireguard-peers"
                 rows={8}
                 value={peersText}
                 disabled={!canEdit}
                 onChange={(e) => setText("peers", e.target.value)}
                 className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
-            </div>
+            </details>
           </div>
         </div>
 

@@ -12,6 +12,31 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+Service panels show **Unknown** when live status is unavailable; missing readings
+are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
+to request a new observation. **Service details** keeps process IDs, generated
+settings files and scanner metadata available without crowding the status summary.
+Antivirus **Scan-path details** retains listener and routing diagnostics; the
+scanning outcome and fail policy remain visible. Syslog **Delivery details** and
+per-stream **Technical details** expose batching and exact stream positions.
+**Advanced local scanner settings** and **Advanced remote scanner settings**
+retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
+peer JSON and profile import under **Advanced peer settings** and
+**Advanced profile import**; opening a disclosure does not change saved settings.
+
+Dashboard's **No recent IDS/AV alerts** describes only the reported alert counts,
+not overall appliance health or protection. Its IPS card shows unknown when no
+live protection observation is available. Rule counts are counts, not measured
+utilization; container memory bars appear only for reported percentages.
+
+Deleting a reverse proxy site first changes local edits. **Save** stages the
+removal; review and **Commit** apply it. Saving alone does not remove a live site.
+
+In Diagnostics, temporary flow blocks match source IP, destination IP,
+destination service port and protocol, with any source port: they can affect
+multiple connections. When enforcement is off, open **Deployment details** for
+configuration and startup guidance. There is no enforcement switch on PCAP.
+
 ## Service faults
 
 An older stored service configuration that no longer passes validation is

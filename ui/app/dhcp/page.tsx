@@ -211,25 +211,30 @@ export default function DHCPPage() {
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-8 w-1/2" />
           </div>
+        ) : !status ? (
+          <div role="status" className="mt-3 text-sm text-(--text-muted)">
+            Unknown — live service status unavailable.
+            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+          </div>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
             <div>
-              Enabled: <span className="text-(--text)">{status?.enabled ? "yes" : "no"}</span>
+              Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span>
             </div>
             <div>
-              Pools: <span className="text-(--text)">{status?.pools ?? 0}</span>
+              Pools: <span className="text-(--text)">{status?.pools ?? "Unknown"}</span>
             </div>
             <div>
-              Reservations: <span className="text-(--text)">{status?.reservations ?? 0}</span>
+              Reservations: <span className="text-(--text)">{status?.reservations ?? "Unknown"}</span>
             </div>
             <div>
-              Listen ifaces: <span className="text-(--text)">{status?.listen_ifaces ?? 0}</span>
+              Listen ifaces: <span className="text-(--text)">{status?.listen_ifaces ?? "Unknown"}</span>
             </div>
             <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
             <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
             {status?.last_error ? (
               <div className="md:col-span-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
@@ -256,7 +261,7 @@ export default function DHCPPage() {
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">DHCPv4 Server</h2>
         <p className="mt-1 text-sm text-(--text)">
-          Configure LAN-side DHCP. The engine runs a minimal DHCPv4 server (IPv4 only) when enabled and committed.
+          Assign IPv4 addresses to LAN clients after saving and applying these settings.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -412,7 +417,7 @@ export default function DHCPPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-(--text)">Active Leases</h2>
-            <p className="mt-1 text-sm text-(--text)">Leases issued by the embedded DHCP server (best-effort).</p>
+            <p className="mt-1 text-sm text-(--text)">Leases issued by the DHCP service on this appliance (best-effort).</p>
           </div>
           <div className="flex items-center gap-2">
             <a

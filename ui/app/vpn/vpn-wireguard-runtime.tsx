@@ -22,10 +22,10 @@ export function WireGuardRuntimeCard({
   return (
     <section aria-label="WireGuard runtime" className="rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
       <h2 className="text-lg font-semibold text-(--text)">Runtime</h2>
-      <p className="mt-1 text-sm text-(--text)">Kernel state (engine).</p>
+      <p className="mt-1 text-sm text-(--text)">Live tunnel status.</p>
       {interfaceStateStatus === "unavailable" && (
         <div role="status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          <p>Interface state unavailable — the engine could not be reached. Link and runtime addresses are unknown.</p>
+          <p>Interface state unavailable — live tunnel information could not be reached. Link and runtime addresses are unknown.</p>
           <button onClick={onRetry} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}

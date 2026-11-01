@@ -120,8 +120,9 @@ export default function Home() {
 
   const health = data?.health ?? null;
   const eventStats = data?.eventStats ?? null;
+  const alertCountsKnown = Number.isFinite(eventStats?.idsAlerts) && Number.isFinite(eventStats?.avDetections);
   const hasAlerts =
-    eventStats &&
+    alertCountsKnown && eventStats &&
     (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
   const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
@@ -137,14 +138,14 @@ export default function Home() {
             <div className="flex items-center gap-2.5">
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
-                  hasAlerts ? "animate-pulse" : "bg-emerald-400"
+                  !alertCountsKnown ? "bg-slate-500" : hasAlerts ? "animate-pulse" : "bg-emerald-400"
                 }`}
               />
               <span className="text-sm font-semibold text-white tracking-wide">
                 {health.hostname ?? "containd"}
               </span>
               <span className="text-xs text-slate-500">
-                {hasAlerts ? "Alerts active" : "All systems nominal"}
+                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : "No recent IDS/AV alerts"}
               </span>
             </div>
           ) : (

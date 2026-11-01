@@ -57,7 +57,7 @@ const pages = [
   { path: "/system/services/ntp/", charts: ["NTP events per minute"] },
   { path: "/system/services/dns/", charts: ["DNS events per minute"] },
   { path: "/proxies/", charts: ["Envoy events per minute", "Nginx events per minute"] },
-  { path: "/system/services/av/", charts: ["Engine AV scans per minute"] },
+  { path: "/system/services/av/", charts: ["Scans per minute"] },
   { path: "/vpn/", charts: ["VPN events per minute"] },
 ];
 
@@ -82,9 +82,9 @@ for (const { path, charts } of pages) {
 
 test("the antivirus page reports an unreachable engine without runtime values", async ({ page }) => {
   await open(page, "/system/services/av/", { faults: [], av: { available: false, error: "engine unavailable" } });
-  await expect(page.getByText("Engine antivirus unavailable: engine unavailable")).toBeVisible();
-  await expect(page.getByText("The engine did not report its runtime status.")).toBeVisible();
-  await expect(page.getByText("Backend ready:")).toHaveCount(0);
+  await expect(page.getByText("Antivirus status unavailable: engine unavailable")).toBeVisible();
+  await expect(page.getByText("Live scanner status was not reported.")).toBeVisible();
+  await expect(page.getByText("Scanner ready:")).toHaveCount(0);
 });
 
 test("topology nodes draw no made-up traffic sparklines", async ({ page }) => {
@@ -108,4 +108,16 @@ test("topology nodes draw no made-up traffic sparklines", async ({ page }) => {
   await expect(page.locator(".react-flow__node-firewall")).toBeVisible();
   await expect(page.locator(".react-flow__node-zone")).toBeVisible();
   await expect(page.locator("[class*='sparkline']")).toHaveCount(0);
+});
+
+test("missing antivirus readings stay unknown rather than using candidate defaults", async ({ page }) => {
+  await open(page, "/system/services/av/", { faults: [], av: { available: true, ...meter([]) } });
+  const panel = page.getByRole("heading", { name: "Live runtime status", exact: true }).locator("..");
+  await expect(panel).toContainText("Enabled: Unknown");
+  await expect(panel).toContainText("Scanner ready: Unknown");
+  await expect(panel).toContainText("Detections: Unknown");
+  await expect(panel).toContainText("Fail policy: Unknown");
+  await panel.getByText("Service details", { exact: true }).click();
+  await expect(panel).toContainText("Additional CA: Unknown");
+  await expect(panel).toContainText("Definition updater interval: Unknown");
 });

@@ -409,57 +409,63 @@ export function deriveServices(
 
   if (!status) {
     return [
-      { name: "IPS", active: false, detail: "Loading...", href: "/ids/", sparkline: ips },
-      { name: "AV", active: false, detail: "Loading...", href: "/system/services/av/" },
-      { name: "DNS", active: false, detail: "Loading...", href: "/system/services/dns/" },
-      { name: "VPN", active: false, detail: "Loading...", href: "/vpn/" },
-      { name: "Syslog", active: false, detail: "Loading...", href: "/system/services/syslog/" },
-      { name: "Proxy", active: false, detail: "Loading...", href: "/proxies/" },
+      { name: "IPS", active: null, detail: "Unknown — protection not reported", href: "/ids/", sparkline: ips },
+      { name: "AV", active: null, detail: "Unknown", href: "/system/services/av/" },
+      { name: "DNS", active: null, detail: "Unknown", href: "/system/services/dns/" },
+      { name: "VPN", active: null, detail: "Unknown", href: "/vpn/" },
+      { name: "Syslog", active: null, detail: "Unknown", href: "/system/services/syslog/" },
+      { name: "Proxy", active: null, detail: "Unknown", href: "/proxies/" },
     ];
   }
 
   const { av, vpn, proxy, syslog, dns } = status;
-  const syslogConfigured = (syslog?.configured_forwarders ?? 0) > 0;
+  const syslogKnown = typeof syslog?.configured_forwarders === "number";
+  const syslogConfigured = syslogKnown && syslog!.configured_forwarders > 0;
   const envoyActive = !!(proxy?.forward_enabled && proxy.envoy_running);
   const nginxActive = !!(proxy?.reverse_enabled && proxy.nginx_running);
   const avEnabled = av.available && av.enabled;
+  const avKnown = av.available && typeof av.enabled === "boolean";
   const vpnActive = !!vpn?.wireguard_enabled || !!vpn?.openvpn_running;
-  const dnsActive = !!dns?.enabled;
+  const vpnKnown = vpnActive || (typeof vpn?.wireguard_enabled === "boolean" && typeof vpn?.openvpn_running === "boolean");
+  const proxyActive = envoyActive || nginxActive;
+  const proxyKnown = proxyActive || (typeof proxy?.envoy_running === "boolean" && typeof proxy?.nginx_running === "boolean" && typeof proxy?.forward_enabled === "boolean" && typeof proxy?.reverse_enabled === "boolean");
+  const dnsKnown = typeof dns?.enabled === "boolean" && typeof dns?.running === "boolean";
+  const dnsActive = !!(dns?.enabled && dns.running);
 
   return [
     {
       name: "IPS",
-      active: true,
-      detail: "Active",
+      active: null,
+      detail: "Unknown — protection not reported",
       href: "/ids/",
       sparkline: ips,
     },
     {
       name: "AV",
-      active: avEnabled,
-      detail: !av.available ? "Engine unavailable" : avEnabled ? av.mode || "Enabled" : "Disabled",
+      active: avKnown ? avEnabled : null,
+      detail: !av.available ? "Scanner unavailable" : !avKnown ? "Unknown" : avEnabled ? av.mode || "Enabled" : "Disabled",
       href: "/system/services/av/",
       sparkline: av.available ? av.sparkline : undefined,
     },
     {
       name: "DNS",
-      active: dnsActive,
-      detail: dnsActive ? "Resolving" : "Disabled",
+      active: dnsKnown ? dnsActive : null,
+      detail: !dnsKnown ? "Unknown" : dnsActive ? "Resolving" : dns!.enabled ? "Stopped" : "Disabled",
       href: "/system/services/dns/",
       sparkline: dns?.sparkline,
     },
     {
       name: "VPN",
-      active: vpnActive,
-      detail: vpnActive ? "Tunnel up" : "No tunnels",
+      active: vpnKnown ? vpnActive : null,
+      detail: !vpnKnown ? "Unknown" : vpn!.openvpn_running ? "OpenVPN running" : vpn!.wireguard_enabled ? "WireGuard enabled" : "No tunnels",
       href: "/vpn/",
       sparkline: vpn?.sparkline,
     },
     {
       name: "Syslog",
-      active: syslogConfigured,
-      detail: syslogConfigured
-        ? `${syslog?.configured_forwarders} fwd · ${(syslog?.rate_per_min ?? 0).toFixed(0)}/min`
+      active: syslogKnown ? syslogConfigured : null,
+      detail: !syslogKnown ? "Unknown" : syslogConfigured
+        ? `${syslog?.configured_forwarders} fwd · ${typeof syslog?.rate_per_min === "number" ? syslog.rate_per_min.toFixed(0) : "Unknown"}/min`
         : "No forwarders",
       href: "/system/services/syslog/",
       sparkline: syslog?.sparkline,
@@ -467,8 +473,8 @@ export function deriveServices(
     },
     {
       name: "Proxy",
-      active: envoyActive || nginxActive,
-      detail: envoyActive || nginxActive ? "Active" : "Disabled",
+      active: proxyKnown ? proxyActive : null,
+      detail: !proxyKnown ? "Unknown" : proxyActive ? "Active" : "Stopped",
       href: "/proxies/",
       sparkline: proxy?.sparkline,
     },

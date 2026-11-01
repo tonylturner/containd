@@ -36,7 +36,7 @@ const flows = Array.from({ length: 60 }, (_, i) => ({
   eventCount: 1,
 }));
 
-type Mocks = { events: unknown[]; services: unknown };
+type Mocks = { events: unknown[]; services: unknown; health?: unknown; eventStats?: unknown; stats?: unknown; ruleCount?: number; ids?: unknown };
 
 async function openDashboard(page: Page, mocks: Mocks) {
   await page.addInitScript(() => {
@@ -50,21 +50,22 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/dashboard") {
       body = {
         user,
-        health: { status: "ok", hostname: "test" },
-        counts: { assets: 0, zones: zones.length, interfaces: 0, rules: 0, icsRules: 0 },
-        eventStats: { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
+        health: mocks.health ?? { status: "ok", hostname: "test" },
+        counts: { assets: 0, zones: zones.length, interfaces: 0, rules: mocks.ruleCount ?? 0, icsRules: 0 },
+        eventStats: "eventStats" in mocks ? mocks.eventStats : { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
         services: null,
         lastActivity: null,
       };
     }
     if (p === "/api/v1/system/stats") {
-      body = {
-        cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
+      body = mocks.stats ?? {
+        ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
         disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true },
         runtime: { uptime: "1m", goroutines: 1 },
       };
     }
     if (p === "/api/v1/zones") body = zones;
+    if (p === "/api/v1/ids/rules") body = mocks.ids ?? { enabled: false, rules: [] };
     if (p === "/api/v1/events") body = mocks.events;
     if (p === "/api/v1/flows") body = flows;
     if (p === "/api/v1/simulation") body = { running: false };
@@ -137,6 +138,61 @@ test("service cards read the services status, antivirus included", async ({ page
 
   await page.unrouteAll({ behavior: "wait" });
   await openDashboard(page, { events: [], services: { faults: [], av: { available: false, error: "engine unavailable" } } });
-  await expect(card("AV")).toContainText("Engine unavailable");
-  await expect(card("DNS")).toContainText("Disabled");
+  await expect(card("AV")).toContainText("Scanner unavailable");
+  await expect(card("DNS")).toContainText("Unknown");
 });
+
+test("partially reported service entries do not claim stopped or disabled", async ({ page }) => {
+  await openDashboard(page, { events: [], services: {
+    faults: [], av: { available: true }, vpn: { wireguard_enabled: false }, proxy: { envoy_running: false },
+  } });
+  for (const name of ["AV", "DNS", "VPN", "Syslog", "Proxy"]) {
+    const card = page.locator("a.rounded-lg").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(card).toContainText("Unknown");
+    await expect(card).not.toContainText(/Disabled|Stopped|No tunnels/);
+  }
+});
+
+
+test("a quiet alert window does not claim overall health when protection is degraded", async ({ page }) => {
+  await openDashboard(page, { events: [], services, health: { hostname: "test", status: "degraded", enforceEnabled: false } });
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toBeVisible();
+  await expect(page.getByText("All systems nominal", { exact: true })).toHaveCount(0);
+});
+
+test("missing dashboard alert counts remain unknown", async ({ page }) => {
+  await openDashboard(page, { events: [], services, eventStats: {} });
+  await expect(page.getByText("Recent IDS/AV alerts unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toHaveCount(0);
+});
+
+
+test("rule counts and unknown container memory do not fabricate utilization bars", async ({ page }) => {
+  await openDashboard(page, { events: [], services, ruleCount: 60 });
+  const ruleRow = page.getByText("Rule Eval", { exact: true }).locator("../..");
+  await expect(ruleRow).toContainText("60 rules");
+  await expect(ruleRow.locator("[style*='width']")).toHaveCount(0);
+  const containerRow = page.getByText("Container", { exact: true }).locator("../..");
+  await expect(containerRow).toContainText("Running");
+  await expect(containerRow.locator("[style*='width']")).toHaveCount(0);
+});
+
+test("a measured zero container memory stays zero, not a synthetic minimum", async ({ page }) => {
+  await openDashboard(page, { events: [], services, stats: {
+    ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
+    disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memPercent: 0 },
+    runtime: { uptime: "1m", goroutines: 1 },
+  } });
+  const containerRow = page.getByText("Container", { exact: true }).locator("../..");
+  await expect(containerRow.locator("[style*='width']")).toHaveAttribute("style", /width: 0%;/);
+});
+
+for (const ids of [{ enabled: false, rules: [] }, { enabled: true, rules: [] }]) {
+  test(`IPS is unknown without a live protection observation, even with IDS enabled=${ids.enabled}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, ids });
+    const ips = page.locator("a.rounded-lg").filter({ has: page.getByText("IPS", { exact: true }) });
+    await expect(ips).toContainText("Unknown");
+    await expect(ips).not.toContainText("Active");
+    await expect(ips).not.toHaveClass(/border-emerald/);
+  });
+}

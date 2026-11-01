@@ -93,3 +93,18 @@ test("empty candidate does not prevent exporting running rules", async ({ page }
   await expect(page.getByText("No candidate rules. Running rules can still be exported.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Snort/ })).toBeEnabled();
 });
+
+test("built-in rule format and group syntax remain reachable in disclosures", async ({ page }) => {
+  await openExport(page);
+  await page.getByRole("button", { name: /^Rules/ }).click();
+  const format = page.locator("details").filter({ has: page.getByText("Built-in format", { exact: true }) });
+  await expect(format.getByText("native", { exact: true })).not.toBeVisible();
+  await format.locator("summary").click();
+  await expect(format.getByText("native", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^Groups/ }).click();
+  const matching = page.locator("details").filter({ has: page.getByText("Advanced group matching", { exact: true }) });
+  await matching.locator("summary").click();
+  for (const expression of ["proto:modbus", "format:suricata", "severity:critical"]) {
+    await expect(matching.getByText(expression, { exact: true })).toBeVisible();
+  }
+});
