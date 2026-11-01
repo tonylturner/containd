@@ -168,7 +168,7 @@ export default function SyslogPage() {
           <div>Forwarders: {status?.configured_forwarders ?? "Unknown"}</div>
           <div>Sent: {status?.sent_total ?? "Unknown"}</div>
           <div>Failed: {status?.failed_total ?? "Unknown"}</div>
-          <div>Last send: {status?.last_flush || "\u2014"}</div>
+          <div>Last check: {status?.last_flush || "\u2014"}</div>
           <details className="md:col-span-4 rounded-xs border p-3">
             <summary className="cursor-pointer">Delivery details</summary>
             <div>Last batch: {status?.last_batch ?? "Unknown"}</div>

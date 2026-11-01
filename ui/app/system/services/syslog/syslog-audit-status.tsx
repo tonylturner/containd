@@ -27,7 +27,7 @@ export function SyslogAuditStatusPanel({ audit }: { audit: SyslogAuditStatus }) 
         <div>Sent: {audit.sent_total}</div>
         <div>Failed: {audit.failed_total}</div>
         <div className={stalled ? "text-amber" : undefined}>Backlog: {audit.backlog}</div>
-        <div>Last send: {when(audit.last_flush)}</div>
+        <div>Last check: {when(audit.last_flush)}</div>
       </div>
       {audit.last_error && (
         <p role="status" aria-label="Audit forwarding error" className="mt-2 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-amber wrap-break-word">

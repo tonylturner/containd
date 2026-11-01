@@ -595,7 +595,7 @@ export default function VPNPage() {
               />
             </div>
 
-            <details className="rounded-xs border p-3">
+            <details className="rounded-xs border p-3" open={(cfg.wireguard.peers?.length ?? 0) > 0}>
               <summary className="cursor-pointer text-sm">Advanced peer settings</summary>
               <label htmlFor="wireguard-peers" className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Peers (JSON)

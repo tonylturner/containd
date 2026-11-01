@@ -474,7 +474,7 @@ export function deriveServices(
     {
       name: "Proxy",
       active: proxyKnown ? proxyActive : null,
-      detail: !proxyKnown ? "Unknown" : proxyActive ? "Active" : "Stopped",
+      detail: !proxyKnown ? "Unknown" : proxyActive ? "Active" : proxy!.forward_enabled || proxy!.reverse_enabled ? "Stopped" : "Disabled",
       href: "/proxies/",
       sparkline: proxy?.sparkline,
     },

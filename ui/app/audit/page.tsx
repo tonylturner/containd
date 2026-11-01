@@ -89,12 +89,12 @@ export default function AuditPage() {
                   {new Date(r.timestamp).toLocaleString()}
                 </td>
                 <td className="px-4 py-3 text-(--text)">{r.actor}</td>
-                <td className="px-4 py-3 text-(--text)"><details><summary className="cursor-pointer">Source details</summary><code>{r.source}</code></details></td>
+                <td className="px-4 py-3 text-(--text)"><code>{r.source}</code></td>
                 <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                  <details><summary className="cursor-pointer">Action details</summary><code>{r.action}</code></details>
+                  <code>{r.action}</code>
                 </td>
                 <td className="px-4 py-3 text-(--text)">{r.target}</td>
-                <td className="px-4 py-3 text-(--text)"><details><summary className="cursor-pointer">Result details</summary><code>{r.result}</code></details></td>
+                <td className="px-4 py-3 text-(--text)"><code>{r.result}</code></td>
               </tr>
             ))}
           </tbody>

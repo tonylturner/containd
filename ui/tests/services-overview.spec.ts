@@ -95,3 +95,11 @@ test("missing service entries stay unknown on the overview", async ({ page }) =>
     await expect(card).not.toContainText(/Enabled:\s*no|running:\s*no|Forwarders:\s*0/);
   }
 });
+
+test("service software identities are readable inline", async ({ page }) => {
+  await openServices(page, servicesStatus({ available: false, error: "scanner offline" }));
+  for (const software of ["Envoy + Nginx", "Unbound", "chrony"]) {
+    await expect(page.getByText(`Software: ${software}`, { exact: true })).toBeVisible();
+  }
+  await expect(page.locator("details")).toHaveCount(0);
+});

@@ -125,9 +125,11 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
           key={service.name}
           href={service.href}
           className={`block rounded-lg border p-3 transition-colors hover:border-white/12 ${
-            service.active
-              ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
-              : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
+            service.active === null
+              ? "border-slate-500/30 bg-white/2 hover:bg-white/4"
+              : service.active
+                ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
+                : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
           }`}
         >
           <div
@@ -330,7 +332,7 @@ export function SystemHealthPanel({
         : stats.container.uptime
           ? `Up ${stats.container.uptime}`
           : "Running",
-      pct: Number.isFinite(memPct) ? memPct : null,
+      pct: stats.container.memLimitBytes > 0 && Number.isFinite(memPct) ? memPct : null,
       color: memPct > 85 ? "#ef4444" : memPct > 65 ? "#f59e0b" : "#06b6d4",
     });
   } else if (stats) {

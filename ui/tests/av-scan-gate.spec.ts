@@ -34,7 +34,7 @@ function gate(overrides: Record<string, unknown> = {}) {
 
 type Mock = { requests: { method: string; path: string; body: unknown }[] };
 
-async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fail?: string } = {}): Promise<Mock> {
+async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fail?: string; config?: Record<string, unknown> } = {}): Promise<Mock> {
   const mock: Mock = { requests: [] };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -48,7 +48,7 @@ async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fa
       return;
     }
     if (request.method() === "GET") {
-      const body = path === "/api/v1/services/av" ? baseConfig
+      const body = path === "/api/v1/services/av" ? { ...baseConfig, ...options.config }
         : path === "/api/v1/services/status" ? { faults: [], av: { available: true, enabled: true, mode: "clamav", ready: true, ...meter, gate: options.gate ?? gate() } }
           : path === "/api/v1/zones" ? zones
             : path === "/api/v1/assets" ? assets
@@ -128,7 +128,9 @@ test("an ICS decoder port is flagged before the save", async ({ page }) => {
 });
 
 test("advanced scanner settings retain protocol and path controls", async ({ page }) => {
-  await mockAPI(page);
+  await mockAPI(page, { config: { clamav: {
+    socketPath: "/run/clamav/clamd.sock", customDefsPath: "/data/clamav/custom", freshclamEnabled: true,
+  } } });
   await openPage(page);
   await expect(page.getByText("Socket path", { exact: true })).not.toBeVisible();
   await page.getByText("Advanced local scanner settings", { exact: true }).click();
@@ -184,12 +186,12 @@ test("a refusing gate is a failure and names the listener and routing faults", a
   await expect(gateBlock(page).getByRole("status")).toHaveText("refusing");
   await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-critical/);
   await expect(gateBlock(page).getByText("selected connections are refused; ICS endpoints pass")).toBeVisible();
-  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
-  await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Listener [::1]:18100: down — bind: address already in use")).toBeVisible();
   await expect(gateBlock(page).getByText("Routing: fwmark rule: operation not permitted")).toBeVisible();
   await expect(gateBlock(page).getByText("Admission: gate_admit: nft apply failed")).toBeVisible();
   await expect(gateBlock(page).getByText("zone \"ot\" has no interface bound to it")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
+  await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
 });
 
 test("a passing gate says it is not scanning", async ({ page }) => {
@@ -210,4 +212,35 @@ test("an off gate is neutral", async ({ page }) => {
   await expect(gateBlock(page).getByText("Off: firewall enforcement is off.")).toBeVisible();
   await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 0/0")).toBeVisible();
+});
+
+for (const config of [
+  { mode: "icap" },
+  { icap: { servers: [{ address: "scanner.example:1344", service: "avscan", useTls: true }] } },
+  { clamav: { socketPath: "/custom/clamd.sock" } },
+  { clamav: { customDefsPath: "/custom/defs" } },
+  { clamav: { updateSchedule: "4h" } },
+  { clamav: { freshclamEnabled: false } },
+]) {
+  test(`advanced scanner settings reveal mode-required or non-default configuration ${JSON.stringify(config)}`, async ({ page }) => {
+    const mock = await mockAPI(page, { config });
+    await openPage(page);
+    const summary = "clamav" in config ? "Advanced local scanner settings" : "Advanced remote scanner settings";
+    const details = page.locator("details").filter({ has: page.getByText(summary, { exact: true }) });
+    await expect(details).toHaveAttribute("open", "");
+    expect(mock.requests).toEqual([]);
+  });
+}
+
+test("fail policy options name the scanner-unavailable condition and retain API values", async ({ page }) => {
+  const mock = await mockAPI(page);
+  await openPage(page);
+  for (const [value, label] of [["open", "Allow unscanned traffic when the scanner is unavailable"], ["closed", "Block selected traffic when the scanner is unavailable"]]) {
+    const option = page.getByRole("option", { name: label, exact: true });
+    await expect(option).toHaveAttribute("value", value);
+    await page.locator("select").filter({ has: option }).selectOption(value);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: staged — commit to apply.");
+    expect((mock.requests.at(-1)?.body as Record<string, unknown>).failPolicy).toBe(value);
+  }
 });
