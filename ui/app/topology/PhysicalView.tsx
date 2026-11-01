@@ -423,11 +423,7 @@ export default function PhysicalView() {
                     <span className={s.resName}>CPU quota</span>
                     <span className={s.resVal} style={{ color: cpuQuota === "max" || cpuQuota === "unlimited" ? "#f59e0b" : "#22c55e" }}>{cpuQuota}</span>
                   </div>
-                  {(cpuQuota === "max" || cpuQuota === "unlimited") ? (
-                    <div className={s.resBarDashed}><div className={s.resBar} style={{ width: "100%", background: "rgba(245,158,11,0.15)" }} /></div>
-                  ) : (
-                    <div className={s.resBarWrap}><div className={s.resBar} style={{ width: "30%", background: "#22c55e" }} /></div>
-                  )}
+                  <p className="text-xs text-(--text-muted)">Configured limit, not CPU usage</p>
                 </div>
                 <div className={s.resRow}>
                   <div className={s.resHeader}>
