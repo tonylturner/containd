@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones 412. Scripts and integrations that stage then commit must read the
   revision first and pass the one each write returns.
 
+### Changed
+
+- Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
+
 ### Fixed
 
 - CLI configuration edits and repository smoke scripts carry snapshot revisions

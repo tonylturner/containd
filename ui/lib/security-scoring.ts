@@ -1,4 +1,4 @@
-// IEC 62443-3-3 SL scoring — shared between SecurityView and Zones page.
+// IEC 62443-3-3 requirement checks and check-based SL — shared between SecurityView and Zones page.
 
 import type { Conduit, ConduitMap, Zone } from "./api";
 
@@ -31,7 +31,7 @@ export interface SRCheck extends SRDef {
 /* ── SR definitions (SL 0 through SL 4) ── */
 
 export const SR_DEFS: SRDef[] = [
-  // SL-0: No security requirements (always met — baseline for unprotected zones)
+  // SL-0: No requirement checks (baseline for unprotected zones)
 
   // SL-1
   { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",            source: "zone",    check: (z) => z.id !== "internet" },
