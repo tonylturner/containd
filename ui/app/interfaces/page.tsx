@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { reconcileRows, upsertRow } from "../../lib/config-editor";
@@ -26,6 +28,7 @@ import { runtimeFor } from "../../lib/interface-addresses";
 import { zoneLabel } from "../../lib/zones";
 
 export default function InterfacesPage() {
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const rowsDraft = useConfigEditor<Interface[]>([], false);
@@ -84,20 +87,17 @@ export default function InterfacesPage() {
   ];
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [i, z, s, r] = await Promise.all([
-      api.listInterfaces(),
-      api.listZones(),
-      api.listInterfaceState(),
-      api.getManagementReservation(),
-    ]);
+    const [iSnapshot, zSnapshot, s, r] = await Promise.all([api.listInterfaces(), api.listZones(), api.listInterfaceState(), api.getManagementReservation()]);
+    const i = readConfig(iSnapshot, keepEdits);
+    const z = readConfig(zSnapshot, keepEdits);
     if (!checkLoaded(i)) return;
-    refreshForm(i, keepEdits);
+    refreshForm(i, keepEdits, iSnapshot?.revision);
     setReservation(r);
-    adoptRows(i, keepEdits);
+    adoptRows(i, keepEdits, iSnapshot?.revision);
     setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
-  }, [checkLoaded, refreshForm, adoptRows]));
+  }, [checkLoaded, refreshForm, adoptRows, readConfig]));
 
   const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
   const unboundConfigured = {
@@ -112,7 +112,7 @@ export default function InterfacesPage() {
     setError(null);
     setAssigning(true);
     const before = rowsDraft.editor.server;
-    const res = await api.assignInterfaces("auto");
+    const res = await api.assignInterfaces(expectedRevision(), "auto").then(handleRevision);
     setAssigning(false);
     if (!res.ok) {
       setError(res.error || "Failed to auto-assign interfaces.");
@@ -134,7 +134,7 @@ export default function InterfacesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await api.reconcileInterfacesReplace();
+        const res = await api.reconcileInterfacesReplace(expectedRevision()).then(handleRevision);
         setReconciling(false);
         if (!res.ok) {
           setError(res.error || "Failed to reconcile interfaces.");
@@ -193,28 +193,30 @@ export default function InterfacesPage() {
               addresses: addrs,
             };
     const submitted = form.editor;
-    const created = await api.createInterface(payload);
+    const created = await api.createInterface(form.editor.baseRevision ?? "", payload);
     setSaving(false);
     if (!created.ok) {
+      form.fail(created);
       setError(created.error || "Failed to create interface.");
       return;
     }
     rowsDraft.acceptCollection((rows) => upsertRow(rows, created.data, (row) => row.name));
     await refresh();
     setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
-    form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"]);
+    form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"], created.revision);
   }
 
   async function onDelete(ifaceName: string) {
     if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
-    const result = await api.deleteInterface(ifaceName);
+    const result = await api.deleteInterface(rowsDraft.editor.baseRevision ?? "", ifaceName);
     if (!result.ok) {
+      rowsDraft.reportFailure(result);
       setError(result.error || "Failed to delete interface.");
       return;
     }
-    rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`]);
+    rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`], result.revision);
     await refresh();
     setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }
@@ -232,14 +234,14 @@ export default function InterfacesPage() {
       if (gwErr) { setError(gwErr); return; }
     }
     const submitted = rowsDraft.beginSave();
-    const updated = await api.updateInterface(ifaceName, patch);
+    const updated = await api.updateInterface(submitted.baseRevision ?? "", ifaceName, patch);
     if (!updated.ok) {
-      rowsDraft.failSave(submitted);
+      rowsDraft.failSave(submitted, updated);
       setError(updated.error || "Failed to update interface.");
       return;
     }
     // Reflect candidate state; the separate OS state remains live until commit.
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, updated.data, (row) => row.name), `${JSON.stringify(ifaceName)}.`);
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, updated.data, (row) => row.name), `${JSON.stringify(ifaceName)}.`, updated.revision);
     await refresh();
     setNotice(updated.warning ? `Interface staged — commit to apply. Warning: ${updated.warning}` : "Interface staged — commit to apply.");
   }
@@ -278,6 +280,7 @@ export default function InterfacesPage() {
         </div>
       }
     >
+      {revisionNotice(() => refresh({ keepEdits: false }))}
       <ConfirmDialog {...confirm.props} />
       {reservation?.active && (
         <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">
@@ -314,6 +317,8 @@ export default function InterfacesPage() {
       )}
       {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
+      <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

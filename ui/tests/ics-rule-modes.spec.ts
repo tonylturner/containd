@@ -89,7 +89,7 @@ async function mock(page: Page, counters: unknown = snapshot) {
         attributes: { decision, reason: "rule", mode: "monitor", ruleId: "trial", action: i ? "DENY" : "ALLOW" },
       })) };
     }
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return { writes, queries };
 }

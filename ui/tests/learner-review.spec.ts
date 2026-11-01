@@ -153,7 +153,7 @@ test("wire-coordinate approval cannot be replaced by selection", async ({
   expect(state.writes[0].body.coordinateApproved).toBe(true);
 });
 
-test("409 is atomic: server reason, no partial success, refreshed revisions and empty selection", async ({
+test("409 is atomic: server reason, refreshed revisions and the original selections and receipt retained", async ({
   page,
 }) => {
   const state = await mockLearner(page);
@@ -188,9 +188,11 @@ test("409 is atomic: server reason, no partial success, refreshed revisions and 
     page.getByRole("article", { name: "Suggestion modbus-1", exact: true }),
   ).toContainText("Revision 3");
   await expect(
-    page.getByRole("button", { name: "Stage 0 selected", exact: true }),
+    page.getByRole("button", { name: "Stage 1 selected", exact: true }),
   ).toBeDisabled();
-  await expect(page.getByText(pending, { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Select modbus-1", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("Select modbus-2", { exact: true })).toBeChecked();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeVisible();
 });
 
 test("uncertain completion retries identical request ID and ordered revisions", async ({
@@ -211,6 +213,7 @@ test("uncertain completion retries identical request ID and ordered revisions", 
     page.getByRole("button", { name: "Retry same staging request" }),
   ).toBeVisible();
   state.uncertain = false;
+  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
   await page
     .getByRole("button", { name: "Retry same staging request" })
     .click();

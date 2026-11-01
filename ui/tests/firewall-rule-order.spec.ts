@@ -39,7 +39,7 @@ async function openFirewall(page: Page, hash = "") {
       const { position } = request.postDataJSON() as { position: Position };
       const id = decodeURIComponent(path.split("/").at(-2)!);
       moves.push({ id, position });
-      if (rejectMove) return route.fulfill({ status: 400, json: { error: "Unknown anchor" } });
+      if (rejectMove) return route.fulfill({ status: 400, json: { error: "Unknown anchor" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       const moved = rules.find((r) => r.id === id)!;
       rules = rules.filter((r) => r.id !== id);
       const index = position === "top" ? 0 : position === "bottom" ? rules.length
@@ -58,7 +58,7 @@ async function openFirewall(page: Page, hash = "") {
       ruleId: "allow-ssh", action: "ALLOW", shadowedBy: "deny-all",
       message: "rule at position 2 is shadowed by earlier DENY rule deny-all at position 1",
     }] };
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto(`/firewall/${hash}`);

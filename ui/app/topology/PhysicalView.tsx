@@ -202,7 +202,7 @@ export default function PhysicalView() {
         await Promise.all([
           api.getSystemStats(signal).catch(() => null),
           api.getSystemInspection(signal).catch(() => null),
-          api.getRunningConfig(signal),
+          api.getRunningConfig(signal).then(snapshot => snapshot?.data ?? null),
           api.listInterfaceState(signal),
           api.listFlows(200, signal),
           api.getServicesStatus(signal).catch(() => null),

@@ -77,10 +77,7 @@ test("gaps do not bypass collection state, expiry or backend certification", asy
     expect(route.request().postDataJSON()).toEqual({
       datasetId: state.datasets[0].id,
     });
-    await route.fulfill({
-      status: 409,
-      json: { error: "no complete parents eligible for certification" },
-    });
+    await route.fulfill({ status: 409, json: { error: "no complete parents eligible for certification" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await openDataset(page);
   await expect(generate).toBeEnabled();

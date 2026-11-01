@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
+import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -68,7 +68,7 @@ export default function DHCPPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null), false);
+  const { conflictProps, editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null), false);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -82,10 +82,11 @@ export default function DHCPPage() {
       const svc = await api.getServicesStatus();
       setError(null);
       setStatus(svc?.dhcp ?? null);
-      const current = await api.getDHCP();
+      const currentSnapshot = await api.getDHCP();
+      const current = (currentSnapshot?.data ?? null);
       if (!checkLoaded(current)) return;
       const next = normalize(current);
-      adoptConfig(next, keepEdits);
+      adoptConfig(next, keepEdits, currentSnapshot?.revision);
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -139,18 +140,18 @@ export default function DHCPPage() {
       dnsServers: dnsServersText.split(",").map((s) => s.trim()).filter(Boolean),
       pools: textToPools(poolsText), reservations: textToReservations(reservationsText),
     };
-    const saved = await save.run("save", () => api.setDHCP(payload), {
+    const saved = await save.run("save", () => api.setDHCP(submitted.baseRevision ?? "", payload), {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
     });
     if (!saved) { failSave(submitted); return; }
     if (!saved.ok) {
-      failSave(submitted);
+      failSave(submitted, saved);
       setError(saved.error);
       return;
     }
     const next = normalize(saved.data);
-    acceptConfig(submitted, next);
+    acceptConfig(submitted, next, saved.revision);
   }
 
   return (
@@ -185,6 +186,7 @@ export default function DHCPPage() {
         </div>
       }
     >
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { accept, acceptCollection, adopt, beginSave, failSave, fresh, isDirty, reconcileRows, sameConfig, upsertRow, type ConfigEditor } from "../lib/config-editor";
+import { accept, acceptCollection, adopt, beginSave, failSave, fresh, isDirty, keepEdits, reconcileRows, sameConfig, upsertRow, type ConfigEditor } from "../lib/config-editor";
 
 function start<T>(editor: ConfigEditor<T>) {
   const submitted = { id: Symbol("test-save"), cfg: editor.cfg, raw: editor.raw };
@@ -135,4 +135,45 @@ test("a post-mutation read reconciles only changed rows even after a subscriptio
   const accepted = acceptCollection(editor, (rows) => reconcileRows(rows, before, next, (r) => r.name));
   expect(accepted.server).toEqual(next);
   expect(accepted.cfg).toEqual([local[0], next[1], next[2]]);
+});
+
+test("dirty refresh retains its immutable revision; consent and acknowledgements are separate", () => {
+  const initialRevision = "0123456789abcdef.7";
+  const currentRevision = initialRevision.replace(/.$/, "8");
+  const original = fresh({ name: "original" }, initialRevision);
+  const dirty = { ...original, raw: { unfinished: "[" } };
+  const read = adopt(dirty, { name: "server" }, true, currentRevision);
+  expect(read.baseRevision).toBe(initialRevision);
+  expect(read.serverRevision).toBe(currentRevision);
+  expect(read.raw).toEqual(dirty.raw);
+  const rebased = keepEdits({ ...read, conflictRevision: currentRevision });
+  expect(rebased.baseRevision).toBe(currentRevision);
+  expect(rebased.olderView).toBe(true);
+  expect(rebased.pending).toEqual([]);
+  expect(rebased.raw).toEqual(dirty.raw);
+});
+
+test("acknowledging one row never advances a different draft's base revision", () => {
+  const initialRevision = "0123456789abcdef.7";
+  const resultingRevision = initialRevision.replace(/.$/, "8");
+  const initial = fresh([{ name: "one" }, { name: "two" }], initialRevision);
+  const dirty = { ...initial, raw: { '"one".alias': '"first"', '"two".alias': '"second"' } };
+  const submitted = { id: Symbol("first"), cfg: dirty.cfg, raw: dirty.raw, baseRevision: initialRevision };
+  const saving = beginSave(dirty, submitted);
+  const accepted = acceptCollection(saving, rows => rows, ['"one".'], submitted, resultingRevision);
+  expect(accepted.baseRevision).toBe(initialRevision);
+  expect(accepted.raw).toEqual({ '"two".alias': '"second"' });
+  expect(accepted.serverRevision).toBe(resultingRevision);
+});
+
+test("deleting a row acknowledges only the deletion, not another row's structured edits", () => {
+  const baseRevision = "0123456789abcdef.7";
+  const revision = baseRevision.replace(/.$/, "8");
+  const initial = fresh([{ id: "one", enabled: true }, { id: "two", enabled: true }], baseRevision);
+  const dirty = { ...initial, cfg: [initial.cfg[0], { ...initial.cfg[1], enabled: false }] };
+  const submitted = { id: Symbol("delete"), cfg: dirty.cfg, raw: {}, baseRevision };
+  const result = acceptCollection(beginSave(dirty, submitted), rows => rows.filter(row => row.id !== "one"), [], submitted, revision);
+  expect(result.cfg).toEqual([{ id: "two", enabled: false }]);
+  expect(result.server).toEqual([{ id: "two", enabled: true }]);
+  expect(result.baseRevision).toBe(baseRevision);
 });

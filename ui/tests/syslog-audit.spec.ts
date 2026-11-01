@@ -18,7 +18,7 @@ async function open(page: Page, audit: unknown) {
       : path === "/api/v1/services/status" ? { syslog: { ...syslog, ...(audit === undefined ? {} : { audit }) }, av: { available: false, error: "x" } }
         : path === "/api/v1/services/syslog" ? { forwarders: [{ address: "192.0.2.10", port: 514, proto: "udp" }], batchSize: 500, flushEvery: 2 }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/syslog/");

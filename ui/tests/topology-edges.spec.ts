@@ -19,7 +19,7 @@ for (const width of [1440, 1024]) {
             if (message.text().includes("reactflow.dev/error#002")) typeWarnings.push(message.text());
           });
           await page.route("**/api/v1/**", (route) =>
-            route.fulfill({ json: responses[new URL(route.request().url()).pathname] ?? {} }));
+            route.fulfill({ json: responses[new URL(route.request().url()).pathname] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
           const loaded = page.waitForResponse("**/api/v1/config");
           await page.goto("/topology/");
           await loaded;
@@ -48,7 +48,7 @@ test("topology refresh updates data without resetting measured, selected or drag
   await page.setViewportSize({ width: 1440, height: 900 });
   const updatedResponses = structuredClone(responses);
   await page.route("**/api/v1/**", (route) =>
-    route.fulfill({ json: updatedResponses[new URL(route.request().url()).pathname] ?? {} }));
+    route.fulfill({ json: updatedResponses[new URL(route.request().url()).pathname] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   const edges = page.locator(".react-flow__edge-path");
   await expect(edges).toHaveCount(edgeIds.length);

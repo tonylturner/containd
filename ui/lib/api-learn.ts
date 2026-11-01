@@ -5,7 +5,7 @@ import {
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { failureOf, getJSONResult, postJSONResult } from "./api-request";
+import { failureOf, getJSONResult, postJSONResult, responseRevision, revisionHeaders } from "./api-request";
 import { notifyConfigMutation } from "./config-events";
 
 // Public evidence API projections; rule predicates always use FirewallRule.
@@ -229,11 +229,12 @@ export async function analyzeUpload(
 // Preserve the status so uncertain persistence can be retried with the same receipt.
 export async function stageSuggestions(
   payload: LearnApplyRequest,
+  expectedRevision: string,
 ): Promise<ApiResult<{ staged: true }> & { status?: number }> {
   try {
     const res = await fetchWithSession(`${base}/apply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...revisionHeaders(expectedRevision) },
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res))
@@ -242,7 +243,7 @@ export async function stageSuggestions(
     if (!res.ok) return { ...(await failureOf(res)), status: res.status };
     const data = (await res.json()) as { staged: true };
     notifyConfigMutation(res);
-    return { ok: true, data, status: res.status };
+    return { ok: true, data, status: res.status, revision: responseRevision(res) };
   } catch (e) {
     return {
       ok: false,

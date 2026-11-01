@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { useConfigRevision } from "../../lib/use-config-revision";
 
 import { ICSModeSelect } from "../ics/ics-mode-select";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
@@ -24,16 +26,20 @@ import {
 
 export function DPIConfigSection({
   config: cfg,
+  revision,
   health,
   available,
   onChange,
 }: {
   config: DataPlaneConfig;
+  revision: string;
   available: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
   onChange: (c: DataPlaneConfig) => void;
 }) {
+  const { readConfig, expectedRevision: directRevision, handleRevision, revisionNotice } = useConfigRevision();
+  useEffect(() => { readConfig({ data: cfg, revision }); }, [cfg, revision, readConfig]);
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
@@ -61,19 +67,20 @@ export function DPIConfigSection({
 
   // Failed requests leave the editor open; only acknowledged state replaces
   // the displayed server copy.
-  async function save(updated: DataPlaneConfig) {
+  async function save(updated: DataPlaneConfig, expectedRevision?: string) {
     if (!canEdit || !available || saving) return null;
     setSaving(true);
     setSaveError(null);
-    const result = await setDataPlane(updated);
+    const response = await setDataPlane(expectedRevision ?? directRevision(), updated);
+    const result = expectedRevision === undefined ? handleRevision(response) : response;
     setSaving(false);
     setSaveState(result.ok ? "saved" : "error");
     if (!result.ok) {
       setSaveError(result.error);
-      return null;
+      return result;
     }
     onChange(result.data);
-    return result.data;
+    return result;
   }
 
   function toggleDPI() {
@@ -84,28 +91,30 @@ export function DPIConfigSection({
     save({ ...cfg, dpiMode: mode });
   }
 
-  function saveProtos(newProtos: Record<string, boolean>) {
-    return save({ ...cfg, dpiProtocols: newProtos });
+  function saveProtos(newProtos: Record<string, boolean>, expectedRevision: string) {
+    return save({ ...cfg, dpiProtocols: newProtos }, expectedRevision);
   }
 
   function saveICSProtos(
     newICSProtos: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
+    expectedRevision: string,
   ) {
     return save({
       ...cfg,
       dpiIcsProtocols: newICSProtos,
       ...(Object.keys(parsing).length > 0 ? { dpiIcsParsing: parsing } : {}),
-    });
+    }, expectedRevision);
   }
 
-  function saveExclusions(newExcl: DPIExclusion[]) {
-    return save({ ...cfg, dpiExclusions: newExcl });
+  function saveExclusions(newExcl: DPIExclusion[], expectedRevision: string) {
+    return save({ ...cfg, dpiExclusions: newExcl }, expectedRevision);
   }
 
   return (
     <>
       <Card padding="md" className="mt-6">
+        {revisionNotice(() => window.location.reload())}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-(--text)">
@@ -131,6 +140,7 @@ export function DPIConfigSection({
             {canEdit && (
               <button
                 onClick={toggleDPI}
+                aria-label="Toggle DPI"
                 disabled={saving || !available}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   dpiOn ? "bg-emerald-500" : "bg-white/10"
@@ -320,6 +330,7 @@ export function DPIConfigSection({
 
       {showProtoModal && (
         <DPIProtocolModal
+          revision={revision}
           context={cfg}
           protocols={protos}
           saving={saving || !available}
@@ -329,6 +340,7 @@ export function DPIConfigSection({
       )}
       {showExclModal && (
         <DPIExclusionModal
+          revision={revision}
           context={cfg}
           exclusions={exclusions}
           saving={saving || !available}
@@ -338,6 +350,7 @@ export function DPIConfigSection({
       )}
       {showICSConfigModal && (
         <ICSDPIConfigModal
+          revision={revision}
           context={cfg}
           icsProtocols={icsProtos}
           parsing={cfg.dpiIcsParsing ?? {}}

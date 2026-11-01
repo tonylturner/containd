@@ -1,5 +1,7 @@
 "use client";
 
+import type { ApiResult } from "../../lib/api";
+
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -154,6 +156,7 @@ function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[],
 }
 
 export function EditRuleModal({
+  revision,
   context,
   zones,
   forwards,
@@ -164,6 +167,7 @@ export function EditRuleModal({
   onSave,
 }: {
   context: FirewallRule[];
+  revision: string;
   zones: Zone[];
   forwards: PortForward[];
   rule: FirewallRule;
@@ -171,15 +175,15 @@ export function EditRuleModal({
   /** Distinct TAG labels of the other rules. */
   tagsInUse: string[];
   onClose: () => void;
-  onSave: (patch: FirewallRulePatch) => Promise<FirewallRule | null>;
+  onSave: (patch: FirewallRulePatch, revision: string) => Promise<ApiResult<FirewallRule> | null>;
 }) {
-  const draft = useConfigEditor(() => ruleDraftFrom(rule, context, zones, globalMode));
+  const draft = useConfigEditor(() => ruleDraftFrom(rule, context, zones, globalMode), true, revision);
   const { cfg, setCfg, adoptConfig } = draft;
   const latest = useRef(draft.editor);
   useLayoutEffect(() => { latest.current = draft.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig(ruleDraftFrom(rule, context, zones, globalMode)); }, [adoptConfig, rule, context, zones, globalMode]);
+  useEffect(() => { adoptConfig(ruleDraftFrom(rule, context, zones, globalMode), true, revision); }, [adoptConfig, rule, context, zones, globalMode, revision]);
   const description = cfg.description;
   const setDescription = (description: typeof cfg.description) => setCfg((c) => ({ ...c, description }));
   const log = cfg.log;
@@ -253,10 +257,12 @@ export function EditRuleModal({
     if (!built) return;
     const submitted = draft.beginSave();
     setSaving(true);
-    const saved = await onSave(built.patch);
+    const result = await onSave(built.patch, submitted.baseRevision ?? "");
     setSaving(false);
-    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
-    draft.acceptConfig(submitted, ruleDraftFrom(saved, context, zones, globalMode));
+    if (!result || !mounted.current) { draft.failSave(submitted); return; }
+    if (!result.ok) { draft.failSave(submitted, result); setError(result.error); return; }
+    const saved = result.data;
+    draft.acceptConfig(submitted, ruleDraftFrom(saved, context, zones, globalMode), result.revision);
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
 
@@ -282,7 +288,7 @@ export function EditRuleModal({
           <button onClick={onClose} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Close</button>
         </div>
 
-        <ConfigEditNotice superseded={draft.editor.superseded} />
+        <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={() => window.location.reload()} />
         <div className="grid gap-3 md:grid-cols-3">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
           <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
@@ -334,6 +340,7 @@ export function EditRuleModal({
 }
 
 export function CreateRuleForm({
+  revision,
   context,
   zones,
   forwards,
@@ -341,21 +348,22 @@ export function CreateRuleForm({
   tagsInUse,
   onCreate,
 }: {
+  revision: string;
   zones: Zone[];
   forwards: PortForward[];
   globalMode: ICSModeSelection | undefined;
   /** Distinct TAG labels of the existing rules. */
   tagsInUse: string[];
   context: FirewallRule[];
-  onCreate: (rule: FirewallRuleCreate) => Promise<boolean>;
+  onCreate: (rule: FirewallRuleCreate, revision: string) => Promise<ApiResult<FirewallRule> | null>;
 }) {
   const form = useConfigForm({
     id: "", description: "", log: false, srcZone: "", dstZone: "", sources: "", destinations: "",
     proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, ""),
     position: "bottom" as Position, viaForwards: [] as string[],
-  });
+  }, null, revision);
   const { refreshForm } = form;
-  useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }); }, [refreshForm, context, zones, globalMode, tagsInUse]);
+  useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }, true, revision); }, [refreshForm, context, zones, globalMode, tagsInUse, revision]);
   const [id, setId] = form.field("id");
   const [description, setDescription] = form.field("description");
   const [log, setLog] = form.field("log");
@@ -411,14 +419,15 @@ export function CreateRuleForm({
     };
     setSaving(true);
     const submitted = form.editor;
-    const ok = await onCreate(rule);
+    const result = await onCreate(rule, submitted.baseRevision ?? "");
     setSaving(false);
-    if (ok) form.acceptFields(submitted, ["id", "description", "sources", "destinations"]);
+    if (result && !result.ok) form.fail(result);
+    if (result?.ok) form.acceptFields(submitted, ["id", "description", "sources", "destinations"], result.revision);
   }
 
   return (
     <Card padding="lg" className="mt-6">
-      <ConfigEditNotice superseded={form.editor.superseded} />
+      <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => window.location.reload()} />
       <h2 className="text-sm font-semibold text-(--text)">Create rule</h2>
       <div className="mt-3"><RulePositionSelect rules={context} value={position} onChange={setPosition} /></div>
       <div className="mt-3 grid gap-3 md:grid-cols-3">

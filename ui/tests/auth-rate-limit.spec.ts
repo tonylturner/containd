@@ -28,7 +28,7 @@ async function openLogin(page: Page, routes: Record<string, Reply>) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/auth/me") {
-      await route.fulfill({ status: 401, json: { error: "unauthorized" } });
+      await route.fulfill({ status: 401, json: { error: "unauthorized" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     await route.fulfill(routes[path] ?? { json: {} });
@@ -78,11 +78,11 @@ async function openProfile(page: Page, menuItem: "Profile" | "Change password", 
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: admin });
+      await route.fulfill({ json: admin, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/zones") {
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     await route.fulfill(routes[path] ?? { json: {} });

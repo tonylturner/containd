@@ -6,8 +6,10 @@ import {
   handleUnauthorized,
 } from "./api-core";
 import {
+  getConfigJSON,
+  responseRevision,
+  revisionHeaders,
   failureOf,
-  getJSON,
   getJSONList,
   postJSON,
   postJSONResult,
@@ -107,12 +109,13 @@ export type IDSRuleSource = {
 };
 
 export const idsAPI = {
-  getIDS: () => getJSON<IDSConfig>("/api/v1/ids/rules"),
-  setIDS: (cfg: IDSConfig) =>
-    postJSONResult<IDSConfig>("/api/v1/ids/rules", cfg),
+  getIDS: () => getConfigJSON<IDSConfig>("/api/v1/ids/rules", "object"),
+  setIDS: (expectedRevision: string, cfg: IDSConfig) =>
+    postJSONResult<IDSConfig>("/api/v1/ids/rules", cfg, expectedRevision),
   convertSigma: (sigmaYAML: string) =>
     postJSON<IDSRule>("/api/v1/ids/convert/sigma", { sigmaYAML }),
   importIDSRules: async (
+    expectedRevision: string,
     file: File,
     format?: string,
   ): Promise<ApiResult<IDSImportResult>> => {
@@ -124,13 +127,13 @@ export const idsAPI = {
         method: "POST",
         body: form,
         credentials: "include",
-        headers: authHeaders(),
+        headers: { ...authHeaders(), ...revisionHeaders(expectedRevision) },
       });
       if (handleUnauthorized(res)) return failureOf(res);
       clearAuthExpired();
       if (!res.ok) return failureOf(res);
       notifyConfigMutation(res);
-      return { ok: true, data: (await res.json()) as IDSImportResult };
+      return { ok: true, data: (await res.json()) as IDSImportResult, revision: responseRevision(res) };
     } catch (e) {
       return {
         ok: false,
@@ -175,7 +178,7 @@ export const idsAPI = {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      return { ok: true, data: { refusedCount } };
+      return { ok: true, data: { refusedCount }, revision: responseRevision(res) };
     } catch (e) {
       return {
         ok: false,

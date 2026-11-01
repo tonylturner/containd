@@ -5,7 +5,7 @@ import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 import { sameConfig } from "../../lib/config-editor";
 
-import type { DataPlaneConfig, DPIExclusion } from "../../lib/api";
+import type { ApiResult, DataPlaneConfig, DPIExclusion } from "../../lib/api";
 import {
   ICS_DPI_PROTOCOLS,
   ICS_PROTOCOL_OPTIONS,
@@ -15,6 +15,7 @@ import {
 // The DPI section's editors: IT decoders, ICS decoders and exclusions.
 
 export function DPIProtocolModal({
+  revision,
   context,
   saving,
   protocols,
@@ -22,12 +23,13 @@ export function DPIProtocolModal({
   onClose,
 }: {
   context: DataPlaneConfig;
+  revision: string;
   saving: boolean;
   protocols: Record<string, boolean>;
-  onSave: (p: Record<string, boolean>) => Promise<DataPlaneConfig | null>;
+  onSave: (p: Record<string, boolean>, revision: string) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
-  const editor = useConfigEditor({ protocols, context });
+  const editor = useConfigEditor({ protocols, context }, true, revision);
   const { cfg, setCfg, adoptConfig } = editor;
   const draft = cfg.protocols;
   const setDraft = (update: React.SetStateAction<typeof protocols>) => setCfg((c) => ({
@@ -37,13 +39,15 @@ export function DPIProtocolModal({
   useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ protocols, context }); }, [adoptConfig, protocols, context]);
+  useEffect(() => { adoptConfig({ protocols, context }, true, revision); }, [adoptConfig, protocols, context, revision]);
 
   async function save() {
     const submitted = editor.beginSave();
-    const saved = await onSave(draft);
-    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
-    editor.acceptConfig(submitted, { protocols: saved.dpiProtocols ?? {}, context: saved });
+    const result = await onSave(draft, submitted.baseRevision ?? "");
+    if (!result || !mounted.current) { editor.failSave(submitted); return; }
+    if (!result.ok) { editor.failSave(submitted, result); return; }
+    const saved = result.data;
+    editor.acceptConfig(submitted, { protocols: saved.dpiProtocols ?? {}, context: saved }, result.revision);
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
 
@@ -90,7 +94,7 @@ export function DPIProtocolModal({
           </div>
         </div>
 
-        <ConfigEditNotice superseded={editor.editor.superseded} />
+        <ConfigEditNotice {...editor.conflictProps} onReload={() => window.location.reload()} superseded={editor.editor.superseded} />
         <div className="space-y-1">
           {IT_PROTOCOLS.map((p) => {
             const on = draft[p.key] !== false;
@@ -159,6 +163,7 @@ export function DPIProtocolModal({
 }
 
 export function ICSDPIConfigModal({
+  revision,
   context,
   saving,
   icsProtocols,
@@ -167,16 +172,18 @@ export function ICSDPIConfigModal({
   onClose,
 }: {
   context: DataPlaneConfig;
+  revision: string;
   saving: boolean;
   icsProtocols: Record<string, boolean>;
   parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>;
   onSave: (
     p: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
-  ) => Promise<DataPlaneConfig | null>;
+    revision: string,
+  ) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
-  const editor = useConfigEditor({ protocols: icsProtocols, parsing, context });
+  const editor = useConfigEditor({ protocols: icsProtocols, parsing, context }, true, revision);
   const { cfg, setCfg, adoptConfig } = editor;
   const draft = cfg.protocols;
   const draftParsing = cfg.parsing;
@@ -190,14 +197,16 @@ export function ICSDPIConfigModal({
   useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ protocols: icsProtocols, parsing, context }); }, [adoptConfig, icsProtocols, parsing, context]);
+  useEffect(() => { adoptConfig({ protocols: icsProtocols, parsing, context }, true, revision); }, [adoptConfig, icsProtocols, parsing, context, revision]);
   const [activeProto, setActiveProto] = useState<string | null>(null);
 
   async function save() {
     const submitted = editor.beginSave();
-    const saved = await onSave(draft, draftParsing);
-    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
-    editor.acceptConfig(submitted, { protocols: saved.dpiIcsProtocols ?? {}, parsing: saved.dpiIcsParsing ?? {}, context: saved });
+    const result = await onSave(draft, draftParsing, submitted.baseRevision ?? "");
+    if (!result || !mounted.current) { editor.failSave(submitted); return; }
+    if (!result.ok) { editor.failSave(submitted, result); return; }
+    const saved = result.data;
+    editor.acceptConfig(submitted, { protocols: saved.dpiIcsProtocols ?? {}, parsing: saved.dpiIcsParsing ?? {}, context: saved }, result.revision);
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
 
@@ -249,7 +258,7 @@ export function ICSDPIConfigModal({
           </div>
         </div>
 
-        <ConfigEditNotice superseded={editor.editor.superseded} />
+        <ConfigEditNotice {...editor.conflictProps} onReload={() => window.location.reload()} superseded={editor.editor.superseded} />
         <div className="space-y-1">
           {ICS_DPI_PROTOCOLS.map((p) => {
             const on = draft[p.key] !== false;
@@ -454,6 +463,7 @@ export function ICSDPIConfigModal({
 }
 
 export function DPIExclusionModal({
+  revision,
   context,
   saving,
   exclusions,
@@ -461,16 +471,17 @@ export function DPIExclusionModal({
   onClose,
 }: {
   context: DataPlaneConfig;
+  revision: string;
   saving: boolean;
   exclusions: DPIExclusion[];
-  onSave: (e: DPIExclusion[]) => Promise<DataPlaneConfig | null>;
+  onSave: (e: DPIExclusion[], revision: string) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
-  const editor = useConfigEditor({ rows: exclusions, context });
+  const editor = useConfigEditor({ rows: exclusions, context }, true, revision);
   const { cfg, setCfg, adoptConfig } = editor;
   const draft = cfg.rows;
   const setDraft = (rows: DPIExclusion[]) => setCfg((c) => ({ ...c, rows }));
-  const form = useConfigForm({ newValue: "", newType: "ip" as "ip" | "cidr" | "domain", newReason: "" });
+  const form = useConfigForm({ newValue: "", newType: "ip" as "ip" | "cidr" | "domain", newReason: "" }, context, revision);
   const { refreshForm } = form;
   const [newValue, setNewValue] = form.field("newValue");
   const [newType, setNewType] = form.field("newType");
@@ -479,13 +490,15 @@ export function DPIExclusionModal({
   useLayoutEffect(() => { latest.current = { editor: editor.editor, fields: form.editor.cfg.fields }; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ rows: exclusions, context }); refreshForm(context); }, [adoptConfig, refreshForm, exclusions, context]);
+  useEffect(() => { adoptConfig({ rows: exclusions, context }, true, revision); refreshForm(context, true, revision); }, [adoptConfig, refreshForm, exclusions, context, revision]);
 
   async function save() {
     const submitted = editor.beginSave();
-    const saved = await onSave(draft);
-    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
-    editor.acceptConfig(submitted, { rows: saved.dpiExclusions ?? [], context: saved });
+    const result = await onSave(draft, submitted.baseRevision ?? "");
+    if (!result || !mounted.current) { editor.failSave(submitted); return; }
+    if (!result.ok) { editor.failSave(submitted, result); return; }
+    const saved = result.data;
+    editor.acceptConfig(submitted, { rows: saved.dpiExclusions ?? [], context: saved }, result.revision);
     if (sameConfig(latest.current.editor.cfg, submitted.cfg) && !latest.current.fields.newValue && !latest.current.fields.newReason) onClose();
   }
 
@@ -500,6 +513,10 @@ export function DPIExclusionModal({
     const val = newValue.trim();
     if (!val) return;
     if (draft.some((e) => e.value === val)) return;
+    if (form.editor.baseRevision !== editor.editor.baseRevision) {
+      form.requireReview(editor.editor.baseRevision ?? "");
+      return;
+    }
     setDraft([
       ...draft,
       {
@@ -528,7 +545,8 @@ export function DPIExclusionModal({
           entirely.
         </p>
 
-        <ConfigEditNotice superseded={editor.editor.superseded || form.editor.superseded} />
+        <ConfigEditNotice {...editor.conflictProps} onReload={() => window.location.reload()} superseded={editor.editor.superseded || form.editor.superseded} />
+        <ConfigEditNotice {...form.conflictProps} onReload={() => window.location.reload()} superseded={false} />
         <div className="flex gap-2 mb-4">
           <select
             value={newType}

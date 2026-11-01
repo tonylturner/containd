@@ -42,7 +42,7 @@ test("the security view summarizes zones below target, including zones outside t
       : path === "/api/v1/zones" ? many
         : path === "/api/v1/security/conduits" ? {}
           : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
   await page.goto("/topology/");

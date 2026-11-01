@@ -44,7 +44,7 @@ async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fa
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: admin });
+      await route.fulfill({ json: admin, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (request.method() === "GET") {
@@ -55,16 +55,16 @@ async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fa
               : path === "/api/v1/services/av/defs" ? { path: "/data/clamav/custom", files: [], definitions: [] }
                 : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] }
                   : {};
-      await route.fulfill({ json: body });
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const body = request.postDataJSON();
     mock.requests.push({ method: request.method(), path, body });
     if (options.fail) {
-      await route.fulfill({ status: 400, json: { error: options.fail } });
+      await route.fulfill({ status: 400, json: { error: options.fail }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return mock;
 }

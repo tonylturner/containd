@@ -53,7 +53,7 @@ test("the topology chip reads degraded with the failed apply while the topology 
       "/api/v1/flows": [],
       "/api/v1/events": [],
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const statusLoaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/dataplane/ruleset/status");
   await page.goto("/topology/");

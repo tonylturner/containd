@@ -10,7 +10,7 @@ async function mockAPI(page: Page, routes: Record<string, { status?: number; jso
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: user });
+      await route.fulfill({ json: user, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     await route.fulfill(routes[path] ?? { json: {} });

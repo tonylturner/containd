@@ -5,7 +5,7 @@ import {
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { failureOf, getJSON, getJSONShaped, isRecord, postJSONResult } from "./api-request";
+import { getConfigJSON, failureOf, getJSON, getJSONShaped, isRecord, postJSONResult } from "./api-request";
 
 import type {
   AVConfig,
@@ -51,12 +51,12 @@ export const servicesAPI = {
     getJSONShaped<SystemInspection>("/api/v1/system/inspection", {
       objects: ["host", "runtime", "container", "process", "security"],
     }, signal),
-  getSyslog: () => getJSON<SyslogConfig>("/api/v1/services/syslog"),
-  setSyslog: (cfg: SyslogConfig) =>
-    postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg),
-  getAV: () => getJSON<AVConfig>("/api/v1/services/av"),
-  setAV: (cfg: AVConfig) =>
-    postJSONResult<AVConfig>("/api/v1/services/av", cfg),
+  getSyslog: () => getConfigJSON<SyslogConfig>("/api/v1/services/syslog", "object"),
+  setSyslog: (expectedRevision: string, cfg: SyslogConfig) =>
+    postJSONResult<SyslogConfig>("/api/v1/services/syslog", cfg, expectedRevision),
+  getAV: () => getConfigJSON<AVConfig>("/api/v1/services/av", "object"),
+  setAV: (expectedRevision: string, cfg: AVConfig) =>
+    postJSONResult<AVConfig>("/api/v1/services/av", cfg, expectedRevision),
   runAVUpdate: () =>
     postJSONResult<{ status: string }>("/api/v1/services/av/update", {}),
   listAVDefs: () => getJSONShaped<AVDefinitionList>("/api/v1/services/av/defs", { lists: ["files"] }),
@@ -113,22 +113,22 @@ export const servicesAPI = {
       };
     }
   },
-  getDNS: () => getJSON<DNSConfig>("/api/v1/services/dns"),
-  setDNS: (cfg: DNSConfig) =>
-    postJSONResult<DNSConfig>("/api/v1/services/dns", cfg),
+  getDNS: () => getConfigJSON<DNSConfig>("/api/v1/services/dns", "object"),
+  setDNS: (expectedRevision: string, cfg: DNSConfig) =>
+    postJSONResult<DNSConfig>("/api/v1/services/dns", cfg, expectedRevision),
   getForwardProxy: () =>
-    getJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward"),
-  setForwardProxy: (cfg: ForwardProxyConfig) =>
-    postJSONResult<ForwardProxyConfig>("/api/v1/services/proxy/forward", cfg),
+    getConfigJSON<ForwardProxyConfig>("/api/v1/services/proxy/forward", "object"),
+  setForwardProxy: (expectedRevision: string, cfg: ForwardProxyConfig) =>
+    postJSONResult<ForwardProxyConfig>("/api/v1/services/proxy/forward", cfg, expectedRevision),
   getReverseProxy: () =>
-    getJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse"),
-  setReverseProxy: (cfg: ReverseProxyConfig) =>
-    postJSONResult<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg),
-  getNTP: () => getJSON<NTPConfig>("/api/v1/services/ntp"),
-  setNTP: (cfg: NTPConfig) =>
-    postJSONResult<NTPConfig>("/api/v1/services/ntp", cfg),
-  getDHCP: () => getJSON<DHCPConfig>("/api/v1/services/dhcp"),
-  setDHCP: (cfg: DHCPConfig) =>
-    postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg),
+    getConfigJSON<ReverseProxyConfig>("/api/v1/services/proxy/reverse", "object"),
+  setReverseProxy: (expectedRevision: string, cfg: ReverseProxyConfig) =>
+    postJSONResult<ReverseProxyConfig>("/api/v1/services/proxy/reverse", cfg, expectedRevision),
+  getNTP: () => getConfigJSON<NTPConfig>("/api/v1/services/ntp", "object"),
+  setNTP: (expectedRevision: string, cfg: NTPConfig) =>
+    postJSONResult<NTPConfig>("/api/v1/services/ntp", cfg, expectedRevision),
+  getDHCP: () => getConfigJSON<DHCPConfig>("/api/v1/services/dhcp", "object"),
+  setDHCP: (expectedRevision: string, cfg: DHCPConfig) =>
+    postJSONResult<DHCPConfig>("/api/v1/services/dhcp", cfg, expectedRevision),
   listDHCPLeases: () => getJSONShaped<{ leases: DHCPLease[] }>("/api/v1/dhcp/leases", { lists: ["leases"] }),
 };

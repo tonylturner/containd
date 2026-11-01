@@ -34,7 +34,7 @@ async function serve(page: Page) {
             enabled: true,
             portForwards: [{ id: "pf-1", enabled: true, ingressZone: "wan", proto: "tcp", listenPort: 8443, destIp: "192.0.2.5" }],
           } : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 
