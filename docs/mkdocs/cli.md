@@ -171,11 +171,12 @@ See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
 Environment variables (common):
-- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and refuses
-  every password change, including the SSH menu reset and the wizard's password
-  step. Protected API routes still require a bearer token or cookie.
-  With a JWT secret, the token's signature and expiry are validated without a
-  session lookup. Without a secret, **any nonempty token passes**. Factory reset
+- `CONTAIND_LAB_MODE=1` refuses every password change, including the SSH menu
+  reset and the wizard's password step. It keeps existing and custom-seeded
+  credentials; a freshly seeded lab uses `containd/containd`. Protected API
+  routes still require a bearer token or cookie.
+  With a JWT secret, the token must be HS256-signed and carry `exp`; signature
+  and expiry are validated with 30 seconds of leeway, without a session lookup. Without a secret, **any nonempty token passes**. Factory reset
   does not revoke lab web/API tokens in either case. Lab requests receive admin
   access rather than ordinary role enforcement. Use only in isolated, disposable environments; see
   [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).

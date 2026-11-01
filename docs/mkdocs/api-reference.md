@@ -14,7 +14,9 @@ writes require a same-origin request or an explicitly allowed origin.
 
 Lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
 privileges without normal session enforcement. If a JWT secret is configured,
-the token must be a valid signed JWT; without one, any nonempty token is accepted.
+the token must be an HS256 JWT signed with it and carry `exp` (30 seconds of
+leeway); no session or `jti` is required. Without a secret, any nonempty token
+is accepted.
 Factory reset does not revoke lab tokens, even with a JWT secret configured.
 Do not expose lab mode to untrusted clients.
 
