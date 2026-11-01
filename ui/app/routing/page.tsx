@@ -21,6 +21,7 @@ import {
   type RoutingConfig,
   type StaticRoute,
 } from "../../lib/api";
+import { NetworkSetup } from "../interfaces/network-setup";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import {
@@ -354,6 +355,7 @@ export default function RoutingPage() {
         </div>
       }
     >
+      <NetworkSetup current="/routing/" />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       {!canEdit && (

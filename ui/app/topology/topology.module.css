@@ -361,3 +361,11 @@
   text-align: center; font-family: var(--mono); font-size: 8px;
   color: var(--text-dim); padding: 2px 0; letter-spacing: 1px;
 }
+
+.workspace, .flowWrap, .detailPanel { min-width: 0; }
+@media (max-width: 700px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .flowWrap { min-height: 360px; }
+  .detailPanel { max-height: 50vh; }
+  .chipReason { white-space: normal; overflow-wrap: anywhere; }
+}

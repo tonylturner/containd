@@ -110,6 +110,7 @@ function TopologyInner() {
     return () => window.removeEventListener(CONFIG_COMMITTED, refresh);
   }, [fetchData]);
 
+  const inspectedNode = useRef<HTMLElement | null>(null);
   const initialFitDone = useRef(false);
   useEffect(() => {
     if (!nodesInitialized || initialFitDone.current) return;
@@ -128,7 +129,8 @@ function TopologyInner() {
   }, [fetchData]);
 
   // ── Handle node click ──
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    inspectedNode.current = (event.target as HTMLElement).closest<HTMLElement>(".react-flow__node");
     setSelectedId(node.id);
     setPanelOpen(true);
   }, []);
@@ -188,6 +190,8 @@ function TopologyInner() {
         </div>
       )}
 
+      <p className="px-4 py-2 text-xs text-(--text-muted)">{currentView === "security" ? "Live · Conduit observations / Saved target · Candidate zone settings" : currentView === "physical" ? "Live · Deployment details" : "Live · Running network and traffic observations"}</p>
+
       {/* WORKSPACE — switches between views */}
       {currentView === "physical" ? (
         <PhysicalView />
@@ -195,7 +199,13 @@ function TopologyInner() {
         <SecurityView />
       ) : topoError ? null : (
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
-          <div className={s.flowWrap}>
+          <div className={s.flowWrap} onKeyDownCapture={event => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            const node = (event.target as HTMLElement).closest<HTMLElement>(".react-flow__node[data-id]");
+            if (node?.dataset.id) {
+              event.preventDefault(); inspectedNode.current = node; setSelectedId(node.dataset.id); setPanelOpen(true);
+            }
+          }}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -238,15 +248,15 @@ function TopologyInner() {
               <div className={s.legendItem}><div className={s.legendLine} style={{ background: "#6b7280", opacity: 0.7, borderTop: "1px dashed #6b7280", height: 0 }} />External / WAN</div>
             </div>
 
-            {!panelOpen && <button className={s.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
+            {!panelOpen && <button className={s.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel" aria-expanded={panelOpen} aria-controls="logical-inspector">&#x25C0;</button>}
           </div>
 
           {/* DETAIL PANEL */}
-          {panelOpen && (
-            <div className={s.detailPanel}>
+          {(
+            <div className={s.detailPanel} id="logical-inspector" hidden={!panelOpen} style={panelOpen ? undefined : { display: "none" }} role="region" aria-label="Topology inspector">
               <div className={s.panelHeader}>
                 <span className={s.panelTitle}>{selectedData?.label || "TOPOLOGY"}</span>
-                <button className={s.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
+                <button className={s.panelClose} aria-label="Hide detail panel" aria-expanded={panelOpen} aria-controls="logical-inspector" onClick={() => { setPanelOpen(false); inspectedNode.current?.focus(); }}>&#x25B6;</button>
               </div>
               <div className={s.panelBody}>
                 {selectedData ? <DetailContent data={selectedData} /> : (

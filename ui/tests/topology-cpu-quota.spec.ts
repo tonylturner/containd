@@ -19,7 +19,7 @@ for (const quota of ["50000 100000", "max", ""]) {
     });
     await page.goto("/topology/");
     await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
-    await page.getByText("Container runtime details", { exact: true }).click();
+    await page.getByRole("button", { name: "Container runtime details", exact: true }).click();
     const row = page.locator('[class*="resRow"]').filter({ has: page.getByText("CPU quota", { exact: true }) });
     await expect(row).toContainText(quota || "—");
     await expect(row).toBeVisible();
