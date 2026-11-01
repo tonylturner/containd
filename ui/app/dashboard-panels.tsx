@@ -378,7 +378,9 @@ export function SystemHealthPanel({
       {stats && (
         <div className="flex justify-between text-2xs font-mono text-slate-500">
           <span>Uptime: {stats.runtime.uptime}</span>
-          <span>{stats.runtime.goroutines} goroutines</span>
+          <span title="Go runtime goroutines">
+            {stats.runtime.goroutines} background task{stats.runtime.goroutines === 1 ? "" : "s"}
+          </span>
         </div>
       )}
 
