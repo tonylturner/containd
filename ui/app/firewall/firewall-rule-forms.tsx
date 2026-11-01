@@ -1,13 +1,14 @@
 "use client";
 
+import type { ConfigBase } from "../../lib/config-boundary";
+
 import type { ApiResult } from "../../lib/api";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { sameConfig } from "../../lib/config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import {
@@ -175,15 +176,13 @@ export function EditRuleModal({
   /** Distinct TAG labels of the other rules. */
   tagsInUse: string[];
   onClose: () => void;
-  onSave: (patch: FirewallRulePatch, revision: string) => Promise<ApiResult<FirewallRule> | null>;
+  onSave: (patch: FirewallRulePatch, revision: ConfigBase) => Promise<ApiResult<FirewallRule> | null>;
 }) {
   const draft = useConfigEditor(() => ruleDraftFrom(rule, context, zones, globalMode), true, revision);
-  const { cfg, setCfg, adoptConfig } = draft;
-  const latest = useRef(draft.editor);
-  useLayoutEffect(() => { latest.current = draft.editor; });
+  const { cfg, setCfg, readConfig: adoptConfig } = draft;
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig(ruleDraftFrom(rule, context, zones, globalMode), true, revision); }, [adoptConfig, rule, context, zones, globalMode, revision]);
+  useEffect(() => { adoptConfig({ data: ruleDraftFrom(rule, context, zones, globalMode), revision: revision ?? "" }, true); }, [adoptConfig, rule, context, zones, globalMode, revision]);
   const description = cfg.description;
   const setDescription = (description: typeof cfg.description) => setCfg((c) => ({ ...c, description }));
   const log = cfg.log;
@@ -255,15 +254,13 @@ export function EditRuleModal({
   async function save() {
     const built = build();
     if (!built) return;
-    const submitted = draft.beginSave();
     setSaving(true);
-    const result = await onSave(built.patch, submitted.baseRevision ?? "");
+    const result = await draft.write(base => onSave(built.patch, base), { replace: data => (ruleDraftFrom(data, context, zones, globalMode)) });
     setSaving(false);
-    if (!result || !mounted.current) { draft.failSave(submitted); return; }
-    if (!result.ok) { draft.failSave(submitted, result); setError(result.error); return; }
-    const saved = result.data;
-    draft.acceptConfig(submitted, ruleDraftFrom(saved, context, zones, globalMode), result.revision);
-    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+    if (!mounted.current) return;
+    if (!result.ok) { setError(revisionError(result)); return; }
+
+    if (result.adopted && result.unchanged) onClose();
   }
 
   async function previewImpact() {
@@ -355,15 +352,15 @@ export function CreateRuleForm({
   /** Distinct TAG labels of the existing rules. */
   tagsInUse: string[];
   context: FirewallRule[];
-  onCreate: (rule: FirewallRuleCreate, revision: string) => Promise<ApiResult<FirewallRule> | null>;
+  onCreate: (rule: FirewallRuleCreate, revision: ConfigBase) => Promise<ApiResult<FirewallRule> | null>;
 }) {
   const form = useConfigForm({
     id: "", description: "", log: false, srcZone: "", dstZone: "", sources: "", destinations: "",
     proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, ""),
     position: "bottom" as Position, viaForwards: [] as string[],
-  }, null, revision);
-  const { refreshForm } = form;
-  useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }, true, revision); }, [refreshForm, context, zones, globalMode, tagsInUse, revision]);
+  }, null as unknown, revision);
+  const { readConfig: refreshForm } = form;
+  useEffect(() => { refreshForm({ data: { rules: context, zones, globalMode, tagsInUse }, revision: revision ?? "" }, true); }, [refreshForm, context, zones, globalMode, tagsInUse, revision]);
   const [id, setId] = form.field("id");
   const [description, setDescription] = form.field("description");
   const [log, setLog] = form.field("log");
@@ -418,11 +415,8 @@ export function CreateRuleForm({
       viaForwards: viaForwards.length ? viaForwards : undefined,
     };
     setSaving(true);
-    const submitted = form.editor;
-    const result = await onCreate(rule, submitted.baseRevision ?? "");
+    await form.write(base => onCreate(rule, base), ["id", "description", "sources", "destinations"]);
     setSaving(false);
-    if (result && !result.ok) form.fail(result);
-    if (result?.ok) form.acceptFields(submitted, ["id", "description", "sources", "destinations"], result.revision);
   }
 
   return (

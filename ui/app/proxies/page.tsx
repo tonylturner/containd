@@ -1,5 +1,7 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
@@ -55,12 +57,12 @@ export default function ProxiesPage() {
     backends: [],
     tlsEnabled: false,
   } as ReverseProxySite, backends: "", hostnames: "" });
-  const { cfg: forward, setCfg: setForward, adoptConfig: adoptForward } = forwardDraft;
-  const { cfg: reverse, setCfg: setReverse, adoptConfig: adoptReverse } = reverseDraft;
+  const { cfg: forward, setCfg: setForward, readConfig: adoptForward } = forwardDraft;
+  const { cfg: reverse, setCfg: setReverse, readConfig: adoptReverse } = reverseDraft;
   const [newSite, setNewSite] = siteDraft.field("site");
   const [backendsCSV, setBackendsCSV] = siteDraft.field("backends");
   const [hostnamesCSV, setHostnamesCSV] = siteDraft.field("hostnames");
-  const { refreshForm: refreshSite } = siteDraft;
+  const { readConfig: refreshSite } = siteDraft;
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -75,9 +77,9 @@ export default function ProxiesPage() {
       const rp = (rpSnapshot?.data ?? null);
       if (!checkLoaded(fp) || !checkLoaded(rp)) return;
       setError(null);
-      adoptForward(fp, keepEdits, fpSnapshot?.revision);
-      adoptReverse(rp, keepEdits, rpSnapshot?.revision);
-      refreshSite(rp, keepEdits, rpSnapshot?.revision);
+      adoptForward({ data: fp, revision: fpSnapshot?.revision ?? "" }, keepEdits);
+      adoptReverse({ data: rp, revision: rpSnapshot?.revision ?? "" }, keepEdits);
+      refreshSite({ data: rp, revision: rpSnapshot?.revision ?? "" }, keepEdits);
       toast("Proxy status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -109,19 +111,16 @@ export default function ProxiesPage() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     setSaveState("saving");
-    const submitted = forwardDraft.beginSave();
-    const saved = await api.setForwardProxy(submitted.baseRevision ?? "", { ...forward,
+    const saved = await forwardDraft.write((base, submitted) => api.setForwardProxy(base, { ...submitted,
       listenZones: listenZonesCSV.split(",").map((s) => s.trim()).filter(Boolean),
       allowedDomains: allowedDomainsCSV.split(",").map((s) => s.trim()).filter(Boolean),
-    });
-    setSaveState(saved.ok ? "saved" : "error");
+    }), { replace: data => data });
+    setSaveState(saved.ok ? "saved" : revisionError(saved) === null ? "idle" : "error");
     if (!saved.ok) {
-      forwardDraft.failSave(submitted, saved);
-      const msg = saved.error || "Failed to save forward proxy settings.";
+      const msg = revisionError(saved);
       setError(msg);
-      toast(msg, "error");
+      if (msg) toast(msg, "error");
     } else {
-      forwardDraft.acceptConfig(submitted, saved.data, saved.revision);
       toast(saved.warning ? `Forward proxy staged — commit to apply. Warning: ${saved.warning}` : "Forward proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -131,16 +130,13 @@ export default function ProxiesPage() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     setSaveState("saving");
-    const submitted = reverseDraft.beginSave();
-    const saved = await api.setReverseProxy(submitted.baseRevision ?? "", reverse);
-    setSaveState(saved.ok ? "saved" : "error");
+    const saved = await reverseDraft.write((base, submitted) => api.setReverseProxy(base, submitted), { replace: data => data });
+    setSaveState(saved.ok ? "saved" : revisionError(saved) === null ? "idle" : "error");
     if (!saved.ok) {
-      reverseDraft.failSave(submitted, saved);
-      const msg = saved.error || "Failed to save reverse proxy settings.";
+      const msg = revisionError(saved);
       setError(msg);
-      toast(msg, "error");
+      if (msg) toast(msg, "error");
     } else {
-      reverseDraft.acceptConfig(submitted, saved.data, saved.revision);
       toast(saved.warning ? `Reverse proxy staged — commit to apply. Warning: ${saved.warning}` : "Reverse proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -171,7 +167,7 @@ export default function ProxiesPage() {
       ...r,
       sites: [...(r.sites ?? []), { ...newSite, name: newSite.name.trim(), backends, hostnames }],
     }));
-    siteDraft.acceptFields(siteDraft.editor, ["site", "backends", "hostnames"]);
+    siteDraft.clearFields(siteDraft.editor.cfg.fields, ["site", "backends", "hostnames"]);
   }
 
   function deleteSite(name: string) {

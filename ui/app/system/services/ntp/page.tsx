@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -20,7 +20,7 @@ export default function NTPPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [status, setStatus] = useState<NTPStatus | null>(null);
-  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
@@ -37,7 +37,7 @@ export default function NTPPage() {
     const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits, sSnapshot?.revision);
+    adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -56,14 +56,12 @@ export default function NTPPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
-    const saved = await save.run("save", () => api.setNTP(submitted.baseRevision ?? "", { ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => write((base, submitted) => api.setNTP(base, { ...submitted, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), { replace: data => data }), {
       success: "NTP settings staged — commit to apply.",
       failure: "Failed to save NTP settings.",
     });
-    if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
-    else { failSave(submitted, saved); setError(saved.error); }
+    if (!saved) return;
+    if (!saved.ok) setError(revisionError(saved));
   }
 
   return (

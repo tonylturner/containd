@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
-import { accept, acceptCollection as acknowledge, adopt, beginSave as begin, failSave as fail, fresh, isDirty, keepEdits, sameConfig, type ConfigSubmission } from "./config-editor";
-import { revisionFailure } from "./config-revision";
-import type { ApiFailure } from "./api";
+import { useCallback, useRef, useState, useSyncExternalStore, type SetStateAction } from "react";
+import { sameConfig, type ConfigEditor } from "./config-editor";
+import { ConfigBoundary } from "./config-boundary";
 
-export { isRevisionConflict, isRevisionRequired } from "./config-revision";
+export { isRevisionConflict, isRevisionRequired, revisionError } from "./config-revision";
 
 /** A missing authoritative read never authorizes a write or resets a draft.
  * Keep availability separate from save errors and editable form defaults.
@@ -27,82 +26,52 @@ export function useConfigLoad() {
 }
 
 export function useConfigEditor<T>(initial: T | (() => T), initialLoaded = true, revision?: string) {
-  const authoritative = useRef(initialLoaded);
-  const [editor, setEditor] = useState(() => fresh(
-    typeof initial === "function" ? (initial as () => T)() : initial, revision,
+  const [boundary] = useState(() => new ConfigBoundary(
+    typeof initial === "function" ? (initial as () => T)() : initial, initialLoaded, revision,
   ));
-  const latest = useRef(editor);
-  useLayoutEffect(() => { latest.current = editor; }, [editor]);
-  const getBaseRevision = useCallback(() => latest.current.baseRevision, []);
+  const editor = useSyncExternalStore(boundary.subscribe, boundary.snapshot, boundary.snapshot);
   const setCfg = useCallback((update: SetStateAction<T>) => {
-    setEditor((e) => ({ ...e, cfg: typeof update === "function" ? (update as (cfg: T) => T)(e.cfg) : update }));
-  }, []);
-  const adoptConfig = useCallback((next: T, keepEdits = true, revision?: string) => {
-    // Stand-in defaults cannot become a dirty draft's authoritative base.
-    const keep = keepEdits && authoritative.current;
-    authoritative.current = true;
-    setEditor((e) => adopt(e, next, keep, revision));
-  }, []);
-  // A submission is captured before enqueueing state, never inside an updater
-  // (React may replay updaters). Tokens let independent row saves overlap.
-  const beginSave = (raw = editor.raw): ConfigSubmission<T> => {
-    const submitted = { id: Symbol("config-save"), cfg: editor.cfg, raw, baseRevision: editor.baseRevision };
-    setEditor((e) => begin(e, submitted));
-    return submitted;
-  };
-  const failSave = useCallback((submitted: ConfigSubmission<T>, failure?: ApiFailure) => {
-    setEditor((e) => !e.pending.some(entry => entry.id === submitted.id) ? e :
-      failure ? revisionFailure(fail(e, submitted), failure) : fail(e, submitted));
-  }, []);
-  const reportFailure = useCallback((failure: ApiFailure) => {
-    setEditor((e) => revisionFailure(e, failure));
-  }, []);
-  const acceptConfig = useCallback((submitted: ConfigSubmission<T>, next: T, revision?: string) => {
-    setEditor((e) => accept(e, submitted, next, revision));
-  }, []);
+    boundary.edit(cfg => typeof update === "function" ? (update as (cfg: T) => T)(cfg) : update);
+  }, [boundary]);
   const setText = useCallback((key: string, value: string) => {
-    setEditor((e) => ({ ...e, raw: { ...e.raw, [key]: value } }));
-  }, []);
+    boundary.editRaw(raw => ({ ...raw, [key]: value }));
+  }, [boundary]);
   const clearText = useCallback((prefix: string) => {
-    setEditor((e) => ({ ...e, raw: Object.fromEntries(Object.entries(e.raw).filter(([key]) => !key.startsWith(prefix))) }));
-  }, []);
-  const acceptCollection = useCallback((submittedBase: string | undefined, update: (cfg: T) => T, prefixes: string[] = [], revision?: string) => {
-    setEditor((e) => acknowledge(e, update, prefixes, undefined, revision, submittedBase));
-  }, []);
-  // Row saves acknowledge only that row. Other drafts, and typing after the
-  // request started, are not part of the acknowledgement.
-  const acceptRow = useCallback((submitted: ConfigSubmission<T>, update: (rows: T) => T, prefix: string, revision?: string) => {
-    setEditor((e) => acknowledge(e, update, [prefix], submitted, revision));
-  }, []);
+    boundary.editRaw(raw => Object.fromEntries(Object.entries(raw).filter(([key]) => !key.startsWith(prefix))));
+  }, [boundary]);
   function field<V>(key: string, derived: V): [V, (value: SetStateAction<V>) => void] {
     const value = key in editor.raw ? JSON.parse(editor.raw[key]) as V : derived;
-    return [value, (update) => setEditor((e) => {
-      const current = key in e.raw ? JSON.parse(e.raw[key]) as V : derived;
+    return [value, (update) => boundary.editRaw(raw => {
+      const current = key in raw ? JSON.parse(raw[key]) as V : derived;
       const next = typeof update === "function" ? (update as (v: V) => V)(current) : update;
-      // Reverting to a pre-save value is still a new edit while saving.
-      if (sameConfig(next, derived) && e.pending.length === 0) {
-        const raw = { ...e.raw };
-        delete raw[key];
-        return { ...e, raw };
+      if (sameConfig(next, derived) && boundary.snapshot().pending.length === 0) {
+        return Object.fromEntries(Object.entries(raw).filter(([name]) => name !== key));
       }
-      return { ...e, raw: { ...e.raw, [key]: JSON.stringify(next) } };
+      return { ...raw, [key]: JSON.stringify(next) };
     })];
   }
   return {
-    editor, cfg: editor.cfg, getBaseRevision, setCfg, adoptConfig, beginSave, failSave, reportFailure, acceptConfig,
-    dirty: isDirty(editor), setText, field, clearText, acceptRow, acceptCollection,
+    editor: editor as Readonly<Omit<ConfigEditor<T>, "server" | "pending">>, cfg: editor.cfg, setCfg, readConfig: boundary.read,
+    write: boundary.write, writeRefresh: boundary.writeRefresh, collection: boundary.collection, writer: boundary.writer,
+    requireReview: boundary.requireReview, dirty: boundary.dirty, stale: boundary.stale,
+    available: boundary.readable, writable: boundary.writable, setText, field, clearText,
     text: (key: string, derived: string) => editor.raw[key] ?? derived,
     conflictProps: {
       conflictRevision: editor.conflictRevision, olderView: editor.olderView, revisionRequired: editor.revisionRequired,
-      onKeep: () => setEditor(keepEdits),
+      stale: boundary.stale, onKeep: boundary.keep,
     },
   };
 }
 
-export function ConfigEditNotice({ superseded, conflictRevision, olderView, revisionRequired, onKeep, onReload }: {
-  superseded: boolean; conflictRevision?: string; olderView?: boolean; revisionRequired?: boolean; onKeep?: () => void; onReload?: () => void;
+export function ConfigEditNotice({ superseded, conflictRevision, olderView, revisionRequired, stale, onKeep, onReload }: {
+  superseded: boolean; conflictRevision?: string; olderView?: boolean; revisionRequired?: boolean; stale?: boolean; onKeep?: () => void; onReload?: () => void;
 }) {
-  return revisionRequired ? (
+  return stale ? (
+    <div role="alert" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+      <p>Changes staged, but the updated configuration is unavailable. Reload before saving.</p>
+      <button className="mt-2 rounded-xs border px-3 py-1.5" onClick={onReload}>Reload</button>
+    </div>
+  ) : revisionRequired ? (
     <div role="alert" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
       <p>Configuration revision unavailable. Reload before saving.</p>
       <button className="mt-2 rounded-xs border px-3 py-1.5" onClick={onReload}>Reload</button>

@@ -43,7 +43,7 @@ export function ConfigStatusBar() {
         </Link>}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Link href="/config/?tab=diff" className="rounded-lg px-3 py-1 text-xs font-semibold transition-ui">Review diff</Link>
+        {!deadline && <Link href="/config/?tab=diff" className="rounded-lg px-3 py-1 text-xs font-semibold transition-ui">Review diff</Link>}
         {status === "unknown" && <button onClick={check} className="rounded-lg px-3 py-1 text-xs font-semibold transition-ui">Retry</button>}
       </div>
     </div>

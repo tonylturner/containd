@@ -1,6 +1,8 @@
 "use client";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView } from "../../lib/use-config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
@@ -26,10 +28,9 @@ const criticalityVariant = (c: string) =>
     : "neutral" as const;
 
 export default function AssetsPage() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
+  const { readConfig, write, data: assets, revisionNotice } = useConfigView<Asset[]>([]);
   const toast = useToast();
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
-  const [assets, setAssets] = useState<Asset[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Asset | null>(null);
@@ -50,10 +51,9 @@ export default function AssetsPage() {
 
   const { refresh } = useAsyncRefresh(useCallback(async () => {
     const [aSnapshot, zSnapshot] = await Promise.all([api.listAssets(), api.listZones()]);
-    const a = readConfig(aSnapshot, true, retainedDraft.current);
+    readConfig(aSnapshot, true, retainedDraft.current);
     const z = zSnapshot?.data ?? null;
     setInventoryRefresh((key) => key + 1);
-    setAssets(a ?? []);
     setZones(z ?? []);
   }, [readConfig]));
 
@@ -69,7 +69,7 @@ export default function AssetsPage() {
       const ipErr = validateIPOrCIDRList(ips);
       if (ipErr) { setError(ipErr); return; }
     }
-    const result = await api.createAsset(expectedRevision(), {
+    const result = await write(base => api.createAsset(base, {
       id: id.trim(),
       name: name.trim(),
       alias: alias.trim() || undefined,
@@ -80,9 +80,9 @@ export default function AssetsPage() {
         .map((s) => s.trim())
         .filter(Boolean),
       criticality,
-    }).then(handleRevision(expectedRevision()));
+    }), { patch: (rows, data) => [...rows, data] });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");
@@ -95,9 +95,9 @@ export default function AssetsPage() {
 
   async function onDelete(assetID: string) {
     setError(null);
-    const result = await api.deleteAsset(expectedRevision(), assetID).then(handleRevision(expectedRevision()));
+    const result = await write(base => api.deleteAsset(base, assetID), { patch: rows => rows.filter(row => row.id !== assetID) });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");
@@ -106,9 +106,9 @@ export default function AssetsPage() {
 
   async function onUpdate(assetID: string, patch: Partial<Asset>) {
     setError(null);
-    const result = await api.updateAsset(expectedRevision(), assetID, patch).then(handleRevision(expectedRevision()));
+    const result = await write(base => api.updateAsset(base, assetID, patch), { patch: (rows, data) => rows.map(row => row.id === assetID ? data : row) });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");

@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -22,7 +22,7 @@ export default function DNSPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [status, setStatus] = useState<DNSStatus | null>(null);
-  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
@@ -40,7 +40,7 @@ export default function DNSPage() {
     const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits, sSnapshot?.revision);
+    adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -59,14 +59,12 @@ export default function DNSPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
-    const saved = await save.run("save", () => api.setDNS(submitted.baseRevision ?? "", { ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => write((base, submitted) => api.setDNS(base, { ...submitted, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), { replace: data => data }), {
       success: "DNS settings staged — commit to apply.",
       failure: "Failed to save DNS settings.",
     });
-    if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
-    else { failSave(submitted, saved); setError(saved.error); }
+    if (!saved) return;
+    if (!saved.ok) setError(revisionError(saved));
     await refresh();
   }
 

@@ -1,9 +1,10 @@
 "use client";
 
+import type { ConfigBase } from "../../lib/config-boundary";
+
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
-import { sameConfig } from "../../lib/config-editor";
 
 import type { ApiResult, DataPlaneConfig, DPIExclusion } from "../../lib/api";
 import {
@@ -26,29 +27,25 @@ export function DPIProtocolModal({
   revision: string;
   saving: boolean;
   protocols: Record<string, boolean>;
-  onSave: (p: Record<string, boolean>, revision: string) => Promise<ApiResult<DataPlaneConfig> | null>;
+  onSave: (p: Record<string, boolean>, revision: ConfigBase) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
   const editor = useConfigEditor({ protocols, context }, true, revision);
-  const { cfg, setCfg, adoptConfig } = editor;
+  const { cfg, setCfg, readConfig: adoptConfig } = editor;
   const draft = cfg.protocols;
   const setDraft = (update: React.SetStateAction<typeof protocols>) => setCfg((c) => ({
     ...c, protocols: typeof update === "function" ? update(c.protocols) : update,
   }));
-  const latest = useRef(editor.editor);
-  useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ protocols, context }, true, revision); }, [adoptConfig, protocols, context, revision]);
+  useEffect(() => { adoptConfig({ data: { protocols, context }, revision: revision ?? "" }, true); }, [adoptConfig, protocols, context, revision]);
 
   async function save() {
-    const submitted = editor.beginSave();
-    const result = await onSave(draft, submitted.baseRevision ?? "");
-    if (!result || !mounted.current) { editor.failSave(submitted); return; }
-    if (!result.ok) { editor.failSave(submitted, result); return; }
-    const saved = result.data;
-    editor.acceptConfig(submitted, { protocols: saved.dpiProtocols ?? {}, context: saved }, result.revision);
-    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+    const result = await editor.write(base => onSave(draft, base), { replace: data => ({ protocols: data.dpiProtocols ?? {}, context: data }) });
+    if (!mounted.current) return;
+    if (!result.ok) { return; }
+
+    if (result.adopted && result.unchanged) onClose();
   }
 
   function toggle(key: string) {
@@ -179,12 +176,12 @@ export function ICSDPIConfigModal({
   onSave: (
     p: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
-    revision: string,
+    revision: ConfigBase,
   ) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
   const editor = useConfigEditor({ protocols: icsProtocols, parsing, context }, true, revision);
-  const { cfg, setCfg, adoptConfig } = editor;
+  const { cfg, setCfg, readConfig: adoptConfig } = editor;
   const draft = cfg.protocols;
   const draftParsing = cfg.parsing;
   const setDraft = (update: React.SetStateAction<Record<string, boolean>>) => setCfg((c) => ({
@@ -193,21 +190,17 @@ export function ICSDPIConfigModal({
   const setDraftParsing = (update: React.SetStateAction<typeof parsing>) => setCfg((c) => ({
     ...c, parsing: typeof update === "function" ? update(c.parsing) : update,
   }));
-  const latest = useRef(editor.editor);
-  useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ protocols: icsProtocols, parsing, context }, true, revision); }, [adoptConfig, icsProtocols, parsing, context, revision]);
+  useEffect(() => { adoptConfig({ data: { protocols: icsProtocols, parsing, context }, revision: revision ?? "" }, true); }, [adoptConfig, icsProtocols, parsing, context, revision]);
   const [activeProto, setActiveProto] = useState<string | null>(null);
 
   async function save() {
-    const submitted = editor.beginSave();
-    const result = await onSave(draft, draftParsing, submitted.baseRevision ?? "");
-    if (!result || !mounted.current) { editor.failSave(submitted); return; }
-    if (!result.ok) { editor.failSave(submitted, result); return; }
-    const saved = result.data;
-    editor.acceptConfig(submitted, { protocols: saved.dpiIcsProtocols ?? {}, parsing: saved.dpiIcsParsing ?? {}, context: saved }, result.revision);
-    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+    const result = await editor.write(base => onSave(draft, draftParsing, base), { replace: data => ({ protocols: data.dpiIcsProtocols ?? {}, parsing: data.dpiIcsParsing ?? {}, context: data }) });
+    if (!mounted.current) return;
+    if (!result.ok) { return; }
+
+    if (result.adopted && result.unchanged) onClose();
   }
 
   function toggle(key: string) {
@@ -474,32 +467,30 @@ export function DPIExclusionModal({
   revision: string;
   saving: boolean;
   exclusions: DPIExclusion[];
-  onSave: (e: DPIExclusion[], revision: string) => Promise<ApiResult<DataPlaneConfig> | null>;
+  onSave: (e: DPIExclusion[], revision: ConfigBase) => Promise<ApiResult<DataPlaneConfig> | null>;
   onClose: () => void;
 }) {
   const editor = useConfigEditor({ rows: exclusions, context }, true, revision);
-  const { cfg, setCfg, adoptConfig } = editor;
+  const { cfg, setCfg, readConfig: adoptConfig } = editor;
   const draft = cfg.rows;
   const setDraft = (rows: DPIExclusion[]) => setCfg((c) => ({ ...c, rows }));
   const form = useConfigForm({ newValue: "", newType: "ip" as "ip" | "cidr" | "domain", newReason: "" }, context, revision);
-  const { refreshForm } = form;
+  const { readConfig: refreshForm } = form;
   const [newValue, setNewValue] = form.field("newValue");
   const [newType, setNewType] = form.field("newType");
   const [newReason, setNewReason] = form.field("newReason");
-  const latest = useRef({ editor: editor.editor, fields: form.editor.cfg.fields });
-  useLayoutEffect(() => { latest.current = { editor: editor.editor, fields: form.editor.cfg.fields }; });
+  const latest = useRef(form.editor.cfg.fields);
+  useLayoutEffect(() => { latest.current = form.editor.cfg.fields; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig({ rows: exclusions, context }, true, revision); refreshForm(context, true, revision); }, [adoptConfig, refreshForm, exclusions, context, revision]);
+  useEffect(() => { adoptConfig({ data: { rows: exclusions, context }, revision: revision ?? "" }, true); refreshForm({ data: context, revision: revision ?? "" }, true); }, [adoptConfig, refreshForm, exclusions, context, revision]);
 
   async function save() {
-    const submitted = editor.beginSave();
-    const result = await onSave(draft, submitted.baseRevision ?? "");
-    if (!result || !mounted.current) { editor.failSave(submitted); return; }
-    if (!result.ok) { editor.failSave(submitted, result); return; }
-    const saved = result.data;
-    editor.acceptConfig(submitted, { rows: saved.dpiExclusions ?? [], context: saved }, result.revision);
-    if (sameConfig(latest.current.editor.cfg, submitted.cfg) && !latest.current.fields.newValue && !latest.current.fields.newReason) onClose();
+    const result = await editor.write(base => onSave(draft, base), { replace: data => ({ rows: data.dpiExclusions ?? [], context: data }) });
+    if (!mounted.current) return;
+    if (!result.ok) { return; }
+
+    if (result.adopted && result.unchanged && !latest.current.newValue && !latest.current.newReason) onClose();
   }
 
   function detectType(v: string): "ip" | "cidr" | "domain" {
