@@ -19,7 +19,7 @@ async function openDiagnostics(page: Page) {
           : path === "/api/v1/interfaces/state"
             ? [{ name: "eth0", up: true, addrs: ["fe80::1/64", "192.0.2.010/24", "192.0.2.10/24"] }]
             : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/interfaces/state");
   await page.goto("/diagnostics/");

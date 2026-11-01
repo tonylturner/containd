@@ -26,26 +26,26 @@ async function mockAPI(
       const body = request.postDataJSON() as Binding;
       seen.posts.push(body);
       if (options.postError) {
-        await route.fulfill({ status: 400, json: { error: options.postError } });
+        await route.fulfill({ status: 400, json: { error: options.postError }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         return;
       }
       bindings = [...bindings.filter((b) => b.ip !== body.ip), body];
-      await route.fulfill({ json: body, headers: { "X-Containd-Config": "staged" } });
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
       return;
     }
     if (path.startsWith("/api/v1/identities/") && request.method() === "DELETE") {
       const ip = decodeURIComponent(path.slice("/api/v1/identities/".length));
       seen.deletes.push(ip);
       bindings = bindings.filter((b) => b.ip !== ip);
-      await route.fulfill({ json: { deleted: ip }, headers: { "X-Containd-Config": "staged" } });
+      await route.fulfill({ json: { deleted: ip }, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
       return;
     }
     if (path === "/api/v1/identities") {
       if (options.listStatus) {
-        await route.fulfill({ status: options.listStatus, json: { error: "config store unavailable" } });
+        await route.fulfill({ status: options.listStatus, json: { error: "config store unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         return;
       }
-      await route.fulfill({ json: { mappings: bindings } });
+      await route.fulfill({ json: { mappings: bindings }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
@@ -54,7 +54,7 @@ async function mockAPI(
     }
     if (path === "/api/v1/firewall/rules") body = options.rules ?? [];
     if (path === "/api/v1/config/diff") body = { changed: true, changedSections: ["firewall"] };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return seen;
 }

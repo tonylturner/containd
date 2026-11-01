@@ -137,7 +137,7 @@ func TestManagementBootFaultGatesReplayAndView(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"bootFault":"stored conflict"`) {
 		t.Fatalf("fault invisible: %s", rec.Body)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ApplyRunningConfig(ctx, store, engine, services); err != nil {

@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type Response } from "@playwrigh
 import { CONFIG_COMMITTED, CONFIG_STAGED } from "../lib/config-events";
 
 const prefix = "/api/v1";
+const revision = (counter: number) => `0123456789abcdef.${counter}`;
 const read = (path: string) => (r: Response) =>
   new URL(r.url()).pathname === prefix + path && r.request().method() === "GET";
 
@@ -30,7 +31,13 @@ async function mockAPI(page: Page) {
     "/assets": [],
     "/config/diff": { changed: false, changedSections: [] },
   };
-  const server = { data, failedReads: new Set<string>(), failedWrites: new Set<string>(), writes: [] as { path: string; body: unknown }[], hold: null as Promise<void> | null };
+  const server = {
+    data, counter: 1, failedReads: new Set<string>(), failedWrites: new Set<string>(),
+    writes: [] as { path: string; body: unknown }[],
+    attempts: [] as { path: string; revision?: string; status: number }[],
+    hold: null as Promise<void> | null,
+    change(path: string, value: unknown) { data[path] = value; this.counter++; },
+  };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -43,16 +50,35 @@ async function mockAPI(page: Page) {
     }
     if (req.method() === "GET") return server.failedReads.has(path)
       ? route.fulfill({ status: 503, json: { error: "unavailable" } })
-      : route.fulfill({ json: data[path] ?? {} });
+      : route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": revision(server.counter) } });
     const body = req.postDataJSON();
     server.writes.push({ path, body });
-    if (server.hold) await server.hold;
-    if (server.failedWrites.has(path)) return route.fulfill({ status: 400, json: { error: "rejected" } });
+    const base = req.headers()["x-containd-if-revision"];
+    const attempt = { path, revision: base, status: 200 };
+    server.attempts.push(attempt);
+    if (path === "/templates/ics/apply" && body.preview) {
+      return route.fulfill({ json: { rules: [], created: 0 } });
+    }
+    if (base === undefined) {
+      attempt.status = 428;
+      return route.fulfill({ status: 428, json: { error: "revision required", code: "config_revision_required" } });
+    }
+    if (base.length > 64 || !/^[0-9a-f]{16}\.[1-9][0-9]*$/.test(base)) {
+      attempt.status = 400;
+      return route.fulfill({ status: 400, json: { error: "malformed revision", code: "config_revision_malformed" } });
+    }
+    if (base !== revision(server.counter)) {
+      attempt.status = 412;
+      return route.fulfill({ status: 412, json: { error: "changed", code: "config_revision_mismatch", currentRevision: revision(server.counter) } });
+    }
+    if (server.failedWrites.has(path)) {
+      attempt.status = 400;
+      return route.fulfill({ status: 400, json: { error: "rejected" } });
+    }
     let result = body;
     if (path === "/templates/ics/apply") {
-      return route.fulfill({ json: { rules: [], created: 0 }, headers: body.preview ? {} : { "X-Containd-Config": "staged" } });
-    }
-    if (path === "/firewall/port-forwards" && req.method() === "POST") {
+      result = { rules: [], created: 0 };
+    } else if (path === "/firewall/port-forwards" && req.method() === "POST") {
       const nat = data["/firewall/nat"] as { portForwards?: unknown[] };
       data["/firewall/nat"] = { ...nat, portForwards: [...(nat.portForwards ?? []), body.forward] };
       result = { forward: body.forward, placement: { reason: "generated", rule: { id: "generated-allow" }, index: 0 } };
@@ -71,9 +97,32 @@ async function mockAPI(page: Page) {
     } else if (path === "/identities") {
       data[path] = { mappings: [...(data[path] as { mappings: { ip: string }[] }).mappings.filter((row) => row.ip !== body.ip), body] };
     } else data[path] = body;
-    await route.fulfill({ json: result, headers: { "X-Containd-Config": "staged" } });
+    // Persist atomically before delaying the acknowledgement. A concurrent read
+    // can observe this write, and a later external change cannot rewrite its receipt.
+    const acknowledgedRevision = revision(++server.counter);
+    if (server.hold) await server.hold;
+    await route.fulfill({ json: result, headers: { "X-Containd-Revision": acknowledgedRevision, "X-Containd-Config": "staged" } });
   });
   return server;
+}
+
+async function reviewConflict(page: Page, server: Awaited<ReturnType<typeof mockAPI>>, save: Locator, scope: Page | Locator = page) {
+  const counter = server.counter;
+  const before = structuredClone(server.data);
+  const response = page.waitForResponse(r => r.status() === 412 && r.request().method() !== "GET");
+  await save.click();
+  expect((await response).status()).toBe(412);
+  const alert = scope.getByRole("alert").filter({ hasText: "Configuration changed since you loaded it" });
+  await expect(alert).toBeVisible();
+  await expect(alert.getByRole("button", { name: "Reload", exact: true })).toBeVisible();
+  expect(server.counter).toBe(counter);
+  expect(server.data).toEqual(before);
+  expect(server.attempts.at(-1)).toMatchObject({ status: 412 });
+  expect(server.attempts.at(-1)?.revision).not.toBe(revision(counter));
+  const attempts = server.attempts.length;
+  await alert.getByRole("button", { name: "Keep my edits", exact: true }).click();
+  await expect(scope.getByText("Based on an older view — review, then save again.", { exact: true })).toBeVisible();
+  expect(server.attempts).toHaveLength(attempts);
 }
 
 async function open(page: Page, route: string, path: string) {
@@ -86,6 +135,32 @@ async function announce(page: Page, path: string, event = CONFIG_COMMITTED) {
     page.evaluate((name) => window.dispatchEvent(new CustomEvent(name)), event),
   ]);
 }
+
+test("draft mock enforces preconditions, advances successful writes and external changes, and exempts preview", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/system/services/dns/", "/services/dns");
+  const post = (base?: string, path = "/services/dns", body: unknown = { enabled: true }) =>
+    page.evaluate(async ({ base, path, body }) => {
+      const response = await fetch(`/api/v1${path}`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...(base === undefined ? {} : { "X-Containd-If-Revision": base }) },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, revision: response.headers.get("X-Containd-Revision"), body: await response.json() };
+    }, { base, path, body });
+  expect(await post()).toMatchObject({ status: 428, revision: null, body: { code: "config_revision_required" } });
+  expect(await post("")).toMatchObject({ status: 400, revision: null, body: { code: "config_revision_malformed" } });
+  expect(await post("malformed")).toMatchObject({ status: 400, revision: null, body: { code: "config_revision_malformed" } });
+  expect(server.counter).toBe(1);
+  expect(await post(revision(1))).toMatchObject({ status: 200, revision: revision(2) });
+  expect(await post(revision(1))).toMatchObject({ status: 412, revision: null, body: { currentRevision: revision(2) } });
+  expect(server.counter).toBe(2);
+  server.change("/services/dns", { enabled: false });
+  expect(await post(revision(2))).toMatchObject({ status: 412, body: { currentRevision: revision(3) } });
+  expect(server.data["/services/dns"]).toEqual({ enabled: false });
+  expect(await post(undefined, "/templates/ics/apply", { preview: true })).toMatchObject({ status: 200, revision: null });
+  expect(server.counter).toBe(3);
+  expect(await post(revision(3))).toMatchObject({ status: 200, revision: revision(4) });
+});
 
 for (const item of [
   { name: "DNS", route: "/system/services/dns/", path: "/services/dns", label: "Enable DNS resolver" },
@@ -106,7 +181,6 @@ for (const item of [
     await expect.poll(() => server.writes.length).toBe(1);
     await enabled.uncheck();
     // A read of the submitted value arrives before the save acknowledgement.
-    server.data[item.path] = server.writes[0].body;
     await announce(page, item.path);
     await expect(enabled).not.toBeChecked();
     const refreshed = page.waitForResponse(read(item.path));
@@ -136,7 +210,6 @@ test("a row reversion to its derived value remains explicit while its save is ou
   await row.getByRole("button", { name: "Edit", exact: true }).click();
   const alias = row.getByRole("textbox").first();
   await alias.fill("Original");
-  server.data["/zones"] = [{ name: "lan", alias: "Submitted" }];
   await announce(page, "/zones");
   const refreshed = page.waitForResponse(read("/zones"));
   release();
@@ -171,28 +244,32 @@ for (const item of textPages) {
     const field = item.field(page);
     await expect(field).toBeVisible();
     await field.fill(item.first);
-    server.data[item.path] = item.name === "VPN"
+    server.change(item.path, item.name === "VPN"
       ? { wireguard: { enabled: true, interface: "wg0", peers: [] }, openvpn: { enabled: false } }
-      : { ...(server.data[item.path] as object), enabled: true };
+      : { ...(server.data[item.path] as object), enabled: true });
     await announce(page, item.path);
     await expect(page.getByRole("status", { name: "Unsaved edits" }).first()).toContainText("changed on the server");
+    await expect(field).toHaveValue(item.first);
+    const save = page.getByRole("button", { name: "Save", exact: true }).first();
+    await reviewConflict(page, server, save);
     await expect(field).toHaveValue(item.first);
     // Hold the save echo, not just a synthetic event: the request helper will
     // dispatch CONFIG_STAGED and cause a real subscription read on release.
     let release!: () => void;
     server.hold = new Promise<void>((resolve) => { release = resolve; });
-    await page.getByRole("button", { name: "Save", exact: true }).first().click();
-    await expect.poll(() => server.writes.length).toBe(1);
+    await save.click();
+    await expect.poll(() => server.writes.length).toBe(2);
     await field.fill(item.later);
     const refreshed = page.waitForResponse(read(item.path));
     release();
     await refreshed;
     await expect(field).toHaveValue(item.later);
-    expect(server.writes[0].path).toBe(item.path);
-    if (item.name === "DNS") expect(server.writes[0].body).toMatchObject({ upstreamServers: ["192.0.2.53", "192.0.2.54"] });
-    if (item.name === "NTP") expect(server.writes[0].body).toMatchObject({ servers: ["pool.ntp.org", "ntp.lab"] });
-    if (item.name === "Proxies") expect(server.writes[0].body).toMatchObject({ listenZones: ["lan"] });
-    if (item.name === "VPN") expect(server.writes[0].body).toMatchObject({ wireguard: { peers: [] } });
+    expect(server.attempts[1]).toMatchObject({ revision: revision(2), status: 200 });
+    expect(server.writes[1].path).toBe(item.path);
+    if (item.name === "DNS") expect(server.writes[1].body).toMatchObject({ upstreamServers: ["192.0.2.53", "192.0.2.54"] });
+    if (item.name === "NTP") expect(server.writes[1].body).toMatchObject({ servers: ["pool.ntp.org", "ntp.lab"] });
+    if (item.name === "Proxies") expect(server.writes[1].body).toMatchObject({ listenZones: ["lan"] });
+    if (item.name === "VPN") expect(server.writes[1].body).toMatchObject({ wireguard: { peers: [] } });
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
     await expect(field).not.toHaveValue(item.later);
   });
@@ -208,7 +285,7 @@ test("IDS retains a rule modal draft through a staged save and a deleted server 
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
   const field = page.locator("textarea");
   await field.fill('{"id":"test-rule", "title":');
-  server.data["/ids/rules"] = { enabled: true, rules: [] };
+  server.change("/ids/rules", { enabled: true, rules: [] });
   await announce(page, "/ids/rules");
   await expect(field).toHaveValue('{"id":"test-rule", "title":');
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toContainText("changed on the server");
@@ -233,22 +310,26 @@ for (const item of [
     await row.getByRole("button", { name: "Edit", exact: true }).click();
     const rowField = row.getByRole("textbox").first();
     await rowField.fill("row draft, ");
-    server.data[item.path] = item.name === "Identities" ? { mappings: [] } : [];
+    server.change(item.path, item.name === "Identities" ? { mappings: [] } : []);
     await announce(page, item.path);
     await expect(field).toHaveValue("unfinished, ");
     await expect(rowField).toHaveValue("row draft, ");
     await expect(page.getByRole("status", { name: "Unsaved edits" })).toContainText("changed on the server");
     // Reintroduce the row, then save it while the independent creation form
     // is unfinished. Its staged refresh must not reset that creation form.
-    server.data[item.path] = item.name === "Identities"
-      ? { mappings: [{ ip: item.row, identities: ["operator"] }] } : [{ name: item.row }];
+    server.change(item.path, item.name === "Identities"
+      ? { mappings: [{ ip: item.row, identities: ["operator"] }] } : [{ name: item.row }]);
     await announce(page, item.path, CONFIG_STAGED);
     await rowField.fill(item.name === "Identities" ? "supervisor" : "Saved row");
+    await reviewConflict(page, server, row.getByRole("button", { name: "Save", exact: true }));
+    if (item.name !== "Identities") await row.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(rowField).toHaveValue(item.name === "Identities" ? "supervisor" : "Saved row");
     await Promise.all([
       page.waitForResponse(read(item.path)),
       row.getByRole("button", { name: "Save", exact: true }).click(),
     ]);
-    await expect.poll(() => server.writes.length).toBe(1);
+    await expect.poll(() => server.writes.length).toBe(2);
+    expect(server.attempts[1]).toMatchObject({ revision: revision(3), status: 200 });
     await expect(field).toHaveValue("unfinished, ");
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
     await expect(field).toHaveValue("");
@@ -261,14 +342,15 @@ test("Routing keeps an unfinished gateway while staging a route", async ({ page 
   await page.getByText("Add gateway (advanced)", { exact: true }).click();
   const field = page.getByPlaceholder("isp1");
   await field.fill("gateway draft");
-  server.data["/routing"] = { gateways: [{ name: "other", address: "192.0.2.1" }], routes: [], rules: [] };
+  server.change("/routing", { gateways: [{ name: "other", address: "192.0.2.1" }], routes: [], rules: [] });
   await announce(page, "/routing");
   await expect(field).toHaveValue("gateway draft");
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toContainText("changed on the server");
   await page.getByText("Add static route (advanced)", { exact: true }).click();
   await page.getByPlaceholder("dst (CIDR or default)").fill("198.51.100.0/24");
+  await reviewConflict(page, server, page.getByRole("button", { name: "Add route", exact: true }));
   await page.getByRole("button", { name: "Add route", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(1);
+  await expect.poll(() => server.writes.length).toBe(2);
   await expect(field).toHaveValue("gateway draft");
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
   await expect(field).toHaveValue("");
@@ -280,7 +362,7 @@ test("Wizard keeps its active step and raw text on committed and staged notifica
   await page.getByRole("button", { name: /Publish Internal Service/ }).click();
   const field = page.getByPlaceholder("e.g. 192.168.1.10");
   await field.fill("192.0.");
-  server.data["/firewall/nat"] = { enabled: true };
+  server.change("/firewall/nat", { enabled: true });
   for (const event of [CONFIG_COMMITTED, CONFIG_STAGED]) {
     await announce(page, "/firewall/nat", event);
     await expect(field).toHaveValue("192.0.");
@@ -296,12 +378,13 @@ test("NAT keeps both cards and unfinished DNAT fields when SNAT is staged", asyn
   const field = page.getByPlaceholder("dest ip");
   await field.fill("192.0.");
   await page.getByRole("button", { name: "Off", exact: true }).click();
-  server.data["/firewall/nat"] = { enabled: false, egressZone: "wan", portForwards: [] };
+  server.change("/firewall/nat", { enabled: false, egressZone: "wan", portForwards: [] });
   await announce(page, "/firewall/nat");
   await expect(field).toHaveValue("192.0.");
   await expect(page.getByRole("button", { name: "On", exact: true })).toBeVisible();
+  await reviewConflict(page, server, page.getByRole("button", { name: "Save NAT", exact: true }));
   await page.getByRole("button", { name: "Save NAT", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(1);
+  await expect.poll(() => server.writes.length).toBe(2);
   await expect(field).toHaveValue("192.0.");
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
   await expect(field).toHaveValue("");
@@ -315,7 +398,7 @@ test("DNS automatic refresh keeps raw-only edits", async ({ page }) => {
   await field.fill("192.0.2.53\n");
   await page.clock.install();
   await page.getByRole("checkbox", { name: "Auto", exact: true }).check();
-  server.data["/services/dns"] = { enabled: true, upstreamServers: ["192.0.2.54"] };
+  server.change("/services/dns", { enabled: true, upstreamServers: ["192.0.2.54"] });
   await Promise.all([page.waitForResponse(read("/services/dns")), page.clock.fastForward(15_000)]);
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toContainText("changed on the server");
   await expect(field).toHaveValue("192.0.2.53\n");
@@ -336,7 +419,7 @@ test("a row save keeps later typing and another deleted row's draft, including d
   await expect.poll(() => server.writes.length).toBe(1);
   await row("lan").getByRole("button", { name: "Edit", exact: true }).click();
   await row("lan").getByRole("textbox").first().fill("later typing");
-  server.data["/zones"] = [{ name: "lan" }];
+  server.change("/zones", [{ name: "lan" }]);
   await announce(page, "/zones");
   const refreshed = page.waitForResponse(read("/zones"));
   release();
@@ -385,7 +468,7 @@ test("a forward-proxy staged save does not parse or clear a new reverse site's C
   const hosts = page.getByPlaceholder("hostnames (optional)");
   await backends.pressSequentially("srv:80, ");
   await hosts.pressSequentially("lab., ");
-  server.data["/services/proxy/reverse"] = { enabled: true, sites: [] };
+  server.change("/services/proxy/reverse", { enabled: true, sites: [] });
   await announce(page, "/services/proxy/reverse");
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toContainText("changed on the server");
   await Promise.all([
@@ -404,7 +487,7 @@ test("IDS page Save does not acknowledge an unfinished group form", async ({ pag
   await page.getByRole("button", { name: /^Groups/ }).click();
   const name = page.getByPlaceholder("e.g. ICS/Modbus");
   await name.fill("new group ");
-  server.data["/ids/rules"] = { enabled: true, rules: [] };
+  server.change("/ids/rules", { enabled: true, rules: [] });
   await announce(page, "/ids/rules");
   await Promise.all([
     page.waitForResponse(read("/ids/rules")),
@@ -420,7 +503,7 @@ test("NAT does not silently replace a chosen ingress zone removed by a refresh",
   await open(page, "/nat/", "/firewall/nat");
   const ingress = page.getByRole("combobox", { name: "Ingress zone" });
   await ingress.selectOption("lan");
-  server.data["/zones"] = [{ name: "wan" }];
+  server.change("/zones", [{ name: "wan" }]);
   await announce(page, "/firewall/nat");
   await expect(ingress).toHaveValue("lan");
   await expect(ingress.getByRole("option", { selected: true })).toHaveText("ingress:lan (no longer on server)");
@@ -464,22 +547,28 @@ for (const surface of ["Firewall", "ICS"]) {
       : page.getByPlaceholder("3, 16");
     const raw = surface === "Firewall" ? "192.0.2.0/24, " : "3, ";
     await input.fill(raw);
-    server.data["/firewall/rules"] = [];
+    server.change("/firewall/rules", []);
     for (const event of [CONFIG_STAGED, CONFIG_COMMITTED]) {
       await announce(page, "/firewall/rules", event);
       await expect(input).toHaveValue(raw);
       await expect(page.getByRole("status", { name: "Unsaved edits" }).first()).toBeVisible();
     }
+    // Restore the row before retrying its update; revision consent does not
+    // resurrect a rule that no longer exists on the server.
+    server.change("/firewall/rules", [draftRule]);
+    await announce(page, "/firewall/rules");
+    const save = page.getByRole("button", { name: surface === "Firewall" ? "Save changes" : "Save filter", exact: true });
+    await reviewConflict(page, server, save);
     let release!: () => void;
     server.hold = new Promise<void>((resolve) => { release = resolve; });
-    await page.getByRole("button", { name: surface === "Firewall" ? "Save changes" : "Save filter", exact: true }).click();
-    await expect.poll(() => server.writes.length).toBe(1);
+    await save.click();
+    await expect.poll(() => server.writes.length).toBe(2);
     await input.fill(raw + (surface === "Firewall" ? "198.51." : "16,"));
     const refreshed = page.waitForResponse(read("/firewall/rules"));
     release();
     await refreshed;
     await expect(input).toHaveValue(raw + (surface === "Firewall" ? "198.51." : "16,"));
-    expect(server.writes[0].body).toMatchObject(surface === "Firewall" ? { sources: ["192.0.2.0/24"] } : { ics: { functionCode: [3] } });
+    expect(server.writes[1].body).toMatchObject(surface === "Firewall" ? { sources: ["192.0.2.0/24"] } : { ics: { functionCode: [3] } });
     await page.getByRole("button", { name: "Refresh", exact: true }).press("Enter");
     await expect(input).toHaveCount(surface === "Firewall" ? 1 : 0);
     if (surface === "Firewall") await expect(input).toHaveValue("");
@@ -495,13 +584,14 @@ test("Firewall creation keeps failed submissions and later typing, independently
   await sources.fill("192.0.2.0/24, ");
   const sourceZone = page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
   await sourceZone.selectOption("lan");
-  server.data["/zones"] = [{ name: "wan" }];
-  server.data["/firewall/rules"] = [draftRule];
+  server.change("/zones", [{ name: "wan" }]);
+  server.change("/firewall/rules", [draftRule]);
   await announce(page, "/firewall/rules");
   await expect(page.getByRole("row").filter({ hasText: "ot-rule" })).toBeVisible();
   await expect(sources).toHaveValue("192.0.2.0/24, ");
   await expect(sourceZone).toHaveValue("lan");
   await expect(sourceZone.getByRole("option", { selected: true })).toContainText("no longer on server");
+  await reviewConflict(page, server, page.getByRole("button", { name: "Create rule", exact: true }));
   server.failedWrites.add("/firewall/rules");
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
   await expect(page.getByText("rejected", { exact: true })).toBeVisible();
@@ -511,7 +601,7 @@ test("Firewall creation keeps failed submissions and later typing, independently
   let release!: () => void;
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await page.getByRole("button", { name: "Create rule", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(2);
+  await expect.poll(() => server.writes.length).toBe(3);
   await sources.fill("192.0.2.0/24, 198.51.");
   release();
   await expect(id).toHaveValue("");
@@ -526,10 +616,12 @@ test("Firewall DPI parsing and unfinished exclusions survive background refresh 
   await page.getByRole("button", { name: "Configure", exact: true }).first().click();
   const parsing = page.getByRole("combobox", { name: "Modbus/TCP parsing" });
   await parsing.selectOption("strict");
-  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "enforce" };
+  server.change("/dataplane", { ...server.data["/dataplane"] as object, dpiMode: "enforce" });
   await announce(page, "/dataplane");
   await expect(parsing).toHaveValue("strict");
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toBeVisible();
+  await reviewConflict(page, server, page.getByRole("button", { name: "Save", exact: true }));
+  await expect(parsing).toHaveValue("strict");
   server.failedWrites.add("/dataplane");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Not saved: rejected")).toBeVisible();
@@ -538,17 +630,19 @@ test("Firewall DPI parsing and unfinished exclusions survive background refresh 
   let release!: () => void;
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(2);
+  await expect.poll(() => server.writes.length).toBe(3);
   await parsing.selectOption("tolerant");
   release();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   await expect(parsing).toHaveValue("tolerant");
-  expect(server.writes[1].body).toMatchObject({ dpiMode: "enforce", dpiIcsParsing: { modbus: "strict" } });
+  expect(server.writes[2].body).toMatchObject({ dpiMode: "enforce", dpiIcsParsing: { modbus: "strict" } });
+  expect(server.attempts.map(attempt => attempt.status)).toEqual([412, 400, 200]);
+  expect(server.attempts.map(attempt => attempt.revision)).toEqual([revision(1), revision(2), revision(2)]);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("button", { name: "Add Exclusion", exact: true }).click();
   const reason = page.getByPlaceholder("Reason (optional)");
   await reason.fill("unfinished, ");
-  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "monitor" };
+  server.change("/dataplane", { ...server.data["/dataplane"] as object, dpiMode: "monitor" });
   await announce(page, "/dataplane");
   await expect(reason).toHaveValue("unfinished, ");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -564,8 +658,8 @@ test("Templates keep parameters and zone selections through preview, notificatio
   const codes = page.getByPlaceholder("3, 16");
   await codes.fill("3, ");
   await page.getByRole("button", { name: "lan", exact: true }).first().click();
-  server.data["/zones"] = [{ name: "wan" }, { name: "dmz" }];
-  server.data["/templates/ics"] = [{ name: "Test baseline", description: "Changed template", protocol: "modbus", parameters: [] }];
+  server.change("/zones", [{ name: "wan" }, { name: "dmz" }]);
+  server.change("/templates/ics", [{ name: "Test baseline", description: "Changed template", protocol: "modbus", parameters: [] }]);
   for (const event of [CONFIG_STAGED, CONFIG_COMMITTED]) {
     await announce(page, "/zones", event);
     await expect(codes).toHaveValue("3, ");
@@ -575,20 +669,21 @@ test("Templates keep parameters and zone selections through preview, notificatio
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(page.getByText("Preview: 0 Rule(s)")).toBeVisible();
   await expect(codes).toHaveValue("3, ");
+  await reviewConflict(page, server, page.getByRole("button", { name: "Stage", exact: true }));
   server.failedWrites.add("/templates/ics/apply");
   await page.getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Failed to apply template.", { exact: true })).toBeVisible();
+  await expect(page.getByText("rejected", { exact: true })).toBeVisible();
   await expect(codes).toHaveValue("3, ");
   server.failedWrites.clear();
   let release!: () => void;
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await page.getByRole("button", { name: "Stage", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(3);
+  await expect.poll(() => server.writes.length).toBe(4);
   await codes.fill("3, 16, ");
   release();
   await expect(page.getByRole("button", { name: "Stage", exact: true })).toBeEnabled();
   await expect(codes).toHaveValue("3, 16, ");
-  expect(server.writes[2].body).toMatchObject({ parameters: { codes: "3, " }, sourceZones: ["lan"] });
+  expect(server.writes[3].body).toMatchObject({ parameters: { codes: "3, " }, sourceZones: ["lan"] });
   await page.getByRole("button", { name: "Refresh", exact: true }).press("Enter");
   await expect(codes).toHaveCount(0);
 });
@@ -600,7 +695,7 @@ for (const surface of ["Firewall", "ICS"]) {
     server.data["/firewall/rules"] = [draftRule];
     await open(page, surface === "Firewall" ? "/firewall/" : "/ics/", "/firewall/rules");
     await page.getByRole("row").filter({ hasText: "ot-rule" }).getByRole("button", { name: "Edit", exact: true }).click();
-    server.data["/firewall/rules"] = [{ ...draftRule, description: "New server copy", ics: { ...draftRule.ics, functionCode: [16] } }];
+    server.change("/firewall/rules", [{ ...draftRule, description: "New server copy", ics: { ...draftRule.ics, functionCode: [16] } }]);
     await announce(page, "/firewall/rules");
     const input = surface === "Firewall" ? page.getByPlaceholder("description").last() : page.getByPlaceholder("3, 16");
     await expect(input).toHaveValue(surface === "Firewall" ? "New server copy" : "16");
@@ -614,20 +709,52 @@ test("Firewall IT decoder draft survives a refresh and acknowledges only the sub
   await page.getByRole("button", { name: "Configure", exact: true }).nth(1).click();
   const modal = page.locator("div.fixed").filter({ has: page.getByRole("heading", { name: "IT Protocol DPI Configuration" }) });
   await modal.getByRole("button", { name: "Disable All", exact: true }).click();
-  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "enforce" };
+  server.change("/dataplane", { ...server.data["/dataplane"] as object, dpiMode: "enforce" });
   await announce(page, "/dataplane");
   await expect(modal.getByRole("status", { name: "Unsaved edits" })).toBeVisible();
+  await reviewConflict(page, server, modal.getByRole("button", { name: "Save", exact: true }), modal);
   let release!: () => void;
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await modal.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => server.writes.length).toBe(1);
+  await expect.poll(() => server.writes.length).toBe(2);
   await modal.getByRole("button", { name: "Enable All", exact: true }).click();
   release();
   await expect(modal.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-  expect(server.writes[0].body).toMatchObject({ dpiProtocols: { http: false }, dpiMode: "enforce" });
+  expect(server.writes[1].body).toMatchObject({ dpiProtocols: { http: false }, dpiMode: "enforce" });
   await modal.getByRole("button", { name: "Save", exact: true }).click();
   await expect(modal).toHaveCount(0);
-  expect(server.writes[1].body).toMatchObject({ dpiProtocols: { http: true } });
+  expect(server.writes[2].body).toMatchObject({ dpiProtocols: { http: true } });
+  expect(server.attempts.map(attempt => attempt.status)).toEqual([412, 200, 200]);
+  expect(server.attempts.map(attempt => attempt.revision)).toEqual([revision(1), revision(2), revision(3)]);
+});
+
+test("DPI conflict Reload discards parsing edits before a fresh reviewed save", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/firewall/", "/dataplane");
+  await page.getByRole("button", { name: "Configure", exact: true }).first().click();
+  const parsing = page.getByRole("combobox", { name: "Modbus/TCP parsing" });
+  await parsing.selectOption("strict");
+  server.change("/dataplane", { ...server.data["/dataplane"] as object, dpiMode: "enforce", dpiIcsParsing: { modbus: "tolerant" } });
+  await announce(page, "/dataplane");
+  const rejected = page.waitForResponse(r => r.status() === 412 && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await rejected;
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await expect(parsing).toHaveValue("strict");
+  await Promise.all([
+    page.waitForResponse(read("/dataplane")),
+    page.getByRole("button", { name: "Reload", exact: true }).click(),
+  ]);
+  await expect(parsing).toHaveCount(0);
+  expect(server.writes).toHaveLength(1);
+  await page.getByRole("button", { name: "Configure", exact: true }).first().click();
+  await expect(parsing).toHaveValue("tolerant");
+  await parsing.selectOption("strict");
+  const saved = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === prefix + "/dataplane");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await saved).status()).toBe(200);
+  expect(server.attempts.map(attempt => attempt.revision)).toEqual([revision(1), revision(2)]);
+  expect(server.counter).toBe(3);
 });
 
 for (const item of [

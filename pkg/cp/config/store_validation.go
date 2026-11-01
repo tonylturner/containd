@@ -89,14 +89,51 @@ func (s *SQLiteStore) recordRollbackRefusal(ctx context.Context, err error) erro
 }
 
 func (s *SQLiteStore) timedRollbackLocked(ctx context.Context) (bool, error) {
-	err := s.rollbackLocked(ctx)
+	// Observe pending and its authority together; another handle may confirm or
+	// supersede this deadline before the rollback acquires the write lock.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	revision, err := readRevision(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	pending, err := loadPendingFrom(ctx, tx)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if remain := time.Until(time.Unix(0, pending.DeadlineUnix)); remain > 0 {
+		s.schedulePendingLocked(remain)
+		return false, nil
+	}
+	_, err = s.rollbackLocked(ctx, &revision, nil)
 	var invalid *ValidationError
 	if errors.As(err, &invalid) {
-		// Never retry an unsafe target. Keep running and the staged candidate;
-		// retain previous for inspection, clear pending, and persist the fault.
-		if clearErr := s.clearPendingLocked(ctx); clearErr != nil {
+		// Clear only the pending generation whose rollback was refused.
+		if clearErr := s.clearPendingLocked(ctx, revision); clearErr != nil {
+			var mismatch *ErrRevisionMismatch
+			if errors.As(clearErr, &mismatch) {
+				s.schedulePendingLocked(time.Millisecond)
+				return false, nil
+			}
 			return false, errors.Join(err, clearErr)
 		}
+		if recordErr := s.recordRollbackRefusal(ctx, err); recordErr != nil {
+			return false, recordErr
+		}
+		return false, nil
+	}
+	var mismatch *ErrRevisionMismatch
+	if errors.As(err, &mismatch) {
+		s.schedulePendingLocked(time.Millisecond)
 		return false, nil
 	}
 	return err == nil, err

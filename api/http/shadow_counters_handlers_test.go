@@ -32,7 +32,7 @@ func TestShadowCountersRoute(t *testing.T) {
 		if authed {
 			req = authedRequest(http.MethodGet, req.URL.String(), nil)
 		}
-		s.ServeHTTP(r, req)
+		serveWithConfigRevision(t, s, r, req)
 		return r
 	}
 	if r := get(false); r.Code != http.StatusUnauthorized {

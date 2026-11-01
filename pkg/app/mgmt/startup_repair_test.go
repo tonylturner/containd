@@ -35,7 +35,7 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	if err := store.Save(ctx, initial); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MutateCandidateIDS(ctx, func(next *config.Config) error {
+	if err := testMutateCandidateIDS(store, ctx, func(next *config.Config) error {
 		next.System.Hostname = "staged-host"
 		next.System.Mgmt.HTTPSListenAddr = ":9444"
 		next.Firewall.Rules = []config.Rule{{ID: "staged-rule", Action: config.ActionAllow}}
@@ -55,7 +55,8 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	defer stores.store.Close()
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	if len(candidate.IDS.Rules) != 1 || candidate.IDS.Rules[0].ID == running.IDS.Rules[0].ID {
 		t.Fatal("repair replaced staged bank")
 	}
-	if err := stores.store.Commit(ctx); err != nil {
+	if err := testCommit(stores.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	promoted, err := stores.store.Load(ctx)

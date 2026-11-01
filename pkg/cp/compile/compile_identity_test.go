@@ -35,13 +35,13 @@ func TestIdentityBindingsAreDurableConfig(t *testing.T) {
 	}
 	cand.Firewall.Rules = append(cand.Firewall.Rules, config.Rule{ID: "ops-ssh", Identities: []string{"operator"},
 		Protocols: []config.Protocol{{Name: "tcp", Port: "22"}}, Action: config.ActionAllow})
-	if err := store.SaveCandidate(ctx, cand); err != nil {
+	if err := testSaveCandidate(store, ctx, cand); err != nil {
 		t.Fatal(err)
 	}
 	if running, err := store.Load(ctx); err != nil || len(running.Firewall.IdentityBindings) != 0 {
 		t.Fatalf("staged bindings reached the running config: %v, %v", running, err)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -85,7 +85,7 @@ func TestIdentityBindingsAreDurableConfig(t *testing.T) {
 		t.Fatalf("snapshot bindings = %+v, want %+v", snap.IdentityBindings, want)
 	}
 
-	if err := store.Rollback(ctx); err != nil {
+	if err := testRollback(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if rolled, err := store.Load(ctx); err != nil || len(rolled.Firewall.IdentityBindings) != 0 {

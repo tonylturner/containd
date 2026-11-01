@@ -11,7 +11,7 @@ async function setup(page: Page) {
     if (req.method() !== "GET") {
       const body = req.postDataJSON();
       state.writes.push({ path, body });
-      if (state.reject) return route.fulfill({ status: 400, json: { error: "mutation rejected" } });
+      if (state.reject) return route.fulfill({ status: 400, json: { error: "mutation rejected" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       const headers: Record<string, string> = {};
       if (path.startsWith("/config/commit")) {
         state.dirty = false;
@@ -25,11 +25,11 @@ async function setup(page: Page) {
       }
       else if (path === "/pcap/config") state.dirty = true;
       if (["/zones", "/ids/rules", "/pcap/config"].includes(path)) headers["X-Containd-Config"] = "staged";
-      return route.fulfill({ headers, json: path === "/ids/rules" ? state.ids : body ?? {} });
+      return route.fulfill({ json: path === "/ids/rules" ? state.ids : body ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(headers) } });
     }
     if (path === "/config/diff") {
       state.reads++;
-      return route.fulfill(state.offline ? { status: 503, json: { error: "offline" } } : { json: { changed: state.dirty, changedSections: state.dirty ? ["zones"] : [], running: {}, candidate: state.dirty ? { zones: state.zones } : {}, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } } });
+      return route.fulfill(state.offline ? { status: 503, json: { error: "offline" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } } : { json: { changed: state.dirty, changedSections: state.dirty ? ["zones"] : [], running: {}, candidate: state.dirty ? { zones: state.zones } : {}, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     const data: Record<string, unknown> = {
       "/auth/me": { id: "admin-1", username: "containd", role: "admin" },
@@ -46,7 +46,7 @@ async function setup(page: Page) {
       "/system/info": {},
       "/config/backups": [],
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return state;
 }
@@ -62,6 +62,7 @@ test("successful zone mutation immediately refreshes global status; commit refre
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "newzone", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Review diff", exact: true }).click();
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByText(pending, { exact: true })).toHaveCount(0);
@@ -84,7 +85,7 @@ test("failed mutation never shows pending; failed diff shows unknown, never clea
   await expect(page.getByText("Configuration status unknown — unable to check pending changes.")).toHaveCount(0);
 });
 
-test("editors consume both events and status bar supports commit-confirmed", async ({ page }) => {
+test("editors consume both events and status bar leads to reviewed commit-confirmed", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/zones/");
   for (const event of ["containd:config:staged", "containd:config:committed"]) {
@@ -94,9 +95,10 @@ test("editors consume both events and status bar supports commit-confirmed", asy
     await page.evaluate((type) => window.dispatchEvent(new CustomEvent(type)), event);
     await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
   }
+  await page.getByRole("link", { name: "Review diff", exact: true }).click();
   await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Commit-confirmed", exact: true }).click();
-  await expect(page.getByRole("link", { name: "Confirm / rollback" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Start timer", exact: true }).click();
+  await expect(page.getByText("Commit-confirmed started (60s). Warning: test apply warning", { exact: true })).toBeVisible();
   expect(state.writes.at(-1)).toEqual({ path: "/config/commit_confirmed", body: { ttl_seconds: 60 } });
 });
 
@@ -126,7 +128,7 @@ test("capture start is immediate and does not persist defaults; saving defaults 
 
 test("capture cannot start when discovery reports the saved device is absent", async ({ page }) => {
   const state = await setup(page);
-  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
   await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
   await expect(page.getByText("Kernel devices not found: eth0. Bind the interfaces or choose an available device.", { exact: true })).toBeVisible();
@@ -153,7 +155,7 @@ test("topology surfaces failed zone patches without optimistic target changes", 
   const state = await setup(page);
   state.zones = [{ name: "MixedCase" }, { name: "wan" }];
   state.reject = true;
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] }] }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await page.getByText("ALLOW", { exact: true }).click();
@@ -177,9 +179,9 @@ test("an event during an in-flight diff read is not lost or overwritten", async 
     reads++;
     if (reads === 1) {
       await held;
-      return route.fulfill({ json: { changed: false, changedSections: [], running: {}, candidate: {} } });
+      return route.fulfill({ json: { changed: false, changedSections: [], running: {}, candidate: {} }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
-    return route.fulfill({ json: { changed: true, changedSections: ["zones"], running: {}, candidate: { zones: [{ name: "staged" }] } } });
+    return route.fulfill({ json: { changed: true, changedSections: ["zones"], running: {}, candidate: { zones: [{ name: "staged" }] } }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   try {
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
@@ -200,9 +202,10 @@ test("failed commit preserves pending status and exposes the server error", asyn
   state.reject = true;
   await page.goto("/zones/");
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Review diff", exact: true }).click();
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
-  await expect(page.getByText("mutation rejected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Commit failed: mutation rejected", { exact: true })).toBeVisible();
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
 });
 
@@ -212,22 +215,20 @@ test("secret-only edits trust authoritative changed even when redacted snapshots
   await page.route("**/api/v1/config/diff", (route) => route.fulfill({ json: {
     changed: true, changedSections: ["services"], running: {}, candidate: {},
     idsBank: { running: { count: 30000, sha256: "same" }, candidate: { count: 30000, sha256: "same" } },
-  } }));
+  }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/zones/");
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
 });
 
-test("committed events clear commit-confirmed and warning notices", async ({ page }) => {
+test("status bar never sends a lifecycle write without review", async ({ page }) => {
   const state = await setup(page);
   state.dirty = true;
   await page.goto("/zones/");
-  await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Commit-confirmed", exact: true }).click();
-  await expect(page.getByRole("link", { name: "Confirm / rollback" })).toBeVisible();
-  await expect(page.getByText("Warning: test apply warning", { exact: true })).toBeVisible();
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
-  await expect(page.getByRole("link", { name: "Confirm / rollback" })).toHaveCount(0);
-  await expect(page.getByText("Warning: test apply warning", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(pending, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Commit-confirmed", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review diff", exact: true })).toBeVisible();
+  expect(state.writes).toEqual([]);
 });
 
 const unchangedBank = { count: 30000, sha256: "a".repeat(64) };
@@ -239,6 +240,7 @@ function configDiff(overrides: Partial<WireConfigDiff> = {}): WireConfigDiff {
   return {
     changed: false,
     changedSections: [],
+    pendingConfirm: null,
     running: {},
     candidate: {},
     idsBank: { running: unchangedBank, candidate: unchangedBank },
@@ -249,7 +251,7 @@ function configDiff(overrides: Partial<WireConfigDiff> = {}): WireConfigDiff {
 async function setupConfigReview(page: Page, diff: ConfigDiff) {
   const state = await setup(page);
   await page.route("**/api/v1/config/diff", (route) => route.fulfill(
-    state.offline ? { status: 503, json: { error: "offline" } } : { json: diff },
+    state.offline ? { status: 503, json: { error: "offline" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } } : { json: diff, headers: { "X-Containd-Revision": "0123456789abcdef.1" } },
   ));
   return state;
 }
@@ -391,7 +393,7 @@ test("candidate JSON edited during a pending save stays a draft", async ({ page 
   await page.route("**/api/v1/config/candidate", async (route) => {
     submitted = route.request().postDataJSON();
     await held;
-    await route.fulfill({ json: { status: "staged" } });
+    await route.fulfill({ json: { status: "staged" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/config/?tab=candidate");
   const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });

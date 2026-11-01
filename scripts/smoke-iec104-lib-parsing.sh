@@ -26,7 +26,7 @@ port_of() {
 # PORT recorded at or after SINCE to RESULTS_DIR/parsing-NAME.json.
 parsing_events() {
   local name=$1 port=$2 since=$3 out="$RESULTS_DIR/parsing-$1.json"
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=5000" 2>/dev/null | jq --argjson port "$port" --arg since "$since" '
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=5000" 2>/dev/null | jq --argjson port "$port" --arg since "$since" '
     [.[] | select(.srcPort == $port
       and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= ($since | fromdateiso8601)))]' \
     >"$out" 2>/dev/null || printf '[]\n' >"$out"

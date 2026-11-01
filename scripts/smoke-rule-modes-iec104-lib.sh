@@ -5,8 +5,8 @@
 iec_modes_fail() {
   log "FAIL rule modes: $*" >&2
   log "RTU state: $(rtu_state)" >&2
-  log "shadow counters: $($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
-  log "monitor events: $($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=monitor")" >&2
+  log "shadow counters: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
+  log "monitor events: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=monitor")" >&2
   return 1
 }
 
@@ -14,8 +14,8 @@ iec_modes_evidence() {
   local id=$1 decision=$2 expected=${3:-1} counters events field=wouldDeny
   [[ $decision != would_allow ]] || field=wouldAllow
   for _ in $(seq 1 30); do
-    counters=$($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")
-    events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")
+    counters=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")
+    events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")
     if echo "$counters" | jq -e --arg id "$id" --arg f "$field" --argjson n "$expected" '
       .available and .unit == "messages" and any(.rules[]; .ruleId == $id and .shadowMatches == $n and .[$f] == $n)' >/dev/null &&
       echo "$events" | jq -e --arg d "$decision" 'any(.events[]; .attributes.decision == $d and .attributes.reason == "rule")' >/dev/null; then
@@ -83,7 +83,7 @@ run_iec_rule_modes_matrix() {
         iec_modes_fail "$capture $order strict scope: expected reset and no delivery; probe=$out commands $before->$after"; return 1;
       }
       iec_modes_evidence "$id" would_drop || return 1
-      events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=enforce")
+      events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=enforce")
       echo "$events" |
         jq -e --arg id "$eid" 'any(.events[]; .attributes.reason == "nonconformant" and .attributes.scopeId == $id and .attributes.findingCode == "iec104.reserved_bits" and .attributes.ruleId == null and .attributes.action == null)' >/dev/null || { iec_modes_fail "$capture $order strict attribution: expected nonconformant/reserved_bits scope=$eid, no rule/action; events=$events"; return 1; }
       printf '%s\n' "$events" >"$RESULTS_DIR/modes-$order-strict-enforce-events.json"

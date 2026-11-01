@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Every configuration write and commit must send `X-Containd-If-Revision` with
+  the revision from the read it is based on; requests without it get 428, stale
+  ones 412. Scripts and integrations that stage then commit must read the
+  revision first and pass the one each write returns.
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as
   numbers must accept decimal strings.
 - ICAP servers must answer `OPTIONS` with a non-empty `Methods` header that
@@ -75,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve in-flight AV scan failures across unchanged backend reapplies so
   readiness requires scan-canary recovery.
+- Keep unfinished routing and interface edits pinned to their original revision
+  after live reconciliation, so a later save cannot silently overwrite another
+  operator's changes. Operational reconcile responses no longer return a
+  configuration revision.
 - Use the theme's failure color for degraded evidence and audit persistence
   banners.
 - Keep zone security scores, topology conduit selection and staged zone updates
@@ -123,6 +131,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
 - Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
 - OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
+- CLI configuration edits and repository smoke scripts carry snapshot revisions
+  through saves and staged sequences; `show diff` displays a revision and
+  `commit revision <token>` commits only that reviewed revision.
+- Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
+- Reject stale configuration saves, section edits and lifecycle actions using
+  a durable whole-state revision, including IDS banks and secret-only edits.
+- `PATCH /zones/:name` rejects wrongly typed fields with 400 instead of ignoring
+  them.
 
 ## [0.1.37] - 2026-10-31
 

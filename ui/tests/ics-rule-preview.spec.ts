@@ -57,7 +57,7 @@ async function openICS(page: Page, reply: PreviewReply, previews: Request[]) {
       previews.push(request);
       // Only the session token authenticates this route.
       if (request.headers()["authorization"] !== `Bearer ${sessionToken}`) {
-        await route.fulfill({ status: 401, json: { error: "unauthorized" } });
+        await route.fulfill({ status: 401, json: { error: "unauthorized" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         return;
       }
       await route.fulfill(reply);
@@ -68,7 +68,7 @@ async function openICS(page: Page, reply: PreviewReply, previews: Request[]) {
     if (path === "/api/v1/firewall/rules") body = [rule];
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "enforce" };
     if (path === "/api/v1/health") body = { status: "ok", component: "mgmt" };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/ics/");

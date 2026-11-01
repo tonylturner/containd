@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -22,7 +22,7 @@ export default function NTPPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const status = servicesStatus?.ntp ?? null;
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
@@ -35,10 +35,11 @@ export default function NTPPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
     setServicesStatus(svc);
-    const s = await api.getNTP();
+    const sSnapshot = await api.getNTP();
+    const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits);
+    adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -57,14 +58,12 @@ export default function NTPPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
-    const saved = await save.run("save", () => api.setNTP({ ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => write((base, submitted) => api.setNTP(base, { ...submitted, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), { replace: data => data }), {
       success: "NTP settings staged — commit to apply.",
       failure: "Failed to save NTP settings.",
     });
-    if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data);
-    else { failSave(submitted); setError(saved.error); }
+    if (!saved) return;
+    if (!saved.ok) setError(revisionError(saved));
   }
 
   return (
@@ -101,7 +100,7 @@ export default function NTPPage() {
     >
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["ntp"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

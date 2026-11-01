@@ -6,14 +6,14 @@
 modes_fail() {
   log "FAIL rule modes: $*" >&2
   log "receiver state: $(server_state)" >&2
-  log "shadow counters: $($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
+  log "shadow counters: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
   return 1
 }
 
 modes_apply() {
   UPDATED_CFG=$1
   local code
-  code=$(printf '%s' "$UPDATED_CFG" | $CURL -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
+  code=$(printf '%s' "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
     -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/modes-save.json" -w '%{http_code}')
   [[ $code == 200 ]] || { modes_fail "config save HTTP=$code expected=200; response=$(cat "$WORK_DIR/modes-save.json")"; return 1; }
   DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
@@ -22,7 +22,7 @@ modes_apply() {
 }
 
 modes_counter() {
-  $CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters" |
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters" |
     jq -er --arg id "$1" 'select(.available and .unit == "messages") | .rules[] | select(.ruleId == $id)'
 }
 
@@ -30,13 +30,13 @@ modes_evidence() {
   local id=$1 decision=$2 field=$3
   for _ in $(seq 1 30); do
     if modes_counter "$id" | jq -e --arg f "$field" '.shadowMatches == 1 and .[$f] == 1' >/dev/null &&
-      $CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor" |
+      "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor" |
         jq -e --arg d "$decision" 'any(.events[]; .attributes.decision == $d and .attributes.reason == "rule")' >/dev/null; then
       return 0
     fi
     sleep 0.2
   done
-  modes_fail "rule=$id expected shadowMatches=1, $field=1 and event decision=$decision; events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")"
+  modes_fail "rule=$id expected shadowMatches=1, $field=1 and event decision=$decision; events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")"
 }
 
 run_rule_modes_matrix() {

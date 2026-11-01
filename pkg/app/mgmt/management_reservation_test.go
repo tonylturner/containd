@@ -41,7 +41,7 @@ func TestReservedBootFaultPreservesRecoveryAndCandidate(t *testing.T) {
 	if err := store.Save(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MutateCandidate(ctx, func(c *config.Config) error { c.Description = "staged edit survives boot"; return nil }); err != nil {
+	if err := testMutateCandidate(store, ctx, func(c *config.Config) error { c.Description = "staged edit survives boot"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -102,20 +102,21 @@ func TestReservedBootFaultPreservesRecoveryAndCandidate(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("boot emitted %d fault events", count)
 	}
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || candidate.Description != "staged edit survives boot" {
 		t.Fatal("boot lost candidate")
 	}
 	candidate.Interfaces[0].Addresses = nil
 	candidate.System.Mgmt = safe.System.Mgmt
 	candidate.System.SSH.ListenAddr = safe.System.SSH.ListenAddr
-	if err := stores.store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(stores.store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.CheckManagementBootFault(ctx, stores.store); err == nil {
 		t.Fatal("staging cleared boot fault")
 	}
-	if err := stores.store.Commit(ctx); err != nil {
+	if err := testCommit(stores.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.CheckManagementBootFault(ctx, stores.store); err != nil {
@@ -219,7 +220,7 @@ func TestNonReservationBootRepairErrorWarnsAndContinues(t *testing.T) {
 	defer stores.store.Close()
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
-	if logs.FilterMessageSnippet("repair test failure").Len() != 2 {
+	if logs.FilterMessageSnippet("repair test failure").Len() != 1 {
 		t.Fatalf("repair errors not warned: %v", logs.All())
 	}
 	if err := config.CheckManagementBootFault(context.Background(), stores.store); err != nil {

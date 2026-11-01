@@ -44,7 +44,7 @@ func TestLoginRequiresMFA(t *testing.T) {
 	body := loginBody("admin", testPassword)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for MFA challenge, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -63,7 +63,7 @@ func TestLoginRequiresMFA(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req, _ = http.NewRequest(http.MethodPost, "/api/v1/auth/login/mfa", bytes.NewBuffer(verifyBody))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for MFA verify login, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestLoginAllowsPendingMFADuringGrace(t *testing.T) {
 	body := loginBody("admin", testPassword)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for grace-period login, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestSelfMFAEnrollEnableDisable(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("enroll mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -148,7 +148,7 @@ func TestSelfMFAEnrollEnableDisable(t *testing.T) {
 	})
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enable", bytes.NewBuffer(enableBody), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("enable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -162,7 +162,7 @@ func TestSelfMFAEnrollEnableDisable(t *testing.T) {
 	})
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/disable", bytes.NewBuffer(disableBody), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -195,7 +195,7 @@ func TestRequiredUserCannotSelfDisableMFA(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/disable", bytes.NewBuffer(disableBody), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 when required user disables MFA, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -217,7 +217,7 @@ func TestAdminCanDisableUserMFA(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/disable", bytes.NewBufferString(`{}`), adminTok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -243,7 +243,7 @@ func TestAdminDisableRequiredUserMFASetsGrace(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/disable", bytes.NewBufferString(`{}`), adminTok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin disable mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -269,7 +269,7 @@ func TestAdminCanRequireClearAndExtendUserMFA(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/require", bytes.NewBufferString(`{}`), adminTok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("require mfa expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -280,7 +280,7 @@ func TestAdminCanRequireClearAndExtendUserMFA(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/grace", bytes.NewBufferString(`{}`), adminTok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("extend mfa grace expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -290,7 +290,7 @@ func TestAdminCanRequireClearAndExtendUserMFA(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/users/"+userID+"/mfa/clear", bytes.NewBufferString(`{}`), adminTok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("clear mfa requirement expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -315,14 +315,14 @@ func TestExpiredMFARequirementRestrictsUntilEnabled(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for expired MFA requirement on /config, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me/mfa/enroll during restricted session, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -337,14 +337,14 @@ func TestExpiredMFARequirementRestrictsUntilEnabled(t *testing.T) {
 	})
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enable", bytes.NewBuffer(enableBody), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me/mfa/enable during restricted session, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /config after enabling MFA, got %d body=%s", rec.Code, rec.Body.String())
 	}

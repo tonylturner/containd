@@ -154,7 +154,7 @@ func TestStoreRejectsICSEnforceWithoutInlinePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := genericICSConfig("modbus", "enforce", "", 0)
-	if err := store.SaveCandidate(ctx, bad); err == nil || !strings.Contains(err.Error(), "nfqueueGroup") {
+	if err := testSaveCandidate(store, ctx, bad); err == nil || !strings.Contains(err.Error(), "nfqueueGroup") {
 		t.Fatalf("SaveCandidate err = %v, want inline-path refusal", err)
 	}
 	if err := store.Save(ctx, bad); err == nil || !strings.Contains(err.Error(), "nfqueueGroup") {

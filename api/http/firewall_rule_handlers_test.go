@@ -85,7 +85,7 @@ func patchRule(t *testing.T, m *mockStore, body string) *httptest.ResponseRecord
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPatch, "/api/v1/firewall/rules/r1", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	NewServer(m, nil).ServeHTTP(rec, req)
+	NewServer(m, nil).ServeHTTP(rec, withTestRevision(m, req))
 	return rec
 }
 

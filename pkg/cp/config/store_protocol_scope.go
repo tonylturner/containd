@@ -29,11 +29,12 @@ const industrialScopeMigrationKey = "industrial_scope_migration_018"
 func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialScopeMigration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	changed := false
 	removed := map[string]bool{}
 	updated := map[string]bool{}
 	for _, key := range []string{configKeyRunning, configKeyCandidate, configKeyPrevious} {
@@ -76,11 +77,16 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 			// Reordering firewall rules must not replace an immutable IDS bank.
 			cfg.IDS.Rules = nil
 		}
+		changed = true
 		if err := writeConfigTx(ctx, tx, key, cfg); err != nil {
 			return nil, err
 		}
 	}
 	if len(removed)+len(updated) == 0 {
+		if changed {
+			_, err = s.commitRevisionTx(ctx, tx)
+			return nil, err
+		}
 		return nil, s.commitStateTx(ctx, tx)
 	}
 	ids := make([]string, 0, len(removed))
@@ -95,7 +101,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 	if err := persistScopeMigrationTx(ctx, tx, record); err != nil {
 		return nil, err
 	}
-	if err := s.commitStateTx(ctx, tx); err != nil {
+	if _, err := s.commitRevisionTx(ctx, tx); err != nil {
 		return nil, err
 	}
 	return record, nil

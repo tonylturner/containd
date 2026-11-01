@@ -65,7 +65,7 @@ func TestSSHDisableStageAndCommitAdminKeyGuard(t *testing.T) {
 	keys := t.TempDir()
 	t.Setenv("CONTAIND_SSH_AUTH_KEYS_DIR", keys)
 	cfg.System.SSH.AllowPassword = new(false)
-	if err := store.SaveCandidate(ctx, cfg); err == nil {
+	if err := testSaveCandidate(store, ctx, cfg); err == nil {
 		t.Fatal("stage accepted without a key")
 	}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
@@ -80,20 +80,20 @@ func TestSSHDisableStageAndCommitAdminKeyGuard(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(keys, "viewer.pub"), key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveCandidate(ctx, cfg); err == nil {
+	if err := testSaveCandidate(store, ctx, cfg); err == nil {
 		t.Fatal("viewer key allowed an admin lockout")
 	}
 	adminKey := filepath.Join(keys, "containd.pub")
 	if err := os.WriteFile(adminKey, []byte("not an SSH key"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveCandidate(ctx, cfg); err == nil {
+	if err := testSaveCandidate(store, ctx, cfg); err == nil {
 		t.Fatal("malformed key allowed an admin lockout")
 	}
 	if err := os.WriteFile(adminKey, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	// Make the key unreadable to the parser after staging, without depending
@@ -101,13 +101,13 @@ func TestSSHDisableStageAndCommitAdminKeyGuard(t *testing.T) {
 	if err := os.WriteFile(adminKey, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Commit(ctx); err == nil {
+	if err := testCommit(store, ctx); err == nil {
 		t.Fatal("commit failed to recheck admin keys")
 	}
 	if err := os.WriteFile(adminKey, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 }

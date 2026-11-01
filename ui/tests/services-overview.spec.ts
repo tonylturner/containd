@@ -50,7 +50,7 @@ async function openServices(page: Page, status: unknown) {
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
     if (path === "/api/v1/services/status") body = status;
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");

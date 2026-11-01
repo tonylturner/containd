@@ -18,7 +18,7 @@ import (
 
 func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -186,7 +186,9 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 		}
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
+		// This read drives a runtime action, not a configuration acknowledgement.
+		c.Header(revisionHeader, "")
 		if err != nil {
 			internalError(c, err)
 			return
@@ -264,6 +266,10 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
+		if _, err := mergeInterfacePatch(config.Interface{}, patch); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid interface payload")
+			return
+		}
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			for i, existing := range cfg.Interfaces {
 				if existing.Name == name {
@@ -313,7 +319,7 @@ func mergeInterfacePatch(existing config.Interface, patch map[string]json.RawMes
 
 func getRoutingHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -356,7 +362,9 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 		}
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
+		// This read drives a runtime action, not a configuration acknowledgement.
+		c.Header(revisionHeader, "")
 		if err != nil {
 			internalError(c, err)
 			return

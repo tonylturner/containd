@@ -26,7 +26,7 @@ func avRequest(t *testing.T, engine EngineClient, req *http.Request) *httptest.R
 		s = NewServerWithEngineAndServices(&mockStore{cfg: config.DefaultConfig()}, nil, engine, routeInventoryServices{}, newMockUserStore())
 	}
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	return rec
 }
 

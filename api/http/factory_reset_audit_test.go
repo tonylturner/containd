@@ -105,9 +105,10 @@ func requestFactoryResetWithAuditStore(t *testing.T, auditStore audit.Store) *ht
 		c.Set("auditStore", auditStore)
 		c.Next()
 	})
-	router.POST("/reset", factoryResetHandler(stageStore(t), userStore, &mockEngine{}, nil))
+	configStore := stageStore(t)
+	router.POST("/reset", factoryResetHandler(configStore, userStore, &mockEngine{}, nil))
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+	router.ServeHTTP(rec, withTestRevision(configStore, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	return rec
 }

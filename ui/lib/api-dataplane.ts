@@ -1,5 +1,4 @@
-import { authHeaders, fetchWithSession, handleUnauthorized } from "./api-core";
-import { getJSONResult, postJSONResult } from "./api-request";
+import { getConfigJSON, getJSONResult, postJSONResult } from "./api-request";
 import {
   normalizeICSCoverageReport,
   type ICSCoverageReport,
@@ -7,7 +6,7 @@ import {
 } from "./api-ics-coverage";
 import type { RuleWarning } from "./api-firewall";
 
-import type { ApiResult, DataPlaneConfig } from "./api";
+import type { ApiResult, ConfigSnapshot, DataPlaneConfig } from "./api";
 
 export type RulesetPreview = {
   ruleset?: string;
@@ -62,23 +61,15 @@ export type InstalledRulesetStatus = {
   icsCoverage?: ICSCoverageRule[];
 };
 
-export async function fetchDataPlane(): Promise<DataPlaneConfig | null> {
-  try {
-    const res = await fetchWithSession("/api/v1/dataplane", {
-      headers: { ...authHeaders() },
-      cache: "no-store",
-    });
-    if (handleUnauthorized(res) || !res.ok) return null;
-    return (await res.json()) as DataPlaneConfig;
-  } catch {
-    return null;
-  }
+export async function fetchDataPlane(): Promise<ConfigSnapshot<DataPlaneConfig> | null> {
+  return getConfigJSON<DataPlaneConfig>("/api/v1/dataplane");
 }
 
 export async function setDataPlane(
+  expectedRevision: string,
   cfg: DataPlaneConfig,
 ): Promise<ApiResult<DataPlaneConfig>> {
-  return await postJSONResult<DataPlaneConfig>("/api/v1/dataplane", cfg);
+  return await postJSONResult<DataPlaneConfig>("/api/v1/dataplane", cfg, expectedRevision);
 }
 
 /** Admin-only: the compiled candidate ruleset; 400 when the candidate is invalid. */

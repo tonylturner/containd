@@ -16,7 +16,7 @@ import {
 } from "./ids-shared";
 
 export type IDSPanelFields = { name: string; filter: string; format: string; sigmaText: string };
-type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field">;
+type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field" | "editor">;
 
 export function GroupsPanel({
   form,
@@ -29,7 +29,7 @@ export function GroupsPanel({
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
-  onUpdate: (g: RuleGroup[]) => void;
+  onUpdate: (g: RuleGroup[]) => boolean;
 }) {
   const [name, setName] = form.field("name");
   const [filter, setFilter] = form.field("filter");
@@ -54,10 +54,11 @@ export function GroupsPanel({
     if (groups.some((g) => g.id === id)) {
       return;
     }
-    onUpdate([
+    const accepted = onUpdate([
       ...groups,
       { id, name: name.trim(), filter: filter.trim(), enabled: true },
     ]);
+    if (!accepted) return;
     setName("");
     setFilter("");
   }
@@ -187,7 +188,7 @@ export function ImportPanel({
 }: {
   form: PanelForm;
   onImport: (file: File, format: string) => Promise<boolean>;
-  onConverted: (rule: IDSRule) => void;
+  onConverted: (rule: IDSRule, revision?: string) => boolean;
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -217,13 +218,14 @@ export function ImportPanel({
     setSigmaConverting(true);
     onError("");
     const submitted = sigmaText;
+    const submittedRevision = form.editor.baseRevision;
     const rule = await api.convertSigma(submitted);
     setSigmaConverting(false);
     if (!rule) {
       onError("Sigma conversion failed. Check YAML syntax.");
       return;
     }
-    onConverted(rule);
+    if (!onConverted(rule, submittedRevision)) return;
     setSigmaText((current) => current === submitted ? "" : current);
   }
 

@@ -77,7 +77,7 @@ async function openClients(page: Page, revocationsApplied = false) {
     };
     if (["/api/v1/interfaces/state", "/api/v1/interfaces", "/api/v1/zones"].includes(path)) body = [];
     if (path === "/api/v1/config/diff") body = { changed: false, changedSections: [] };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await Promise.all([page.waitForResponse((res) => new URL(res.url()).pathname === prefix), page.goto("/vpn/")]);
   await expect(page.getByRole("region", { name: "OpenVPN client credentials" })).toBeVisible();

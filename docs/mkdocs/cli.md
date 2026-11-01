@@ -18,6 +18,15 @@ commands stage candidate edits: review `show diff`, then `commit` or
 `rollback` to restore the previous running configuration. Listener changes can
 require a restart; committing does not rebind management sockets.
 
+`commit`/`commit confirmed`/`rollback`/`confirm` without an argument first GET /config/candidate (not /diff) and send its revision: this guards only the gap inside the command and commits whatever candidate is current (Junos semantics). `show diff` prints the revision; `commit revision <token>` binds to a reviewed revision.
+
+Every configuration edit sends the revision of the snapshot it modified.
+Direct-intent commands (such as create and import) read the revision first in
+the same command. A stale write (412) or missing precondition (428) reports an
+error without retrying. Read the current configuration, review your intended
+changes, then issue a new command. Outbound quick start composes from one
+candidate snapshot and chains the revisions returned by its staged writes.
+
 ## Command reference
 
 - Inspection and help:
@@ -85,7 +94,7 @@ require a restart; committing does not rebind management sockets.
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)
   - `set system ssh shell-mode <appliance|linux>` (candidate; see [shell modes](#shell-modes))
-  - `commit`
+  - `commit` / `commit revision <token>`
   - `commit confirmed [ttl_seconds]`
   - `confirm`
   - `rollback`

@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -16,7 +17,7 @@ import (
 
 func listAssetsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -119,7 +120,7 @@ func deleteAssetHandler(store config.Store) gin.HandlerFunc {
 
 func listObjectsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -237,7 +238,7 @@ func deleteObjectHandler(store config.Store) gin.HandlerFunc {
 
 func listZonesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -347,6 +348,13 @@ func readZonePatch(c *gin.Context) (map[string]interface{}, error) {
 	var patch map[string]interface{}
 	if err := json.Unmarshal(body, &patch); err != nil {
 		return nil, err
+	}
+	var typed config.Zone
+	if err := json.Unmarshal(body, &typed); err != nil {
+		return nil, err
+	}
+	if patch == nil {
+		return nil, errors.New("zone patch must be an object")
 	}
 	return patch, nil
 }

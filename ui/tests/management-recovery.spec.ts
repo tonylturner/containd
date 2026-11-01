@@ -25,7 +25,7 @@ async function mockAPI(page: Page, managementRecovery: unknown, seen: { health: 
     if (path === "/api/v1/zones" || path === "/api/v1/conntrack") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

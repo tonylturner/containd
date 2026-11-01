@@ -1,5 +1,9 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -18,9 +22,9 @@ const INITIAL_ZONES = 6;
    ════════════════════════════════════════════════════════════════════ */
 
 export default function SecurityView() {
+  const { readConfig, write, data: allZones, revisionNotice } = useConfigView<ZoneView[]>([]);
   const toast = useToast();
   const zoneNames = useRef(new Map<string, string>());
-  const [allZones, setAllZones] = useState<ZoneView[]>([]);
   const [conduits, setConduits] = useState<Conduit[]>([]);
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ from: string; to: string } | null>(null);
@@ -39,15 +43,15 @@ export default function SecurityView() {
       ]);
       setError(null);
       if (!zones || !conds) throw new Error("Failed to load security data");
-      zoneNames.current = new Map(zones.map((z) => [mapZone(z).id, z.name]));
-      const zv = zones.map(mapZone);
-      setAllZones(zv);
+      zoneNames.current = new Map(zones.data.map((z) => [mapZone(z).id, z.name]));
+      const zv = zones.data.map(mapZone);
+      readConfig({ data: zv, revision: zones.revision });
       setConduits(conds);
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, INITIAL_ZONES).map((z) => z.id));
     } catch (e) {
       setError(String(e));
     }
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(fetchData);
 
@@ -98,24 +102,27 @@ export default function SecurityView() {
   const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
     const name = zoneNames.current.get(zoneId);
     if (!name) return;
-    const result = await api.updateZone(name, { slTarget: lvl });
-    if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
+    const result = await write(base => api.updateZone(base, name, { slTarget: lvl }), { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone target staged — commit to apply.", "success");
     await fetchData();
-  }, [fetchData, toast]);
+  }, [fetchData, toast, write]);
 
   const toggleOverride = useCallback(async (zoneId: string, srId: string, newVal: boolean) => {
     const zone = allZones.find((z) => z.id === zoneId);
     const name = zoneNames.current.get(zoneId);
     if (!zone || !name) return;
-    const ov = { ...zone.overrides };
-    if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
-    else ov[srId] = newVal;
-    const result = await api.updateZone(name, { slOverrides: ov });
-    if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
+    const result = await write((base, rows) => {
+      const current = rows.find(row => row.id === zoneId);
+      const ov = { ...current?.overrides };
+      if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
+      else ov[srId] = newVal;
+      return api.updateZone(base, name, { slOverrides: ov });
+    }, { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone override staged — commit to apply.", "success");
     await fetchData();
-  }, [allZones, fetchData, toast]);
+  }, [allZones, fetchData, toast, write]);
 
   // ── Cell selection ──
   const selectCell = useCallback((from: string, to: string) => {
@@ -151,6 +158,7 @@ export default function SecurityView() {
   return (
     <div className={`${ts.workspace} ${s.workspace} ${panelOpen ? s.workspaceWithPanel : ""} ${panelOpen && selected ? s.workspaceWithSelection : ""}`}>
       <div className={s.matrixPane}>
+        {revisionNotice(() => window.location.reload())}
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
           <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>

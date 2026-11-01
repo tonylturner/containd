@@ -20,7 +20,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 	resetTestRateLimiters()
 	store := stageStore(t)
 	ctx := context.Background()
-	if err := store.SaveCandidate(ctx, config.DefaultConfig()); err != nil {
+	if err := testSaveCandidate(store, ctx, config.DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(store, nil)
@@ -28,7 +28,8 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged, err := store.LoadCandidate(ctx)
+	stagedSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	staged := stagedSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,8 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(before, running) {
 				t.Fatalf("rejected request changed running: %v", err)
 			}
-			candidate, err := store.LoadCandidate(ctx)
+			candidateSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate := candidateSnapshot2.Candidate
 			if err != nil || !reflect.DeepEqual(staged, candidate) {
 				t.Fatalf("rejected request changed candidate/bank: %v", err)
 			}

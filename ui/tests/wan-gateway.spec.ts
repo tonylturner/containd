@@ -126,7 +126,7 @@ async function serveWan(page: Page, wanAddr: string) {
     if (request.method() === "POST") {
       const body = request.postDataJSON();
       writes.push({ path, body });
-      return route.fulfill({ json: body, headers: { "X-Containd-Config": "staged" } });
+      return route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
     }
     const user = { id: "admin-1", username: "admin", role: "admin", mfaRequired: false };
     const bodies: Record<string, unknown> = {
@@ -142,7 +142,7 @@ async function serveWan(page: Page, wanAddr: string) {
       "/dataplane": { captureInterfaces: [], dpiMock: false },
       "/config/diff": { changed: false, running: {}, candidate: {} },
     };
-    return route.fulfill({ json: bodies[path] ?? {} });
+    return route.fulfill({ json: bodies[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return writes;
 }
@@ -191,7 +191,7 @@ test("firewall quick start sends nothing when its fresh routing read fails", asy
   const quickStart = page.getByRole("button", { name: "Quick start (LAN→WAN)", exact: true });
   await expect(quickStart).toBeEnabled();
   await page.route("**/api/v1/routing", (route) => route.request().method() === "GET"
-    ? route.fulfill({ status: 503, json: { error: "unavailable" } }) : route.fallback());
+    ? route.fulfill({ status: 503, json: { error: "unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }) : route.fallback());
   await quickStart.click();
   await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText("Routing configuration unavailable; no quick-start changes were staged.", { exact: true })).toBeVisible();

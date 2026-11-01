@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
-import { sameConfig } from "../../lib/config-editor";
+import type { ConfigBase } from "../../lib/config-boundary";
+
+import type { ApiResult } from "../../lib/api";
+
+import { useEffect, useRef, useState } from "react";
+import { revisionError, ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 
 import {
   api,
@@ -47,6 +50,7 @@ function filterDraftFrom(rule: FirewallRule, rules: FirewallRule[], globalMode: 
 }
 
 export function EditICSModal({
+  revision,
   context,
   available,
   rule,
@@ -55,20 +59,19 @@ export function EditICSModal({
   onSave,
 }: {
   context: FirewallRule[];
+  revision: string;
   available: boolean;
   rule: FirewallRule;
   globalMode?: ICSModeSelection;
   onClose: () => void;
   /** The predicate to stage; undefined removes it. */
-  onSave: (ics: ICSPredicatePatch | undefined) => Promise<FirewallRule | null>;
+  onSave: (ics: ICSPredicatePatch | undefined, revision: ConfigBase) => Promise<ApiResult<FirewallRule> | null>;
 }) {
-  const draft = useConfigEditor(() => filterDraftFrom(rule, context, globalMode));
-  const { cfg, setCfg, adoptConfig } = draft;
-  const latest = useRef(draft.editor);
-  useLayoutEffect(() => { latest.current = draft.editor; });
+  const draft = useConfigEditor(() => filterDraftFrom(rule, context, globalMode), true, revision);
+  const { cfg, setCfg, readConfig: adoptConfig } = draft;
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { adoptConfig(filterDraftFrom(rule, context, globalMode)); }, [adoptConfig, rule, context, globalMode]);
+  useEffect(() => { adoptConfig({ data: filterDraftFrom(rule, context, globalMode), revision: revision ?? "" }, true); }, [adoptConfig, rule, context, globalMode, revision]);
   const enabled = cfg.enabled;
   const setEnabled = (enabled: typeof cfg.enabled) => setCfg((c) => ({ ...c, enabled }));
   const protocol = cfg.protocol;
@@ -115,13 +118,13 @@ export function EditICSModal({
       setError(built.error);
       return;
     }
-    const submitted = draft.beginSave();
     setSaving(true);
-    const saved = await onSave(built.ics);
+    const result = await draft.write(base => onSave(built.ics, base), { replace: data => (filterDraftFrom(data, context, globalMode)) });
     setSaving(false);
-    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
-    draft.acceptConfig(submitted, filterDraftFrom(saved, context, globalMode));
-    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+    if (!mounted.current) return;
+    if (!result.ok) { setError(revisionError(result)); return; }
+
+    if (result.adopted && result.unchanged) onClose();
   }
 
   // Previews the whole rule with the edited predicate, so the zones, sources,
@@ -160,7 +163,7 @@ export function EditICSModal({
           </button>
         </div>
 
-        <ConfigEditNotice superseded={draft.editor.superseded} />
+        <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={() => window.location.reload()} />
         <div className="space-y-4 text-sm">
           <label className="flex items-center gap-2">
             <input

@@ -52,6 +52,7 @@ type sshHTTPRequest struct {
 type sshTestHTTPClient struct {
 	cfg      config.Config
 	requests []sshHTTPRequest
+	revision sshTestRevision
 }
 
 func newSSHTestHTTPClient() *sshTestHTTPClient {
@@ -78,7 +79,9 @@ func (c *sshTestHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		Path:   req.URL.Path,
 		Body:   string(body),
 	})
-	return c.respond(req.Method, req.URL.Path, body), nil
+	return c.revision.respond(req, func() *http.Response {
+		return c.respond(req.Method, req.URL.Path, body)
+	}), nil
 }
 
 func (c *sshTestHTTPClient) respond(method, path string, body []byte) *http.Response {
@@ -321,9 +324,14 @@ type failedResetHTTPClient struct {
 	err error
 }
 
-func (c failedResetHTTPClient) Do(*http.Request) (*http.Response, error) {
+func (c failedResetHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	if c.err != nil {
 		return nil, c.err
+	}
+	if req.Method == http.MethodGet && req.URL.Path == "/api/v1/config/candidate" {
+		return (&sshTestRevision{}).respond(req, func() *http.Response {
+			return jsonResponse(http.StatusOK, config.DefaultConfig())
+		}), nil
 	}
 	return jsonResponse(http.StatusInternalServerError, map[string]any{
 		"error":     "configuration apply failed",

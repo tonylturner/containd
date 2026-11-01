@@ -24,7 +24,7 @@ async function openMatrix(page: Page, count: number) {
         protoWhitelist: false, mfaRequired: false, auditLogged: true, avEnabled: false,
       }],
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse("**/api/v1/security/conduits");
   await page.goto("/topology/");

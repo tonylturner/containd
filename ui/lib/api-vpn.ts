@@ -1,5 +1,5 @@
 import { apiURL, authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
-import { failureOf, getJSON, getJSONShaped, postJSONResult } from "./api-request";
+import { getConfigJSON, failureOf, getJSON, getJSONShaped, postJSONResult } from "./api-request";
 
 // VPN: WireGuard and OpenVPN configuration, OpenVPN client profiles and
 // WireGuard runtime status.
@@ -126,13 +126,13 @@ async function revokeOpenVPNClient(id: string): Promise<RevokeResponse> {
 }
 
 export const vpnAPI = {
-  getVPN: () => getJSON<VPNConfig>("/api/v1/services/vpn"),
-  setVPN: (cfg: VPNConfig) =>
-    postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg),
-  uploadOpenVPNProfile: (name: string, ovpn: string) =>
+  getVPN: () => getConfigJSON<VPNConfig>("/api/v1/services/vpn", "object"),
+  setVPN: (expectedRevision: string, cfg: VPNConfig) =>
+    postJSONResult<VPNConfig>("/api/v1/services/vpn", cfg, expectedRevision),
+  uploadOpenVPNProfile: (expectedRevision: string, name: string, ovpn: string) =>
     postJSONResult<OpenVPNProfileUploadResponse>(
       "/api/v1/services/vpn/openvpn/profile",
-      { name, ovpn },
+      { name, ovpn }, expectedRevision,
     ),
   listOpenVPNClients: () =>
     getJSONShaped<{ clients: OpenVPNCredential[]; revocationsApplied: boolean }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),

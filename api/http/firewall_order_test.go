@@ -22,7 +22,7 @@ func firewallRequest(store *mockStore, method, path, body string) *httptest.Resp
 	rec := httptest.NewRecorder()
 	req := authedRequest(method, "/api/v1/firewall/"+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	NewServer(store, nil).ServeHTTP(rec, req)
+	NewServer(store, nil).ServeHTTP(rec, withTestRevision(store, req))
 	return rec
 }
 

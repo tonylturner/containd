@@ -145,7 +145,7 @@ func TestDashboardHandlerAndHelpers(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
-	router.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, router, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dashboard status = %d, body=%s", rec.Code, rec.Body.String())
 	}
@@ -211,7 +211,7 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/system/tls", nil)
-	router.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, router, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("getTLS status = %d, body=%s", rec.Code, rec.Body.String())
 	}
@@ -234,7 +234,7 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/system/tls/cert", invalidPairBody)
 	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, router, rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid cert/key pair") {
 		t.Fatalf("setTLSCert invalid status/body = %d %s", rec.Code, rec.Body.String())
 	}
@@ -242,7 +242,7 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/system/tls/trusted-ca", bytes.NewBufferString(`{"pem":"not pem"}`))
 	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, router, rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid PEM") {
 		t.Fatalf("setTrustedCA invalid status/body = %d %s", rec.Code, rec.Body.String())
 	}
@@ -337,12 +337,14 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		c.Set("actor", "alice")
 		c.Next()
 	})
+	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(cfgStore))
 	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, &mockEngine{}, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))
 	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	req.Header.Set(ifRevisionHeader, string(testBaseRevision(cfgStore, context.Background())))
+	serveWithConfigRevision(t, router, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("factory reset status = %d, body=%s", rec.Code, rec.Body.String())
 	}

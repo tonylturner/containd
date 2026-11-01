@@ -5,6 +5,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -36,7 +37,8 @@ func TestCandidateSeedingIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := s.LoadCandidate(ctx)
+	candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || !reflect.DeepEqual(candidate, running) {
 		t.Fatalf("seed differs: %v", err)
 	}
@@ -46,24 +48,40 @@ func TestCandidateSeedingIsReadOnly(t *testing.T) {
 	}
 }
 
-func TestCandidateConcurrentEditsPreserveEachOther(t *testing.T) {
+func TestCandidateConcurrentEditsRejectStaleBases(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
+	base := testBaseRevision(s, ctx)
 	var wg sync.WaitGroup
+	results := make(chan error, 40)
 	for i := range 40 {
 		wg.Go(func() {
-			err := s.MutateCandidate(ctx, func(cfg *Config) error {
+			_, err := s.MutateCandidate(ctx, base, func(cfg *Config) error {
 				cfg.Assets = append(cfg.Assets, Asset{ID: fmt.Sprint(i), Name: fmt.Sprint(i)})
 				return nil
 			})
-			if err != nil {
-				t.Error(err)
-			}
+			results <- err
 		})
 	}
 	wg.Wait()
-	cfg, err := s.LoadCandidate(ctx)
-	if err != nil || len(cfg.Assets) != 40 {
+	close(results)
+	success := 0
+	for err := range results {
+		if err == nil {
+			success++
+			continue
+		}
+		var mismatch *ErrRevisionMismatch
+		if !errors.As(err, &mismatch) {
+			t.Fatal(err)
+		}
+	}
+	if success != 1 {
+		t.Fatalf("successful edits=%d", success)
+	}
+	cfgSnapshot2, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	cfg := cfgSnapshot2.Candidate
+	if err != nil || len(cfg.Assets) != 1 {
 		t.Fatalf("lost edits: %+v err=%v", cfg, err)
 	}
 }
@@ -77,7 +95,7 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+			if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 				cfg.System.Hostname = "candidate"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 				return nil
@@ -85,9 +103,9 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "plain" {
-				err = s.Commit(ctx)
+				err = testCommit(s, ctx)
 			} else {
-				err = s.CommitConfirmed(ctx, 100*time.Millisecond)
+				err = testCommitConfirmed(s, ctx, 100*time.Millisecond)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -98,14 +116,14 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 			}
 			if mode == "superseded" {
 				before = running
-				if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+				if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 					cfg.System.Hostname = "superseding"
 					cfg.IDS.Rules = []IDSRule{}
 					return nil
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if err := s.Commit(ctx); err != nil {
+				if err := testCommit(s, ctx); err != nil {
 					t.Fatal(err)
 				}
 				time.Sleep(150 * time.Millisecond)
@@ -129,7 +147,7 @@ func TestCandidateIDSCommitAndRollback(t *testing.T) {
 					}
 					time.Sleep(time.Millisecond)
 				}
-			} else if err := s.Rollback(ctx); err != nil {
+			} else if err := testRollback(s, ctx); err != nil {
 				t.Fatal(err)
 			}
 			running, err = s.Load(ctx)
@@ -151,7 +169,7 @@ func TestCandidatePromotionFailureIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+	if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 		cfg.System.Hostname = "must-not-promote"
 		cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 		return nil
@@ -161,14 +179,15 @@ func TestCandidatePromotionFailureIsAtomic(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER fail_promotion BEFORE INSERT ON configs WHEN NEW.key = 'running' BEGIN SELECT RAISE(ABORT, 'test failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Commit(ctx); err == nil {
+	if err := testCommit(s, ctx); err == nil {
 		t.Fatal("injected database error should abort the transaction")
 	}
 	after, err := s.Load(ctx)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("partial promotion: %+v err=%v", after, err)
 	}
-	candidate, err := s.LoadCandidate(ctx)
+	candidateSnapshot3, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot3.Candidate
 	if err != nil || candidate.System.Hostname != "must-not-promote" {
 		t.Fatalf("failed promotion lost candidate: %+v err=%v", candidate, err)
 	}
@@ -183,24 +202,25 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+			if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 				cfg.System.Hostname = "confirmed"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 				return nil
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CommitConfirmed(ctx, 100*time.Millisecond); err != nil {
+			if err := testCommitConfirmed(s, ctx, 100*time.Millisecond); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+			if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 				cfg.Description = "newer edit"
 				cfg.IDS.Rules = DefaultIDSConfig().Rules[2:3]
 				return nil
 			}); err != nil {
 				t.Fatal(err)
 			}
-			desired, err := s.LoadCandidate(ctx)
+			desiredSnapshot4, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			desired := desiredSnapshot4.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -219,14 +239,15 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 					}
 					time.Sleep(time.Millisecond)
 				}
-			} else if err := s.Rollback(ctx); err != nil {
+			} else if err := testRollback(s, ctx); err != nil {
 				t.Fatal(err)
 			}
 			running, err := s.Load(ctx)
 			if err != nil || !reflect.DeepEqual(running, original) {
 				t.Fatalf("rollback failed: %+v %v", running, err)
 			}
-			candidate, err := s.LoadCandidate(ctx)
+			candidateSnapshot5, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			candidate := candidateSnapshot5.Candidate
 			if err != nil || !reflect.DeepEqual(candidate, desired) {
 				t.Fatalf("rollback lost newer candidate: %+v %v", candidate, err)
 			}

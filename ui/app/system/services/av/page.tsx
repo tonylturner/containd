@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -28,7 +28,7 @@ export default function AVPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<AVConfig>({
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write } = useConfigEditor<AVConfig>({
     enabled: false,
     mode: "clamav",
     failPolicy: "open",
@@ -54,10 +54,13 @@ export default function AVPage() {
       const svc = await api.getServicesStatus();
       setRefreshError(null);
       setServicesStatus(svc);
-      const s = await api.getAV();
+      const sSnapshot = await api.getAV();
+      const s = (sSnapshot?.data ?? null);
       if (!checkLoaded(s)) return;
-      adoptConfig(s, keepEdits);
-      const [zoneList, assetList] = await Promise.all([api.listZones(), api.listAssets()]);
+      adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
+      const [zoneListSnapshot, assetListSnapshot] = await Promise.all([api.listZones(), api.listAssets()]);
+      const zoneList = (zoneListSnapshot?.data ?? null);
+      const assetList = (assetListSnapshot?.data ?? null);
       setZones(zoneList ?? []);
       setAssets(assetList ?? []);
       const defsResp = await api.listAVDefs();
@@ -88,7 +91,6 @@ export default function AVPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
     // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
     const payload: AVConfig = {
       ...cfg,
@@ -98,13 +100,12 @@ export default function AVPage() {
       },
       scan: normalizeScan(cfg.scan),
     };
-    const result = await save.run("save", () => api.setAV(payload), {
+    const result = await save.run("save", () => write(base => api.setAV(base, payload), { replace: data => data }), {
       success: "AV settings staged — commit to apply.",
       failure: "Failed to save AV settings.",
     });
-    if (!result) { failSave(submitted); return; }
-    if (result.ok) acceptConfig(submitted, result.data);
-    else { failSave(submitted); setError(result.error); }
+    if (!result) return;
+    if (!result.ok) setError(revisionError(result));
   }
 
   async function onRunUpdate() {
@@ -188,7 +189,7 @@ export default function AVPage() {
     >
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["av"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

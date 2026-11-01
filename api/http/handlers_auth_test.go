@@ -30,7 +30,7 @@ func TestLoginEmptyCredentials(t *testing.T) {
 	body := loginBody("", "")
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty creds, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -53,7 +53,7 @@ func TestLoginInvalidCredentials(t *testing.T) {
 	body := loginBody("admin", "deliberately-wrong")
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for bad password, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -76,7 +76,7 @@ func TestLoginSuccess(t *testing.T) {
 	body := loginBody("admin", testPassword)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid login, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -102,7 +102,7 @@ func TestLoginRejectsOversizedBody(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = defaultJSONBodyLimit + 1
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413 for oversized login body, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -120,7 +120,7 @@ func TestCookieAuthedWriteAllowsNonBrowserAutomation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "")
 	req.Host = "containd.local"
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for non-browser cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -139,7 +139,7 @@ func TestCookieAuthedWriteAllowsSameOrigin(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://containd.local")
 	req.Host = "containd.local"
 	req.TLS = &tls.ConnectionState{}
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for same-origin cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -158,7 +158,7 @@ func TestCookieAuthedWriteAllowsSameOriginWithDefaultHTTPSPort(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://containd.local:443")
 	req.Host = "containd.local"
 	req.TLS = &tls.ConnectionState{}
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for same-origin cookie-authenticated write with default port, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -178,7 +178,7 @@ func TestCookieAuthedWriteAllowsForwardedDefaultHTTPSPort(t *testing.T) {
 	req.Host = "internal.containd:8080"
 	req.Header.Set("X-Forwarded-Host", "containd.local:443")
 	req.Header.Set("X-Forwarded-Proto", "https")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for forwarded same-origin cookie-authenticated write with default port, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -197,7 +197,7 @@ func TestCookieAuthedWriteRejectsCrossOrigin(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://portal.example.com")
 	req.Host = "containd.local"
 	req.TLS = &tls.ConnectionState{}
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for cross-origin cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -222,7 +222,7 @@ func TestCookieAuthedCrossOriginWriteDoesNotRefreshSession(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://portal.example.com")
 	req.Host = "containd.local"
 	req.TLS = &tls.ConnectionState{}
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for cross-origin cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -245,7 +245,7 @@ func TestCookieAuthedWriteAllowsConfiguredOrigin(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "https://portal.example.com")
 	req.Host = "containd.local"
 	req.TLS = &tls.ConnectionState{}
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for allowlisted origin, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -264,7 +264,7 @@ func TestCookieAuthedWriteRejectsCrossSiteFetch(t *testing.T) {
 	req := cookieAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token, "")
 	req.Host = "containd.local"
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for cross-site cookie-authenticated write, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -282,7 +282,7 @@ func TestBearerAuthedWriteDoesNotRequireOrigin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/mfa/enroll", bytes.NewBufferString(`{}`), token)
 	req.Host = "containd.local"
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for bearer-authenticated write without origin, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -304,7 +304,7 @@ func TestLoginRateLimiting(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "10.0.0.99:12345"
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		lastCode = rec.Code
 	}
 	if lastCode != http.StatusTooManyRequests {
@@ -326,7 +326,7 @@ func TestLogoutRevokesSessionAndClearsCookie(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/auth/logout", nil, tok)
 	req.AddCookie(&http.Cookie{Name: "containd_token", Value: tok})
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for logout, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -347,7 +347,7 @@ func TestLegacyAuthAccountHandlersWithoutUserStore(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/auth/me", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me with legacy auth, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -364,7 +364,7 @@ func TestLegacyAuthAccountHandlersWithoutUserStore(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/auth/session", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/session with legacy auth, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -385,7 +385,7 @@ func TestLegacyAuthAccountHandlersWithoutUserStore(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPatch, "/api/v1/auth/me", bytes.NewBufferString(`{"firstName":"Legacy"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 for /auth/me patch without user store, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -393,7 +393,7 @@ func TestLegacyAuthAccountHandlersWithoutUserStore(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/auth/me/password", bytes.NewBufferString(`{"currentPassword":"x","newPassword":"y"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 for /auth/me/password without user store, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -420,7 +420,7 @@ func TestSessionAndAccountSelfServiceHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/auth/me", nil, tok)
 	req.RemoteAddr = "203.0.113.10:4123"
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -441,7 +441,7 @@ func TestSessionAndAccountSelfServiceHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tok)
 	req.RemoteAddr = "203.0.113.10:4123"
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/session, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -470,7 +470,7 @@ func TestSessionAndAccountSelfServiceHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPatch, "/api/v1/auth/me", bytes.NewBufferString(`{"firstName":"Grace","lastName":"Hopper","email":"grace@example.com"}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me patch, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -480,14 +480,14 @@ func TestSessionAndAccountSelfServiceHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/password", bytes.NewBufferString(`{"currentPassword":"wrong","newPassword":"Containd9"}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for invalid current password, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/password", bytes.NewBufferString(`{"currentPassword":"`+testPassword+`"}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing newPassword, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -495,7 +495,7 @@ func TestSessionAndAccountSelfServiceHandlers(t *testing.T) {
 	us.users[uid].MustChangePassword = true
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodPost, "/api/v1/auth/me/password", bytes.NewBufferString(`{"currentPassword":"`+testPassword+`","newPassword":"Containd9"}`), tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid password change, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -520,7 +520,7 @@ func TestJWTProtectedEndpointWithValidToken(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 with valid JWT, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -542,7 +542,7 @@ func TestJWTProtectedEndpointRejectsExpiredSession(t *testing.T) {
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for expired session, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -562,7 +562,7 @@ func TestJWTProtectedEndpointRejectsRevokedSession(t *testing.T) {
 	s := setupJWTServer(&mockStore{}, us)
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for revoked session, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -582,7 +582,7 @@ func TestUserCRUD(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body := createUserBody("viewer1", "view", testPassword)
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", body, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create user expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -594,7 +594,7 @@ func TestUserCRUD(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/users", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list users expected 200, got %d", rec.Code)
 	}
@@ -602,14 +602,14 @@ func TestUserCRUD(t *testing.T) {
 	rec = httptest.NewRecorder()
 	body = bytes.NewBufferString(`{"firstName":"Test"}`)
 	req = jwtAuthedRequest(http.MethodPatch, "/api/v1/users/"+created.ID, body, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update user expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodDelete, "/api/v1/users/"+created.ID, nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete user expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -629,7 +629,7 @@ func TestCreateUserDuplicate(t *testing.T) {
 	body := createUserBody("containd", "view", testPassword)
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/users", body, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for duplicate username, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -648,7 +648,7 @@ func TestDeleteLastAdminRejected(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodDelete, "/api/v1/users/"+uid, nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for deleting last admin, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -667,14 +667,14 @@ func TestMustChangePasswordEnforcement(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for must-change-password user on /config, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/auth/me", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for /auth/me even with must-change-password, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -694,14 +694,14 @@ func TestViewerCannotAccessAdminEndpoints(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"zones":[{"name":"it"}]}`)
 	req := jwtAuthedRequest(http.MethodPost, "/api/v1/config", body, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for viewer on admin endpoint, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/config", nil, tok)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for viewer on read endpoint, got %d body=%s", rec.Code, rec.Body.String())
 	}

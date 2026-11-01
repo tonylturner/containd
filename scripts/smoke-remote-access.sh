@@ -16,6 +16,9 @@ export RA_IMAGE RA_CLIENT_IMAGE RA_WORK
 mkdir -p "$RA_LOG_DIR"
 # shellcheck source=scripts/smoke-lib.sh
 source "$ROOT/scripts/smoke-lib.sh"
+# shellcheck source=scripts/config-revision.sh
+source "$ROOT/scripts/config-revision.sh"
+RA_REVISION="$RA_WORK/config.revision"
 
 ACTIVE=0
 CHECK=prerequisites
@@ -79,8 +82,17 @@ wait_api() {
 # Preserve status and response; never commit after a rejected candidate save.
 api() {
   local method=$1 path=$2 body=${3:-} expected=${4:-200} code
+  local -a request=(curl)
+  case "$method $path" in
+    "GET /config"|"GET /services/vpn")
+      request=(cas_read "$RA_REVISION" curl)
+      ;;
+    "POST /config"|"POST /services/vpn"|"POST /config/commit"|"POST /services/vpn/openvpn/profile")
+      request=(cas_write "$RA_REVISION" curl)
+      ;;
+  esac
   API_COUNT=$((API_COUNT + 1))
-  code=$(curl -ksS --max-time 60 -o "$RA_LOG_DIR/api-$API_COUNT.body" -w '%{http_code}' \
+  code=$("${request[@]}" -ksS --max-time 60 -o "$RA_LOG_DIR/api-$API_COUNT.body" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -X "$method" --data-binary "$body" "$BASE$path")
   RESPONSE=$(cat "$RA_LOG_DIR/api-$API_COUNT.body")
@@ -193,6 +205,7 @@ pass "HTTPS answers; plaintext on its port cannot serve the API"
 CHECK=openvpn-server
 compose exec -T target ip route replace default via 10.250.2.2
 compose exec -T inspect ping -c 1 -W 2 10.250.2.3
+api GET /services/vpn
 api POST /services/vpn '{"openvpn":{"enabled":true,"mode":"server","server":{"listenPort":1194,"proto":"udp","listenZone":"wan","tunnelCIDR":"10.250.10.0/24","publicEndpoint":"10.250.1.2","pushRoutes":["10.250.2.0/24"]}},"wireguard":{"enabled":false}}'
 commit
 api POST /services/vpn/openvpn/clients '{"name":"smoke-a"}'

@@ -87,12 +87,13 @@ func TestDecodeRequestConfigLegacyExportSchemas(t *testing.T) {
 func TestStoredSnapshotMetadataStillLoads(t *testing.T) {
 	store := candidateStore(t)
 	ctx := context.Background()
-	want, err := store.Load(ctx)
+	snapshot, err := store.ReadSnapshot(ctx, SnapshotCandidate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := snapshot.Candidate
 	want.Description = "stored with bank reference"
-	if err := store.SaveCandidate(ctx, want); err != nil {
+	if _, err := store.SaveCandidate(ctx, snapshot.Revision, want); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
@@ -109,10 +110,11 @@ func TestStoredSnapshotMetadataStillLoads(t *testing.T) {
 	if metadata.Format != snapshotFormatReferencedBank || metadata.BankID == 0 {
 		t.Fatalf("fixture lacks storage metadata: %s", raw)
 	}
-	got, err := store.LoadCandidate(ctx)
+	snapshot, err = store.ReadSnapshot(ctx, SnapshotCandidate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := snapshot.Candidate
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal("stored snapshot failed to round-trip its document and IDS bank")
 	}

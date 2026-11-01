@@ -19,21 +19,27 @@ func wipeAllTx(ctx context.Context, tx *sql.Tx) error {
 
 // resetLocked atomically clears history and replaces running and its IDS bank.
 // A failed transaction leaves the pending timer intact.
-func (s *SQLiteStore) resetLocked(ctx context.Context, defaults *Config) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *SQLiteStore) resetLocked(ctx context.Context, expected Revision, defaults *Config, capture func(*sql.Tx) error) (Revision, error) {
+	tx, err := s.beginConfigTx(ctx, &expected)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if capture != nil {
+		if err := capture(tx); err != nil {
+			return "", err
+		}
+	}
 	if err := wipeAllTx(ctx, tx); err != nil {
-		return err
+		return "", err
 	}
 	if err := writeRunningTx(ctx, tx, defaults); err != nil {
-		return err
+		return "", err
 	}
-	if err := s.commitStateTx(ctx, tx); err != nil {
-		return err
+	revision, err := s.commitRevisionTx(ctx, tx)
+	if err != nil {
+		return "", err
 	}
 	s.stopPendingTimerLocked()
-	return nil
+	return revision, nil
 }

@@ -94,7 +94,7 @@ async function mockAPI(page: Page, mocks: Mocks): Promise<{ rulesetRequests: num
     if (path === "/api/v1/dataplane/ruleset") {
       // Admin-only and 400 on an invalid candidate: never the coverage source.
       seen.rulesetRequests++;
-      await route.fulfill({ status: 403, json: { error: "forbidden" } });
+      await route.fulfill({ status: 403, json: { error: "forbidden" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
@@ -106,7 +106,7 @@ async function mockAPI(page: Page, mocks: Mocks): Promise<{ rulesetRequests: num
     if (path === "/api/v1/health") body = mocks.health ?? health;
     if (path === "/api/v1/firewall/rules/preview") body = mocks.preview ?? {};
     if (path === "/api/v1/dataplane/ruleset/status") body = mocks.installed ?? { installed: true, appliedAt: "2026-10-26T06:00:00Z" };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return seen;
 }

@@ -239,6 +239,7 @@ function json(body: unknown, status = 200) {
   return {
     status,
     contentType: "application/json",
+    headers: { "X-Containd-Revision": "0123456789abcdef.1" },
     body: JSON.stringify(body),
   };
 }
@@ -274,7 +275,7 @@ function responseFor(pathname: string) {
     return json(defaultConfig);
   }
   if (pathname === "/api/v1/config/diff") {
-    return json({ changed: false, changedSections: [], running: defaultConfig, candidate: defaultConfig, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } });
+    return json({ changed: false, changedSections: [], pendingConfirm: null, running: defaultConfig, candidate: defaultConfig, idsBank: { running: { count: 0, sha256: "empty" }, candidate: { count: 0, sha256: "empty" } } });
   }
   if (pathname === "/api/v1/config/backups") return json([]);
   if (pathname === "/api/v1/routing") {

@@ -123,8 +123,7 @@ export async function mockLearner(page: Page, role = "admin") {
       state.writes.push({ path, body });
       if (path.startsWith("/pcap/analyze")) {
         state.imported = true;
-        return route.fulfill({
-          json: {
+        return route.fulfill({ json: {
             dataset,
             stats: {
               packetCount: 24,
@@ -133,28 +132,22 @@ export async function mockLearner(page: Page, role = "admin") {
               flows: [],
               protocols: { modbus: 24 },
             },
-          },
-        });
+          }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       if (path === "/learn/generate")
-        return route.fulfill({
-          json: {
+        return route.fulfill({ json: {
             suggestions: state.suggestions.map(({ id, revision }) => ({
               id,
               revision,
             })),
             withheld: { iec104_value: 3 },
-          },
-        });
+          }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       if (path.endsWith("/review")) {
         const s = state.suggestions.find(
           (s) => path === `/learn/suggestions/${s.id}/review`,
         )!;
         if (body.selection.revision !== s.revision)
-          return route.fulfill({
-            status: 409,
-            json: { error: "stale revision" },
-          });
+          return route.fulfill({ status: 409, json: { error: "stale revision" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         s.review = {
           actor: "admin",
           at: createdAt,
@@ -163,33 +156,24 @@ export async function mockLearner(page: Page, role = "admin") {
         };
         s.revision++;
         s.status = body.approve ? "reviewed" : "rejected";
-        return route.fulfill({ json: s });
+        return route.fulfill({ json: s, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       if (path === "/learn/apply") {
         if (state.conflict) {
           state.suggestions[0].revision++;
-          return route.fulfill({
-            status: 409,
-            json: {
+          return route.fulfill({ status: 409, json: {
               error: "candidate rule conflict: no selected rules staged",
-            },
-          });
+            }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         }
         state.dirty = true;
         if (state.uncertain)
-          return route.fulfill({
-            status: 503,
-            json: { error: "completion unavailable" },
-          });
+          return route.fulfill({ status: 503, json: { error: "completion unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         for (const selection of body.selections) {
           const s = state.suggestions.find((s) => s.id === selection.id)!;
           s.revision++;
           s.status = "staged";
         }
-        return route.fulfill({
-          headers: { "X-Containd-Config": "staged" },
-          json: { ...body, staged: true },
-        });
+        return route.fulfill({ json: { ...body, staged: true }, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
       }
       if (path === "/learn/watches") {
         const watch = {
@@ -207,30 +191,28 @@ export async function mockLearner(page: Page, role = "admin") {
           source: "live",
           state: "collecting",
         });
-        return route.fulfill({ json: watch });
+        return route.fulfill({ json: watch, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       if (path === "/learn/watches/watch-1/stop") {
         state.watches[0].stoppedAt = new Date().toISOString();
         state.watches[0].stopReason = "operator";
         state.datasets[1].state = "sealed";
-        return route.fulfill({ json: state.watches[0] });
+        return route.fulfill({ json: state.watches[0], headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       if (path === "/firewall/rules/preview")
-        return route.fulfill({
-          json: {
+        return route.fulfill({ json: {
             match_count: 1,
             total_events: 2,
             sample_matches: [],
             warnings: [],
-          },
-        });
-      return route.fulfill({ json: {} });
+          }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+      return route.fulfill({ json: {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     const data: Record<string, unknown> = {
       "/auth/me": { id: "admin-1", username: "containd", role },
       "/auth/session": { id: "admin-1", username: "containd", role },
       "/config/diff": {
-        changed: state.dirty,
+        pendingConfirm: null, changed: state.dirty,
         changedSections: state.dirty ? ["firewall"] : [],
         running: {},
         candidate: state.dirty ? { firewall: {} } : {},
@@ -253,11 +235,10 @@ export async function mockLearner(page: Page, role = "admin") {
     };
     if (path === "/learn/suggestions") {
       state.suggestionReads++;
-      return route.fulfill({ json: { items: state.suggestions } });
+      return route.fulfill({ json: { items: state.suggestions }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     if (path.endsWith("/observations"))
-      return route.fulfill({
-        json: {
+      return route.fulfill({ json: {
           items: [
             {
               id: "parent-1",
@@ -286,9 +267,8 @@ export async function mockLearner(page: Page, role = "admin") {
               },
             },
           ],
-        },
-      });
-    return route.fulfill({ json: data[path] ?? {} });
+        }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    return route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return state;
 }

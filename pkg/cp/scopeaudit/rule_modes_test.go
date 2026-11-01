@@ -21,7 +21,7 @@ func TestRuleModesOutboxRedeliversOnce(t *testing.T) {
 	c := config.DefaultConfig()
 	c.SchemaVersion = "0.1.8"
 	c.DataPlane.DPIMode = "learn"
-	if err := s.SaveCandidate(ctx, c); err != nil {
+	if err := testSaveCandidate(s, ctx, c); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate loss of the management process after config commit, before audit delivery.

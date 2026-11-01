@@ -56,21 +56,22 @@ func TestStoredUnsupportedAddressesRemainRepairable(t *testing.T) {
 			if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) || !strings.Contains(err.Error(), conflict.Error()) {
 				t.Fatalf("replay gate lost the cause: %v", err)
 			}
-			candidate, err := store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, candidate); err == nil {
+			if err := testSaveCandidate(store, ctx, candidate); err == nil {
 				t.Fatal("unchanged invalid candidate was accepted")
 			}
 			candidate.Firewall.Rules[0].ICS.Addresses = nil
-			if err := store.SaveCandidate(ctx, candidate); err != nil {
+			if err := testSaveCandidate(store, ctx, candidate); err != nil {
 				t.Fatal(err)
 			}
 			if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) {
 				t.Fatalf("staging cleared recovery: %v", err)
 			}
-			if err := store.Commit(ctx); err != nil {
+			if err := testCommit(store, ctx); err != nil {
 				t.Fatal(err)
 			}
 			if err := CheckManagementBootFault(ctx, store); err != nil {

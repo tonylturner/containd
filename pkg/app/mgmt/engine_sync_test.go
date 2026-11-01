@@ -313,14 +313,14 @@ func TestAutoRollbackReplaysPreviousConfig(t *testing.T) {
 			if err := store.Save(ctx, previous); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, &pending); err != nil {
+			if err := testSaveCandidate(store, ctx, &pending); err != nil {
 				t.Fatal(err)
 			}
 			ttl := time.Hour
 			if timing == "before startup" {
 				ttl = time.Millisecond
 			}
-			if err := store.CommitConfirmed(ctx, ttl); err != nil {
+			if err := testCommitConfirmed(store, ctx, ttl); err != nil {
 				t.Fatal(err)
 			}
 			// Wait for expiry before registering management's hook to verify
@@ -387,10 +387,10 @@ func TestAutoRollbackReplaysPreviousConfig(t *testing.T) {
 				if err := store.Save(ctx, previous); err != nil {
 					t.Fatal(err)
 				}
-				if err := store.SaveCandidate(ctx, &pending); err != nil {
+				if err := testSaveCandidate(store, ctx, &pending); err != nil {
 					t.Fatal(err)
 				}
-				if err := store.CommitConfirmed(ctx, time.Millisecond); err != nil {
+				if err := testCommitConfirmed(store, ctx, time.Millisecond); err != nil {
 					t.Fatal(err)
 				}
 				waitForRollback(t, store)
@@ -458,7 +458,7 @@ func TestEngineSyncBootFaultAppliesRecoveryWithoutSpam(t *testing.T) {
 	if calls != 1 || logs.Len() != 1 || !s.recovery {
 		t.Fatalf("fault retried/logged: %d %v", calls, logs.All())
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	s.poll(ctx)

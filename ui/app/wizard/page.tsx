@@ -1,11 +1,13 @@
 "use client";
 
+import { matchingRevisions } from "../../lib/use-config-revision";
+
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -43,9 +45,6 @@ import {
 
 export default function WizardPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
-  const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [natConfig, setNatConfig] = useState<NATConfig>({ enabled: false });
 
   /* active wizard state */
   const [active, setActive] = useState<WizardId | null>(null);
@@ -61,8 +60,9 @@ export default function WizardPage() {
     icsProto: "modbus", icsSrcZone: "", icsDstZone: "",
     icsAccess: "readonly" as "readonly" | "readwrite", icsMode: "" as ICSModeSelection,
     izSrcZone: "", izDstZone: "", izAny: true, izSelected: new Set<string>(),
-  });
-  const { refreshForm } = form;
+  }, { zones: [] as Zone[], nat: { enabled: false } as NATConfig, globalMode: "" as ICSModeSelection });
+  const { zones, globalMode } = form.context;
+  const { readConfig: refreshForm } = form;
   const [lanZone, setLanZone] = form.field("lanZone");
   const [wanZone, setWanZone] = form.field("wanZone");
 
@@ -83,12 +83,13 @@ export default function WizardPage() {
   const [izSelected, setIzSelected] = form.field("izSelected");
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [z, n, dp] = await Promise.all([api.listZones(), api.getNAT(), fetchDataPlane()]);
+    const [zSnapshot, nSnapshot, dpSnapshot] = await Promise.all([api.listZones(), api.getNAT(), fetchDataPlane()]);
+    if (!matchingRevisions(zSnapshot, nSnapshot, dpSnapshot)) { checkLoaded(null); return; }
+    const z = (zSnapshot?.data ?? null);
+    const n = (nSnapshot?.data ?? null);
+    const dp = (dpSnapshot?.data ?? null);
     if (!checkLoaded(z && n && dp)) return;
-    setGlobalMode(dp?.dpiMode ?? "");
-    refreshForm({ zones: z, nat: n, globalMode: dp?.dpiMode }, keepEdits);
-    setZones(z ?? []);
-    setNatConfig(n ?? { enabled: false });
+    refreshForm({ data: { zones: z!, nat: n!, globalMode: dp?.dpiMode ?? "" }, revision: zSnapshot?.revision ?? "" }, keepEdits);
   }, [refreshForm, checkLoaded]));
 
   useConfigRefresh(refresh);
@@ -131,33 +132,31 @@ export default function WizardPage() {
     setError(null);
     try {
       // Create firewall allow rule LAN -> WAN
-      const ruleRes = await api.createFirewallRule({
+      const ruleRes = await form.write(base => api.createFirewallRule(base, {
         id: genId(),
         description: `Allow ${lanZone} to ${wanZone} (wizard)`,
         sourceZones: [lanZone],
         destZones: [wanZone],
         action: "ALLOW",
-      });
+      }));
       if (!ruleRes.ok) {
-        setError(`Firewall rule failed: ${ruleRes.error}`);
+        setError(revisionError(ruleRes));
         setApplying(false);
         return;
       }
 
+      if (!ruleRes.adopted) { setApplying(false); return; }
+
       // Enable SNAT masquerade
-      const updatedNat: NATConfig = {
-        ...natConfig,
-        enabled: true,
-        egressZone: wanZone,
-        sourceZones: Array.from(new Set([...(natConfig.sourceZones ?? []), lanZone])),
-      };
-      const natRes = await api.setNAT(updatedNat);
+      const natRes = await form.write((base, view) => api.setNAT(base, {
+        ...view.nat, enabled: true, egressZone: wanZone,
+        sourceZones: Array.from(new Set([...(view.nat.sourceZones ?? []), lanZone])),
+      }), [], { context: (view, nat) => ({ ...view, nat }) });
       if (!natRes.ok) {
-        setError(`NAT config failed: ${natRes.error}`);
+        setError(revisionError(natRes));
         setApplying(false);
         return;
       }
-      setNatConfig(natRes.data);
       setSuccess("LAN internet rule and SNAT staged — commit to apply.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
@@ -189,13 +188,12 @@ export default function WizardPage() {
         destIp,
         destPort: port,
       };
-      const natRes = await api.publishPortForward(pf);
+      const natRes = await form.write(base => api.publishPortForward(base, pf), [], { context: (view, result) => ({ ...view, nat: { ...view.nat, portForwards: [...(view.nat.portForwards ?? []), result.forward] } }) });
       if (!natRes.ok) {
-        setError(`NAT port forward failed: ${natRes.error}`);
+        setError(revisionError(natRes));
         setApplying(false);
         return;
       }
-      setNatConfig((nat) => ({ ...nat, portForwards: [...(nat.portForwards ?? []), natRes.data.forward] }));
       setSuccess(forwardPlacementMessage(natRes.data) + (natRes.warning ? ` Warning: ${natRes.warning}` : ""));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
@@ -218,7 +216,7 @@ export default function WizardPage() {
         ? [{ name: "tcp", port: String(protoMeta.port) }]
         : [];
 
-      const ruleRes = await api.createFirewallRule({
+      const ruleRes = await form.write(base => api.createFirewallRule(base, {
         id: genId(),
         description: `ICS ${protoMeta?.label ?? icsProto} ${icsSrcZone} -> ${icsDstZone} (${icsAccess}) (wizard)`,
         sourceZones: [icsSrcZone],
@@ -231,9 +229,9 @@ export default function WizardPage() {
         // trail of what *was* blocked.
         log: true,
         action: "ALLOW",
-      });
+      }));
       if (!ruleRes.ok) {
-        setError(`Firewall rule failed: ${ruleRes.error}`);
+        setError(revisionError(ruleRes));
         setApplying(false);
         return;
       }
@@ -257,16 +255,16 @@ export default function WizardPage() {
               : { name: key };
           });
 
-      const ruleRes = await api.createFirewallRule({
+      const ruleRes = await form.write(base => api.createFirewallRule(base, {
         id: genId(),
         description: `Allow ${izSrcZone} -> ${izDstZone}${izAny ? "" : ` (${Array.from(izSelected).join(", ")})`} (wizard)`,
         sourceZones: [izSrcZone],
         destZones: [izDstZone],
         protocols,
         action: "ALLOW",
-      });
+      }));
       if (!ruleRes.ok) {
-        setError(`Firewall rule failed: ${ruleRes.error}`);
+        setError(revisionError(ruleRes));
         setApplying(false);
         return;
       }
@@ -426,6 +424,7 @@ export default function WizardPage() {
           </div>
 
           {/* error */}
+          <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => window.location.reload()} />
           {error && (
             <div className="mt-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {error}
