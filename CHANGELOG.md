@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
 - Reject stale configuration saves, section edits and lifecycle actions using
   a durable whole-state revision, including IDS banks and secret-only edits.
+- `PATCH /zones/:name` rejects wrongly typed fields with 400 instead of ignoring
+  them.
 
 ## [0.1.37] - 2026-10-31
 
