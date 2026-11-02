@@ -54,14 +54,14 @@ func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 		}{
 			{name: "success", status: http.StatusOK},
 			{name: "apply error", err: errors.New("engine unavailable"), status: http.StatusInternalServerError},
-			{name: "infrastructure warning", svcErr: errors.New("services unavailable"), status: http.StatusOK, warning: "services: services unavailable"},
+			{name: "infrastructure warning", svcErr: errors.New("services unavailable"), status: http.StatusOK, warning: "av: owner delivery failed"},
 			{name: "ruleset permission failure", err: errors.New("operation not permitted"), status: http.StatusInternalServerError},
 		} {
 			t.Run(action+"/"+result.name, func(t *testing.T) {
 				store := stageStore(t)
 				engine := &mockEngine{err: result.err, svcErr: result.svcErr}
 				audit := &mockAuditStore{}
-				server := NewServerWithEngine(store, audit, engine)
+				server := newTestServerWithEngine(store, audit, engine)
 				rec := httptest.NewRecorder()
 				serveWithConfigRevision(t, server, rec, idsApplyRequest(t, action))
 				if rec.Code != http.StatusOK || engine.applied {

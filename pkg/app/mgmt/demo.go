@@ -66,6 +66,13 @@ func (r *demoReconciler) SimulationControl(ctx context.Context, action string) (
 	return r.reconcileLocked(ctx), nil
 }
 
+// Reset retires eligibility before recovery, a new boot or a new baseline.
+func (r *demoReconciler) Reset(context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.synced, r.bootID = false, ""
+}
+
 func (r *demoReconciler) Reconcile(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

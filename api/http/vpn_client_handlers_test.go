@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 )
@@ -28,8 +30,8 @@ type vpnClientServices struct {
 	result      cpservices.OpenVPNRevokeResult
 }
 
-func (*vpnClientServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (s *vpnClientServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (cpservices.DeliveryResult, error) {
+	return cpservices.DeliveryResult{Effective: cfg}, nil
 }
 func (s *vpnClientServices) ListOpenVPNClients(context.Context) (cpservices.OpenVPNClientList, error) {
 	return cpservices.OpenVPNClientList{Clients: s.credentials, RevocationsApplied: s.applied}, s.err
@@ -180,7 +182,7 @@ func TestVPNClientAuthorizationAndUnavailable(t *testing.T) {
 	if len(svc.names)+len(svc.downloads)+len(svc.revokes) != 0 {
 		t.Fatal("unauthorized request reached authority")
 	}
-	unavailable := NewServer(&mockStore{}, nil)
+	unavailable := newTestServerWithEngine(&mockStore{}, nil, nil)
 	for _, route := range []struct{ method, path string }{
 		{"GET", "/clients"}, {"POST", "/clients"}, {"GET", "/clients/" + vpnTestID}, {"POST", "/clients/" + vpnTestID + "/revoke"},
 	} {
@@ -206,4 +208,7 @@ func TestVPNClientListRevocationsApplied(t *testing.T) {
 	}
 }
 
-func (*vpnClientServices) RecordEngineFaults([]config.ServiceFault) {}
+func (*vpnClientServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (*vpnClientServices) RetryDelivery(context.Context, protection.Metadata) (cpservices.DeliveryResult, error) {
+	return cpservices.DeliveryResult{}, nil
+}

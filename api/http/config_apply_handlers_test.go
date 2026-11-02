@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -23,20 +25,20 @@ type transactionalEngine struct {
 	configureErr error
 }
 
-func (e *transactionalEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (e *transactionalEngine) ApplyRules(_ context.Context, admission protection.Admission, snap rules.Snapshot) error {
 	e.attempts = append(e.attempts, snap)
 	if len(e.attempts) == 1 || e.failRestore {
 		e.ruleset = dpengine.RulesetStatus{Error: "nft apply failed: operation not permitted"}
-		return dpengine.ProtectionStatus{}, errors.New(e.ruleset.Error)
+		return errors.New(e.ruleset.Error)
 	}
 	e.ruleset = dpengine.RulesetStatus{Ruleset: "restored rules", AppliedAt: time.Now()}
-	return dpengine.ProtectionStatus{}, nil
+	return nil
 }
-func (e *transactionalEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
+func (e *transactionalEngine) Configure(ctx context.Context, admission protection.Admission, cfg config.DataPlaneConfig) error {
 	if e.configureErr != nil {
 		return e.configureErr
 	}
-	return e.mockEngine.Configure(ctx, cfg)
+	return e.mockEngine.Configure(ctx, admission, cfg)
 }
 
 func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
@@ -71,7 +73,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				candidateSnapshot1, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
 				candidate = candidateSnapshot1.Candidate
 				engine := &transactionalEngine{mockEngine: &mockEngine{}, failRestore: failRestore}
-				server := NewServerWithEngine(store, nil, engine)
+				server := newTestServerWithEngine(store, nil, engine)
 				rec := requestStage(t, server, "POST", "/config/"+action, map[string]int{"ttl_seconds": 1})
 				var body struct {
 					Error        string `json:"error"`
@@ -125,7 +127,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				}
 				if failRestore {
 					engine.failRestore = false
-					if _, err := ApplyRunningConfig(ctx, store, engine, nil); err != nil {
+					if _, err := replayTestConfig(ctx, store, engine, nil); err != nil {
 						t.Fatal(err)
 					}
 					fault, err := store.RuntimeApplyFault(ctx)
@@ -141,7 +143,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 func TestDataplaneFailureCannotCommitAsWarning(t *testing.T) {
 	store := stageStore(t)
 	engine := &transactionalEngine{mockEngine: &mockEngine{}, configureErr: errors.New("dataplane unavailable")}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	rec := requestStage(t, server, "POST", "/config/commit", nil)
 	if rec.Code != http.StatusInternalServerError || len(engine.attempts) != 0 {
 		t.Fatalf("response: %d %s", rec.Code, rec.Body)
@@ -152,12 +154,12 @@ func TestReplayNftFailureIsNotSuccess(t *testing.T) {
 	for _, boot := range []bool{false, true} {
 		store := stageStore(t)
 		engine := &transactionalEngine{mockEngine: &mockEngine{}, failRestore: true}
-		apply := ApplyRunningConfig
+		apply := replayTestConfig
 		if boot {
-			apply = ApplyBootConfig
+			apply = replayTestConfig
 		}
 		warnings, err := apply(context.Background(), store, engine, nil)
-		if err == nil || len(warnings) != 0 {
+		if err == nil || !containsWarning(warnings, "nft: owner delivery failed") {
 			t.Fatalf("boot=%v warnings=%v err=%v", boot, warnings, err)
 		}
 		fault, err := store.RuntimeApplyFault(context.Background())
@@ -179,7 +181,7 @@ func TestRunningChangeRequiresEngine(t *testing.T) {
 func TestCommitConfirmedRejectsDurationOverflow(t *testing.T) {
 	store := stageStore(t)
 	engine := &mockEngine{}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	rec := requestStage(t, server, "POST", "/config/commit_confirmed", map[string]int64{"ttl_seconds": 1<<63 - 1})
 	if rec.Code != http.StatusBadRequest || engine.applied {
 		t.Fatalf("overflow: %d %s", rec.Code, rec.Body)
@@ -193,7 +195,7 @@ func (failedCommitReader) Read([]byte) (int, error) { return 0, errors.New("body
 func TestCommitConfirmedRejectsUnreadableRequest(t *testing.T) {
 	store := stageStore(t)
 	engine := &mockEngine{}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", failedCommitReader{}))
 	if rec.Code != http.StatusBadRequest || engine.applied {

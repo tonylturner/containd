@@ -31,7 +31,7 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 			replacement.System.Hostname = "replacement"
 			replacement.IDS.Rules = config.DefaultIDSConfig().Rules[1:2]
 			engine := &stageEngine{mockEngine: &mockEngine{}}
-			server := NewServerWithEngine(store, nil, engine)
+			server := newTestServerWithEngine(store, nil, engine)
 			rec := requestStage(t, server, "POST", path, replacement)
 			if rec.Code != http.StatusOK || engine.mutations != 0 {
 				t.Fatalf("replacement failed or applied: %d %s", rec.Code, rec.Body)
@@ -153,7 +153,7 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	candidateSnapshot4, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
 	candidate := candidateSnapshot4.Candidate
 	engine := newRuntimeMockEngine()
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	for _, body := range []string{"", `{"interfaces":["explicit"]}`} {
 		rec := httptest.NewRecorder()
 		serveWithConfigRevision(t, server, rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))

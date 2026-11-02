@@ -93,7 +93,7 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			})
 			revoked := false
 			router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-			router.POST("/system/factory-reset", factoryResetHandler(store, userStore, engine, nil, func(context.Context, string) { revoked = true }))
+			router.POST("/system/factory-reset", testRuntimeHandler(t, store, engine, nil, factoryResetHandler(store, userStore, engine, nil, func(context.Context, string) { revoked = true })))
 			rec := httptest.NewRecorder()
 			serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 			var body struct {
@@ -216,7 +216,7 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	engine := &mockEngine{}
 	router := gin.New()
 	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-	router.POST("/", factoryResetHandler(store, userStore, engine, nil))
+	router.POST("/", testRuntimeHandler(t, store, engine, nil, factoryResetHandler(store, userStore, engine, nil)))
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Containd-Warnings") != "" {

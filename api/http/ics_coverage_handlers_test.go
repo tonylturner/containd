@@ -31,7 +31,7 @@ func icsCoverageConfig(queue uint16) *config.Config {
 func getICSCoverage(t *testing.T, store config.Store, engine EngineClient) map[string]json.RawMessage {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	NewServerWithEngine(store, nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/dataplane/ics-coverage", nil))
+	newTestServerWithEngine(store, nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/dataplane/ics-coverage", nil))
 	var body map[string]json.RawMessage
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -96,7 +96,7 @@ func TestICSCoverageWithInvalidCandidate(t *testing.T) {
 		t.Fatalf("applied = %+v", got)
 	}
 	rec := httptest.NewRecorder()
-	NewServerWithEngine(store, nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil))
+	newTestServerWithEngine(store, nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("ruleset preview of an invalid candidate = %d, want 400", rec.Code)
 	}

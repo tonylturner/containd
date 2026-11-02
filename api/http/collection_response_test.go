@@ -62,7 +62,7 @@ func TestCLIQuickstartCreatesFirstCandidateRule(t *testing.T) {
 	engine := &stageEngine{mockEngine: &mockEngine{
 		state: []config.InterfaceState{{Name: "eth0", Addrs: []string{"192.0.2.7/24"}}},
 	}}
-	handler := NewServerWithEngine(store, nil, engine)
+	handler := newTestServerWithEngine(store, nil, engine)
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{{Name: "wan", Device: "eth0", Zone: "wan"}}
 	cfg.Firewall.Rules = nil

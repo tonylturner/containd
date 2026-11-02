@@ -86,7 +86,7 @@ func TestMonitoringAvailability(t *testing.T) {
 						m.anomaliesErr = m.err
 						m.simErr = m.err
 					}
-					server := NewServerWithEngine(&mockStore{}, nil, engine)
+					server := newTestServerWithEngine(&mockStore{}, nil, engine)
 					req := authedRequest(op.method, "/api/v1"+op.path, strings.NewReader(op.body))
 					req.Header.Set("Content-Type", "application/json")
 					rec := httptest.NewRecorder()

@@ -83,7 +83,7 @@ func TestEvidenceStageAtomicRetry(t *testing.T) {
 	}
 	s := stageProposal(t)
 	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}, completeError: errors.New("connection lost after candidate save")}
-	server := NewServerWithEngine(store, nil, e)
+	server := newTestServerWithEngine(store, nil, e)
 	req := learn.ApplyRequest{RequestID: "retry-one", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
 	first := requestStage(t, server, "POST", "/learn/apply", req)
 	if first.Code != 503 {
@@ -139,7 +139,7 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
-	rec := requestStage(t, NewServerWithEngine(store, nil, e), "POST", "/learn/apply", learn.ApplyRequest{RequestID: "conflict", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
+	rec := requestStage(t, newTestServerWithEngine(store, nil, e), "POST", "/learn/apply", learn.ApplyRequest{RequestID: "conflict", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
 	if rec.Code != 409 || e.done != 0 || e.releases != 1 {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
@@ -157,7 +157,7 @@ func TestEvidenceStageRejectsStaleAndInvalidSelections(t *testing.T) {
 			store := stageStore(t)
 			s := stageProposal(t)
 			e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, resolveError: &engineapi.EvidenceError{Status: status, Detail: "stale evidence"}}
-			server := NewServerWithEngine(store, nil, e)
+			server := newTestServerWithEngine(store, nil, e)
 			rec := requestStage(t, server, "POST", "/learn/apply", learn.ApplyRequest{RequestID: "stale", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
 			if rec.Code != status || e.done != 0 {
 				t.Fatalf("status lost: %d %s", rec.Code, rec.Body)
@@ -168,7 +168,7 @@ func TestEvidenceStageRejectsStaleAndInvalidSelections(t *testing.T) {
 	for _, selections := range [][]learn.Selection{nil, {{ID: "one"}}, {{ID: "one", Revision: 1}, {ID: "one", Revision: 2}}} {
 		store := stageStore(t)
 		e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}
-		rec := requestStage(t, NewServerWithEngine(store, nil, e), "POST", "/learn/apply", learn.ApplyRequest{RequestID: "invalid", Selections: selections})
+		rec := requestStage(t, newTestServerWithEngine(store, nil, e), "POST", "/learn/apply", learn.ApplyRequest{RequestID: "invalid", Selections: selections})
 		if rec.Code != 400 || e.resolves != 0 {
 			t.Fatalf("invalid input resolved: %d %s", rec.Code, rec.Body)
 		}
@@ -219,7 +219,7 @@ func TestEvidenceStageRecoveryErrorsAreRetryable(t *testing.T) {
 					}
 				}
 				req := learn.ApplyRequest{RequestID: "recover-this-request", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
-				server := NewServerWithEngine(store, nil, e)
+				server := newTestServerWithEngine(store, nil, e)
 				rec := requestStage(t, server, "POST", "/learn/apply", req)
 				if rec.Code != 503 || !strings.Contains(rec.Body.String(), req.RequestID) {
 					t.Fatalf("lost recovery identity: %d %s", rec.Code, rec.Body)
@@ -364,7 +364,7 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 						t.Fatal("live suggestion survived lifecycle event")
 					}
 				}
-				server := NewServerWithEngine(store, nil, e)
+				server := newTestServerWithEngine(store, nil, e)
 				req := learn.ApplyRequest{RequestID: "lifecycle-retry", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
 				rec := requestStage(t, server, "POST", "/learn/apply", req)
 				if release {
@@ -429,7 +429,7 @@ func TestEvidenceStageUpgradeOnlyReconcilesExistingRules(t *testing.T) {
 				t.Fatal(err)
 			}
 			e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
-			server := NewServerWithEngine(store, nil, e)
+			server := newTestServerWithEngine(store, nil, e)
 			req := learn.ApplyRequest{RequestID: "upgraded-request", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
 			for range 2 {
 				rec := requestStage(t, server, "POST", "/learn/apply", req)
@@ -457,7 +457,7 @@ func TestEvidenceStageUpgradeRevisionMismatch(t *testing.T) {
 	s := stageProposal(t)
 	s.StageReconcileOnly = true
 	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
-	server := NewServerWithEngine(store, nil, e)
+	server := newTestServerWithEngine(store, nil, e)
 	body, err := json.Marshal(learn.ApplyRequest{RequestID: "stale-upgrade", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
 	if err != nil {
 		t.Fatal(err)

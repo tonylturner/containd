@@ -7,10 +7,12 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -21,15 +23,15 @@ type commitFailingEngine struct {
 	applied []string
 }
 
-func (e *commitFailingEngine) ApplyRules(ctx context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (e *commitFailingEngine) ApplyRules(ctx context.Context, admission protection.Admission, snapshot rules.Snapshot) error {
 	e.applied = append(e.applied, snapshot.Version)
-	if _, err := e.recoveryEngine.ApplyRules(ctx, snapshot); err != nil {
-		return dpengine.ProtectionStatus{}, err
+	if err := e.recoveryEngine.ApplyRules(ctx, admission, snapshot); err != nil {
+		return err
 	}
 	if snapshot.Version != config.ManagementRecoveryVersion {
-		return dpengine.ProtectionStatus{}, errors.New("nft apply failed")
+		return errors.New("nft apply failed")
 	}
-	return dpengine.ProtectionStatus{}, nil
+	return nil
 }
 
 // A transition that fails at runtime while the appliance is in management
@@ -54,7 +56,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &commitFailingEngine{recoveryEngine: &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}}
-	if _, err := ApplyBootConfig(ctx, store, engine, &stageServices{}); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, &stageServices{}); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServerWithEngineAndServices(store, nil, engine, &stageServices{}, nil)
@@ -87,7 +89,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 			if got, err := store.ManagementBootFault(ctx); err != nil || got != fault {
 				t.Fatalf("boot fault = %q, %v", got, err)
 			}
-			if got, err := store.RuntimeApplyFault(ctx); err != nil || got != "" {
+			if got, err := store.RuntimeApplyFault(ctx); err != nil || !strings.Contains(got, "apply failed") {
 				t.Fatalf("runtime apply fault = %q, %v", got, err)
 			}
 		})

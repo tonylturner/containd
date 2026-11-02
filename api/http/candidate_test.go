@@ -15,10 +15,11 @@ import (
 	"strings"
 	"testing"
 
-	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/templates"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -28,21 +29,21 @@ type stageEngine struct {
 	mutations int
 }
 
-func (e *stageEngine) Configure(context.Context, config.DataPlaneConfig) error {
+func (e *stageEngine) Configure(context.Context, protection.Admission, config.DataPlaneConfig) error {
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureInterfaces(context.Context, []config.Interface) error {
+func (e *stageEngine) ConfigureInterfaces(context.Context, protection.Admission, []config.Interface, bool) error {
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureRouting(context.Context, config.RoutingConfig) error {
+func (e *stageEngine) ConfigureRouting(context.Context, protection.Admission, config.RoutingConfig, bool) error {
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
+func (e *stageEngine) ConfigureServices(context.Context, protection.Admission, config.ServicesConfig) error {
 	e.mutations++
-	return engineclient.ServicesApplyResult{}, nil
+	return nil
 }
 func (e *stageEngine) SetPcapConfig(_ context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error) {
 	e.mutations++
@@ -56,17 +57,20 @@ func (e *stageEngine) StopPcap(context.Context) (pcap.Status, error) {
 	e.mutations++
 	return pcap.Status{}, nil
 }
-func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (e *stageEngine) ApplyRules(_ context.Context, admission protection.Admission, snap rules.Snapshot) error {
 	e.mutations++
 	e.snap = snap
-	return dpengine.ProtectionStatus{}, nil
+	return nil
 }
 
 type stageServices struct{ mutations int }
 
-func (s *stageServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+func (s *stageServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, faults []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
 	s.mutations++
-	return cfg, nil
+	for _, fault := range faults {
+		config.QuarantineService(&cfg, fault.Service)
+	}
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 
 func stageStore(t *testing.T) *config.SQLiteStore {
@@ -287,7 +291,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 func TestIDSSaveResponseSurvivesSecondSave(t *testing.T) {
 	store := stageStore(t)
 	engine := &stageEngine{mockEngine: &mockEngine{}}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	payload := config.IDSConfig{Enabled: true, Rules: config.DefaultIDSConfig().Rules[1:2]}
 	for range 2 {
 		rec := requestStage(t, server, "POST", "/ids/rules", payload)
@@ -341,4 +345,7 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 	}
 }
 
-func (*stageServices) RecordEngineFaults([]config.ServiceFault) {}
+func (*stageServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (*stageServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

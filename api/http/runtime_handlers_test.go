@@ -18,8 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -173,8 +176,8 @@ type telemetryOnlyServices struct {
 	events []dpevents.Event
 }
 
-func (t telemetryOnlyServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (t telemetryOnlyServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 
 func (t telemetryOnlyServices) ListTelemetryEvents(limit int) []dpevents.Event {
@@ -278,7 +281,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 		},
 	}
 
-	s := NewServerWithEngine(store, nil, eng)
+	s := newTestServerWithEngine(store, nil, eng)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/config", bytes.NewBufferString(`{"interfaces":["wan"],"mode":"once","snaplen":256}`))
@@ -402,7 +405,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	eng.anomaliesResp = []anomaly.Anomaly{{Type: "malformed_frame", Protocol: "modbus", Severity: "high"}}
 	eng.conntrackResp = []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}, Tags: []string{"plc"}}}
 
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/events?limit=10", nil)
@@ -550,7 +553,7 @@ func TestRuntimeTelemetryGatewayErrorsAndStoreLoadFailures(t *testing.T) {
 	eng.anomaliesErr = errors.New("anomalies failed")
 	eng.conntrackErr = errors.New("conntrack failed")
 
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 
 	for _, tc := range []struct {
 		path string
@@ -686,7 +689,7 @@ func TestVPNServiceReadWritePreservesRedactedSecrets(t *testing.T) {
 
 	store := &mockStore{cfg: cfg}
 	eng := &mockEngine{svcErr: errors.New("runtime services unavailable")}
-	s := NewServerWithEngine(store, nil, eng)
+	s := newTestServerWithEngine(store, nil, eng)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/services/vpn", nil)
@@ -753,4 +756,7 @@ func (m *runtimeMockEngine) AnalyzePcapByName(context.Context, string) (*pcap.Im
 	return &pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1}}, nil
 }
 
-func (telemetryOnlyServices) RecordEngineFaults([]config.ServiceFault) {}
+func (telemetryOnlyServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (telemetryOnlyServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

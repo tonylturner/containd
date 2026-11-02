@@ -19,7 +19,7 @@ func TestICSParsingConfigRoundTrip(t *testing.T) {
 	resetTestRateLimiters()
 	store := stageStore(t)
 	ctx := context.Background()
-	server := NewServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
+	server := newTestServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
 	initial := map[string]string{"modbus": "strict", "iec104": "strict"}
 	check := func(path string, want map[string]string) config.Config {
 		t.Helper()

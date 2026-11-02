@@ -25,7 +25,7 @@ import (
 func TestHealthReportsUnboundManagement(t *testing.T) {
 	cfg := config.DefaultConfig()
 	engine := &mockEngine{}
-	server := NewServerWithEngine(&mockStore{cfg: cfg}, nil, engine)
+	server := newTestServerWithEngine(&mockStore{cfg: cfg}, nil, engine)
 	check := func(want string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func (m *healthMockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeH
 
 func healthBody(t *testing.T, engine EngineClient) (int, map[string]any) {
 	t.Helper()
-	s := NewServerWithEngine(&mockStore{}, nil, engine)
+	s := newTestServerWithEngine(&mockStore{}, nil, engine)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	serveWithConfigRevision(t, s, rec, req)
@@ -192,7 +192,7 @@ func TestHealthSanitizesIEC104ReasonCodes(t *testing.T) {
 func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
 	store := stageStore(t)
 	sensitive := "nft apply failed: secret source 192.0.2.44 tcp dport 12345"
-	if err := store.SetRuntimeApplyFault(context.Background(), sensitive); err != nil {
+	if err := store.SetRuntimeApplyFault(context.Background(), testRunningRevision(store), sensitive); err != nil {
 		t.Fatal(err)
 	}
 	engine := &mockEngine{ruleset: dpengine.RulesetStatus{Error: sensitive}}
@@ -293,7 +293,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 		state:   []config.InterfaceState{{Name: "eth0"}},
 		ruleset: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()},
 	}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	started := time.Now()
@@ -323,7 +323,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 	}
 }
 
-func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
+func TestHealthAnswersDuringRunningApplyWithoutClaimingReadiness(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
 	candidate, err := store.Load(ctx)
@@ -348,58 +348,28 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 		})
 	}()
 	<-entered
-	readCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
-	defer cancel()
-	snapshot, err := store.ReadHealthSnapshot(readCtx)
-	if !errors.Is(err, config.ErrHealthBusy) || !errors.Is(err, context.DeadlineExceeded) || snapshot.Config != nil {
-		t.Fatalf("intermediate health snapshot exposed: %+v %v", snapshot, err)
+	// The store publishes committed authority and its guard before delivery. A
+	// readable target is not runtime proof, nor must delivery lock out liveness.
+	state, err := store.ReadRunning(ctx)
+	if err != nil || state.Transition == nil || state.Running.System.Hostname != candidate.System.Hostname {
+		t.Fatalf("missing durable transition: %+v %v", state, err)
 	}
-	loaded := make(chan *config.Config, 1)
-	loadError := make(chan error, 1)
-	go func() { cfg, err := store.Load(ctx); loaded <- cfg; loadError <- err }()
-	select {
-	case cfg := <-loaded:
-		t.Fatalf("reader observed unapplied config: %+v", cfg)
-	case <-time.After(20 * time.Millisecond):
-	}
-	server := NewServerWithEngine(store, nil, &mockEngine{})
-	rec := httptest.NewRecorder()
-	answered := make(chan struct{})
+	server := newTestServerWithEngine(store, nil, &mockEngine{})
 	start := time.Now()
-	go func() {
-		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-		close(answered)
-	}()
-	select {
-	case <-answered:
-	case <-time.After(engineHealthTimeout + 100*time.Millisecond):
-		t.Fatal("health blocked on running apply")
+	rec := requestStage(t, server, "GET", "/health", nil)
+	if rec.Code != http.StatusOK || time.Since(start) > engineHealthTimeout {
+		t.Fatalf("liveness blocked: %d %s", rec.Code, rec.Body)
 	}
-	if elapsed := time.Since(start); elapsed < engineHealthTimeout || elapsed > engineHealthTimeout+100*time.Millisecond {
-		t.Fatalf("health did not use the shared observation budget: %s", elapsed)
+	rec = requestStage(t, server, "GET", "/dataplane/protection", nil)
+	var aggregate struct {
+		Ready              bool
+		ProtectingRevision *string
 	}
-	var body struct {
-		Enforcement struct {
-			State string `json:"state"`
-		} `json:"enforcement"`
-		Binding struct {
-			State string `json:"state"`
-		} `json:"managementBinding"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != http.StatusOK || body.Enforcement.State != "unknown" || body.Binding.State != "unknown" {
-		t.Fatalf("health: %d %s", rec.Code, rec.Body)
+	if json.Unmarshal(rec.Body.Bytes(), &aggregate) != nil || aggregate.Ready || aggregate.ProtectingRevision != nil {
+		t.Fatalf("unapplied target claimed protection: %s", rec.Body)
 	}
 	unblock()
 	if err := <-applied; err != nil {
-		t.Fatal(err)
-	}
-	if cfg := <-loaded; cfg == nil || cfg.System.Hostname != candidate.System.Hostname {
-		t.Fatalf("applied running: %+v", cfg)
-	}
-	if err := <-loadError; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -436,7 +406,7 @@ func TestHealthSharesOneObservationDeadline(t *testing.T) {
 			cfg := config.DefaultConfig()
 			cfg.DataPlane.Enforcement = true
 			engine := &deadlineHealthEngine{mockEngine: &mockEngine{ruleset: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}}, stall: stall}
-			server := NewServerWithEngine(&mockStore{cfg: cfg}, nil, engine)
+			server := newTestServerWithEngine(&mockStore{cfg: cfg}, nil, engine)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 			rec := httptest.NewRecorder()

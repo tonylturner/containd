@@ -67,7 +67,7 @@ func TestEngineTLSClientFamilies(t *testing.T) {
 	if err := c.getJSON(ctx, "/health", "health", &read); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Configure(ctx, config.DataPlaneConfig{}); err != nil {
+	if err := c.Configure(ctx, testAdmission(), config.DataPlaneConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.UploadPcap(ctx, "test.pcap", strings.NewReader("capture")); err != nil {

@@ -8,8 +8,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -22,17 +23,17 @@ type addressEngine struct {
 	ifaceErr   error
 }
 
-func (e *addressEngine) Configure(ctx context.Context, dp config.DataPlaneConfig) error {
+func (e *addressEngine) Configure(ctx context.Context, admission protection.Admission, dp config.DataPlaneConfig) error {
 	e.calls = append(e.calls, "dataplane")
-	return e.recoveryEngine.Configure(ctx, dp)
+	return e.recoveryEngine.Configure(ctx, admission, dp)
 }
 
-func (e *addressEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (e *addressEngine) ApplyRules(ctx context.Context, admission protection.Admission, snap rules.Snapshot) error {
 	e.calls = append(e.calls, "rules")
-	return e.recoveryEngine.ApplyRules(ctx, snap)
+	return e.recoveryEngine.ApplyRules(ctx, admission, snap)
 }
 
-func (e *addressEngine) ConfigureInterfaces(_ context.Context, ifaces []config.Interface) error {
+func (e *addressEngine) ConfigureInterfaces(_ context.Context, admission protection.Admission, ifaces []config.Interface, replace bool) error {
 	e.calls = append(e.calls, "interfaces")
 	e.interfaces = append(e.interfaces, ifaces)
 	return e.ifaceErr
@@ -67,7 +68,7 @@ func TestManagementRecoveryAppliesManagementAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &addressEngine{recoveryEngine: &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}}
-	warnings, err := ApplyBootConfig(ctx, store, engine, &stageServices{})
+	warnings, err := replayTestConfig(ctx, store, engine, &stageServices{})
 	if err != nil || len(warnings) != 0 {
 		t.Fatalf("recovery = %v, warnings %q", err, warnings)
 	}
@@ -82,7 +83,7 @@ func TestManagementRecoveryAppliesManagementAddresses(t *testing.T) {
 	// An address failure is a warning: the recovery ruleset is in force.
 	engine.calls, engine.interfaces = nil, nil
 	engine.ifaceErr = errors.New("interface mgmt0 (mgmtnic) not found")
-	warnings, err = ApplyBootConfig(ctx, store, engine, &stageServices{})
+	warnings, err = replayTestConfig(ctx, store, engine, &stageServices{})
 	if err != nil || len(warnings) != 1 {
 		t.Fatalf("recovery with an address failure = %v, warnings %q", err, warnings)
 	}
@@ -110,7 +111,7 @@ func TestRecoveryAddressesOnlyFromValidStoredInterfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &addressEngine{recoveryEngine: &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}}
-	if _, err := ApplyBootConfig(context.Background(), reserved, engine, &stageServices{}); err != nil {
+	if _, err := replayTestConfig(context.Background(), reserved, engine, &stageServices{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(engine.interfaces) != 0 {

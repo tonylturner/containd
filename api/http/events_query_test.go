@@ -113,7 +113,7 @@ func TestEventsStringIDsListDetailQueryAndPreview(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", strings.NewReader(`{"id":"candidate","action":"ALLOW"}`))
 	req.Header.Set("Content-Type", "application/json")
-	NewServerWithEngine(&mockStore{}, nil, preview).ServeHTTP(rec, req)
+	newTestServerWithEngine(&mockStore{}, nil, preview).ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9223372036854775809"`) {
 		t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
 	}

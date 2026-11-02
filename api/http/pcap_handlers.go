@@ -55,8 +55,6 @@ func setPCAPConfigHandler(store config.Store) gin.HandlerFunc {
 
 func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
 		var err error
 		var body []byte
 		if c.Request.Body != nil {
@@ -105,8 +103,6 @@ func startPCAPHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 
 func stopPCAPHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
 		if engine == nil {
 			c.JSON(http.StatusOK, gin.H{"status": "pcap stop queued"})
 			return
