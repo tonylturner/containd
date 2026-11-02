@@ -27,7 +27,8 @@ import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { ServiceStatusStrip } from "../system/services/service-presentation";
+import { ProxyStatus } from "./proxy-status";
+import { ReverseSiteForm } from "./reverse-site-form";
 import { Disclosure } from "../../components/Disclosure";
 import { Card } from "../../components/Card";
 
@@ -35,7 +36,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
   const canEdit = isAdmin();
-  const { canSave, loadError, checkLoaded } = useConfigLoad();
+  const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
   const [status, setStatus] = useState<ServicesStatus | null>(null);
@@ -58,10 +59,11 @@ export default function ProxiesPage() {
     hostnames: [],
     backends: [],
     tlsEnabled: false,
-  } as ReverseProxySite, backends: "", hostnames: "" });
+  } as ReverseProxySite, backends: "", hostnames: "", editingSite: null as string | null });
   const { cfg: forward, setCfg: setForward, readConfig: adoptForward } = forwardDraft;
   const { cfg: reverse, setCfg: setReverse, readConfig: adoptReverse } = reverseDraft;
   const [newSite, setNewSite] = siteDraft.field("site");
+  const [editingSite, setEditingSite] = siteDraft.field("editingSite");
   const [backendsCSV, setBackendsCSV] = siteDraft.field("backends");
   const [hostnamesCSV, setHostnamesCSV] = siteDraft.field("hostnames");
   const { readConfig: refreshSite } = siteDraft;
@@ -145,14 +147,22 @@ export default function ProxiesPage() {
   }
 
   function addSite() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     if (!newSite.name.trim()) {
       setError("Site name is required.");
       return;
     }
-    if (!newSite.listenPort || newSite.listenPort <= 0) {
+    if (!Number.isInteger(newSite.listenPort) || newSite.listenPort < 1 || newSite.listenPort > 65535) {
       setError("Listen port must be valid.");
+      return;
+    }
+    if ((reverse.sites ?? []).some(site => site.name === newSite.name.trim() && site.name !== editingSite)) {
+      setError("Site name is already in use.");
+      return;
+    }
+    if (newSite.tlsEnabled && !newSite.certRef?.trim()) {
+      setError("Certificate reference is required when TLS is enabled.");
       return;
     }
     const backends = backendsCSV.split(",").map((s) => s.trim()).filter(Boolean);
@@ -165,21 +175,43 @@ export default function ProxiesPage() {
       siteDraft.requireReview(reverseDraft.editor.baseRevision ?? "");
       return;
     }
+    if (editingSite !== null && !(reverse.sites ?? []).some(site => site.name === editingSite)) {
+      setError("The site being edited is no longer in the local list. Cancel the edit and review the sites.");
+      return;
+    }
+    const next = { ...newSite, name: newSite.name.trim(), certRef: newSite.certRef?.trim(), backends, hostnames };
     setReverse((r) => ({
       ...r,
-      sites: [...(r.sites ?? []), { ...newSite, name: newSite.name.trim(), backends, hostnames }],
+      sites: editingSite === null ? [...(r.sites ?? []), next]
+        : (r.sites ?? []).map(site => site.name === editingSite ? next : site),
     }));
-    siteDraft.clearFields(siteDraft.editor.cfg.fields, ["site", "backends", "hostnames"]);
+    cancelSiteEdit();
+  }
+
+  function cancelSiteEdit() {
+    setError(null);
+    siteDraft.clearFields(siteDraft.editor.cfg.fields, ["site", "backends", "hostnames", "editingSite"]);
+  }
+
+  function editSite(site: ReverseProxySite) {
+    if (!canEdit || !canSave) return;
+    setError(null);
+    setEditingSite(site.name);
+    setNewSite({ ...site });
+    setBackendsCSV((site.backends ?? []).join(", "));
+    setHostnamesCSV((site.hostnames ?? []).join(", "));
   }
 
   function deleteSite(name: string) {
-    if (!canEdit) return;
+    if (!canEdit || !canSave) return;
     confirm.open({
       title: "Delete site",
       message: `Remove reverse proxy site "${name}"? This removes it from local edits only. Save to stage the removal, then commit to apply.`,
       confirmLabel: "Delete",
       variant: "danger",
       onConfirm: () => {
+        if (!canSaveNow()) return;
+        if (editingSite === name) cancelSiteEdit();
         setReverse((r) => ({
           ...r,
           sites: (r.sites ?? []).filter((s) => s.name !== name),
@@ -217,15 +249,19 @@ export default function ProxiesPage() {
       <ConfirmDialog {...confirm.props} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />
-      <ServiceStatusStrip label="Forward proxy status" configured={canSave ? forward.enabled : undefined} running={proxy?.envoy_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.envoy_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
-      <ServiceStatusStrip label="Reverse proxy status" configured={canSave ? reverse.enabled : undefined} running={proxy?.nginx_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.nginx_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
+      <ProxyStatus label="Forward proxy status" configured={canSave ? forward.enabled : undefined}
+        running={proxy?.envoy_running} available={!!proxy} updated={proxy?.last_render}
+        diagnostic={proxy?.envoy_last_error || proxy?.fault?.message} faulted={proxy?.state === "faulted"} />
+      <ProxyStatus label="Reverse proxy status" configured={canSave ? reverse.enabled : undefined}
+        running={proxy?.nginx_running} available={!!proxy} updated={proxy?.last_render}
+        diagnostic={proxy?.nginx_last_error || proxy?.fault?.message} faulted={proxy?.state === "faulted"} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {!loading && error && (
-        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -233,8 +269,8 @@ export default function ProxiesPage() {
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "---"} {autoRefresh ? "(auto)" : ""}
       </p>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <section className="rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+      <div className="grid min-w-0 gap-6 md:grid-cols-2">
+        <section className="min-w-0 rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
           <h2 className="text-lg font-semibold text-(--text)">Forward proxy</h2>
           <p className="mt-1 text-sm text-(--text)">
             Quick controls for enablement and listening port.
@@ -361,7 +397,7 @@ export default function ProxiesPage() {
           </div>
         </section>
 
-        <section className="rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+        <section className="min-w-0 rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
           <h2 className="text-lg font-semibold text-(--text)">Reverse proxy</h2>
           <p className="mt-1 text-sm text-(--text)">
             Add sites to expose internal apps.
@@ -381,61 +417,10 @@ export default function ProxiesPage() {
               Enabled
             </label>
 
-            <div className="rounded-xs border bg-(--surface) p-4">
-              <h3 className="text-sm font-semibold text-(--text)">Add site</h3>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <input
-                  type="text"
-                  value={newSite.name}
-                  disabled={!canEdit || !canSave}
-                  onChange={(e) =>
-                    setNewSite((s) => ({ ...s, name: e.target.value }))
-                  }
-                  placeholder="site name"
-                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-                <input
-                  type="number"
-                  value={newSite.listenPort}
-                  disabled={!canEdit || !canSave}
-                  onChange={(e) =>
-                    setNewSite((s) => ({
-                      ...s,
-                      listenPort: Number(e.target.value),
-                    }))
-                  }
-                  placeholder="listen port"
-                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-                <input
-                  type="text"
-                  value={backendsCSV}
-                  disabled={!canEdit || !canSave}
-                  onChange={(e) => setBackendsCSV(e.target.value)}
-                  placeholder="backends host:port, host:port"
-                  className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-                <input
-                  type="text"
-                  value={hostnamesCSV}
-                  disabled={!canEdit || !canSave}
-                  onChange={(e) => setHostnamesCSV(e.target.value)}
-                  placeholder="hostnames (optional)"
-                  className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-              <div className="mt-3 flex justify-end">
-                {canEdit && (
-                  <button
-                    disabled={!canSave}
-                    onClick={addSite}
-                    className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
-                  >
-                    Add
-                  </button>
-                )}
-              </div>
-            </div>
+            <ReverseSiteForm site={newSite} setSite={setNewSite} backends={backendsCSV} setBackends={setBackendsCSV}
+              hostnames={hostnamesCSV} setHostnames={setHostnamesCSV} editing={editingSite !== null}
+              disabled={!canEdit || !canSave || loading || saveState === "saving"}
+              onAccept={addSite} onCancel={cancelSiteEdit} />
 
             <div className="space-y-2">
               {(reverse.sites ?? []).length === 0 && (
@@ -446,24 +431,30 @@ export default function ProxiesPage() {
               {(reverse.sites ?? []).map((site) => (
                 <div
                   key={site.name}
-                  className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2"
+                  className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xs border bg-(--surface) px-3 py-2"
                 >
-                  <div>
+                  <div className="min-w-0 break-all">
                     <div className="text-sm font-semibold text-(--text)">
                       {site.name}
                     </div>
                     <div className="text-xs text-(--text-muted)">
                       port {site.listenPort} → {(site.backends ?? []).join(", ")}
                     </div>
+                    <p className="text-xs text-(--text-muted)">TLS: {site.tlsEnabled ? "enabled" : "disabled"}{site.certRef ? ` · Certificate: ${site.certRef}` : ""}</p>
+                    {site.description && <p className="text-xs text-(--text-muted)">{site.description}</p>}
                   </div>
                   {canEdit && (
-                    <button
-                      disabled={!canSave}
-                      onClick={() => deleteSite(site.name)}
-                      className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex shrink-0 gap-2">
+                      <button disabled={!canSave || loading || saveState === "saving"} onClick={() => editSite(site)}
+                        className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui">Edit</button>
+                      <button
+                        disabled={!canSave || loading || saveState === "saving"}
+                        onClick={() => deleteSite(site.name)}
+                        className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -521,11 +512,6 @@ export default function ProxiesPage() {
               <p className="text-xs text-(--text-dim)">
                 Activity source: access logs when enabled.
               </p>
-              {proxy?.envoy_last_error ? (
-                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {proxy.envoy_last_error}
-                </div>
-              ) : null}
               <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.envoy_pid === undefined || !proxy.envoy_last_start ? "Some details unknown" : undefined}>
                 <p>Software: Envoy</p>
                 <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
@@ -574,11 +560,6 @@ export default function ProxiesPage() {
               <p className="text-xs text-(--text-dim)">
                 Activity source: access logs from published apps.
               </p>
-              {proxy?.nginx_last_error ? (
-                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {proxy.nginx_last_error}
-                </div>
-              ) : null}
               <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.nginx_pid === undefined || !proxy.nginx_last_start ? "Some details unknown" : undefined}>
                 <p>Software: Nginx</p>
                 <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>

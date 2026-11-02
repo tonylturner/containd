@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VPN reads and stage responses redact stored secrets without falsely reporting
   configured key and certificate material as missing.
 
+- Proxy preflight preserves daemon configuration filename extensions so Envoy
+  reads generated YAML correctly. Proxies shows concise faults with exact output
+  under Technical details and supports editing reverse sites, TLS certificate
+  references and descriptions with explicit certificate provisioning guidance.
 - Editing a firewall rule with several zones or protocols no longer keeps only
   the first of each.
 - DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown

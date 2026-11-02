@@ -636,7 +636,37 @@ the `gate` object above.
   - `set proxy forward <on|off> [port] [zone...]`
   - `set proxy reverse <on|off>`
 - On commit/rollback, `containd mgmt` renders daemon configs to the services directory (`CONTAIND_SERVICES_DIR` or `/data/services`): `envoy-forward.yaml` and `nginx-reverse.conf`.
-- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. It validates the generated Nginx config with `nginx -t` before restart, tracks last start/error timestamps, and exposes the `/api/v1/services/status` view consumed by `show services status`.
+- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. Before publishing, it validates the staged configs with `envoy --mode validate` and `nginx -t` when those binaries are installed. Staged filenames retain their `.yaml` or `.conf` extension so each daemon uses the correct parser. Management tracks last start/error timestamps and exposes the `/api/v1/services/status` view consumed by `show services status`.
+
+### Reverse sites and TLS
+
+On **Proxies**, **Add** puts a new site in the local list. **Edit** loads an
+existing site's name, listen port, backends, hostnames, description and TLS
+settings; **Update site** changes that local list and **Cancel edit** discards
+the form edits. **Save** stages the list into the candidate with its loaded
+revision. Review and commit to apply; none of these form actions uploads
+certificates or starts a listener immediately.
+
+**Site TLS** opens automatically for a site with TLS enabled or a saved
+certificate reference. Enable TLS and enter `certRef` as a filename stem,
+not a file path: 1–128 ASCII letters, digits, underscores or hyphens, beginning
+with a letter or digit. For reference `plant-web`, externally provision
+`plant-web.crt` and `plant-web.key` in `/data/certs` on the management service
+host (or the directory set by `CONTAIND_CERTS_DIR`). The files must contain a
+matching PEM certificate/private-key pair, and every certificate in the chain
+must be currently valid. Files and resolved symlinks must stay inside that
+directory and be readable by the service. A container deployment needs these
+files in its mounted storage.
+
+There is no proxy-certificate upload API or web form. **System Settings**
+certificate upload replaces the management HTTPS identity, not a proxy site's
+certificate. A reference alone cannot provision the files. Missing, expired,
+not-yet-valid or mismatched material rejects application rather than falling
+back to plaintext.
+
+Proxy faults lead with a short cause summary. **Technical details** retains the
+exact reported diagnostic output, including generated configuration when the
+daemon includes it; it is not a separate generated-file or log download.
 
 ## Auth/SSH
 - Auth uses JWT cookie sessions by default with admin/view roles.
