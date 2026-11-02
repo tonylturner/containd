@@ -123,6 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration validation preserves redacted VPN credentials from the candidate.
   Management-access conflict recovery reloads the complete candidate before
   saving again, preserving other operators' staged changes.
+- Dataset deletion controls wrap long IDs on phones, and zone saves keep the
+  editor open when newer edits are still unsaved.
+- IEC 104 anomaly details offer confirmed, immediate clearing of detected
+  anomalies and tracking state, without deleting historical alert events.
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
   Unrelated saves preserve an omitted scanner mode rather than staging an explicit default.

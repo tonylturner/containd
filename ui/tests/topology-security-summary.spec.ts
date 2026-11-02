@@ -152,8 +152,8 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
   await page.goto("/zones/");
   await zoneScoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("2");
-  await expect(rowFor("ot_1").getByRole("cell").nth(4)).toHaveText("—");
+  await expect(rowFor("OT-1").locator('td[data-label="Check-based SL"]')).toHaveText("2");
+  await expect(rowFor("ot_1").locator('td[data-label="Check-based SL"]')).toHaveText("—");
 });
 
 test("arrow-containing endpoints keep distinct matrix selection and zone scores", async ({ page }) => {
@@ -191,7 +191,7 @@ test("arrow-containing endpoints keep distinct matrix selection and zone scores"
   await page.goto("/zones/");
   await scoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("a→b").getByRole("cell").nth(4)).toHaveText("2");
-  await expect(rowFor("a").getByRole("cell").nth(4)).toHaveText("—");
-  await expect(rowFor("b").getByRole("cell").nth(4)).toHaveText("—");
+  await expect(rowFor("a→b").locator('td[data-label="Check-based SL"]')).toHaveText("2");
+  await expect(rowFor("a").locator('td[data-label="Check-based SL"]')).toHaveText("—");
+  await expect(rowFor("b").locator('td[data-label="Check-based SL"]')).toHaveText("—");
 });

@@ -207,8 +207,8 @@ test("a row reversion to its derived value remains explicit while its save is ou
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
-  await row.getByRole("button", { name: "Edit", exact: true }).click();
   const alias = row.getByRole("textbox").first();
+  await expect(alias).toHaveValue("Submitted");
   await alias.fill("Original");
   await announce(page, "/zones");
   const refreshed = page.waitForResponse(read("/zones"));
@@ -328,7 +328,7 @@ for (const item of [
     await announce(page, item.path, CONFIG_STAGED);
     await rowField.fill(item.name === "Identities" ? "supervisor" : "Saved row");
     await reviewConflict(page, server, row.getByRole("button", { name: "Save", exact: true }));
-    if (item.name !== "Identities") await row.getByRole("button", { name: "Edit", exact: true }).click();
+    if (item.name === "Interfaces") await row.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(rowField).toHaveValue(item.name === "Identities" ? "supervisor" : "Saved row");
     await Promise.all([
       page.waitForResponse(read(item.path)),
@@ -423,7 +423,7 @@ test("a row save keeps later typing and another deleted row's draft, including d
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await row("lan").getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
-  await row("lan").getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(row("lan").getByRole("textbox").first()).toHaveValue("lan draft");
   await row("lan").getByRole("textbox").first().fill("later typing");
   server.change("/zones", [{ name: "lan" }]);
   await announce(page, "/zones");
@@ -513,7 +513,7 @@ test("NAT does not silently replace a chosen ingress zone removed by a refresh",
   await announce(page, "/firewall/nat");
   await expect(ingress).toHaveValue("lan");
   await expect(ingress.getByRole("option", { selected: true })).toHaveText("ingress:lan (no longer on server)");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByText("Ingress zone is no longer available. Choose a configured zone.", { exact: true })).toBeVisible();
   expect(server.writes).toHaveLength(0);
 });

@@ -59,7 +59,7 @@ for (const width of [1280, 390]) {
         if (request.url().includes("/api/v1/") && request.method() !== "GET") writes.push(request.url());
       });
       await page.goto("/interfaces/");
-      const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "lan1", exact: true }) });
+      const row = page.getByRole("row").filter({ has: page.getByText("lan1", { exact: true }) });
       const device = row.getByRole("cell").nth(2);
       const actions = row.getByRole("cell").last();
       const inspect = row.getByRole("button", { name: "Inspect", exact: true });
