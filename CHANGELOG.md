@@ -61,14 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or SSH appliance CLI; web and piped consoles refuse secret input. Full
   configuration export is explicit and admin-only; imports preserve file bytes
   for strict API validation.
+- IEC 104 anomaly details offer confirmed, immediate clearing of detected
+  anomalies and tracking state, without deleting historical alert events.
+- CLI file arguments (downloads, imports, credential files) work in local and SSH
+  appliance CLI sessions and name appliance-local paths; the web console refuses
+  them. Downloads require admin access.
 - `configure` now consistently names the configuration CLI; use SSH `wizard`
   for guided setup.
 - Configuration consoles identify configuration versus immediate Linux OS modes,
   show authoritative shared-candidate status and commit-confirmation deadlines,
   and close the web console without logging out of management. SSH setup shows
   the shared diff before commit and offers an explicit Back to CLI menu choice.
-  Status polling no longer blocks executable or SSH command entry, and typed web
-  console exit paints its destination banner before closing.
   Local `shell` / `bash` no longer silently exit; only SSH `shell` opens Linux,
   while `bash` is an ordinary unknown CLI command.
 - Administrators can stage firewall enforcement on or off from the Firewall
@@ -79,7 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - DHCP uses interface pickers and validated pool/reservation rows; IDS offers
   common rule fields, advanced JSON editing, one staged rule save and group descriptions.
-  Rule drafts survive an earlier pending page save, with save feedback visible in the dialog.
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
   focus retained after moves. A Default row always shows the
   candidate policy's fallback action for traffic no allow, deny or reject rule
@@ -119,22 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Successful VPN saves clear submitted secrets even when unrelated edits arrive
-  while saving, without discarding newer secret replacements or peer edits.
-
-- Configuration validation preserves redacted VPN credentials from the candidate.
-  Management-access conflict recovery reloads the complete candidate before
-  saving again, preserving other operators' staged changes.
-- Dataset deletion controls wrap long IDs on phones, and zone saves keep the
-  editor open when newer edits are still unsaved.
-- IEC 104 anomaly details offer confirmed, immediate clearing of detected
-  anomalies and tracking state, without deleting historical alert events.
-- Web consoles refuse CLI file arguments instead of accessing appliance files.
-  File operations remain available in local and SSH appliance CLI sessions;
-  CLI backup downloads now require admin access.
+- Configuration validation restores redacted secrets the same way staging does,
+  so a candidate with a managed OpenVPN client no longer fails validation with
+  "ca is required".
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
-  Unrelated saves preserve an omitted scanner mode rather than staging an explicit default.
 - VPN reads and stage responses redact stored secrets without falsely reporting
   configured key and certificate material as missing.
 - Proxy preflight preserves daemon configuration filename extensions so Envoy
