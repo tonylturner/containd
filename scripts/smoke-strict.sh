@@ -154,7 +154,8 @@ assert_exit() {
   [[ $status == exited ]] || fail "refusal did not exit: $status"
   [[ $(docker inspect --format '{{.State.ExitCode}}' "$cid") == 1 ]] || fail 'refusal exit code is not 1'
   logs >"$scratch/refusal.log"
-  grep -F -- "$expected" "$scratch/refusal.log" >/dev/null || fail "missing refusal: $expected"
+  # Structured logs JSON-escape quotes inside the refusal message.
+  sed 's/\\"/"/g' "$scratch/refusal.log" | grep -F -- "$expected" >/dev/null || fail "missing refusal: $expected"
 }
 claimed="Strict$(openssl rand -hex 12)Aa1"
 
@@ -233,9 +234,13 @@ services:
       - |
         set -eu
         trap 'exit 0' TERM INT
+        # Docker's own netns state (embedded-DNS nat table, packet sockets)
+        # exists before containd starts; only additions are containd's.
+        nft list tables | sort -u > /tmp/tables.base
+        awk 'NR > 1 { print $$9 }' /proc/net/packet | sort -u > /tmp/packets.base
         while :; do
           nft list tables >> /tmp/tables
-          cat /proc/net/packet >> /tmp/packets
+          awk 'NR > 1 { print $$9 }' /proc/net/packet >> /tmp/packets
           ps -eo comm >> /tmp/processes
           touch /tmp/ready
           sleep 0.1
@@ -264,7 +269,7 @@ YAML
   fi
   compose up -d
   assert_exit "$message"
-  compose exec -T observer sh -c 'test -f /tmp/tables && test -f /tmp/processes && test -f /tmp/packets && test ! -s /tmp/tables && ! grep -Eq "clamd|freshclam|tcpdump" /tmp/processes && ! grep -Eq "^[0-9a-fA-F]+[[:space:]]" /tmp/packets'
+  compose exec -T observer sh -c 'test -f /tmp/tables && test -f /tmp/processes && test -f /tmp/packets && sort -u /tmp/tables | cmp -s - /tmp/tables.base && sort -u /tmp/packets | cmp -s - /tmp/packets.base && ! grep -Eq "clamd|freshclam|tcpdump" /tmp/processes' || fail 'refusal left netfilter, packet-socket or AV state'
   ! grep -Eq 'containd engine starting|data plane capture' "$scratch/refusal.log" || fail 'engine started before refusal'
   fixture <<'PY'
 from pathlib import Path
