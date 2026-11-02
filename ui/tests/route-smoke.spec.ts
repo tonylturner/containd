@@ -5,6 +5,7 @@ import { pressure } from "./fixtures/iec104-pressure";
 import { mockProtection } from "./fixtures/protection-api";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
+import { fulfillSeries } from "./fixtures/telemetry";
 
 const routeExpectations = {
   "/": { heading: "Dashboard", api: "/dashboard" },
@@ -174,6 +175,8 @@ const dashboard = {
     icsRules: malformedFirewallRules.length,
   },
   eventStats: {
+    windowSeconds: 86400,
+    complete: true,
     total: 0,
     idsAlerts: 0,
     modbusWrites: 0,
@@ -432,6 +435,7 @@ function responseFor(pathname: string) {
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/telemetry/series") return fulfillSeries(route);
     if (url.pathname === "/api/v1/events" && url.searchParams.has("query")) {
       await route.fulfill(json({ events: [], historyTruncated: false }));
       return;

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillSeries } from "./fixtures/telemetry";
 
-const meter = { sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0 };
+const meter = { count: 0, errors_count: 0 };
 const audit = { enabled: true, sent_total: 4, failed_total: 0, last_error: "", last_flush: "", backlog: 0, forwarders: [] };
 const syslog = { ...meter, configured_forwarders: 1, sent_total: 4, failed_total: 0, last_error: "", last_batch: 17, events: [], audit };
 const gate = { state: "open", enabled: true, fail_policy: "closed", admit: "open", listeners: [], scanner: { ready: true }, connections: 0 };
@@ -34,6 +35,7 @@ async function mock(page: Page, live: unknown = status, fails: (path: string) =>
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     if (request.method() !== "GET") writes.push(request.postData() ?? "");
     if (fails(path)) return route.fulfill({ status: 503, json: { error: "Configuration unavailable" } });
+    if (path === "/telemetry/series") return fulfillSeries(route);
     const body = path.startsWith("/auth/") ? { id: "admin", username: "containd", role: "admin" }
       : path === "/services/status" ? live
         : configs[path] ?? (["/zones", "/assets", "/interfaces", "/interfaces/state", "/ids/sources", "/services/dhcp/leases"].includes(path) ? [] : {});
@@ -67,6 +69,13 @@ for (const [path, endpoint, label, detail] of [
     for (const input of await page.locator('main input:not([type="hidden"]), main textarea, main select').all()) {
       // Auto-refresh and immediate definition actions are not staged settings.
       if (await input.evaluate(el => el.closest('[aria-label="Immediate definition actions"]') !== null)) continue;
+      // Read-only history controls must work even when staged configuration cannot load.
+      if (await input.evaluate(el => el.matches("[data-telemetry] select"))) {
+        await expect(input).toBeEnabled();
+        await input.selectOption("24h");
+        await expect(input).toHaveValue("24h");
+        continue;
+      }
       if (await input.getAttribute("type") === "checkbox" && await input.isEnabled()) {
         await expect(input.locator("..")).toContainText("Auto");
       } else {
