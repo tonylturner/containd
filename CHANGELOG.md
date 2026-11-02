@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- API: `/api/v1/security/conduits` `ids` is now `enabled` or `disabled` (was
+  `full`, `partial` or `none`) and each conduit has a `checks` object with
+  `provenance` and `reason` per control. Heuristic `gaps` and `mitre` entries
+  carry a `Heuristic (...)` prefix. IDS import responses list the added rules in
+  `rules`, with evaluability metadata. WireGuard now refuses new or edited IPv6
+  values; stored ones stay quarantined.
 - The appliance keeps counter history in a new SQLite file, `/data/telemetry.db`
   (`CONTAIND_TELEMETRY_DB`), capped at 64 MiB: 10 s points for 1 hour, 1 minute
   for 24 hours and 15 minutes for 30 days. History starts empty after the upgrade.
