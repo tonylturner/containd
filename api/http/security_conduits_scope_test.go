@@ -52,7 +52,7 @@ func TestProtocolScopeConduits(t *testing.T) {
 				t.Errorf("rule description=%q want=%q", got, want)
 			}
 			mitre := computeMitre("allow", true, "lan", entries)
-			for _, technique := range []string{"T0886 Remote Services OT", "T0843 Program Download"} {
+			for _, technique := range []string{"Heuristic (allowed service ports): T0886 Remote Services OT", "Heuristic (allowed service ports): T0843 Program Download"} {
 				if got := slices.Contains(mitre, technique); got != tc.industrial {
 					t.Errorf("%s classification=%t want=%t (%v)", technique, got, tc.industrial, mitre)
 				}
@@ -118,7 +118,7 @@ func TestConduitProtocolPortChecks(t *testing.T) {
 			if got := slices.Contains(result.Gaps, "Heuristic (service ports): ICS traffic mixed with plaintext IT protocols"); got != tc.plaintext {
 				t.Errorf("plaintext gap=%t want=%t (%v)", got, tc.plaintext, result.Gaps)
 			}
-			if got := slices.Contains(result.Mitre, "T0886 Remote Services OT"); got != tc.industrial {
+			if got := slices.Contains(result.Mitre, "Heuristic (allowed service ports): T0886 Remote Services OT"); got != tc.industrial {
 				t.Errorf("industrial classification=%t want=%t (%v)", got, tc.industrial, result.Mitre)
 			}
 		})

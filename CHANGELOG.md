@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Distinguish configured topology checks from heuristics and unknown evidence;
   remove assumed authentication and verification passes. Show global IDS settings
   without claiming conduit coverage.
-- Label port-based plaintext-mixing gaps and zone-name MITRE hints as heuristics
-  in the existing conduit text, without changing classifications or response shapes.
+- Label port-based plaintext-mixing gaps and all inferred MITRE mappings with
+  their heuristic evidence basis in the existing conduit text, without changing
+  classifications or response shapes.
 - Label non-evaluable IDS imports as storage-only, show conversion notes per rule
   and in import results, and clarify that YARA imports do not execute or detect threats.
 - Reject unsupported IPv6 in new or edited WireGuard tunnel addresses, AllowedIPs

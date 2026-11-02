@@ -6,16 +6,34 @@ test.beforeEach(async ({ page }) => {
     const path = new URL(route.request().url()).pathname;
     const data: Record<string, unknown> = {
       "/api/v1/config/running": { interfaces: [] },
-      "/api/v1/config": { zones: [{ name: "wan" }, { name: "ot" }], interfaces: [], firewall: { rules: [] } },
+      "/api/v1/config": {
+        zones: [{ name: "wan" }, { name: "ot" }], interfaces: [],
+        dataplane: { nfqueueGroup: 101 },
+        firewall: {
+          defaultAction: "DENY",
+          rules: [{
+            id: "real-port-hints", action: "ALLOW", sourceZones: ["wan"], destZones: ["ot"],
+            protocols: [{ name: "tcp", port: "502" }, { name: "tcp", port: "80" }, { name: "tcp", port: "22" }],
+            ics: { protocol: "modbus", mode: "enforce" },
+          }],
+        },
+      },
       "/api/v1/config/diff": { changed: false, changedSections: [] },
       "/api/v1/interfaces/state": [],
       "/api/v1/flows": [],
       "/api/v1/zones": [{ name: "wan", slTarget: 1 }, { name: "ot", slTarget: 2 }],
       "/api/v1/security/conduits": [{
-        from: "wan", to: "ot", state: "allow", ids: "disabled", checks: securityChecks, proto: [{ n: "tcp", t: "allowed" }],
-        traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: ["allow-test"],
+        from: "wan", to: "ot", state: "partial", ids: "disabled", checks: securityChecks,
+        proto: [{ n: "Modbus", t: "inspect" }, { n: "HTTP", t: "inspect" }, { n: "SSH", t: "inspect" }],
+        traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: ["ALLOW Modbus/HTTP/SSH from WAN to OT"],
         gaps: ["Heuristic (service ports): ICS traffic mixed with plaintext IT protocols"],
-        mitre: ["Heuristic (source zone name): T1190 Exploit Public App", "Heuristic (source zone name): T1595 Active Scanning"],
+        mitre: [
+          "Heuristic (allowed service ports): T0886 Remote Services OT",
+          "Heuristic (allowed service ports): T0843 Program Download",
+          "Heuristic (source zone name): T1190 Exploit Public App",
+          "Heuristic (source zone name): T1595 Active Scanning",
+          "Heuristic (allowed service ports): T1021 Remote Services",
+        ],
       }],
       "/api/v1/system/inspection": {
         host: { os: "Linux", kernel: "6.1", arch: "arm64", numCPU: 2 }, runtime: { dockerVersion: "27" },
@@ -66,6 +84,9 @@ test("security gaps and conduit inspector are keyboard reachable with distinct s
   await expect(cell).toHaveAttribute("aria-expanded", "true");
   const inspector = page.getByRole("region", { name: "Conduit details", exact: true });
   await expect(inspector.getByText("Heuristic (service ports): ICS traffic mixed with plaintext IT protocols", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (allowed service ports): T0886 Remote Services OT", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (allowed service ports): T0843 Program Download", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (allowed service ports): T1021 Remote Services", { exact: true })).toBeVisible();
   await expect(inspector.getByText("Heuristic (source zone name): T1190 Exploit Public App", { exact: true })).toBeVisible();
   await expect(inspector.getByText("Heuristic (source zone name): T1595 Active Scanning", { exact: true })).toBeVisible();
   await expect(inspector.getByText("Saved target", { exact: true })).toHaveCount(2);
@@ -85,7 +106,8 @@ test("logical graph node opens its inspector with Enter", async ({ page }) => {
   await node.focus();
   await expect(node).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByText("Policy Rules", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByText("Policy Rules", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByLabel("Rule real-port-hints", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByText("Hostname", { exact: true })).toBeVisible();
   await page.getByRole("region", { name: "Topology inspector", exact: true }).getByRole("button", { name: "Hide detail panel" }).click();
   await expect(node).toBeFocused();

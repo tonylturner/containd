@@ -111,9 +111,12 @@ must specify ports; ICMP does not require a port. An unrestricted
 host grant cannot be cancelled by a separate TCP/443 grant. Unproved cases
 (including ICS-only grants) remain unknown and never pass automatically.
 The plaintext-mixing entry in `gaps` is prefixed **Heuristic (service ports)**.
-The T1190 and T1595 entries inferred from a source zone named `internet` or `wan`
-are prefixed **Heuristic (source zone name)** in `mitre`. These are presentation
-hints, not observed plaintext or attack evidence; both fields remain string arrays.
+Every inferred mapping in `mitre` carries a heuristic evidence-basis prefix:
+**Heuristic (allowed service ports)** for T0886, T0843 and T1021;
+**Heuristic (policy state)** for T1048; and **Heuristic (source zone name)**
+for T1190 and T1595 inferred from a source zone named `internet` or `wan`.
+These are presentation hints, not observed plaintext or attack evidence;
+both fields remain string arrays.
 `traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).
 Measured and recorded demo counts, coverage, and unavailable reasons follow the
 [telemetry contract](#retained-counter-history); there is no percent-of-baseline value.

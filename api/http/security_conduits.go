@@ -477,10 +477,10 @@ func computeMitre(state string, protoWhitelist bool, fromZone string, protos []p
 	}
 
 	if state != "block" && hasICSPort {
-		mitre = append(mitre, "T0886 Remote Services OT", "T0843 Program Download")
+		mitre = append(mitre, "Heuristic (allowed service ports): T0886 Remote Services OT", "Heuristic (allowed service ports): T0843 Program Download")
 	}
 	if state == "allow" && !protoWhitelist {
-		mitre = append(mitre, "T1048 Exfiltration Over Alt Protocol")
+		mitre = append(mitre, "Heuristic (policy state): T1048 Exfiltration Over Alt Protocol")
 	}
 
 	fromLower := strings.ToLower(fromZone)
@@ -490,7 +490,7 @@ func computeMitre(state string, protoWhitelist bool, fromZone string, protos []p
 
 	for _, p := range protos {
 		if adminProtos[p.N] {
-			mitre = append(mitre, "T1021 Remote Services")
+			mitre = append(mitre, "Heuristic (allowed service ports): T1021 Remote Services")
 			break
 		}
 	}
