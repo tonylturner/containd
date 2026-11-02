@@ -104,6 +104,9 @@ func opsDownload(api *API, path func(string) string, usage string) Command {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: %s <id> <new-file>", usage)
 		}
+		if err := requireLocalFilesystem(ctx); err != nil {
+			return err
+		}
 		raw, _, err := api.requestBytes(ctx, http.MethodGet, path(args[0]), nil, "")
 		if err != nil {
 			return err

@@ -313,6 +313,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 }
 
 func (s *Server) handleSession(ctx context.Context, username, remote string, reg *cli.Registry, ch ssh.Channel, in <-chan *ssh.Request) {
+	ctx = cli.WithLocalFilesystem(ctx, true)
 	defer func() {
 		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
 			conn.close()

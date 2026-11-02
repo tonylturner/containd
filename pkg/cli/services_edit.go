@@ -161,6 +161,13 @@ func registerServiceFields(r *Registry, api *API, prefix, endpoint string, field
 			if len(args) != 1 {
 				return fmt.Errorf("usage: %s <value> (lists: comma-separated, - clears)", name)
 			}
+			// Credential *-file fields read caller-supplied paths before any
+			// candidate API call. Web commands must never reach that parser.
+			if strings.HasSuffix(field.name, "-file") {
+				if err := requireLocalFilesystem(ctx); err != nil {
+					return err
+				}
+			}
 			value, err := field.parse(args[0])
 			if err != nil {
 				return fmt.Errorf("%s: %w", field.name, err)

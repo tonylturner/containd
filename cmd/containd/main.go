@@ -136,7 +136,7 @@ func runCLI(ctx context.Context) error {
 		return err
 	}
 	reg := cli.NewRegistry(nil, api)
-	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
+	cmdCtx := cli.WithLocalFilesystem(cli.WithRole(ctx, string(cli.RoleAdmin)), true)
 
 	entry, role := api.SessionEntry(ctx)
 	fmt.Println(entry)

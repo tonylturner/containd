@@ -92,7 +92,8 @@ func runServiceEdits(t *testing.T, endpoint string, cases []serviceEditCase) {
 		t.Run(tc.line, func(t *testing.T) {
 			client := newServiceEditClient(t, endpoint, tc.initial)
 			var out bytes.Buffer
-			err := serviceRegistry(client).ParseAndExecute(WithRole(context.Background(), "admin"), tc.line, &out)
+			ctx := WithLocalFilesystem(WithRole(context.Background(), "admin"), true)
+			err := serviceRegistry(client).ParseAndExecute(ctx, tc.line, &out)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +230,7 @@ func TestServiceVPNRejectsEmptyCredentialFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := newServiceEditClient(t, "", `{}`)
-	err := serviceRegistry(client).Execute(WithRole(context.Background(), "admin"),
+	err := serviceRegistry(client).Execute(WithLocalFilesystem(WithRole(context.Background(), "admin"), true),
 		"set vpn wireguard private-key-file", io.Discard, []string{path})
 	if err == nil || !strings.Contains(err.Error(), "credential file is empty") || len(client.requests) != 0 {
 		t.Fatalf("empty credential reached API: %v %v", err, client.requests)
@@ -303,7 +304,8 @@ func TestServiceEditsRejectInvalidIntent(t *testing.T) {
 	} {
 		t.Run(line, func(t *testing.T) {
 			client := newServiceEditClient(t, "", `{}`)
-			err := serviceRegistry(client).ParseAndExecute(WithRole(context.Background(), "admin"), line, io.Discard)
+			ctx := WithLocalFilesystem(WithRole(context.Background(), "admin"), true)
+			err := serviceRegistry(client).ParseAndExecute(ctx, line, io.Discard)
 			if err == nil || len(client.requests) != 0 {
 				t.Fatalf("invalid intent reached API: %v %v", err, client.requests)
 			}

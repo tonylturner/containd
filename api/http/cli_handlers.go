@@ -48,6 +48,7 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 		}
 		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
 		ctx = cli.WithSecretPrompt(ctx, cli.RefuseWebSecretInput)
+		ctx = cli.WithLocalFilesystem(ctx, false)
 		reg := cli.NewRegistry(store, apiClient)
 		var buf bytes.Buffer
 		if err := reg.ParseAndExecute(ctx, r.Line, &buf); err != nil {
@@ -137,6 +138,7 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 		}
 		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
 		ctx = cli.WithSecretPrompt(ctx, cli.RefuseWebSecretInput)
+		ctx = cli.WithLocalFilesystem(ctx, false)
 		reg := cli.NewRegistry(store, apiClient)
 		entry, role := apiClient.SessionEntry(ctx)
 		send := func(r resp) error {

@@ -4,6 +4,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	httpapi "github.com/tonylturner/containd/api/http"
@@ -23,9 +25,13 @@ type handlerClient struct {
 	t       *testing.T
 	raw     string
 	posts   int
+	remote  string
 }
 
+var importClientSequence atomic.Uint64
+
 func (c *handlerClient) Do(r *http.Request) (*http.Response, error) {
+	r.RemoteAddr = c.remote
 	if r.Method == "POST" {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -53,7 +59,10 @@ func TestOpsImportStrictAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	ctx := cli.WithRole(context.Background(), "admin")
+	ctx := cli.WithLocalFilesystem(cli.WithRole(context.Background(), "admin"), true)
+	// Each invocation models a separate client. Repeated test runs must not
+	// share the API's process-wide sensitive-write budget for one empty IP.
+	remote := fmt.Sprintf("[2001:db8::%x]:12345", importClientSequence.Add(1))
 	if err := store.Save(ctx, config.DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +79,7 @@ func TestOpsImportStrictAPI(t *testing.T) {
 			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			client := &handlerClient{handler: handler, t: t, raw: raw}
+			client := &handlerClient{handler: handler, t: t, raw: raw, remote: remote}
 			api := &cli.API{BaseURL: "http://appliance", Token: "lab", Client: client}
 			err = cli.NewRegistry(nil, api).Execute(ctx, "import config", io.Discard, []string{file})
 			if err == nil || !strings.Contains(err.Error(), "400") || client.posts != 1 {
@@ -87,7 +96,7 @@ func TestOpsImportStrictAPI(t *testing.T) {
 	if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	client := &handlerClient{handler: handler, t: t, raw: raw}
+	client := &handlerClient{handler: handler, t: t, raw: raw, remote: remote}
 	var out bytes.Buffer
 	if err := cli.NewRegistry(nil, &cli.API{BaseURL: "http://appliance", Token: "lab", Client: client}).Execute(ctx, "import config", &out, []string{file}); err != nil {
 		t.Fatal(err)
