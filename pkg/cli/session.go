@@ -11,6 +11,14 @@ import (
 
 const SessionExit = "Leaving configuration CLI. Shared candidate changes are unchanged; nothing has been committed or discarded."
 
+// SessionConfigure names the existing configuration interpreter, never a wizard.
+func SessionConfigure(line string) (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(line), "configure") {
+		return "Already in configuration CLI. Configuration edits are staged until commit.", true
+	}
+	return "", false
+}
+
 // SessionStatus is presentation only. It never supplies a mutation revision.
 type SessionStatus struct {
 	Known     bool

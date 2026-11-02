@@ -159,7 +159,7 @@ func runCLI(ctx context.Context) error {
 	// "set firewall rule") and the completer just filters by the
 	// current line. Liner handles single-match auto-fill + multi-match
 	// listing on its own.
-	commands := append(reg.Commands(), "exit", "quit", "logout", "help")
+	commands := append(reg.Commands(), "configure", "exit", "quit", "logout", "help")
 	sort.Strings(commands)
 	state.SetCompleter(func(line string) []string {
 		needle := strings.ToLower(line)
@@ -193,8 +193,12 @@ func runCLI(ctx context.Context) error {
 		fmt.Println(status.String())
 		return state.Prompt(status.Prompt(role))
 	}, state.AppendHistory, func(line string, buf *strings.Builder) error {
+		if output, handled := cli.SessionConfigure(line); handled {
+			fmt.Fprintln(buf, output)
+			return nil
+		}
 		if strings.EqualFold(line, "help") {
-			fmt.Fprintln(buf, "Session controls: exit / quit / logout end this CLI process. Use the SSH wizard for guided setup.")
+			fmt.Fprintln(buf, "Session controls: configure names this CLI; exit / quit / logout end this CLI process. Use the SSH wizard for guided setup.")
 		}
 		return cli.SessionCommandError(line, reg.ParseAndExecute(cmdCtx, line, buf))
 	}, interactive, os.Stdout, os.Stderr)

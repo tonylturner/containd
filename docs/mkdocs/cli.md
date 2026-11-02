@@ -360,7 +360,8 @@ connection is open. With a JWT secret, the login's session also ends after 4
 hours; reconnect after that. Lab mode without a JWT secret has no session
 and no such limit.
 The `menu`, `wizard` and `diagnostics` commands exist only in the appliance
-SSH CLI. There, `configure` opens the setup wizard, the same as `wizard`.
+SSH CLI. `wizard` opens guided setup. `configure` inside any configuration CLI
+only confirms that you are already there; it never starts the wizard.
 
 Access and lab caveats:
 

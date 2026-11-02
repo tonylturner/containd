@@ -14,6 +14,18 @@ type sessionHTTP func(*http.Request) (*http.Response, error)
 
 func (f sessionHTTP) Do(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestSessionConfigure(t *testing.T) {
+	for _, line := range []string{"configure", " CONFIGURE "} {
+		output, handled := SessionConfigure(line)
+		if !handled || !strings.Contains(output, "Already in configuration CLI") {
+			t.Fatal(output, handled)
+		}
+	}
+	if _, handled := SessionConfigure("wizard"); handled {
+		t.Fatal("guided setup is not configure")
+	}
+}
+
 func TestSessionStatus(t *testing.T) {
 	for _, tt := range []struct{ body, marker, status string }{
 		{`{"changed":false}`, "(config)#", "Candidate matches running"},

@@ -37,6 +37,10 @@ func cliExecuteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, resp{Output: ""})
 			return
 		}
+		if output, handled := cli.SessionConfigure(r.Line); handled {
+			c.JSON(http.StatusOK, resp{Output: output})
+			return
+		}
 		apiClient, err := cliAPIForRequest(c)
 		if err != nil {
 			c.JSON(http.StatusOK, resp{Error: err.Error()})
@@ -168,13 +172,19 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 				_ = conn.WriteJSON(resp{Output: cli.SessionExit, Control: "close"})
 				return
 			}
+			if output, handled := cli.SessionConfigure(line); handled {
+				if send(resp{Output: output}) != nil {
+					return
+				}
+				continue
+			}
 			var buf bytes.Buffer
 			err = nil
 			if line != "" {
 				err = cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
 			}
 			if strings.EqualFold(line, "help") {
-				buf.WriteString("\nSession controls: exit / quit / logout close console (not management logout); clear clears terminal output. No OS shell, menu or wizard here.\n")
+				buf.WriteString("\nSession controls: configure names this CLI; exit / quit / logout close console (not management logout); clear clears terminal output. No OS shell, menu or wizard here.\n")
 			}
 			r := resp{Output: buf.String()}
 			if err != nil {

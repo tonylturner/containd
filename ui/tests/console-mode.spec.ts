@@ -33,7 +33,9 @@ for (const width of [1280, 390]) {
         } else {
           lastCommand = request.line;
           ws.send(JSON.stringify({
-            output: request.line === "show version" ? "containd 0.1.38" : "Session controls: exit",
+            output: request.line === "show version" ? "containd 0.1.38"
+              : request.line === "configure" ? "Already in configuration CLI."
+              : "Session controls: exit",
             error: request.line === "pwd" ? "This is the configuration CLI, not Linux." : undefined,
             ...status(),
           }));
@@ -49,6 +51,11 @@ for (const width of [1280, 390]) {
     await expect(page.locator("#dashboard-console")).toContainText("Candidate matches running");
     const input = page.locator(".xterm-helper-textarea");
     await input.focus();
+    await page.keyboard.type("conf");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => lastCommand).toBe("configure");
+    await expect(page.locator(".xterm-rows")).toContainText("Already in configuration CLI");
     await page.keyboard.type("show vers");
     changed = true; // Another session stages an edit.
     await expect(page.locator("#dashboard-console")).toContainText("Pending changes", { timeout: 10000 });

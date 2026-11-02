@@ -459,6 +459,10 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		if line == "" {
 			continue
 		}
+		if output, handled := cli.SessionConfigure(line); handled {
+			writeTTY(rw, output+"\n")
+			continue
+		}
 		switch strings.ToLower(line) {
 		case "exit", "quit", "logout":
 			return
@@ -477,14 +481,14 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		case "diagnostics", "diag":
 			s.runDiagnosticsMenu(ctx, rw, reader, reg)
 			continue
-		case "wizard", "configure":
+		case "wizard":
 			s.runWizard(ctx, username, rw, reader, reg)
 			continue
 		}
 		var buf strings.Builder
 		err := cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
 		if strings.EqualFold(line, "help") {
-			buf.WriteString("\nSSH controls: shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
+			buf.WriteString("\nSSH controls: configure names this CLI; shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
 		}
 		if s.opts.AuditStore != nil {
 			rec := audit.Record{

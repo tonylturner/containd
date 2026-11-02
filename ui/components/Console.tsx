@@ -11,7 +11,7 @@ import { cliWebSocketURL } from "../lib/api-core";
 import { getPersistCLIHistory } from "../lib/prefs";
 
 function sessionCommands(commands: string[]) {
-  return [...commands.map((command) => command.toLowerCase()), "exit", "quit", "logout", "clear"];
+  return [...commands.map((command) => command.toLowerCase()), "configure", "exit", "quit", "logout", "clear"];
 }
 
 export function Console({ onClose }: { onClose: () => void }) {

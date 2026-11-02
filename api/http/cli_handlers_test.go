@@ -199,6 +199,15 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	}
 
 	// Mode errors must not execute Linux tools or terminate the console.
+	if err := conn.WriteJSON(map[string]string{"line": "configure"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&cmdResp); err != nil {
+		t.Fatal(err)
+	}
+	if cmdResp.Error != "" || !strings.Contains(cmdResp.Output, "Already in configuration CLI") {
+		t.Fatal(cmdResp)
+	}
 	if err := conn.WriteJSON(map[string]string{"line": "pwd"}); err != nil {
 		t.Fatal(err)
 	}
