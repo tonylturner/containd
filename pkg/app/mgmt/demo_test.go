@@ -71,26 +71,51 @@ func (e *demoEngine) assertStopped(t *testing.T) {
 	}
 }
 
-type demoCounter struct{ value uint64 }
+type demoCounter struct {
+	sample     wire.CounterSample
+	background uint64
+}
 
 func (r *demoCounter) TelemetryCounters(context.Context) (wire.CounterSnapshot, error) {
-	return wire.CounterSnapshot{Samples: []wire.CounterSample{{Metric: wire.IfaceRxBytes, Origin: wire.OriginReal, Epoch: "kernel", Value: r.value}}}, nil
+	return wire.CounterSnapshot{Samples: []wire.CounterSample{
+		r.sample,
+		{Metric: wire.IfaceRxBytes, Origin: wire.OriginReal, Epoch: "kernel", Value: r.background},
+		{Metric: wire.EventsClass, Origin: wire.OriginReal, Epoch: "engine", Dims: map[string]string{"source": "engine", "class": "modbus_write"}, Value: r.background},
+		{Metric: wire.EventsTotal, Origin: wire.OriginReal, Epoch: "engine", Dims: map[string]string{"source": "engine"}, Value: r.background},
+		{Metric: wire.EventsClass, Origin: wire.OriginReal, Epoch: "mgmt", Dims: map[string]string{"source": "services", "class": "ids_alert"}, Value: r.background},
+	}}, nil
 }
 
 func TestDemoAutoSamplerAndUpgrade(t *testing.T) {
+	for _, sample := range []wire.CounterSample{
+		{Metric: wire.ConduitBytes},
+		{Metric: wire.EventsClass, Dims: map[string]string{"source": "engine", "class": "ids_alert"}},
+		{Metric: wire.EventsClass, Dims: map[string]string{"source": "engine", "class": "av_detection"}},
+		{Metric: wire.EventsClass, Dims: map[string]string{"source": "engine", "class": "av_block"}},
+	} {
+		t.Run(string(sample.Metric)+"/"+sample.Dims["class"], func(t *testing.T) {
+			testDemoAutoSamplerAndRestart(t, sample)
+		})
+	}
+}
+
+func testDemoAutoSamplerAndRestart(t *testing.T, sample wire.CounterSample) {
+	t.Helper()
 	for _, upgraded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fresh", true: "upgraded"}[upgraded], func(t *testing.T) {
 			ctx := context.Background()
 			dir := t.TempDir()
 			e := &demoEngine{boot: "a"}
 			r := loadDemoReconciler(filepath.Join(dir, "demo.json"), e)
-			store, err := history.Open(filepath.Join(dir, "telemetry.db"))
+			storePath := filepath.Join(dir, "telemetry.db")
+			store, err := history.Open(storePath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			r.history = store
-			counters := &demoCounter{value: 100}
+			sample.Origin, sample.Epoch, sample.Value = wire.OriginReal, "engine", 100
+			counters := &demoCounter{sample: sample}
 			sampler := history.NewSampler(store, counters)
 			sampler.AfterTick = r.Reconcile
 			r.EngineSynced(ctx, "a")
@@ -103,15 +128,17 @@ func TestDemoAutoSamplerAndUpgrade(t *testing.T) {
 			}
 			tick(0)
 			e.assertStopped(t)
+			counters.background++
 			if upgraded {
-				counters.value++
+				counters.sample.Value++
 			}
 			tick(1)
 			st, err := r.SimulationStatus(ctx)
 			if err != nil || st.Preference != demo.Auto || st.Running == upgraded {
 				t.Fatal(st, err)
 			}
-			counters.value++
+			counters.sample.Value++
+			counters.background++
 			tick(2)
 			st, _ = r.SimulationStatus(ctx)
 			if st.Running || st.Reason != "real traffic observed" {
@@ -120,9 +147,26 @@ func TestDemoAutoSamplerAndUpgrade(t *testing.T) {
 			tick(3)
 			e.reboot("b")
 			r.EngineSynced(ctx, "b")
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store, err = history.Open(storePath)
+			if err != nil {
+				t.Fatal(err)
+			}
 			r = loadDemoReconciler(r.path, e)
 			r.history = store
 			r.EngineSynced(ctx, "b")
+			st, _ = r.SimulationStatus(ctx)
+			if st.Running || st.Reason != "real traffic observed" {
+				t.Fatal(st)
+			}
+			// A new sampler has no observed interval yet. Once it is ready,
+			// retained activity still prevents auto from restarting.
+			sampler = history.NewSampler(store, counters)
+			sampler.AfterTick = r.Reconcile
+			tick(4)
+			tick(5)
 			st, _ = r.SimulationStatus(ctx)
 			if st.Running || st.Reason != "real traffic observed" {
 				t.Fatal(st)
