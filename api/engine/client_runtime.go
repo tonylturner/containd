@@ -79,7 +79,7 @@ func (c *HTTPClient) QueryEvents(ctx context.Context, q dpevents.Query) (dpevent
 	return page, err
 }
 
-// ListProtoStats fetches protocol counters derived from live DPI events.
+// ListProtoStats fetches captured-packet, payload-byte, and semantic event counters per protocol.
 func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/stats/protocols", nil)
 	if err != nil {
@@ -103,7 +103,7 @@ func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, er
 	return out, nil
 }
 
-// ListTopTalkers fetches top flow summaries derived from live DPI events.
+// ListTopTalkers fetches directional host-pair/protocol counters derived from captured packets.
 func (c *HTTPClient) ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error) {
 	u := c.BaseURL + "/internal/stats/top-talkers"
 	if n > 0 {
