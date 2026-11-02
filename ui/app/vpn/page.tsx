@@ -45,6 +45,7 @@ import { VPNRuntimeStatusCard } from "./vpn-runtime-status";
 import { WireGuardRuntimeCard } from "./vpn-wireguard-runtime";
 import { WireGuardKeyEditor } from "./vpn-wireguard-key";
 import { WireGuardPeerEditor, parsePeers } from "./vpn-wireguard-peers";
+import { scrubSubmittedVPNSecrets } from "./vpn-secret-draft";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -263,17 +264,19 @@ export default function VPNPage() {
         pushRoutes: text("pushRoutes", (openvpn.server.pushRoutes ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
       };
     }
-    const saved = await write(base => api.setVPN(base, {
+    const submitted = {
       ...cfg,
       wireguard: { ...cfg.wireguard, peers },
       openvpn,
-    }), { replace: data => normalize(data) });
+    };
+    const saved = await write(base => api.setVPN(base, submitted), { replace: data => normalize(data) });
     setSaveState(saved.ok ? "saved" : revisionError(saved) === null ? "idle" : "error");
     if (!saved.ok) {
       const msg = revisionError(saved);
       setError(msg);
       if (msg) toast(msg, "error");
     } else {
+      setCfg(current => scrubSubmittedVPNSecrets(current, submitted));
       if (saved.adopted && saved.unchanged) {
         setGeneratedKey(current => current ? { ...current, revision: saved.revision } : null);
       }

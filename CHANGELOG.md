@@ -116,6 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Successful VPN saves clear submitted secrets even when unrelated edits arrive
+  while saving, without discarding newer secret replacements or peer edits.
+
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
 - VPN reads and stage responses redact stored secrets without falsely reporting

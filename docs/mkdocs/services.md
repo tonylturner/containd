@@ -230,7 +230,11 @@ A stored private key shows **Private key configured — Replace**, without
 revealing it. **Generate key pair** uses WebCrypto X25519 in the browser; it is
 hidden with an explanation when unsupported. Only the private key is submitted
 in the staged write, not in a URL or browser storage. Replacing the server key
-requires updating clients. Saving clears the replacement field.
+requires updating clients. A successful Save clears each submitted secret field
+even if you edit peers while it is pending. A newer replacement entered during
+that request remains an unsaved draft; failed saves retain the draft for review.
+This applies to the WireGuard private key and managed OpenVPN CA, certificate,
+private key and password.
 
 Client downloads require a known server public key (generated in this editor or
 from live tunnel status) and a server endpoint with port entered in the download

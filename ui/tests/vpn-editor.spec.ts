@@ -11,6 +11,7 @@ async function vpn(page: Page, configured = true, options: { noPublicKey?: boole
   await protectionAPI(page, observation(), { role: options.role });
   const state = {
     revision: 1,
+    holdWrite: undefined as Promise<void> | undefined,
     writes: [] as { body: VPNConfig; revision: string | undefined }[],
     cfg: {
       wireguard: { enabled: true, interface: "wg0", listenPort: 51820, addressCIDR: "10.8.0.1/24", privateKeyConfigured: configured, peers: [] },
@@ -30,12 +31,20 @@ async function vpn(page: Page, configured = true, options: { noPublicKey?: boole
     if (req.method() !== "GET") {
       const body = req.postDataJSON() as VPNConfig;
       state.writes.push({ body, revision: req.headers()["x-containd-if-revision"] });
+      if (state.holdWrite) await state.holdWrite;
       if (options.failWrite) return route.fulfill({ status: 412, json: { code: "config_revision_mismatch", error: "Configuration changed", currentRevision: "0123456789abcdef.2" } });
       const privateKeyConfigured = !!body.wireguard?.privateKey || !!state.cfg.wireguard?.privateKeyConfigured;
+      const previousManaged = state.cfg.openvpn?.managed;
       state.cfg = structuredClone(body);
       delete state.cfg.wireguard?.privateKey;
       state.cfg.wireguard!.privateKeyConfigured = privateKeyConfigured;
-      for (const field of ["ca", "cert", "key", "password"] as const) delete state.cfg.openvpn?.managed?.[field];
+      for (const field of ["ca", "cert", "key", "password"] as const) {
+        const managed = state.cfg.openvpn?.managed;
+        if (managed) {
+          managed[`${field}Configured`] = !!managed[field] || !!previousManaged?.[`${field}Configured`];
+          delete managed[field];
+        }
+      }
       state.revision++;
     }
     await route.fulfill({ json: state.cfg, headers: { "X-Containd-Revision": `0123456789abcdef.${state.revision}` } });
@@ -83,6 +92,63 @@ test("managed OpenVPN material can be replaced by file without revealing it afte
   await expect.poll(() => state.writes[0]?.body.openvpn?.managed?.key).toBe(material);
   await expect(field).toHaveValue("");
 });
+
+for (const newerReplacement of [false, true]) {
+  test(`delayed Save scrubs submitted secrets after a peer edit, newer replacement=${newerReplacement}`, async ({ page }) => {
+    const state = await vpn(page);
+    let release = () => {};
+    state.holdWrite = new Promise<void>(resolve => { release = resolve; });
+    const privateField = page.getByLabel("Private Key (base64)");
+    const keyField = page.getByLabel("Client Key (PEM)", { exact: true });
+    const caField = page.getByLabel("CA (PEM)", { exact: true });
+    const certField = page.getByLabel("Client Cert (PEM)", { exact: true });
+    const passwordField = page.getByLabel("OpenVPN password");
+    const material = "-----BEGIN PRIVATE KEY-----\nsubmitted-material\n-----END PRIVATE KEY-----";
+    const newerMaterial = material.replace("submitted-material", "newer-material");
+    try {
+      await page.getByRole("button", { name: "Replace", exact: true }).click();
+      await privateField.fill("submitted-wireguard-key");
+      await keyField.fill(material);
+      await caField.fill(material);
+      await certField.fill(material);
+      await passwordField.fill("submitted-password");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect.poll(() => state.writes.length).toBe(1);
+      await page.getByRole("button", { name: "Add peer", exact: true }).click();
+      const peer = page.getByRole("group", { name: "Peer 1", exact: true });
+      await peer.getByLabel("Name", { exact: true }).fill("Unsaved peer");
+      await peer.getByLabel("Public key", { exact: true }).fill(peerKey);
+      if (newerReplacement) {
+        await privateField.fill("newer-wireguard-key");
+        await keyField.locator("..").locator('input[type="file"]').setInputFiles({
+          name: "newer.pem", mimeType: "text/plain", buffer: Buffer.from(newerMaterial),
+        });
+        await expect(keyField).toHaveValue(newerMaterial);
+      }
+      release();
+      await expect(page.getByText("VPN staged — commit to apply.", { exact: true })).toBeVisible();
+      await expect(privateField).toHaveValue(newerReplacement ? "newer-wireguard-key" : "");
+      await expect(keyField).toHaveValue(newerReplacement ? newerMaterial : "");
+      await expect(caField).toHaveValue("");
+      await expect(certField).toHaveValue("");
+      await expect(passwordField).toHaveValue("");
+      await expect(page.getByText("Private key configured", { exact: true })).toBeVisible();
+      await expect(peer.getByLabel("Name", { exact: true })).toHaveValue("Unsaved peer");
+      state.holdWrite = undefined;
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect.poll(() => state.writes.length).toBe(2);
+      expect(state.writes[1].body.wireguard).toMatchObject({
+        privateKey: newerReplacement ? "newer-wireguard-key" : "",
+        peers: [{ name: "Unsaved peer", publicKey: peerKey, allowedIPs: [] }],
+      });
+      expect(state.writes[1].body.openvpn?.managed).toMatchObject({
+        key: newerReplacement ? newerMaterial : "", ca: "", cert: "", password: "",
+      });
+      await expect(privateField).toHaveValue("");
+      await expect(keyField).toHaveValue("");
+    } finally { release(); }
+  });
+}
 
 test("peer rows and Advanced JSON share a revision-protected round trip at 390px", async ({ page }) => {
   const state = await vpn(page);
