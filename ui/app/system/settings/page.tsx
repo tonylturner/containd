@@ -137,6 +137,11 @@ export default function SystemSettingsPage() {
               {view.reloadError}
             </div>
           )}
+          {view.certificateWarning && (
+            <div role="status" aria-label="Certificate warning" className="mt-4 break-words rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+              {view.certificateWarning}
+            </div>
+          )}
 
           <div className="mt-4 space-y-1 text-sm">
             <p className="mb-2 text-xs text-(--text-muted)">

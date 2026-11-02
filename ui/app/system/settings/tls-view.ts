@@ -26,7 +26,7 @@ export function tlsPolicyRows(info: TLSInfo | null): TLSRow[] {
  * certificate files differ. The API cleans file paths, so equal strings name
  * the same file.
  */
-export type TLSView = { rows: TLSRow[]; note?: string; reloadError?: string };
+export type TLSView = { rows: TLSRow[]; note?: string; reloadError?: string; certificateWarning?: string };
 
 const noListener = "no HTTPS listener bound";
 
@@ -103,6 +103,7 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
   if (info.reloadError) {
     view.reloadError = `Certificate reload failed. The listener still serves the last valid certificate. ${info.reloadError}`;
   }
+  if (info.certificateWarning) view.certificateWarning = info.certificateWarning;
   return view;
 }
 
