@@ -1,5 +1,6 @@
 import { evidenceState, type EvidenceState } from "./api-evidence";
 import { fetchWithSession } from "./api-core";
+import type { DeploymentProfile } from "./api";
 import {
   normalizeICSEnforcementHealth,
   type ICSEnforcementHealth,
@@ -62,6 +63,7 @@ export function normalizeEnforcementHealth(value: unknown): EnforcementHealth | 
 }
 
 export type HealthResponse = {
+  profile: DeploymentProfile;
   evidence?: { state: EvidenceState };
   status: string;
   component: string;

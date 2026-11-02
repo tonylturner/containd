@@ -1,12 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { certUploadNotice, tlsView, type TLSRow } from "../app/system/settings/tls-view";
+import type { ProfileValueSource } from "../lib/api";
 
 // Model tests: no page, no server.
 
 const saved = {
   managed: false,
   httpEnabled: true, httpsEnabled: true, httpListenAddr: ":8080", httpsListenAddr: ":8443",
+  httpEnabledSource: "default" as ProfileValueSource,
+  httpsEnabledSource: "default" as ProfileValueSource,
+  hstsEnabled: true, hstsEnabledSource: "default" as ProfileValueSource,
   certFile: "/etc/tls/server.crt", keyFile: "/etc/tls/server.key",
   certSubject: "CN=saved", certNotAfter: "2027-01-01T00:00:00Z",
   certDnsNames: ["saved.example"], certIps: ["192.0.2.20"],
@@ -30,6 +34,8 @@ test("listeners and files served now equal to the next start show once", () => {
     rows: [
       { label: "HTTP listen", value: "[::]:8080" },
       { label: "HTTPS listen", value: "[::]:8443" },
+      { label: "Served certificate SHA-256", value: "Unavailable" },
+      { label: "Configured certificate SHA-256", value: "Unavailable" },
       { label: "Cert file", value: "/etc/tls/server.crt" },
       { label: "Key file", value: "/etc/tls/server.key" },
       { label: "Cert subject", value: "CN=served" },
@@ -94,6 +100,8 @@ test("without a bound HTTPS listener the saved files wait for the next start", (
     "HTTP listen": "[::]:8080",
     "HTTPS listen": "not bound",
     "HTTPS listen (next start)": ":8443",
+    "Served certificate SHA-256": "Unavailable",
+    "Configured certificate SHA-256": "Unavailable",
     "Cert file": "no HTTPS listener bound",
     "Key file": "no HTTPS listener bound",
     "Cert file (next start)": "/etc/tls/server.crt",
