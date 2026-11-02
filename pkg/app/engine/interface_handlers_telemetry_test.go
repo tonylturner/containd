@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ func (o *interfaceObserver) SetTelemetryInterfaces(_ context.Context, ifaces []c
 }
 
 func TestTelemetryInterfacesAppliedWithoutOwnership(t *testing.T) {
+	t.Setenv("CONTAIND_ADDRESS_STATE_PATH", filepath.Join(t.TempDir(), "addresses.json"))
 	observer := &interfaceObserver{}
 	h := interfacesHandler(zap.NewNop().Sugar(), nil, observer)
 	for _, tc := range []struct {
