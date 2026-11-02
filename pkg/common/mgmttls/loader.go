@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Loader owns the listener's last-good immutable identity. Status and in-process
@@ -70,6 +71,9 @@ func (l *Loader) Reload() (*tls.Certificate, error) {
 		pair, next.identity, err = loadPair(l.certFile, l.keyFile, identity, l.ops)
 		if err == nil && current != nil {
 			err = ValidateSubjectAltName(pair.Leaf)
+			if err == nil {
+				err = ValidateValidity(pair.Leaf, time.Now())
+			}
 		}
 		next.err = err
 	}

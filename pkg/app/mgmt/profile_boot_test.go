@@ -40,6 +40,7 @@ func TestStrictManagement(t *testing.T) {
 	}
 	t.Run("ProjectionAndHTTPSOnly", testStrictProjectionAndHTTPSOnly)
 	t.Run("HTTPSIdentityRefusal", testStrictHTTPSIdentityRefusal)
+	t.Run("ExpiredCertificateWarnsButStarts", testStrictExpiredCertificateWarnsButStarts)
 	t.Run("ListenerRecovery", testStrictListenerRecovery)
 	t.Run("Hints", testStrictHints)
 	t.Run("SSHRuntimePolicy", testStrictSSHRuntimePolicy)
@@ -141,7 +142,42 @@ func testStrictHTTPSIdentityRefusal(t *testing.T) {
 	}
 }
 
+func testStrictExpiredCertificateWarnsButStarts(t *testing.T) {
+	now := time.Now().UTC()
+	cert, key := tlsCertificateWithValidity(t, false, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	dir := t.TempDir()
+	certFile, keyFile := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certFile, cert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved := config.DefaultConfig()
+	saved.System.Mgmt.TLSCertFile, saved.System.Mgmt.TLSKeyFile = certFile, keyFile
+	effective, _ := config.ProjectProfile(saved, profile.IsStrict())
+	core, logs := observer.New(zapcore.WarnLevel)
+	listeners, err := resolveMgmtListenerConfig(zap.New(core).Sugar(), effective, nil)
+	if err != nil || !listeners.enableHTTPS {
+		t.Fatalf("expired identity prevented strict HTTPS startup: listeners=%+v err=%v", listeners, err)
+	}
+	if logs.Len() != 1 {
+		t.Fatalf("expired identity warning count=%d, want 1: %+v", logs.Len(), logs.All())
+	}
+	warning := logs.All()[0].Message
+	if !strings.Contains(warning, certFile) || !strings.Contains(warning, "has expired") ||
+		!strings.Contains(warning, "NotBefore=") || !strings.Contains(warning, "NotAfter=") ||
+		!strings.Contains(warning, "current UTC time=") {
+		t.Fatalf("boot warning omitted certificate validity details: %s", warning)
+	}
+}
+
 func tlsCertificate(t *testing.T, sanless bool) ([]byte, []byte) {
+	now := time.Now()
+	return tlsCertificateWithValidity(t, sanless, now.Add(-time.Hour), now.Add(time.Hour))
+}
+
+func tlsCertificateWithValidity(t *testing.T, sanless bool, notBefore, notAfter time.Time) ([]byte, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -150,8 +186,8 @@ func tlsCertificate(t *testing.T, sanless bool) ([]byte, []byte) {
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(41),
 		Subject:      pkix.Name{CommonName: "strict-test"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

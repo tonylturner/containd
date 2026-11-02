@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 var publishMu sync.Mutex
@@ -47,6 +48,33 @@ func ValidateSubjectAltName(leaf *x509.Certificate) error {
 		)
 	}
 	return nil
+}
+
+// ValidateValidity requires the certificate to be within its validity window
+// at now. Include both bounds and the clock value so callers can explain
+// rejection without relying on the TLS stack's abbreviated verification error.
+func ValidateValidity(leaf *x509.Certificate, now time.Time) error {
+	if leaf == nil {
+		return errors.New("management TLS certificate is missing")
+	}
+	now = now.UTC()
+	notBefore := leaf.NotBefore.UTC().Format(time.RFC3339Nano)
+	notAfter := leaf.NotAfter.UTC().Format(time.RFC3339Nano)
+	current := now.Format(time.RFC3339Nano)
+	switch {
+	case now.Before(leaf.NotBefore):
+		return fmt.Errorf(
+			"management TLS certificate is not yet valid: NotBefore=%s NotAfter=%s current UTC time=%s",
+			notBefore, notAfter, current,
+		)
+	case now.After(leaf.NotAfter):
+		return fmt.Errorf(
+			"management TLS certificate has expired: NotBefore=%s NotAfter=%s current UTC time=%s",
+			notBefore, notAfter, current,
+		)
+	default:
+		return nil
+	}
 }
 
 func parseIdentity(data []byte, requireKey bool) (*tls.Certificate, error) {

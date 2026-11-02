@@ -3147,8 +3147,8 @@ components:
         certNotAfter: {type: string}
         certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
         certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
-        reloadError: {type: string, description: 'Latest bound identity reload error; last-good certificate remains served'}
-        certificateWarning: {type: string, description: 'Warning naming a served or configured management certificate without a DNS or IP subject alternative name, with replacement guidance'}
+        reloadError: {type: string, description: 'Latest bound identity reload error, including a certificate outside its validity window; last-good certificate remains served'}
+        certificateWarning: {type: string, description: 'Warning naming a served or configured management certificate without a DNS or IP subject alternative name, with replacement guidance, or outside its validity window with NotBefore, NotAfter and the current UTC time'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
@@ -7830,8 +7830,10 @@ paths:
       tags: [System]
       description: >-
         Validates the certificate chain and matching key, and requires the leaf
-        certificate to include a DNS or IP subject alternative name. A certificate
-        without a DNS or IP SAN returns 400 without writing. Then atomically
+        certificate to include a DNS or IP subject alternative name and to be
+        currently within its validity window. A certificate without a DNS or IP
+        SAN, expired, or not yet valid returns 400 without writing; validity
+        errors name NotBefore, NotAfter and the current UTC time. Then atomically
         publishes /data/tls/server.pem (0600) with one durable rename. Both
         resolved paths must select the legacy defaults; nondefault external paths
         are read-only. Does not change saved listener paths. The bound listener
@@ -7867,9 +7869,10 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '400':
           description: >-
-            Nothing written. The certificate/key pair is invalid or the leaf
-            certificate has no DNS or IP subject alternative name. The error
-            explains how to add a DNS or IP SAN.
+            Nothing written. The certificate/key pair is invalid, the leaf
+            certificate has no DNS or IP subject alternative name, or its
+            validity window does not include the current UTC time. Validity
+            errors include NotBefore, NotAfter and the current UTC time.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

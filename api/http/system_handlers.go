@@ -110,6 +110,8 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			ServedKeyFile:        cleanFilePath(served.KeyFile),
 		}
 		resp.SecureCookies, resp.SecureCookiesSource = secureCookiesPolicy()
+		now := time.Now()
+		var certificateWarnings []string
 
 		var leaf *x509.Certificate
 		if served.TLS != nil {
@@ -128,9 +130,8 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.ServedCertSubject = leaf.Subject.String()
 			resp.ServedCertNotAfter = formatNotAfter(leaf)
 			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(leaf)
-			if err := mgmttls.ValidateSubjectAltName(leaf); err != nil {
-				resp.CertificateWarning = fmt.Sprintf("%s: %v", resp.ServedCertFile, err)
-			}
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.ServedCertFile, mgmttls.ValidateSubjectAltName(leaf))
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.ServedCertFile, mgmttls.ValidateValidity(leaf, now))
 		}
 
 		configuredLeaf := leaf
@@ -145,15 +146,8 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertIssuer = cert.Issuer.String()
 			resp.CertNotAfter = formatNotAfter(cert)
 			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
-			if err := mgmttls.ValidateSubjectAltName(cert); err != nil {
-				warning := fmt.Sprintf("%s: %v", resp.CertFile, err)
-				if warning != resp.CertificateWarning {
-					if resp.CertificateWarning != "" {
-						resp.CertificateWarning += "; "
-					}
-					resp.CertificateWarning += warning
-				}
-			}
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.CertFile, mgmttls.ValidateSubjectAltName(cert))
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.CertFile, mgmttls.ValidateValidity(cert, now))
 		}
 		// Read the next-start identity independently, even when its paths
 		// equal the served identity: a failed reload retains a last-good leaf.
@@ -161,8 +155,22 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertFingerprintSHA256 = mgmttls.Fingerprint(pair.Leaf)
 		}
 
+		resp.CertificateWarning = strings.Join(certificateWarnings, "; ")
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+func appendCertificateWarning(warnings []string, path string, err error) []string {
+	if err == nil {
+		return warnings
+	}
+	warning := fmt.Sprintf("%s: %v", path, err)
+	for _, existing := range warnings {
+		if existing == warning {
+			return warnings
+		}
+	}
+	return append(warnings, warning)
 }
 
 func tlsProfileFields(saved, effective *config.Config) config.TLSProfileFields {
@@ -300,6 +308,10 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			return
 		}
 		if err := mgmttls.ValidateSubjectAltName(pair.Leaf); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := mgmttls.ValidateValidity(pair.Leaf, time.Now()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}

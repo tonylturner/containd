@@ -25,12 +25,17 @@ func testPair(t *testing.T) ([]byte, []byte) {
 }
 
 func testPairWithDNS(t *testing.T, dnsNames []string) ([]byte, []byte) {
+	now := time.Now()
+	return testPairWithValidity(t, dnsNames, now.Add(-time.Hour), now.Add(time.Hour))
+}
+
+func testPairWithValidity(t *testing.T, dnsNames []string, notBefore, notAfter time.Time) ([]byte, []byte) {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test"}, DNSNames: dnsNames, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	c := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test"}, DNSNames: dnsNames, NotBefore: notBefore, NotAfter: notAfter, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, c, c, &k.PublicKey, k)
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +45,49 @@ func testPairWithDNS(t *testing.T, dnsNames []string) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: key})
+}
+
+func TestValidateValidity(t *testing.T) {
+	now := time.Date(2026, time.November, 2, 12, 0, 0, 0, time.FixedZone("test", -5*60*60))
+	for _, tc := range []struct {
+		name string
+		leaf *x509.Certificate
+		want string
+	}{
+		{
+			name: "valid",
+			leaf: &x509.Certificate{NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)},
+		},
+		{
+			name: "expired",
+			leaf: &x509.Certificate{NotBefore: now.Add(-2 * time.Hour), NotAfter: now.Add(-time.Hour)},
+			want: "has expired",
+		},
+		{
+			name: "not yet valid",
+			leaf: &x509.Certificate{NotBefore: now.Add(time.Hour), NotAfter: now.Add(2 * time.Hour)},
+			want: "not yet valid",
+		},
+		{name: "missing leaf", want: "is missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateValidity(tc.leaf, now)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("ValidateValidity() = %v, want success", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateValidity() = %v, want %q with validity dates and current time", err, tc.want)
+			}
+			if tc.name != "missing leaf" && (!strings.Contains(err.Error(), "NotBefore=") ||
+				!strings.Contains(err.Error(), "NotAfter=") ||
+				!strings.Contains(err.Error(), "current UTC time=")) {
+				t.Fatalf("ValidateValidity() = %v, want validity dates and current time", err)
+			}
+		})
+	}
 }
 
 func TestValidateSubjectAltName(t *testing.T) {
@@ -92,6 +140,58 @@ func TestLoaderAllowsLegacyInitialIdentityButRejectsSANlessRotation(t *testing.T
 	got, err := loader.Reload()
 	if err == nil || !strings.Contains(err.Error(), "subject alternative name") || got != first {
 		t.Fatalf("SAN-less rotation did not retain last-good identity: pair=%p first=%p err=%v", got, first, err)
+	}
+}
+
+func TestLoaderRejectsInvalidValidityWindowAndRecovers(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		notBefore, notAfter time.Time
+		reason              string
+	}{
+		{
+			name: "expired", notBefore: time.Now().Add(-2 * time.Hour), notAfter: time.Now().Add(-time.Hour),
+			reason: "has expired",
+		},
+		{
+			name: "not yet valid", notBefore: time.Now().Add(time.Hour), notAfter: time.Now().Add(2 * time.Hour),
+			reason: "not yet valid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "server.pem")
+			currentCert, currentKey := testPair(t)
+			if err := Publish(path, currentCert, currentKey); err != nil {
+				t.Fatal(err)
+			}
+			loader := NewLoader(path, path)
+			first, err := loader.GetCertificate(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			invalidCert, invalidKey := testPairWithValidity(
+				t, []string{"localhost"}, tc.notBefore, tc.notAfter,
+			)
+			if err := Publish(path, invalidCert, invalidKey); err != nil {
+				t.Fatal(err)
+			}
+			got, err := loader.Reload()
+			if err == nil || !strings.Contains(err.Error(), tc.reason) || got != first {
+				t.Fatalf("invalid reload: pair=%p first=%p err=%v", got, first, err)
+			}
+			validCert, validKey := testPair(t)
+			if err := Publish(path, validCert, validKey); err != nil {
+				t.Fatal(err)
+			}
+			got, err = loader.Reload()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got == first || bytes.Equal(got.Certificate[0], first.Certificate[0]) {
+				t.Fatalf("valid replacement did not recover: pair=%p first=%p", got, first)
+			}
+		})
 	}
 }
 
