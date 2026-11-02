@@ -125,6 +125,11 @@ export function InterfaceRow({
           ) : (
             <span className="text-(--text)">{iface.device || "—"}</span>
           )}
+          <p className="mt-1 max-w-56 text-xs text-(--text-muted)">
+            {modeLabel} · {typeLabel()}{!runtime ? " · Live unknown" : !runtime.up ? " · Link down" : ""}
+            {Object.values(iface.access ?? {}).some(value => value === false) ? " · Access customized" : ""}
+            {iface.gateway ? " · Gateway set" : ""}
+          </p>
         </td>
         <td className="px-4 py-3">
           {runtime ? (
@@ -348,11 +353,6 @@ export function InterfaceRow({
             )}
 
           </div>
-          <p className="mt-1 text-xs text-(--text-muted)">
-            {modeLabel} · {typeLabel()}{!runtime ? " · Live unknown" : !runtime.up ? " · Link down" : ""}
-            {Object.values(iface.access ?? {}).some(value => value === false) ? " · Access customized" : ""}
-            {iface.gateway ? " · Gateway set" : ""}
-          </p>
         </td>
       </tr>
       <tr hidden={!expanded} id={detailId}>
