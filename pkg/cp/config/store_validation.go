@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/profile"
 )
 
 type storeOptions struct {
@@ -48,10 +49,14 @@ func (e *ValidationError) Unwrap() error { return e.Err }
 // ValidateConfig checks strict new content, including defaults and reset.
 // Stored-state decisions use EffectiveForStore instead.
 func (s *SQLiteStore) ValidateConfig(cfg *Config) error {
-	if err := UpgradeInPlace(cfg); err != nil {
+	return s.checkWrite(nil, cfg)
+}
+
+func (s *SQLiteStore) checkContent(baseline, next *Config) error {
+	if err := UpgradeInPlace(next); err != nil {
 		return &ValidationError{err}
 	}
-	if err := CheckWrite(nil, cfg, s.options.reservation); err != nil {
+	if err := CheckWrite(baseline, next, s.options.reservation); err != nil {
 		return &ValidationError{err}
 	}
 	return nil
@@ -153,10 +158,10 @@ func EffectiveForStore(store Store, cfg *Config) (*Config, []ServiceConfigError,
 }
 
 func (s *SQLiteStore) checkWrite(baseline, next *Config) error {
-	if err := UpgradeInPlace(next); err != nil {
-		return &ValidationError{err}
+	if err := s.checkContent(baseline, next); err != nil {
+		return err
 	}
-	if err := CheckWrite(baseline, next, s.options.reservation); err != nil {
+	if err := ValidateProfileWrite(baseline, next, profile.IsStrict()); err != nil {
 		return &ValidationError{err}
 	}
 	return nil

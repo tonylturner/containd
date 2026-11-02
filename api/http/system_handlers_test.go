@@ -97,19 +97,19 @@ func TestTLSInfoReportsEffectiveListeners(t *testing.T) {
 		{
 			name: "defaults",
 			cfg:  &config.Config{},
-			want: tlsInfoResponse{HTTPListenAddr: config.DefaultManagementHTTPAddr, HTTPSListenAddr: config.DefaultManagementHTTPSAddr, HTTPEnabled: true, HTTPSEnabled: true},
+			want: tlsInfoResponse{HTTPListenAddr: config.DefaultManagementHTTPAddr, HTTPSListenAddr: config.DefaultManagementHTTPSAddr, TLSProfileFields: config.TLSProfileFields{HTTPEnabled: true, HTTPSEnabled: true}},
 		},
 		{
 			name: "saved",
 			cfg:  withSaved,
-			want: tlsInfoResponse{HTTPListenAddr: ":7080", HTTPSListenAddr: ":7443", HTTPEnabled: true},
+			want: tlsInfoResponse{HTTPListenAddr: ":7080", HTTPSListenAddr: ":7443", TLSProfileFields: config.TLSProfileFields{HTTPEnabled: true}},
 		},
 		{
 			name:     "environment",
 			cfg:      withSaved,
 			httpEnv:  "127.0.0.1:9180",
 			httpsEnv: ":9543",
-			want:     tlsInfoResponse{HTTPListenAddr: "127.0.0.1:9180", HTTPSListenAddr: ":9543", HTTPEnabled: true},
+			want:     tlsInfoResponse{HTTPListenAddr: "127.0.0.1:9180", HTTPSListenAddr: ":9543", TLSProfileFields: config.TLSProfileFields{HTTPEnabled: true}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

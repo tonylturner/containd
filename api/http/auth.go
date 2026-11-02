@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -378,8 +379,12 @@ func clearAuthCookie(c *gin.Context) {
 }
 
 // cookieSecure returns true if the Secure flag should be set on auth cookies.
-// Auto-detects TLS from the request, and can be overridden via CONTAIND_COOKIE_SECURE.
+// Strict always uses Secure. Training auto-detects TLS from the request and
+// permits CONTAIND_COOKIE_SECURE to override that choice.
 func cookieSecure(c *gin.Context) bool {
+	if profile.IsStrict() {
+		return true
+	}
 	env := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE"))
 	if env != "" {
 		return env == "1" || strings.EqualFold(env, "true")

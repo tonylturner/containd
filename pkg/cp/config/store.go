@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/profile"
 	_ "modernc.org/sqlite"
 )
 
@@ -188,10 +189,9 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
-	if err := s.ValidateConfig(cfg); err != nil {
+	if err := s.checkContent(nil, cfg); err != nil {
 		return err
 	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -201,6 +201,13 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	baseline, err := readKindFrom(ctx, tx, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := ValidateProfileWrite(baseline, cfg, profile.IsStrict()); err != nil {
+		return &ValidationError{err}
+	}
 	if cfg.IDS.Rules != nil {
 		if err := replaceChangedIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 			return err

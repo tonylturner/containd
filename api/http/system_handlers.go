@@ -20,19 +20,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 type tlsInfoResponse struct {
+	config.TLSProfileFields
 	// HTTPListenAddr, HTTPSListenAddr, HTTPEnabled and HTTPSEnabled are the
 	// listeners management binds when it next starts with this
 	// configuration.
 	HTTPListenAddr  string `json:"httpListenAddr,omitempty"`
 	HTTPSListenAddr string `json:"httpsListenAddr,omitempty"`
-	HTTPEnabled     bool   `json:"httpEnabled"`
-	HTTPSEnabled    bool   `json:"httpsEnabled"`
 	// BoundHTTPListenAddr and BoundHTTPSListenAddr are the addresses of the
 	// listeners management has bound now; empty when that listener is not
 	// bound.
@@ -85,16 +85,16 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 
 		// The listeners management binds when it starts with this
 		// configuration, under this process's environment.
-		listeners := config.EffectiveManagementListeners(cfg)
+		effective, _ := config.ProjectProfile(cfg, profile.IsStrict())
+		listeners := config.EffectiveManagementListeners(effective)
 		bound := config.BoundManagementListeners()
 		certFile, keyFile := mgmttls.IdentityFiles(cfg)
 		served := currentServedManagement()
 
 		resp := tlsInfoResponse{
+			TLSProfileFields:     tlsProfileFields(cfg, effective),
 			HTTPListenAddr:       listeners.HTTP.Addr,
 			HTTPSListenAddr:      listeners.HTTPS.Addr,
-			HTTPEnabled:          listeners.HTTP.Enabled,
-			HTTPSEnabled:         listeners.HTTPS.Enabled,
 			BoundHTTPListenAddr:  boundAddr(bound.HTTP),
 			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
 			HTTPListenChanges:    listenerChanges(bound.HTTP, listeners.HTTP),
@@ -119,6 +119,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			}
 		}
 		if leaf != nil {
+			resp.ServedCertFingerprintSHA256 = mgmttls.Fingerprint(leaf)
 			resp.ServedCertSubject = leaf.Subject.String()
 			resp.ServedCertNotAfter = formatNotAfter(leaf)
 			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(leaf)
@@ -137,9 +138,40 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertNotAfter = formatNotAfter(cert)
 			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
 		}
+		// Read the next-start identity independently, even when its paths
+		// equal the served identity: a failed reload retains a last-good leaf.
+		if pair, err := mgmttls.ReadPair(resp.CertFile, resp.KeyFile); err == nil {
+			resp.CertFingerprintSHA256 = mgmttls.Fingerprint(pair.Leaf)
+		}
 
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+func tlsProfileFields(saved, effective *config.Config) config.TLSProfileFields {
+	var fields config.TLSProfileFields
+	for _, field := range []struct {
+		saved, effective *bool
+		value            *bool
+		source           *string
+		override         **bool
+	}{
+		{saved.System.Mgmt.EnableHTTP, effective.System.Mgmt.EnableHTTP, &fields.HTTPEnabled, &fields.HTTPEnabledSource, &fields.HTTPEnabledSaved},
+		{saved.System.Mgmt.EnableHTTPS, effective.System.Mgmt.EnableHTTPS, &fields.HTTPSEnabled, &fields.HTTPSEnabledSource, &fields.HTTPSEnabledSaved},
+		{saved.System.Mgmt.EnableHSTS, effective.System.Mgmt.EnableHSTS, &fields.HSTSEnabled, &fields.HSTSEnabledSource, &fields.HSTSEnabledSaved},
+	} {
+		savedValue := field.saved == nil || *field.saved
+		*field.value = field.effective == nil || *field.effective
+		*field.source = "default"
+		if field.saved != nil {
+			*field.source = "config"
+		}
+		if savedValue != *field.value {
+			*field.source = "profile"
+			*field.override = &savedValue
+		}
+	}
+	return fields
 }
 
 // boundAddr is the address of a bound listener; empty when it is not bound.

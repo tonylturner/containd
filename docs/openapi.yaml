@@ -16,8 +16,15 @@ info:
     Static admin/auditor bearer tokens are a
     fallback only when the user store or JWT secret is unavailable.
     Persisted configuration edits stage a shared candidate. Reads of editable
-    settings use that candidate; commit promotes and applies it. Operational
-    commands remain immediate. Authentication and authorization errors use
+    settings use that candidate; commit promotes and applies it.
+    In strict, validation, candidate writes, imports and promotion reject newly
+    introduced Linux SSH shell mode, disabled HTTPS or disabled HSTS with 400.
+    Existing weak saved values may be carried or repaired field by field,
+    compared with unprojected running intent, not the previous candidate.
+    Rollback may restore previously accepted saved intent. Runtime projection
+    enforces strict policy without persisting it; HTTP enablement is projected
+    off rather than rejected on writes. Session cookies are always Secure in strict.
+    Operational commands remain immediate. Authentication and authorization errors use
     ErrorResponse; protected operations may return 401, 403 or 503. Admin-only
     operations say so in their summary.
   license:
@@ -227,9 +234,15 @@ components:
               lastError: {type: string, description: Sanitized current error}
               lastSuccessAt: {type: string, format: date-time}
 
+    DeploymentProfile:
+      type: string
+      enum: [training, strict]
+      description: Immutable deployment profile selected at process startup.
     HealthResponse:
       type: object
+      required: [profile]
       properties:
+        profile: {$ref: '#/components/schemas/DeploymentProfile'}
         evidence:
           type: object
           required: [state]
@@ -3065,10 +3078,15 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
-      required: [managed]
+      required: [managed, httpEnabled, httpEnabledSource, httpsEnabled, httpsEnabledSource, hstsEnabled, hstsEnabledSource]
       description: >-
         The listen addresses and enabled flags are those management binds when it
-        starts with the saved configuration: CONTAIND_MGMT_ADDR and
+        starts with the profile-projected saved configuration. Strict disables
+        HTTP and enables HTTPS and HSTS without changing saved intent. Each
+        enabledSource is profile when overridden, otherwise config for an explicit
+        saved setting or default for an unset setting (which defaults to true).
+        Each enabledSaved is present only when overridden, including false.
+        CONTAIND_MGMT_ADDR and
         CONTAIND_MGMT_HTTPS_ADDR take precedence over the saved addresses, then
         the defaults :8080 and :8443 apply. A saved listener change binds at the
         next start. boundHttpListenAddr and boundHttpsListenAddr are the
@@ -3094,7 +3112,16 @@ components:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}
         httpEnabled: {type: boolean}
+        httpEnabledSource: {type: string, enum: [profile, config, default]}
+        httpEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; an unset HTTP setting reports true under strict'}
         httpsEnabled: {type: boolean}
+        httpsEnabledSource: {type: string, enum: [profile, config, default]}
+        httpsEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; false is preserved'}
+        hstsEnabled: {type: boolean}
+        hstsEnabledSource: {type: string, enum: [profile, config, default]}
+        hstsEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; false is preserved'}
+        servedCertFingerprintSHA256: {type: string, description: 'SHA-256 of the bound served leaf DER, uppercase colon-separated hex; last-good identity on reload failure, absent when unavailable'}
+        certFingerprintSHA256: {type: string, description: 'SHA-256 of the configured next-start leaf DER, uppercase colon-separated hex; absent when its validated identity is unavailable'}
         boundHttpListenAddr: {type: string, description: 'Address of the bound HTTP listener; absent when none is bound'}
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
         httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
@@ -3865,7 +3892,9 @@ components:
       type: object
     MeResponse:
       type: object
+      required: [profile]
       properties:
+        profile: {$ref: '#/components/schemas/DeploymentProfile'}
         id: {type: string}
         username: {type: string}
         firstName: {type: string}
@@ -4267,7 +4296,7 @@ paths:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
-          description: Reset applied; inspect warnings for incomplete convergence and reauthenticate with default credentials
+          description: Reset applied; inspect warnings for incomplete convergence. Training uses default credentials; strict issues a one-time password in the container log and bootstrap/admin-password beside the users database, requiring a password change at first login
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
@@ -4304,7 +4333,7 @@ paths:
     post:
       summary: Validate configuration without staging (admin)
       description: >
-        Uses the same structural and immutable management-reservation checks as
+        Uses the same structural, deployment-profile and immutable management-reservation checks as
         persistence. Reservation errors name the field and "reserved management path".
         Disabling all ordinary interface access flags is permitted.
       tags: [Config]

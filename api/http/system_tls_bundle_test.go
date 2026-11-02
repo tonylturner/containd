@@ -155,6 +155,9 @@ func TestTLSStatusAndPinKeepLastGoodExternalPair(t *testing.T) {
 	if got.ReloadError == "" || got.ServedCertSubject != first.Subject.String() || got.CertSubject != got.ServedCertSubject {
 		t.Fatalf("%+v", got)
 	}
+	if got.ServedCertFingerprintSHA256 != mgmttls.Fingerprint(first) || got.CertFingerprintSHA256 != "" {
+		t.Fatalf("failed configured identity must not hide last-good served fingerprint: %+v", got)
+	}
 	if strings.Contains(rec.Body.String(), "PRIVATE KEY") {
 		t.Fatal("status exposed key")
 	}

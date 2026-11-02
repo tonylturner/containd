@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -144,7 +145,7 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		if userStore == nil {
-			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey), "labMode": lab})
+			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey), "labMode": lab, "profile": profile.Current()})
 			return
 		}
 		uid := c.GetString(ctxUserKey)
@@ -158,6 +159,7 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 			"username": u.Username,
 			"role":     c.GetString(ctxRoleKey),
 			"labMode":  lab,
+			"profile":  profile.Current(),
 		}
 		if u.FirstName != "" {
 			resp["firstName"] = u.FirstName
