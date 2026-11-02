@@ -30,6 +30,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/telemetry"
 	"github.com/tonylturner/containd/pkg/evidence"
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
@@ -224,10 +225,11 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine, evidenceStore))
 	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine, evidenceStore))
-	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
+	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership, dpEngine))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
+	mux.HandleFunc("/internal/telemetry/counters", telemetryCountersHandler(telemetry.Collector{BootID: engineBootID, Membership: dpEngine.TelemetryMembership, Tracker: dpEngine.TelemetryTracker, Events: dpEngine.Events().TelemetryCounts, AV: avMgr.TelemetryCounts, Conduits: dpEngine.TelemetryConduits}))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/events/forward", eventsFeedHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
