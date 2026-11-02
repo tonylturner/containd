@@ -12,6 +12,7 @@ services:
     # The engine API keeps the all-mode loopback default; the smoke scripts
     # reach it with `docker compose exec`.
     environment:
+      - CONTAIND_PROFILE=training
       - CONTAIND_MGMT_ADDR=:18080
       - CONTAIND_MGMT_HTTPS_ADDR=:18443
       - CONTAIND_ENGINE_URL=http://127.0.0.1:8081

@@ -6,6 +6,11 @@ Docker Compose owns the available networks, interface attachments, and Docker-le
 
 containd is designed to segment container-to-container traffic inside Docker-based labs. Linux Docker hosts are supported, and Docker Desktop is also a valid lab target because the traffic being filtered lives inside Docker's Linux VM. On Windows, use Docker Desktop with the WSL2 backend. containd is not a native host firewall for macOS or Windows networking.
 
+The starter is explicitly **training**. For HTTPS-only management published on
+loopback, a one-time admin password and appliance-only SSH, use the standalone
+[strict profile](deployment-profiles.md). The quickstart, bootstrap and
+`scripts/containd*` helpers are training-only. Keep one profile per data directory.
+
 ## Quickstart
 
 ```bash
@@ -29,7 +34,7 @@ If you cloned the repo locally, you can still use the same starter compose direc
 
 ```bash
 # Create .env with a generated signing key (do not overwrite an existing .env).
-(set -C; sed "s/^CONTAIND_JWT_SECRET=.*/CONTAIND_JWT_SECRET=$(openssl rand -hex 32)/" .env.example > .env)
+(umask 077; set -C; sed "s/^CONTAIND_JWT_SECRET=.*/CONTAIND_JWT_SECRET=$(openssl rand -hex 32)/" .env.example > .env)
 # Optionally edit .env for ports or lab subnets before starting.
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 bash scripts/containd-connect
@@ -57,10 +62,10 @@ and `docker-compose.yml`. For a repository checkout, use the explicit
 ### Common variables
 
 - `CONTAIND_IMAGE`: image tag to run in the starter compose. Defaults to `ghcr.io/tonylturner/containd:latest`.
-- `CONTAIND_JWT_SECRET`: required non-empty JWT signing key for UI/API auth. Generate it with `openssl rand -hex 32` and keep it private.
+- `CONTAIND_JWT_SECRET`: required JWT signing key (at least 32 characters in strict) for UI/API auth. Generate it with `openssl rand -hex 32` and keep it private.
 - `CONTAIND_LAB_MODE`: leave at `0` for normal deployments. Set to `1` only for disposable lab/dev auth behavior.
 - `CONTAIND_ENFORCE_ENABLED`: starter compose default is `1` so nftables enforcement is active once policy is committed. Set `0` only for observe-only runs.
-- `CONTAIND_COOKIE_SECURE`: set to `1` when running behind HTTPS (or a TLS-terminating proxy) to force the `Secure` cookie flag.
+- `CONTAIND_COOKIE_SECURE` (training-only): set to `1` when running behind HTTPS (or a TLS-terminating proxy) to force the `Secure` cookie flag.
 - `CONTAIND_TRUSTED_PROXIES`: comma-separated list of proxy IPs/CIDRs you trust for client IP resolution (e.g. `127.0.0.1,::1,10.0.0.0/8`).
 - `CONTAIND_ALLOWED_ORIGINS`: optional comma-separated browser origins that may embed or call the appliance cross-origin. Starter and dev Compose pass it through to management. Leave empty unless you intentionally integrate containd into another UI or portal.
 

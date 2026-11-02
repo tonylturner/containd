@@ -69,7 +69,7 @@ if [ "$status" != "healthy" ]; then
   exit 1
 fi
 
-curl -fsS "$api/health" | jq -e '.status == "ok"' >/dev/null
+curl -fsS "$api/health" | jq -e '.status == "ok" and .profile == "training"' >/dev/null
 quickstart_password="$(python3 -c 'import secrets; print("Ci" + secrets.token_hex(8) + "Aa1")')"
 curl -fsS -c "$cookie" \
   -H 'Content-Type: application/json' \

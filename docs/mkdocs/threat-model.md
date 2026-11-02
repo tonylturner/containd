@@ -21,6 +21,13 @@ Out of scope:
 - arbitrary host-network control outside the Docker topology the appliance is given
 - threats that completely compromise the container runtime or host kernel
 
+[Deployment profiles](deployment-profiles.md) make the boundary explicit:
+training retains lab conveniences; strict requires HTTPS, Secure cookies and
+HSTS, issues one-time bootstrap passwords, refuses lab authentication and socket
+mounts, and restricts SSH to the appliance CLI. Strict Compose publishes HTTPS
+and SSH on host loopback only. It does not isolate peers on attached networks
+or protect data from the host administrator. Reserved management is training-only.
+
 ## Security Objectives
 
 `containd` is designed to preserve these outcomes:
@@ -136,7 +143,7 @@ Current mitigations:
 Residual risk:
 
 - RBAC provides admin/view roles, not resource-scoped authorization
-- the bootstrap password remains a conscious lab-usability tradeoff
+- the shared training bootstrap password remains a conscious lab-usability tradeoff; strict issues per-account one-time passwords
 - lab-mode JWTs with a configured secret require `exp` (30 seconds of leeway),
   but do not require a session record or `jti`; automation subjects without a
   local account still get admin access and use the configured bootstrap account
