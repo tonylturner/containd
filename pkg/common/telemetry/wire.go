@@ -93,22 +93,29 @@ type CounterSample struct {
 	Dims   map[string]string `json:"dims,omitempty"`
 	// Value is the cumulative count since the counter last started from zero.
 	Value uint64 `json:"value,string"`
-	// Epoch changes whenever this counter may have restarted from zero
-	// (process boot, tracker rebuild, interface recreation, accounting table
-	// rebuild). Opaque; compare for equality only.
+	// Epoch identifies one run of the counter from zero. It changes exactly
+	// when the counter restarts from zero (kernel boot, netns or link
+	// recreation, tracker rebuild, accounting table rebuild, process boot for
+	// process-owned counters) and never otherwise. Opaque; compare only.
 	Epoch string `json:"epoch"`
+	// Origin is real unless the counter counts demo traffic.
+	Origin Origin `json:"origin,omitempty"`
 }
 
-// SourceUnavailable says why a whole source has no samples in a snapshot.
-// A missing source is a gap, never zero.
+// SourceUnavailable says why a source, or one series of it, has no sample
+// in a snapshot. A missing sample is a gap, never zero. With Metric and Dims
+// empty it covers the whole source.
 type SourceUnavailable struct {
-	Source string `json:"source"` // iface, conduit, proto, events, av
-	Reason string `json:"reason"`
+	Source string            `json:"source"` // iface, conduit, proto, events, av, service
+	Metric Metric            `json:"metric,omitempty"`
+	Dims   map[string]string `json:"dims,omitempty"`
+	Reason string            `json:"reason"`
 }
 
 // CounterSnapshot is the engine's GET /internal/telemetry/counters body.
+// Samples list every series the source currently has, quiet ones
+// included, so an absent series means it no longer exists or failed.
 type CounterSnapshot struct {
-	Origin      Origin              `json:"origin"`
 	BootID      string              `json:"bootId"`
 	SampledAt   time.Time           `json:"sampledAt"`
 	Samples     []CounterSample     `json:"samples"`
@@ -125,9 +132,12 @@ type CounterReader interface {
 type Quality string
 
 const (
-	// Observed: the whole bucket was sampled; V is the exact count.
+	// Observed: V is the exact count over exactly this bucket (D equals
+	// the resolution).
 	QualityObserved Quality = "observed"
-	// Partial: part of the bucket was sampled; V counts the observed part.
+	// Partial: V counts D seconds of observation that do not exactly match
+	// the bucket: less than the bucket, or an interval that also absorbed
+	// preceding gap buckets.
 	QualityPartial Quality = "partial"
 	// Reset: a counter restarted inside the bucket; V counts what was
 	// observed, including the count since the restart.
@@ -141,6 +151,9 @@ type Point struct {
 	T time.Time `json:"t"` // bucket start
 	// V is the count in the bucket as a decimal string; absent for a gap.
 	V *uint64 `json:"v,string,omitempty"`
+	// D is the seconds of observation V covers; a rate is V/D. Absent for a
+	// gap.
+	D int     `json:"d,omitempty"`
 	Q Quality `json:"q"`
 }
 
@@ -171,6 +184,9 @@ type CollectorState struct {
 	State        string    `json:"state"` // running, stalled, unavailable
 	LastSampleAt time.Time `json:"lastSampleAt,omitzero"`
 	Error        string    `json:"error,omitempty"`
+	// DroppedSeries counts series refused by the cardinality cap since the
+	// collector started.
+	DroppedSeries uint64 `json:"droppedSeries,string"`
 }
 
 // SeriesResponse is the GET /api/v1/telemetry/series body.
@@ -182,11 +198,23 @@ type SeriesResponse struct {
 	ResolutionSeconds int       `json:"resolutionSeconds"`
 	From              time.Time `json:"from"`
 	To                time.Time `json:"to"`
-	// RealObserved is true once any real observed bucket of this metric
-	// counted more than zero. Charts show demo series only while it is false.
-	RealObserved bool `json:"realObserved"`
+	// RealCovered is true once any real bucket of this metric was observed,
+	// zero or not.
+	RealCovered bool `json:"realCovered"`
+	// RealActive is true once any real bucket of this metric counted more
+	// than zero. Charts fall back to demo series only while it is false and
+	// the collector is running.
+	RealActive bool `json:"realActive"`
 	// RetainedFrom is the oldest bucket still stored at this resolution.
 	RetainedFrom time.Time      `json:"retainedFrom,omitzero"`
 	Collector    CollectorState `json:"collector"`
 	Series       []Series       `json:"series"`
+}
+
+// EventCounts are the cumulative counters of one event store for one
+// origin: every appended event, and every event matching each class.
+type EventCounts struct {
+	Origin  Origin                `json:"origin"`
+	Total   uint64                `json:"total,string"`
+	Classes map[EventClass]uint64 `json:"classes"`
 }
