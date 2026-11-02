@@ -58,7 +58,7 @@ func TestPCAPByteOrderAndResolution(t *testing.T) {
 					tcpEthernetFrame(1012, 0x18, modbusADU(2, 6, 1, 42)),
 				}
 				raw := formatPCAP(order, nano, frames, times)
-				reader, err := newPCAPReader(bytes.NewReader(raw))
+				reader, err := OpenReader(bytes.NewReader(raw))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -98,7 +98,7 @@ func TestPCAPPartialFinalRecordCoverage(t *testing.T) {
 	second := 24 + 16 + len(frames[0])
 	for _, cut := range []int{1, 15, 16, 17, 16 + 54, 16 + len(frames[1]) - 1} {
 		t.Run(fmt.Sprint(cut), func(t *testing.T) {
-			reader, err := newPCAPReader(bytes.NewReader(raw[:second+cut]))
+			reader, err := OpenReader(bytes.NewReader(raw[:second+cut]))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,5 +152,25 @@ func TestPCAPCorruptLengthIsNotTruncation(t *testing.T) {
 	binary.LittleEndian.PutUint32(raw[36:], 1) // original length < captured length
 	if _, err := Analyze(bytes.NewReader(raw)); err == nil {
 		t.Fatal("captured length exceeding original length was accepted")
+	}
+}
+
+func TestReaderNextOriginalLengthAndHeaderValidation(t *testing.T) {
+	raw := formatPCAP(binary.LittleEndian, false, [][]byte{{1, 2, 3}}, []time.Time{time.Unix(1, 0)})
+	binary.LittleEndian.PutUint32(raw[36:], 100)
+	reader, err := OpenReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, data, origLen, err := reader.Next()
+	if err != nil || origLen != 100 || !bytes.Equal(data, []byte{1, 2, 3}) {
+		t.Fatalf("data=%x origLen=%d err=%v", data, origLen, err)
+	}
+	for _, offset := range []int{4, 20} {
+		invalid := bytes.Clone(raw)
+		invalid[offset]++
+		if _, err := OpenReader(bytes.NewReader(invalid)); err == nil {
+			t.Fatalf("invalid header field %d accepted", offset)
+		}
 	}
 }

@@ -7,7 +7,6 @@ package capture
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"net"
 
@@ -96,48 +95,11 @@ func outgoingPacket(from unix.Sockaddr) bool {
 	return ok && ll.Pkttype == unix.PACKET_OUTGOING
 }
 
-// decodePacket strips the Ethernet header and decodes the IP packet with
-// the shared raw-IP decoder. The IP version must match the EtherType.
+// decodePacket adds the live capture interface to the portable decoder result.
 func decodePacket(iface string, data []byte) (Packet, bool) {
-	ethType, offset, ok := parseEthernet(data)
-	if !ok {
-		return Packet{}, false
-	}
-	ip := data[offset:]
-	var version byte
-	switch ethType {
-	case 0x0800:
-		version = 4
-	case 0x86dd:
-		version = 6
-	default:
-		return Packet{}, false
-	}
-	if len(ip) < 1 || ip[0]>>4 != version {
-		return Packet{}, false
-	}
-	pkt, ok := decodeIP(ip)
-	if !ok && !pkt.CaptureIncomplete {
-		return Packet{}, false
-	}
+	pkt, ok := DecodeEthernetFrame(data)
 	pkt.Interface = iface
-	return pkt, true
-}
-
-func parseEthernet(data []byte) (uint16, int, bool) {
-	if len(data) < 14 {
-		return 0, 0, false
-	}
-	ethType := binary.BigEndian.Uint16(data[12:14])
-	offset := 14
-	if ethType == 0x8100 || ethType == 0x88a8 {
-		if len(data) < 18 {
-			return 0, 0, false
-		}
-		ethType = binary.BigEndian.Uint16(data[16:18])
-		offset = 18
-	}
-	return ethType, offset, true
+	return pkt, ok
 }
 
 func htons16(v uint16) uint16 {

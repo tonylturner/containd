@@ -92,7 +92,7 @@
     "capture_side": "tcpdump in the server container network namespace on eth0",
     "generator": "unmodified Debian clients and servers; tcpdump",
     "generator_image_id": "sha256:0c2622da526b6feba4a0ca4fb214a71ae0c6b3ea70a96d77a0210e86771d70ef",
-    "license": "Source-package notices in test/it/capture/LICENSES; tcpdump notice is tcpdump.txt",
+    "license": "Apache-2.0 fixture data (LICENSE); source-package generator notices in test/it/capture/LICENSES; tcpdump notice is tcpdump.txt",
     "package_inventory": [
       "adduser=3.134",
       "apache2-bin=2.4.68-1~deb12u1",

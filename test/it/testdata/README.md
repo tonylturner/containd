@@ -5,7 +5,7 @@ server programs on a private Docker bridge. `manifest.json` records the base
 image digest, generated image ID, exact installed package versions, capture
 side, topology, frame counts, license references and the exchange represented
 by each file. Source-package notices for the software are in
-`../../capture/LICENSES/`. `SHA256SUMS` covers each pcap.
+`../capture/LICENSES/`. `SHA256SUMS` covers each pcap.
 
 | Capture | Recorded exchange |
 | --- | --- |
@@ -28,3 +28,6 @@ Regenerate the lab with
 `bash test/it/capture/capture.sh "$PWD/test/it/testdata"`; Docker and Python 3
 must be available. Decoder results and observed coverage gaps are reported by
 `go test -v -race ./pkg/dp/internal/corpus/ -run TestITRecordedCaptureDecoders`.
+
+The fixture data is licensed under Apache-2.0; see `LICENSE`. Generator
+software notices describe tools used to record the data, not bundled code.
