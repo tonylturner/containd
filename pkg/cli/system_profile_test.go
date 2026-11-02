@@ -82,6 +82,8 @@ func TestSystemStrictProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"Listener settings: effective next-start configuration projected from saved settings (not environment address overrides or live socket state).\n",
+		"_source identifies value authority; _saved shows overridden saved configuration.\n",
 		"mgmt.http_enabled: no\n", "mgmt.http_enabled_source: profile\n", "mgmt.http_enabled_saved: yes\n",
 		"mgmt.https_enabled: yes\n", "mgmt.https_enabled_source: profile\n", "mgmt.https_enabled_saved: no\n",
 		"mgmt.hsts: yes\n", "mgmt.hsts_source: profile\n", "mgmt.hsts_saved: no\n",

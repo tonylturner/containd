@@ -94,7 +94,12 @@ func showSystem(store config.Store, api *API) Command {
 			configErr = monitoringUnavailable(out, "System configuration", configErr)
 		} else {
 			fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
-			fmt.Fprintln(out, "Listener settings: effective next-start configuration (not environment address overrides or live socket state).")
+			if profile.IsStrict() {
+				fmt.Fprintln(out, "Listener settings: effective next-start configuration projected from saved settings (not environment address overrides or live socket state).")
+				fmt.Fprintln(out, "_source identifies value authority; _saved shows overridden saved configuration.")
+			} else {
+				fmt.Fprintln(out, savedListenerNotice)
+			}
 			effective, fields := systemProfileView(&cfg, profile.IsStrict())
 			listeners := savedListeners(effective)
 			printSystemProfileTLS(out, fields)
