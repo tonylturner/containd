@@ -80,17 +80,17 @@ func (m *VPNManager) preflight(cfg config.OpenVPNConfig) (*OpenVPNProfile, error
 			return nil, err
 		}
 	}
-	if !m.SuperviseOpenVPN {
-		return nil, fmt.Errorf("openvpn enabled but supervision disabled")
-	}
-	if m.OpenVPNPath == "" {
-		return nil, fmt.Errorf("openvpn binary not present")
-	}
 	if cfg.Mode == "server" && cfg.Server == nil {
 		return nil, fmt.Errorf("server requires managed server settings")
 	}
 	if cfg.Server == nil && cfg.Managed == nil && p == nil {
 		return nil, fmt.Errorf("openvpn requires a profile or managed settings")
+	}
+	if !m.SuperviseOpenVPN {
+		return nil, &daemonDeliveryError{errors.New("openvpn supervision disabled")}
+	}
+	if m.OpenVPNPath == "" {
+		return nil, &daemonDeliveryError{errors.New("openvpn binary not present")}
 	}
 	return p, nil
 }

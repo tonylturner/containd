@@ -50,7 +50,7 @@ exit 7
 			manager := NewManager(ManagerOptions{BaseDir: t.TempDir()})
 			manager.Syslog, manager.DNS, manager.NTP, manager.Proxy, manager.DHCP = nil, nil, nil, nil, nil
 			manager.VPN = vpn
-			effective, warnings := manager.ApplyEffective(context.Background(), cfg, nil)
+			effective, warnings := applyManagerTest(t, manager, cfg, nil)
 			if !effective.VPN.OpenVPN.Enabled || len(warnings) != 0 || len(manager.Faults()) != 0 {
 				t.Fatalf("connecting client quarantined: %+v %v %v", effective.VPN.OpenVPN, warnings, manager.Faults())
 			}

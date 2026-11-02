@@ -38,6 +38,8 @@ type pool struct {
 }
 
 type listener struct {
+	ready        <-chan struct{}
+	done         <-chan struct{}
 	cancel       context.CancelFunc
 	errCh        chan error
 	cfg          config.DHCPConfig
@@ -57,8 +59,11 @@ type listener struct {
 // Because the engine runs as non-root, the manager installs a small nftables redirect
 // for UDP/67 -> UDP/1067 (unprivileged) for the configured interfaces.
 type Manager struct {
-	mu sync.Mutex
+	delivery delivery
+	applyMu  sync.Mutex
+	mu       sync.Mutex
 
+	stopping  []<-chan struct{}
 	listeners map[string]listener // dev -> listener
 	leases    map[string]Lease    // key=dev|mac
 	lastErr   string
@@ -86,7 +91,9 @@ func (m *Manager) SetOnEvent(fn func(kind string, attrs map[string]any)) {
 	m.OnEvent = fn
 }
 
-func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []config.Interface) error {
+func (m *Manager) apply(ctx context.Context, cfg config.DHCPConfig, ifaces []config.Interface) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastApply = time.Now().UTC()
@@ -95,7 +102,7 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 	m.pruneExpiredLeasesLocked()
 	plan, err := buildApplyPlan(cfg, ifaces)
 	if err != nil {
-		return err
+		return &config.ServiceConfigError{Service: config.ServiceDHCP, Err: err}
 	}
 	if !cfg.Enabled || len(plan.devs) == 0 {
 		return m.disableLocked(ctx)
@@ -105,6 +112,9 @@ func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []con
 	}
 	m.stopRemovedListenersLocked(plan.devs)
 	m.restartChangedListenersLocked(cfg, plan.pools)
+	if err := m.joinStoppingLocked(ctx); err != nil {
+		return err
+	}
 	if err := m.startMissingListenersLocked(cfg, plan.devs, plan.pools, plan.reservations); err != nil {
 		return err
 	}
@@ -212,8 +222,15 @@ func resolveListenDevices(listenIfaces []string, resolveDev func(string) string)
 func (m *Manager) disableLocked(ctx context.Context) error {
 	for dev, l := range m.listeners {
 		l.cancel()
+		if l.done != nil {
+			m.stopping = append(m.stopping, l.done)
+		}
 		delete(m.listeners, dev)
 	}
+	if err := m.joinStoppingLocked(ctx); err != nil {
+		return err
+	}
+
 	if err := ensureRedirect(ctx, nil, false); err != nil {
 		m.lastErr = err.Error()
 		go m.emit("service.dhcp.redirect_failed", map[string]any{"error": err.Error()})
@@ -242,6 +259,9 @@ func (m *Manager) stopRemovedListenersLocked(devs []string) {
 			continue
 		}
 		l.cancel()
+		if l.done != nil {
+			m.stopping = append(m.stopping, l.done)
+		}
 		delete(m.listeners, dev)
 		go m.emit("service.dhcp.listener_stopped", map[string]any{"dev": dev})
 	}
@@ -261,6 +281,9 @@ func (m *Manager) restartChangedListenersLocked(cfg config.DHCPConfig, pools map
 			continue
 		}
 		l.cancel()
+		if l.done != nil {
+			m.stopping = append(m.stopping, l.done)
+		}
 		delete(m.listeners, dev)
 		go m.emit("service.dhcp.listener_restarting", map[string]any{"dev": dev})
 	}
@@ -531,10 +554,15 @@ func (m *Manager) persistLeasesLocked() {
 func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool, res map[string]string) {
 	lctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
+	ready := make(chan struct{})
+	done := make(chan struct{})
 	go func(dev string, pl pool, res map[string]string) {
-		errCh <- serveDHCPv4(lctx, dev, cfg, pl, res, m)
+		err := serveDHCPv4(lctx, dev, cfg, pl, res, m, ready)
+		close(done)
+		errCh <- err
 	}(dev, pl, res)
 	m.listeners[dev] = listener{
+		ready: ready, done: done,
 		cancel:       cancel,
 		errCh:        errCh,
 		cfg:          cfg,
@@ -616,10 +644,7 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 	// If `nft` isn't present, fail softly: DHCPd may still work if running as root with NET_BIND_SERVICE,
 	// but in our default nonroot engine image we rely on redirect.
 	if _, err := exec.LookPath("nft"); err != nil {
-		if enabled {
-			return fmt.Errorf("dhcp: nft not found (required for UDP/67 redirect): %w", err)
-		}
-		return nil
+		return fmt.Errorf("dhcp: nft not found (required to verify UDP/67 redirect): %w", err)
 	}
 
 	script := enforce.DeleteTable(enforce.DHCPRedirectTable)
@@ -707,4 +732,48 @@ func ipToU32(ip net.IP) uint32 {
 
 func u32ToIP(v uint32) net.IP {
 	return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
+func (m *Manager) runtimeReady() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.listeners) == 0 || len(m.stopping) > 0 {
+		return false
+	}
+	for _, l := range m.listeners {
+		if l.ready == nil || l.done == nil {
+			return false
+		}
+		select {
+		case <-l.done:
+			return false
+		default:
+		}
+		select {
+		case <-l.ready:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// Keep outstanding joins after cancellation. A later stop cannot certify absence
+// merely because the first attempt removed a listener from the active map.
+func (m *Manager) joinStoppingLocked(ctx context.Context) error {
+	pending := append([]<-chan struct{}(nil), m.stopping...)
+	m.mu.Unlock()
+	var err error
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+	}
+	m.mu.Lock()
+	if err == nil {
+		m.stopping = nil
+	}
+	return err
 }

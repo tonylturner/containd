@@ -54,7 +54,7 @@ func TestManagerMaterialAndRuntimeQuarantine(t *testing.T) {
 					Backends: []string{"127.0.0.1:80"},
 				}}
 			}
-			effective, warnings := m.ApplyEffective(context.Background(), cfg, nil)
+			effective, warnings := applyManagerTest(t, m, cfg, nil)
 			faults := m.Faults()
 			if len(warnings) == 0 || len(faults) != 1 || faults[0].Service != service || faults[0].Kind != kind {
 				t.Fatalf("fault outcome: %+v %v", faults, warnings)
@@ -68,7 +68,7 @@ func TestManagerMaterialAndRuntimeQuarantine(t *testing.T) {
 				t.Fatalf("false healthy status: %+v", status)
 			}
 			// An identical replay must not emit another fault transition.
-			m.ApplyEffective(context.Background(), cfg, nil)
+			applyManagerTest(t, m, cfg, nil)
 			count := 0
 			for _, ev := range m.ListTelemetryEvents(0) {
 				if ev.Kind == "service."+kind+"_fault" {
@@ -98,7 +98,7 @@ func TestManagerFaultChangesAndConcurrentStatus(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for range 20 {
-			m.ApplyEffective(context.Background(), config.ServicesConfig{}, faults)
+			applyManagerTest(t, m, config.ServicesConfig{}, faults)
 		}
 	})
 	for range 20 {
@@ -117,7 +117,7 @@ func TestManagerFaultChangesAndConcurrentStatus(t *testing.T) {
 	if m.Faults()[0].Message == "mutated" {
 		t.Fatal("fault snapshot was not detached")
 	}
-	m.ApplyEffective(context.Background(), config.ServicesConfig{}, nil)
+	applyManagerTest(t, m, config.ServicesConfig{}, nil)
 	if len(m.Faults()) != 0 {
 		t.Fatal("successful apply retained obsolete fault")
 	}
@@ -136,7 +136,7 @@ func TestManagerEngineFaultIsolation(t *testing.T) {
 		{Service: config.ServiceWireGuard, Kind: "runtime", Message: "runtime apply failed"},
 		{Service: config.ServiceDHCP, Kind: "runtime", Message: "runtime apply failed"},
 	}
-	m.ApplyEffective(context.Background(), config.ServicesConfig{}, initial)
+	applyManagerTest(t, m, config.ServicesConfig{}, initial)
 	m.RecordEngineFaults(runtime)
 	runtime[1].Message = "mutated"
 	faults := m.Faults()
@@ -146,7 +146,7 @@ func TestManagerEngineFaultIsolation(t *testing.T) {
 	}
 	// Until a successful engine request, a local apply does not assert that
 	// the engine recovered. No transient clear/re-fault event is emitted.
-	m.ApplyEffective(context.Background(), config.ServicesConfig{}, initial)
+	applyManagerTest(t, m, config.ServicesConfig{}, initial)
 	if len(m.Faults()) != 2 {
 		t.Fatalf("local apply cleared engine fault: %+v", m.Faults())
 	}

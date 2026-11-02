@@ -37,6 +37,7 @@ type Manager struct {
 	DHCP   *DHCPManager
 	VPN    *VPNManager
 
+	delivery     deliveryState // guarded by applyMu
 	applyMu      sync.Mutex
 	faultMu      sync.Mutex
 	faults       []ServiceFault
