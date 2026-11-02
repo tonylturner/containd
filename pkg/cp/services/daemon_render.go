@@ -81,6 +81,9 @@ func checkDaemon(ctx context.Context, binary string, args ...string) error {
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, binary, args...)
 	if err := cmd.Run(); err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return fmt.Errorf("%s preflight interrupted: %w", filepath.Base(binary), contextErr)
+		}
 		return &daemonRenderError{fmt.Errorf("%s preflight rejected: %w", filepath.Base(binary), err)}
 	}
 	return nil
