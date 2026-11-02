@@ -528,6 +528,9 @@ values. `servedCertFingerprintSHA256` describes the served leaf;
 differ after a rejected reload. Fingerprints are uppercase colon-separated
 SHA-256 DER hashes. Strict disables HTTP and forces HTTPS, HSTS and Secure
 cookies. There is no `/system/ssh` route; use CLI `show system ssh`.
+`certificateWarning` identifies a served or configured management certificate
+without a DNS or IP SAN, including how to add one; `reloadError` remains
+reserved for a rejected certificate reload.
 
 TLS status always includes `secureCookies` (`always`, `https-only` or `never`)
 and `secureCookiesSource` (`profile`, `environment` or `default`). These describe

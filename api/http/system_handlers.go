@@ -72,6 +72,7 @@ type tlsInfoResponse struct {
 	ServedCertDNSNames []string `json:"servedCertDnsNames,omitempty"`
 	ServedCertIPs      []string `json:"servedCertIps,omitempty"`
 	ReloadError        string   `json:"reloadError,omitempty"`
+	CertificateWarning string   `json:"certificateWarning,omitempty"`
 }
 
 func getTLSHandler(store config.Store) gin.HandlerFunc {
@@ -127,6 +128,9 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.ServedCertSubject = leaf.Subject.String()
 			resp.ServedCertNotAfter = formatNotAfter(leaf)
 			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(leaf)
+			if err := mgmttls.ValidateSubjectAltName(leaf); err != nil {
+				resp.CertificateWarning = fmt.Sprintf("%s: %v", resp.ServedCertFile, err)
+			}
 		}
 
 		configuredLeaf := leaf
@@ -141,6 +145,15 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertIssuer = cert.Issuer.String()
 			resp.CertNotAfter = formatNotAfter(cert)
 			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
+			if err := mgmttls.ValidateSubjectAltName(cert); err != nil {
+				warning := fmt.Sprintf("%s: %v", resp.CertFile, err)
+				if warning != resp.CertificateWarning {
+					if resp.CertificateWarning != "" {
+						resp.CertificateWarning += "; "
+					}
+					resp.CertificateWarning += warning
+				}
+			}
 		}
 		// Read the next-start identity independently, even when its paths
 		// equal the served identity: a failed reload retains a last-good leaf.
@@ -284,6 +297,10 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 		pair, err := mgmttls.ParseBundle([]byte(req.CertPEM + "\n" + req.KeyPEM + "\n"))
 		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid cert/key pair", err.Error())
+			return
+		}
+		if err := mgmttls.ValidateSubjectAltName(pair.Leaf); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 

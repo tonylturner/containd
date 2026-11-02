@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -128,5 +131,79 @@ func TestTLSInfoReportsEffectiveListeners(t *testing.T) {
 				t.Fatalf("status=%d listeners=%+v, want %+v", rec.Code, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTLSUploadRejectsSANlessCertificateWithoutWriting(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	cert, key := sanTestCertPEM(t, "cn-only.example", nil, nil)
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	path, _ := mgmttls.IdentityFilesIn(cfg, dir)
+	oldCert, oldKey := generateTestCertPEM(t)
+	if err := mgmttls.Publish(path, []byte(oldCert), []byte(oldKey)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(setTLSCertRequest{CertPEM: string(cert), KeyPEM: string(key)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: cfg}, dir))
+	rec := httptest.NewRecorder()
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+	var response struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Error, "subject alternative name") ||
+		!strings.Contains(response.Error, "-addext") {
+		t.Fatalf("CN-only upload response: %d %s", rec.Code, rec.Body)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("rejected upload changed the managed identity: %v", err)
+	}
+}
+
+func TestTLSStatusWarnsAboutLegacySANlessCertificate(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	cert, key := sanTestCertPEM(t, "legacy-cn-only", nil, nil)
+	dir := t.TempDir()
+	certPath, keyPath := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certPath, cert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader := mgmttls.NewLoader(certPath, keyPath)
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile, cfg.System.Mgmt.TLSKeyFile = certPath, keyPath
+	recordServed(t, ServedManagement{CertFile: certPath, KeyFile: keyPath, TLS: loader})
+	router := gin.New()
+	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
+	rec := httptest.NewRecorder()
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+	var response tlsInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(response.CertificateWarning, certPath) ||
+		!strings.Contains(response.CertificateWarning, "subject alternative name") ||
+		!strings.Contains(response.CertificateWarning, "-addext") || response.ReloadError != "" {
+		t.Fatalf("legacy TLS status did not show a distinct compatibility warning: %d %+v", rec.Code, response)
 	}
 }

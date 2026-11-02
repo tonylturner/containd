@@ -68,6 +68,9 @@ func (l *Loader) Reload() (*tls.Certificate, error) {
 	err := statErr
 	if err == nil {
 		pair, next.identity, err = loadPair(l.certFile, l.keyFile, identity, l.ops)
+		if err == nil && current != nil {
+			err = ValidateSubjectAltName(pair.Leaf)
+		}
 		next.err = err
 	}
 	changed := false

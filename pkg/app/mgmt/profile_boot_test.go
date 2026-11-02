@@ -4,13 +4,21 @@ package mgmtapp
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/common/profile"
@@ -88,26 +96,95 @@ func testStrictProjectionAndHTTPSOnly(t *testing.T) {
 }
 
 func testStrictHTTPSIdentityRefusal(t *testing.T) {
-	for _, corrupted := range []bool{false, true} {
-		dir := t.TempDir()
-		saved := config.DefaultConfig()
-		if corrupted {
-			// Corrupted external identities must never downgrade to HTTP.
-			saved.System.Mgmt.TLSCertFile = filepath.Join(dir, "server.pem")
-			if err := os.WriteFile(saved.System.Mgmt.TLSCertFile, []byte("corrupt"), 0o600); err != nil {
-				t.Fatal(err)
+	for _, tc := range []struct {
+		name    string
+		corrupt bool
+		sanless bool
+		missing bool
+	}{
+		{name: "missing external identity", missing: true},
+		{name: "corrupt external identity", corrupt: true},
+		{name: "SAN-less external identity", sanless: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			saved := config.DefaultConfig()
+			if tc.missing {
+				t.Setenv("CONTAIND_TLS_CERT_FILE", filepath.Join(dir, "missing.crt"))
+				t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "missing.key"))
+			} else {
+				cert, key := tlsCertificate(t, tc.sanless)
+				certFile, keyFile := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+				if tc.corrupt {
+					cert = []byte("corrupt")
+					key = []byte("corrupt")
+				}
+				if err := os.WriteFile(certFile, cert, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(keyFile, key, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				saved.System.Mgmt.TLSCertFile, saved.System.Mgmt.TLSKeyFile = certFile, keyFile
 			}
-		} else {
-			t.Setenv("CONTAIND_TLS_CERT_FILE", filepath.Join(dir, "missing.crt"))
-			t.Setenv("CONTAIND_TLS_KEY_FILE", filepath.Join(dir, "missing.key"))
-		}
-		effective, _ := config.ProjectProfile(saved, true)
-		_, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), effective, nil)
-		if err == nil || !strings.HasPrefix(err.Error(), "CONTAIND_PROFILE=strict refuses to start without HTTPS: ") {
-			t.Fatalf("strict identity failure = %v", err)
-		}
-		t.Setenv("CONTAIND_TLS_CERT_FILE", "")
-		t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+			effective, _ := config.ProjectProfile(saved, true)
+			_, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), effective, nil)
+			if err == nil || !strings.HasPrefix(err.Error(), "CONTAIND_PROFILE=strict refuses to start without HTTPS: ") {
+				t.Fatalf("strict identity failure = %v", err)
+			}
+			if tc.sanless && !strings.Contains(err.Error(), "subject alternative name") {
+				t.Fatalf("SAN-less strict refusal omitted its reason: %v", err)
+			}
+			t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+			t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+		})
+	}
+}
+
+func tlsCertificate(t *testing.T, sanless bool) ([]byte, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(41),
+		Subject:      pkix.Name{CommonName: "strict-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	if !sanless {
+		template.DNSNames = []string{"strict-test"}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+}
+
+func TestLegacyTLSSubjectAltNamePolicy(t *testing.T) {
+	leaf := &x509.Certificate{Subject: pkix.Name{CommonName: "legacy-management"}}
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core).Sugar()
+	if err := checkManagementTLSSubjectAltName(logger, "/data/tls/server.pem", leaf, false); err != nil {
+		t.Fatalf("training rejected a legacy identity: %v", err)
+	}
+	if logs.Len() != 1 || !strings.Contains(logs.All()[0].Message, "/data/tls/server.pem") ||
+		!strings.Contains(logs.All()[0].Message, "subject alternative name") ||
+		!strings.Contains(logs.All()[0].Message, "-addext") {
+		t.Fatalf("training warning lacks certificate and fix: %+v", logs.All())
+	}
+	if err := checkManagementTLSSubjectAltName(logger, "/data/tls/server.pem", leaf, true); err == nil ||
+		!strings.Contains(err.Error(), "subject alternative name") || logs.Len() != 1 {
+		t.Fatalf("strict policy did not refuse without logging a training warning: err=%v logs=%+v", err, logs.All())
 	}
 }
 

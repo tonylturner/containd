@@ -70,6 +70,9 @@ before entering the CLI. Direct `containd cli` cannot perform the change; use
 web/API or SSH first, then set `CONTAIND_CLI_USER` and `CONTAIND_CLI_PASSWORD`.
 The CLI, SSH server and health check call the local management API over pinned
 HTTPS, not insecure TLS bypasses.
+Strict requires the management certificate to include a DNS or IP SAN; a
+stored SAN-less certificate prevents strict startup. Training keeps serving an
+existing SAN-less identity with a warning until it is replaced.
 
 Every strict boot reissues passwords for accounts still awaiting the change,
 invalidating their old passwords, sessions and MFA challenges. A claimed,
@@ -92,6 +95,7 @@ Strict management requires a unique JWT secret of at least 32 characters
 - A mounted `/var/run/docker.sock`, or inability to inspect that path.
 - `CONTAIND_MGMT_RESERVATION`.
 - An unusable HTTPS identity or inability to bind HTTPS after listener recovery.
+- A management certificate without a DNS or IP subject alternative name.
 
 In standalone engine mode, strict preflight checks only the Docker socket.
 Management users-database creation or open failure is fatal in **both** profiles;

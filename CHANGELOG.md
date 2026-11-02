@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Require DNS/IP SANs for management TLS uploads and strict boot; training warns
+  on, but keeps serving, legacy identities.
 - Report the effective Secure-cookie policy and its source in TLS status and
   System Settings, including training environment overrides.
 - Honor `enableHSTS=false` in training by removing a duplicate HSTS header.

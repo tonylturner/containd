@@ -456,6 +456,12 @@ TLS bytes and the saved managed/external choice.
 
 Admins replace the managed identity with
 `POST /api/v1/system/tls/cert`, sending `{"certPEM":"...","keyPEM":"..."}`.
+The leaf certificate must include at least one DNS or IP subject alternative
+name (SAN); a common name alone is not sufficient. An upload without a DNS or
+IP SAN returns HTTP 400 and leaves the existing bundle unchanged. For example,
+add a SAN when generating a certificate with
+`-addext 'subjectAltName=DNS:<name>,IP:<addr>'`.
+
 The pair is validated and published with one durable atomic rename; the listener
 reads the bundle once at each reload. Failures before rename preserve the old
 bundle. A failure to sync the directory after rename returns HTTP 500 with
@@ -464,6 +470,13 @@ confirmed. Inspect status before retrying; containd does not roll it back.
 A successful upload reports `updated` when the bound HTTPS listener serves the
 bundle, or `stored` with a warning when it takes effect at the next start.
 Uploads never change saved paths.
+
+Generated self-signed management identities include `localhost` and
+`127.0.0.1` SANs. Strict refuses to start with a stored management certificate
+that lacks a DNS or IP SAN. Training continues serving an existing SAN-less
+identity and logs a warning with the replacement guidance; TLS status reports
+it in `certificateWarning`. A SAN-less certificate encountered on reload does
+not replace the last-good identity and is reported in `reloadError`.
 
 Handshakes check each file's device/inode, size and modification time. Unchanged
 files are not reread or reparsed, including invalid replacements: status keeps
@@ -500,6 +513,11 @@ snapshot, not an independently read certificate. `reloadError` reports an invali
 rotation while the last-good identity remains served. Private keys are never
 returned. A pin/rotation race fails verification; retry the operation rather than
 disabling certificate verification.
+
+The loopback HTTPS client performs ordinary certificate validity checks as well
+as leaf pinning. An expired stored certificate can still be served and does not
+by itself prevent strict startup, but the health check and local CLI fail their
+loopback TLS connection until a valid certificate is installed.
 
 Strict overrides saved HTTP, HTTPS and HSTS enablement without rewriting saved
 intent. TLS status includes `httpEnabledSource`, `httpsEnabledSource`,
