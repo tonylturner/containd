@@ -18,6 +18,7 @@ import type {
 } from "./api";
 
 export const networkAPI = {
+  clearAnomalies: () => deleteJSONResult<{ status: string }>("/api/v1/anomalies"),
   listZones: (signal?: AbortSignal) => getConfigJSON<Zone[]>("/api/v1/zones", "list", signal),
   createZone: (expectedRevision: string, z: Zone) => postJSONResult<Zone>("/api/v1/zones", z, expectedRevision),
   updateZone: (expectedRevision: string, name: string, z: Partial<Zone>) =>

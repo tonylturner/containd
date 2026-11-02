@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { StatusBadge } from "../../components/StatusBadge";
-import type { TelemetryEvent } from "../../lib/api";
+import { api, isAdmin, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
 import type { EvidenceView } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
@@ -16,8 +18,15 @@ export function IEC104EvidencePanel({
   evidence: EvidenceView;
   onClose: () => void;
 }) {
+  const confirm = useConfirm();
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const anomaly = event.proto === "ids" && event.kind === "anomaly";
+
   return (
     <div className="rounded-xs border bg-(--surface) overflow-hidden flex flex-col h-[calc(100vh-240px)] sticky top-4">
+      <ConfirmDialog {...confirm.props} />
       <div className="flex items-start justify-between gap-2 border-b px-4 py-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-(--text) wrap-break-word">{evidence.headline}</h3>
@@ -63,6 +72,42 @@ export function IEC104EvidencePanel({
             observations and do not change firewall decisions.
           </div>
         </DetailSection>
+        {anomaly && (
+          <DetailSection label="Anomaly store">
+            <p className="text-xs text-(--text-muted)">
+              Clearing resets all detected anomalies and detector tracking state,
+              not historical alert events. New traffic can create more anomalies.
+            </p>
+            {isAdmin() && (
+              <button
+                disabled={clearing}
+                className="mt-3 max-w-full rounded-xs border px-3 py-1.5 text-xs text-(--red) transition-ui disabled:opacity-50"
+                onClick={() => confirm.open({
+                  title: "Clear anomalies?",
+                  message: "Immediately clear all detected protocol anomalies and reset detector tracking state, not just this observation. Historical alert events and configuration remain unchanged. New traffic can create more anomalies. This cannot be undone and does not require a commit.",
+                  confirmLabel: "Clear anomalies",
+                  variant: "danger",
+                  onConfirm: async () => {
+                    setClearing(true);
+                    setError("");
+                    setNotice("");
+                    const result = await api.clearAnomalies();
+                    if (result.ok) {
+                      setNotice("Anomalies cleared immediately. Historical alert events remain. New traffic can create more anomalies.");
+                    } else {
+                      setError(result.error);
+                    }
+                    setClearing(false);
+                  },
+                })}
+              >
+                {clearing ? "Clearing anomalies…" : "Clear anomalies (immediate)"}
+              </button>
+            )}
+            {error && <p role="alert" className="mt-3 text-xs text-(--red)">{error}</p>}
+            {notice && <p role="status" className="mt-3 text-xs">{notice}</p>}
+          </DetailSection>
+        )}
       </div>
     </div>
   );
