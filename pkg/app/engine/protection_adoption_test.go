@@ -75,8 +75,8 @@ func TestProtectionConfigureAdoptsRunAcrossApplyIDsThenObservesLoss(t *testing.T
 			dp := &adoptionPlane{countingDP: newCountingDP(t)}
 			c := testProtectionCoordinator(t, dp)
 			logger := zap.NewNop().Sugar()
-			conf := configHandler(logger, dp, &simulationManager{dpEngine: dp.Engine, logger: logger}, c)
-			apply := applyRulesHandler(dp.Engine, nil, c)
+			conf := configHandler(logger, dp, &simulationManager{dpEngine: dp.Engine}, c)
+			apply := applyRulesHandler(dp.Engine, nil, c, nil)
 			snap, err := json.Marshal(rules.Snapshot{DPIMode: "monitor", Firewall: []rules.Entry{
 				{ID: "direct", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}},
 			}})

@@ -267,7 +267,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = protectionRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString(`{"firewall":[],"nat":{"snat":[],"dnat":[]},"ids":{"enabled":false,"rules":null}}`))
-		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
+		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp), nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("apply_rules status = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -288,7 +288,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = protectionRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString("{"))
-		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
+		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp), nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected invalid JSON status, got %d", rec.Code)
 		}
@@ -298,7 +298,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 	t.Run("config and simulation handlers", func(t *testing.T) {
 		logger := zap.NewNop().Sugar()
-		sim := &simulationManager{dpEngine: dp, logger: logger}
+		sim := &simulationManager{dpEngine: dp}
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/internal/config", nil)
@@ -324,7 +324,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/simulation", bytes.NewBufferString(`{"action":"start"}`))
 		simulationHandler(sim).ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK || !sim.running {
+		if rec.Code != http.StatusOK || sim.status().Running || sim.status().Error != "waiting for policy" {
 			t.Fatalf("simulation start failed: %d %s", rec.Code, rec.Body.String())
 		}
 		sim.stop()
@@ -342,8 +342,8 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("config valid POST status = %d body=%s", rec.Code, rec.Body.String())
 		}
-		if !sim.running {
-			t.Fatal("expected simulation manager running after dpiMock config")
+		if sim.status().Running {
+			t.Fatal("DPI mock must not start replay without policy")
 		}
 		sim.stop()
 	})

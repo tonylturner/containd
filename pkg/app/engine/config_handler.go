@@ -47,9 +47,9 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 
 // configHandler applies a data-plane configuration. A configuration equal to
 // the applied one does not rebuild the engine: its events, inventory,
-// sessions and NFQUEUE binding survive, and the DPI mock simulation keeps
-// running. Parsing-only changes atomically update policy without retiring
-// sessions. It still asks the engine to start, which is a no-op while it runs
+// sessions and NFQUEUE binding survive, and recorded replay keeps running.
+// Parsing-only changes atomically update policy without retiring sessions.
+// It still asks the engine to start, which is a no-op while it runs
 // and retries the queue bind after an earlier attempt gave up. A changed
 // configuration rebuilds the engine as before. A rebuild that cannot take
 // effect (the nft tables of a disabled enforcement cannot be removed) fails
@@ -93,6 +93,7 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 			current.mu.Unlock()
 			if !unchanged && parsingOnly {
 				dp.SetICSParsing(next.DPIICSParsing)
+				simMgr.setParsing(next.DPIICSParsing)
 				current.mu.Lock()
 				current.dp = next
 				current.mu.Unlock()
@@ -103,17 +104,13 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-				if err := dp.Reconfigure(fresh); err != nil {
+				if err := simMgr.reconfigure(next, func() error { return dp.Reconfigure(fresh) }); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
 				current.mu.Lock()
 				current.applied, current.dp = true, next
 				current.mu.Unlock()
-				simMgr.stop()
-				if next.DPIMock {
-					simMgr.start(nil)
-				}
 			}
 			if err := dp.RetryProtection(coordinator.ctx); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -12,22 +12,14 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/engine"
-	dpevents "github.com/tonylturner/containd/pkg/dp/events"
-	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/rules"
-	"github.com/tonylturner/containd/pkg/dp/synth"
 )
 
 func wireguardStatusHandler() http.HandlerFunc {
@@ -246,7 +238,7 @@ func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.
 }
 
 // applyRulesHandler applies a snapshot and hands its scan selection to the gate.
-func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *protectionCoordinator) http.HandlerFunc {
+func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *protectionCoordinator, sim *simulationManager) http.HandlerFunc {
 	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -267,6 +259,9 @@ func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *
 		if err := dpEngine.ApplyRulesAndReconcile(ctx, snap, func() { gate.applySnapshot(snap.Gate) }); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		if sim != nil {
+			sim.loadRules(snap)
 		}
 		writeJSON(w, dpEngine.Protection())
 	})
@@ -295,115 +290,5 @@ func rulesetStatusHandler(dpEngine *engine.Engine) http.HandlerFunc {
 		}
 		status := dpEngine.RulesetStatus()
 		writeJSON(w, status)
-	}
-}
-
-type simulationManager struct {
-	dpEngine *engine.Engine
-	logger   *zap.SugaredLogger
-
-	mu      sync.Mutex // the config and simulation handlers call in concurrently
-	cancel  context.CancelFunc
-	running bool
-	runs    int // simulation starts, so a restart is observable
-}
-
-func (sm *simulationManager) isRunning() bool {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	return sm.running
-}
-
-func (sm *simulationManager) start(subnets []synth.Subnet) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if sm.running {
-		return
-	}
-	cfg := synth.Config{
-		EventsPerSecond: 4,
-		Subnets:         subnets,
-		OnEvent:         synthIDSCallback(sm.dpEngine),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	sm.cancel = cancel
-	sm.running = true
-	sm.runs++
-	sm.logger.Infof("simulation started (%d subnets)", len(cfg.Subnets))
-	go synth.Run(ctx, sm.dpEngine.Events(), cfg)
-}
-
-func (sm *simulationManager) stop() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if !sm.running || sm.cancel == nil {
-		return
-	}
-	sm.cancel()
-	sm.cancel = nil
-	sm.running = false
-	sm.logger.Infof("simulation stopped")
-}
-
-func simulationHandler(sm *simulationManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, map[string]any{"running": sm.isRunning()})
-		case http.MethodPost:
-			var req struct {
-				Action  string         `json:"action"`
-				Subnets []synth.Subnet `json:"subnets,omitempty"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, "invalid JSON", http.StatusBadRequest)
-				return
-			}
-			switch req.Action {
-			case "start":
-				sm.start(req.Subnets)
-				writeJSON(w, map[string]any{"running": true})
-			case "stop":
-				sm.stop()
-				writeJSON(w, map[string]any{"running": false})
-			default:
-				http.Error(w, `action must be "start" or "stop"`, http.StatusBadRequest)
-			}
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	}
-}
-
-func synthIDSCallback(dpEngine *engine.Engine) func(dpevents.Event) {
-	return func(ev dpevents.Event) {
-		snap := dpEngine.CurrentRules()
-		if snap == nil || !snap.IDS.Enabled || len(snap.IDS.Rules) == 0 {
-			return
-		}
-		eval := ids.New(snap.IDS)
-		dpiEv := dpi.Event{
-			FlowID:     ev.FlowID,
-			Proto:      ev.Proto,
-			Kind:       ev.Kind,
-			Attributes: ev.Attributes,
-			Timestamp:  ev.Timestamp,
-		}
-		alerts := eval.Evaluate(dpiEv)
-		for _, a := range alerts {
-			dpEngine.Events().Append(dpevents.Event{
-				Origin:     telemetry.OriginDemo,
-				FlowID:     ev.FlowID,
-				Proto:      a.Proto,
-				Kind:       a.Kind,
-				Attributes: a.Attributes,
-				Timestamp:  a.Timestamp,
-				SrcIP:      ev.SrcIP,
-				DstIP:      ev.DstIP,
-				SrcPort:    ev.SrcPort,
-				DstPort:    ev.DstPort,
-				Transport:  ev.Transport,
-			})
-		}
 	}
 }

@@ -13,7 +13,7 @@ import (
 func TestProtectionApplyAndHealthWireShape(t *testing.T) {
 	dp := newCountingDP(t)
 	c := testProtectionCoordinator(t, dp)
-	w := coordinatedPost(applyRulesHandler(dp.Engine, nil, c), "wire-apply", `{}`)
+	w := coordinatedPost(applyRulesHandler(dp.Engine, nil, c, nil), "wire-apply", `{}`)
 	if w.Code != 200 {
 		t.Fatalf("apply: %d %s", w.Code, w.Body)
 	}

@@ -29,8 +29,8 @@ func TestProtectionCoordinatorServicesAndSupersession(t *testing.T) {
 	dp := newCountingDP(t)
 	c := testProtectionCoordinator(t, dp)
 	services := servicesHandler(zap.NewNop().Sugar(), dp.Engine, nil, nil, nil, nil, c)
-	conf := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, c)
-	apply := applyRulesHandler(dp.Engine, nil, c)
+	conf := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
+	apply := applyRulesHandler(dp.Engine, nil, c, nil)
 	if w := coordinatedPost(services, "A", `{}`); w.Code != 200 {
 		t.Fatalf("services: %d %s", w.Code, w.Body)
 	}
@@ -216,7 +216,7 @@ func TestProtectionCoordinatorAbortedApplyKeepsBindWorker(t *testing.T) {
 func TestProtectionCoordinatorFailedConfigureRestartsBindWorker(t *testing.T) {
 	dp := newCountingDP(t)
 	c := testProtectionCoordinator(t, dp)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, c)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	entered := make(chan struct{})
 	dp.startFn = func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }
 	if w := coordinatedPost(h, "A", `{}`); w.Code != 200 {

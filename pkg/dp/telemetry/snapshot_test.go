@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/netip"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -15,6 +16,34 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
+
+func TestSnapshotDemoSamplesDoNotChangeRealSources(t *testing.T) {
+	c := Collector{
+		BootID: "boot",
+		Events: func() []wire.EventCounts {
+			return []wire.EventCounts{{Origin: wire.OriginReal, Total: 7}, {Origin: wire.OriginDemo, Total: 99}}
+		},
+	}
+	before := c.Snapshot(context.Background())
+	demo := []wire.CounterSample{{Metric: wire.ProtoPackets, Value: 42, Epoch: "run", Origin: wire.OriginDemo}}
+	c.Demo = func() []wire.CounterSample { return demo }
+	after := c.Snapshot(context.Background())
+	if !reflect.DeepEqual(before.Unavailable, after.Unavailable) ||
+		!reflect.DeepEqual(before.Samples, after.Samples[:len(before.Samples)]) ||
+		!reflect.DeepEqual(demo, after.Samples[len(before.Samples):]) {
+		t.Fatalf("demo changed real collector results: before=%+v after=%+v", before, after)
+	}
+	for _, s := range before.Samples {
+		if s.Origin == wire.OriginDemo {
+			t.Fatal("retained demo event totals published without a running replay")
+		}
+	}
+	c.Demo = func() []wire.CounterSample { return nil }
+	stopped := c.Snapshot(context.Background())
+	if !reflect.DeepEqual(before.Samples, stopped.Samples) || !reflect.DeepEqual(before.Unavailable, stopped.Unavailable) {
+		t.Fatal("stopping demo changed real collection or unavailability")
+	}
+}
 
 func TestSnapshotQuietAndNotConnectedSeries(t *testing.T) {
 	tracker := stats.New()
