@@ -8,123 +8,97 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/app/convergence"
+	"github.com/tonylturner/containd/pkg/common/protection"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestApplyProtectionHeaderAndObservation(t *testing.T) {
-	for _, response := range []string{"valid", "empty", "malformed", "other apply"} {
-		t.Run(response, func(t *testing.T) {
-			ctx := NewApplyContext(context.Background())
-			id := ApplyID(ctx)
+func testAdmission() protection.Admission {
+	return protection.Admission{Metadata: protection.Metadata{BootID: "boot", ApplyID: "apply", RunningRevision: "running", Mode: protection.ModeNormal}}
+}
+
+func TestDeliveryAdmissionEveryMutation(t *testing.T) {
+	for _, predecessor := range []protection.ApplyID{"", "previous"} {
+		t.Run(string(predecessor), func(t *testing.T) {
+			a := testAdmission()
+			a.PreviousApplyID = predecessor
+			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if _, err := io.Copy(io.Discard, r.Body); err != nil {
 					t.Error(err)
 					return
 				}
-				if r.Header.Get(ApplyIDHeader) != id || len(id) == 0 || len(id) > 64 {
-					t.Errorf("apply header=%q want %q", r.Header.Get(ApplyIDHeader), id)
-				}
-				if r.URL.Path != "/internal/apply_rules" {
-					_, _ = io.WriteString(w, `{"faults":[]}`)
-					return
-				}
-				switch response {
-				case "valid", "other apply":
-					applyID := id
-					if response == "other apply" {
-						applyID = id + "-other"
+				calls++
+				for header, want := range map[string]string{protection.ApplyIDHeader: string(a.ApplyID), protection.EngineBootIDHeader: string(a.BootID), protection.RunningRevisionHeader: string(a.RunningRevision), protection.ApplyModeHeader: string(a.Mode), protection.PreviousApplyIDHeader: string(predecessor)} {
+					if _, present := r.Header[http.CanonicalHeaderKey(header)]; !present || r.Header.Get(header) != want {
+						t.Errorf("%s: %s=%q want %q", r.URL, header, r.Header.Get(header), want)
 					}
-					_ = json.NewEncoder(w).Encode(dpengine.ProtectionStatus{BootID: "boot", ApplyID: applyID, State: "pending", ObservedAt: time.Now()})
-				case "malformed":
-					_, _ = io.WriteString(w, `bad json`)
 				}
+				// Missing telemetry must never undo known synchronous success.
+				w.WriteHeader(http.StatusAccepted)
 			}))
 			defer server.Close()
-			client := NewHTTPClient(server.URL)
-			if _, err := client.ConfigureServices(ctx, config.ServicesConfig{}); err != nil {
-				t.Fatal(err)
+			c := NewHTTPClient(server.URL)
+			ctx := context.Background()
+			for _, call := range []func() error{
+				func() error { return c.Configure(ctx, a, config.DataPlaneConfig{}) },
+				func() error { return c.ConfigureServices(ctx, a, config.ServicesConfig{}) },
+				func() error { return c.ConfigureTrust(ctx, a, trust.Bundle{Revision: trust.NoRevision}) },
+				func() error { return c.ApplyRules(ctx, a, rules.Snapshot{}) },
+				func() error { return c.Retry(ctx, a) },
+				func() error { return c.ConfigureInterfaces(ctx, a, nil, false) },
+				func() error { return c.ConfigureInterfaces(ctx, a, nil, true) },
+				func() error { return c.ConfigureRouting(ctx, a, config.RoutingConfig{}, false) },
+				func() error { return c.ConfigureRouting(ctx, a, config.RoutingConfig{}, true) },
+			} {
+				if err := call(); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if err := client.Configure(ctx, config.DataPlaneConfig{}); err != nil {
-				t.Fatal(err)
-			}
-			st, err := client.ApplyRules(ctx, rules.Snapshot{})
-			if err != nil || st.ApplyID != id {
-				t.Fatalf("observation=%+v err=%v", st, err)
-			}
-			want := "unknown"
-			if response == "valid" {
-				want = "pending"
-			}
-			if st.State != want {
-				t.Fatalf("state=%s want %s", st.State, want)
-			}
-			if ApplyID(NewApplyContext(ctx)) == id {
-				t.Fatal("nested compensation reused ID")
+			if calls != 9 {
+				t.Fatalf("calls=%d", calls)
 			}
 		})
 	}
 }
 
-func TestApplyProtectionSupersededError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.Copy(io.Discard, r.Body); err != nil {
-			t.Error(err)
-			return
-		}
-		w.WriteHeader(409)
-		_, _ = io.WriteString(w, `{"error":"application was superseded","code":"apply_superseded"}`)
-	}))
-	defer server.Close()
-	client := NewHTTPClient(server.URL)
-	ctx := NewApplyContext(context.Background())
-	_, servicesErr := client.ConfigureServices(ctx, config.ServicesConfig{})
-	configErr := client.Configure(ctx, config.DataPlaneConfig{})
-	_, rulesErr := client.ApplyRules(ctx, rules.Snapshot{})
-	for _, err := range []error{servicesErr, configErr, rulesErr} {
-		if err == nil || !strings.Contains(err.Error(), "apply_superseded") {
-			t.Fatalf("lost rejection: %v", err)
-		}
-	}
-}
-
-func TestRetryProtectionWire(t *testing.T) {
-	for _, code := range []string{"", "protection_superseded", "protection_not_retryable"} {
+func TestDeliveryConflicts(t *testing.T) {
+	for _, code := range []string{"apply_input_changed", "apply_predecessor_changed", "engine_boot_changed", "apply_superseded", "protection_superseded"} {
 		t.Run(code, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var body map[string]string
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
 					t.Error(err)
-					return
-				}
-				if r.URL.Path != "/internal/protection/retry" || r.Header.Get(ApplyIDHeader) != "apply" || body["bootId"] != "boot" || len(body) != 1 {
-					t.Errorf("retry request: %s %v %v", r.URL.Path, r.Header, body)
-				}
-				if code == "" {
-					w.WriteHeader(202)
 					return
 				}
 				w.WriteHeader(409)
 				_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
 			}))
 			defer server.Close()
-			err := NewHTTPClient(server.URL).RetryProtection(context.Background(), "boot", "apply")
-			if code == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			var conflict *ProtectionConflict
-			if !errors.As(err, &conflict) || conflict.Code != code {
-				t.Fatalf("conflict: %v", err)
+			if err := NewHTTPClient(server.URL).Configure(context.Background(), testAdmission(), config.DataPlaneConfig{}); !errors.Is(err, convergence.ErrInputChanged) {
+				t.Fatalf("conflict=%v", err)
 			}
 		})
+	}
+}
+
+func TestObserveNeverInventsProof(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"bootId": "boot", "iec104Enforcement": map[string]bool{}, "protection": dpengine.ProtectionStatus{BootID: "boot", ApplyID: "apply", State: "pending", ObservedAt: time.Now()}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{})
+	}))
+	defer server.Close()
+	o, err := NewHTTPClient(server.URL).Observe(context.Background())
+	if err != nil || o.BootID != "boot" || o.Engine.Installed != nil || len(o.Outcomes) != 0 {
+		t.Fatalf("observation=%+v err=%v", o, err)
 	}
 }
 
