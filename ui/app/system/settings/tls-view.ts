@@ -1,6 +1,22 @@
-import type { ApiResult, TLSCertUpload, TLSInfo } from "../../../lib/api";
+import type { ApiResult, DeploymentProfile, ProfileValueSource, TLSCertUpload, TLSInfo } from "../../../lib/api";
 
 export type TLSRow = { label: string; value: string };
+
+function effectiveValue(value: boolean, source: ProfileValueSource, saved?: boolean): string {
+  const state = value ? "Enabled" : "Disabled";
+  return `${state} · source: ${source}${saved !== undefined ? ` · saved: ${saved ? "enabled" : "disabled"}` : ""}`;
+}
+
+/** Do not infer training cookie flags from the browser's URL: the server may
+ * override them, and neither health nor TLS status reports that override. */
+export function tlsPolicyRows(info: TLSInfo | null, profile?: DeploymentProfile): TLSRow[] {
+  return [
+    { label: "HTTP enabled (next start)", value: info ? effectiveValue(info.httpEnabled, info.httpEnabledSource, info.httpEnabledSaved) : "—" },
+    { label: "HTTPS enabled (next start)", value: info ? effectiveValue(info.httpsEnabled, info.httpsEnabledSource, info.httpsEnabledSaved) : "—" },
+    { label: "HSTS", value: info ? effectiveValue(info.hstsEnabled, info.hstsEnabledSource, info.hstsEnabledSaved) : "—" },
+    { label: "Secure cookies", value: profile === "strict" ? "Enabled · source: profile" : "Not reported by API" },
+  ];
+}
 
 /**
  * The Management HTTPS readout: what the bound listeners serve now, plus a
@@ -53,6 +69,8 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
   const rows = [
     ...listenerRows("HTTP listen", info.boundHttpListenAddr, info.httpListenChanges, info.httpEnabled, info.httpListenAddr),
     ...listenerRows("HTTPS listen", info.boundHttpsListenAddr, info.httpsListenChanges, info.httpsEnabled, info.httpsListenAddr),
+    { label: "Served certificate SHA-256", value: info.servedCertFingerprintSHA256 || "Unavailable" },
+    { label: "Configured certificate SHA-256", value: info.certFingerprintSHA256 || "Unavailable" },
   ];
   const bound = Boolean(info.servedCertFile);
   if (bound) {

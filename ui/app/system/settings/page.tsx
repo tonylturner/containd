@@ -3,6 +3,7 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
+import { useHealth } from "../../../hooks/useHealth";
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
 import { api, isAdmin, type TLSInfo } from "../../../lib/api";
@@ -16,12 +17,13 @@ import {
 } from "../../../lib/prefs";
 import { ManagementAccess } from "./management-access";
 import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
-import { certUploadNotice, tlsView } from "./tls-view";
+import { certUploadNotice, tlsPolicyRows, tlsView } from "./tls-view";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
   const confirm = useConfirm();
   const [tlsInfo, setTLSInfo] = useState<TLSInfo | null>(null);
+  const profile = useHealth()?.profile;
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [caFile, setCAFile] = useState<File | null>(null);
@@ -139,6 +141,18 @@ export default function SystemSettingsPage() {
           )}
 
           <div className="mt-4 space-y-1 text-sm">
+            <p className="mb-2 text-xs text-(--text-muted)">
+              Effective policy and its source. Saved values are shown when the profile overrides them.
+            </p>
+            {tlsPolicyRows(tlsInfo, profile).map((row) => (
+              <Row key={row.label} label={row.label} value={row.value} />
+            ))}
+            {profile === "training" && (
+              <p className="py-2 text-xs text-(--text-muted)">
+                Training sets Secure cookies on HTTPS requests unless CONTAIND_COOKIE_SECURE overrides it.
+                The API does not report the effective cookie flag.
+              </p>
+            )}
             {view.rows.filter((row) => row.label.startsWith("HTTP")).map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />
             ))}
@@ -272,9 +286,9 @@ export default function SystemSettingsPage() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-(--text)">{label}</span>
-      <span className="truncate text-(--text)" title={value}>{value}</span>
+    <div className="flex flex-col gap-1 py-1 sm:flex-row sm:justify-between sm:gap-4">
+      <span className="shrink-0 text-(--text)">{label}</span>
+      <span className="min-w-0 break-all text-(--text) sm:text-right">{value}</span>
     </div>
   );
 }

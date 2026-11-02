@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-import { api, clearLocalAuth, getLastAuthError, type ApiFailure } from "../../lib/api";
+import { api, clearLocalAuth, fetchHealth, getLastAuthError, type ApiFailure } from "../../lib/api";
 import { withRetryTime } from "../../lib/utils";
 import { navigateToUI } from "../../lib/ui-navigation";
 
@@ -42,6 +42,17 @@ function LoginInner() {
   const [alreadyLoggedIn, setAlreadyLoggedIn] = useState(false);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState("");
+  const [showDefaultCredentials, setShowDefaultCredentials] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchHealth(controller.signal).then((health) => {
+      setShowDefaultCredentials(health?.profile === "training");
+    }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
+    });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const sp = new URLSearchParams(paramsKey);
@@ -251,9 +262,11 @@ function LoginInner() {
           </form>
         )}
 
-        <p className="mt-4 text-xs text-(--text-muted)">
-          Default credentials on fresh installs: containd / containd.
-        </p>
+        {showDefaultCredentials && (
+          <p className="mt-4 text-xs text-(--text-muted)">
+            Default credentials on fresh installs: containd / containd.
+          </p>
+        )}
       </div>
     </div>
   );
