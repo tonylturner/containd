@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The appliance CLI can stage focused DNS, NTP, DHCP pool/reservation, antivirus
+  scanning, VPN, proxy site/TLS, syslog batching and IDS enable/group edits,
+  preserving unspecified settings and candidate revision checks. VPN credentials
+  are read from appliance-local files instead of command-line secret values.
+
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
   links directly to enforcement status.

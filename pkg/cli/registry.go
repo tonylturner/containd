@@ -42,6 +42,11 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("diag reach", RoleView, diagReach(store))
 	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
 	if api != nil {
+		registerNetworkServiceCommands(r, api)
+		registerAVServiceCommands(r, api)
+		registerVPNServiceCommands(r, api)
+		registerProxyServiceCommands(r, api)
+		registerIDSServiceCommands(r, api)
 		r.RegisterRole("show health", RoleView, showHealth(api))
 		r.RegisterRole("show config", RoleView, showConfig(api))
 		r.RegisterRole("show running-config", RoleView, showRunningConfig(api))
