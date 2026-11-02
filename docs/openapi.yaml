@@ -2240,8 +2240,11 @@ components:
       description: >-
         Management-owned demo preference, persisted in demo.json beside config.db.
         An absent file resolves to auto. Auto waits for an observed sampler interval,
-        runs only while real interface/conduit traffic has never been observed,
-        and stops permanently once that sticky activity latch is set. On runs
+        and stops permanently after any real conduit.bytes delta greater than zero
+        or real engine events.class delta greater than zero for ids_alert,
+        av_detection or av_block (source engine). Interface bytes and other events
+        do not stop auto. This latch persists across restarts independently of
+        chart realActive flags; the stopped reason is real traffic observed. On runs
         regardless of real traffic; off never runs. An unreadable preference is
         treated as off with an error. The engine boots stopped and receives demo
         commands only after successful configuration sync.

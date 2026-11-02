@@ -91,6 +91,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("telemetry database exceeds physical admission limit: %d: %v", pages, err)
 	}
+	if err = s.restoreDemoSecurity(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = s.maintain(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -246,6 +250,11 @@ func (s *Store) write(ctx context.Context, now time.Time, rows []row) error {
 			}
 			if _, err = tx.ExecContext(ctx, `INSERT INTO coverage VALUES(?,?,?) ON CONFLICT(metric) DO UPDATE SET covered=max(covered,excluded.covered),active=max(active,excluded.active)`, sample.Metric, covered, active); err != nil {
 				return s.fail(err)
+			}
+			if active != 0 && demoSecuritySample(sample) {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO coverage VALUES(?,1,1) ON CONFLICT(metric) DO UPDATE SET covered=1,active=1`, demoSecurityCoverage); err != nil {
+					return s.fail(err)
+				}
 			}
 		}
 	}
