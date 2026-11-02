@@ -313,13 +313,17 @@ func (p *protectionState) bindAttempt(epoch uint64, group uint16, err error, att
 }
 
 // SetScanProtection records actual gate admission separately from scanner readiness.
-func (e *Engine) SetScanProtection(gateState, gateReason string, scannerReady bool, scannerReason string, unknown bool) {
+// An explicitly disabled scanner is off; readiness errors while enabled remain pending.
+func (e *Engine) SetScanProtection(gateState, gateReason string, scannerEnabled, scannerReady bool, scannerReason string, unknown bool) {
 	p := e.protection
 	p.update(func() {
 		p.gateUnknown = unknown
 		p.setLocked("scan-gate", gateState, gateReason, 0, 0)
 		state := "pending"
-		if scannerReady {
+		switch {
+		case !scannerEnabled:
+			state, scannerReason = "off", ""
+		case scannerReady:
 			state = "ready"
 			scannerReason = ""
 		}
