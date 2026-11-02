@@ -33,6 +33,7 @@ cause there, with an **Inspect watch** link that opens and focuses the affected
 watch. Ordinary operator and deadline stops remain in watch history without an
 extra warning.
 Switching tabs does not start, stop or discard a collection.
+The selected collection tab is underlined as well as highlighted.
 
 The learner steps are explicit: **1 Collect → 2 Generate → 3 Review → 4 Stage**.
 Steps explain action prerequisites. Once a dataset is open, all step navigation
@@ -49,6 +50,8 @@ not proof that traffic is safe. Checks on saved evidence retains replay and
 boundary results, limitations, raw versions, digests and counterexamples.
 Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
 visible. Import statistics and content identifications remain available below.
+Missing, invalid or zero-value evidence timestamps display **Unknown**; this
+does not change expiration checks or staging eligibility.
 **Inspect service authority** and its pagination remain available during staging;
 reading authority does not unlock mutation controls or dismiss a staging failure.
 

@@ -2,6 +2,7 @@
 
 import type { RefObject, SetStateAction, Dispatch } from "react";
 import Link from "next/link";
+import { formatEvidenceTime } from "../pcap/evidence-time";
 
 import { downloadPcapURL, type PcapItem } from "../../lib/api";
 import { Card } from "../../components/Card";
@@ -157,7 +158,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
                 <tr key={p.name} className="border-t table-row-hover transition-ui">
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs text-(--text)">{p.name}</div>
-                    <div className="text-[11px] text-(--text-muted)">{new Date(p.createdAt).toLocaleString()}</div>
+                    <div className="text-[11px] text-(--text-muted)">{formatEvidenceTime(p.createdAt)}</div>
                   </td>
                   <td className="px-3 py-2">{p.interface || "—"}</td>
                   <td className="px-3 py-2">{(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</td>

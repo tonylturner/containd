@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
+import { formatEvidenceTime } from "../pcap/evidence-time";
 import type {
   PcapConfig,
   PcapStatus,
@@ -20,12 +21,10 @@ type PcapForwardRow = {
 export function CaptureStatusCard({
   isRunning,
   captureSummary,
-  runningSince,
   status,
 }: {
   isRunning: boolean;
   captureSummary: string;
-  runningSince: string;
   status: PcapStatus | null;
 }) {
   return (
@@ -49,7 +48,7 @@ export function CaptureStatusCard({
         Form settings (not live): {captureSummary}
       </div>
       <div className="mt-2 text-xs text-(--text-muted)">
-        Started: <span className="text-(--text)">{runningSince}</span>
+        Started: <span className="text-(--text)">{status ? formatEvidenceTime(status.startedAt, "Not started") : "Unknown"}</span>
       </div>
       <div className="mt-1 text-xs text-(--text-muted)">
         Active interfaces:{" "}

@@ -20,6 +20,8 @@ import { DatasetList } from "./dataset-list";
 import { DatasetReview, dataOf, ReasonCounts } from "./dataset-review";
 import { LearnerSteps } from "./learner-steps";
 import { primaryButton, secondaryButton } from "./suggestion-review";
+import { formatEvidenceTime } from "./evidence-time";
+import styles from "./collection-tabs.module.css";
 
 export default function PcapAnalysisPage() {
   const canEdit = isAdmin();
@@ -142,7 +144,7 @@ export default function PcapAnalysisPage() {
           {([['import', 'Import capture'], ['watch', 'Watch live']] as const).map(([tab, label]) => (
             <button key={tab} id={`collect-tab-${tab}`} role="tab" aria-selected={collectTab === tab} aria-controls={`collect-panel-${tab}`}
               tabIndex={collectTab === tab ? 0 : -1}
-              className={collectTab === tab ? primaryButton : secondaryButton}
+              className={styles.tab}
               onKeyDown={(event) => {
                 if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
                 event.preventDefault();
@@ -289,7 +291,7 @@ export default function PcapAnalysisPage() {
                       <p className="break-all font-mono">{w.id}</p>
                       <p>
                         {running ? "Collecting" : "Stopped"} · deadline{" "}
-                        {new Date(w.deadline).toLocaleString()}{" "}
+                        {formatEvidenceTime(w.deadline)}{" "}
                         {w.stopReason && `· ${w.stopReason}`}
                       </p>
                       <p className="break-all text-(--text-muted)">
@@ -352,7 +354,7 @@ export default function PcapAnalysisPage() {
               >
                 Inspect watch {watch.id}
               </a>
-              {" · "}{watch.stopReason} · stopped {new Date(watch.stoppedAt!).toLocaleString()}
+              {" · "}{watch.stopReason} · stopped {formatEvidenceTime(watch.stoppedAt)}
             </p>
           ))}
         </section>

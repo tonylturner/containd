@@ -6,6 +6,7 @@ import { type LearnSuggestion, selectable } from "../../lib/api-learn";
 import { summarizeGenericICS } from "../ics/ics-shared";
 import { summarizeIEC104 } from "../ics/iec104";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
+import { formatEvidenceTime } from "./evidence-time";
 
 export const secondaryButton =
   "rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-30 disabled:cursor-not-allowed";
@@ -153,7 +154,7 @@ export function SuggestionReview({
               : "Not staged"}
           </p>
           <p className="text-xs text-(--text-muted)">
-            Expires {new Date(s.expiresAt).toLocaleString()}
+            Expires {formatEvidenceTime(s.expiresAt)}
           </p>
         </div>
         {canEdit && (
@@ -231,7 +232,7 @@ export function SuggestionReview({
             </p>
             <p>
               {s.proof.parentRefs?.length ?? 0} source evidence references · checked{" "}
-              {new Date(s.proof.certifiedAt).toLocaleString()}
+              {formatEvidenceTime(s.proof.certifiedAt)}
             </p>
             <p className="break-all">
               Evidence checksum: {s.proof.evidenceDigest}
@@ -264,7 +265,7 @@ export function SuggestionReview({
       {s.review && (
         <p className="text-xs">
           Reviewed by {s.review.actor} at{" "}
-          {new Date(s.review.at).toLocaleString()}; captured addresses{" "}
+          {formatEvidenceTime(s.review.at)}; captured addresses{" "}
           {s.review.coordinateApproved ? "approved" : "not approved"}.
         </p>
       )}

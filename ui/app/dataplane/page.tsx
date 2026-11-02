@@ -303,13 +303,6 @@ export default function PcapPage() {
       .filter((t) => t.enabled && t.host)
       .map((t) => `${t.interface} → ${formatEndpoint(t.host, t.port)}`.trim());
   }, [settings.forwardTargets]);
-  const runningSince = useMemo(() => {
-    if (!status?.startedAt) return "—";
-    const started = new Date(status.startedAt);
-    if (Number.isNaN(started.getTime())) return "—";
-    return started.toLocaleString();
-  }, [status?.startedAt]);
-
   async function addTag(pcapName: string) {
     const tag = pcapTag.trim();
     if (!tag) return;
@@ -491,7 +484,6 @@ export default function PcapPage() {
         <CaptureStatusCard
           isRunning={isRunning}
           captureSummary={captureSummary}
-          runningSince={runningSince}
           status={status}
         />
         <CaptureSetupCard

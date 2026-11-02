@@ -89,3 +89,54 @@ test("offline analysis link navigates client-side without transmitting or mutati
   expect(await page.evaluate(() => Reflect.get(window, "captureNavigationMarker"))).toBe("same-document");
   expect(writes).toEqual([]);
 });
+
+for (const width of [1280, 390]) {
+  for (const [name, startedAt, running] of [
+    ["Go zero time", "0001-01-01T00:00:00Z", false],
+    ["fractional zero time", "0001-01-01T00:00:00.000Z", false],
+    ["absent time", undefined, false],
+    ["invalid time", "not-a-date", false],
+    ["stopped history", "2026-11-01T12:00:00Z", false],
+    ["running history", "2026-11-01T12:00:00Z", true],
+  ] as const) {
+    test(`capture start displays ${name} without inventing a timestamp or runtime state at ${width}px`, async ({ page }) => {
+      const writes = await mockCapture(page, false);
+      await page.setViewportSize({ width, height: 1000 });
+      await page.route("**/api/v1/pcap/status", (route) => route.fulfill({ json: { running, startedAt } }));
+      await page.goto("/dataplane/");
+      const capture = page.getByRole("region", { name: "Capture now", exact: true });
+      const expected = name.endsWith("history")
+        ? await page.evaluate((value) => new Date(value!).toLocaleString(), startedAt)
+        : name === "invalid time" ? "Unknown" : "Not started";
+      await expect(capture.getByText(`Started: ${expected}`, { exact: true })).toBeVisible();
+      await expect(capture.getByText(running ? "Running" : "Stopped", { exact: true })).toBeVisible();
+      expect(writes).toEqual([]);
+    });
+  }
+}
+
+test("failed capture status remains unknown rather than claiming no start", async ({ page }) => {
+  const writes = await mockCapture(page, false);
+  await page.route("**/api/v1/pcap/status", (route) => route.fulfill({ status: 503, json: { error: "status unavailable" } }));
+  await page.goto("/dataplane/");
+  const capture = page.getByRole("region", { name: "Capture now", exact: true });
+  await expect(capture.getByText("Unknown — live status unavailable", { exact: true })).toBeVisible();
+  await expect(capture.getByText("Started: Unknown", { exact: true })).toBeVisible();
+  await expect(capture.getByText("Not started", { exact: true })).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
+test("saved captures show unknown for zero, missing and invalid creation dates", async ({ page }) => {
+  const writes = await mockCapture(page, false);
+  await page.route("**/api/v1/pcap/list", (route) => route.fulfill({ json:
+    ["0001-01-01T00:00:00Z", undefined, "not-a-date"].map((createdAt, index) => ({
+      name: `undated-${index}.pcap`, interface: "eth0", sizeBytes: 4096, status: "ready", createdAt,
+    })),
+  }));
+  await page.goto("/dataplane/");
+  for (let index = 0; index < 3; index++) {
+    const row = page.getByRole("row").filter({ hasText: `undated-${index}.pcap` });
+    await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
+  }
+  expect(writes).toEqual([]);
+});

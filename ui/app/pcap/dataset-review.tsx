@@ -23,6 +23,7 @@ import {
   type LearnSuggestion,
 } from "../../lib/api-learn";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
+import { formatEvidenceTime } from "./evidence-time";
 import {
   SuggestionReview,
   primaryButton,
@@ -195,8 +196,8 @@ export function DatasetReview({
         {dataset.bytes.toLocaleString()} bytes
       </p>
       <p className="text-xs text-(--text-muted)">
-        Created {new Date(dataset.createdAt).toLocaleString()} · expires{" "}
-        {new Date(dataset.expiresAt).toLocaleString()}
+        Created {formatEvidenceTime(dataset.createdAt)} · expires{" "}
+        {formatEvidenceTime(dataset.expiresAt)}
       </p>
       <details className="mt-3 text-xs">
         <summary className="cursor-pointer">

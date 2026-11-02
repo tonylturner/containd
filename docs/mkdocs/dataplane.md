@@ -48,6 +48,9 @@ and **Replay to a network**:
   only stages defaults for commit; **Stop** acts immediately. Live Capture Status
   shows the active interfaces and start time independently of Form settings
   (not live), so editing the next capture does not change the active one.
+  An absent or zero-value start time shows **Not started**, not a historical
+  date; an unavailable status read remains **Unknown**. A valid start time
+  remains visible after capture stops.
 - Capture setup keeps interface and zone selection, filters, file size/count and
   mode together. **Advanced capture options** retains snaplen, file prefix,
   rotation, buffer and promiscuous capture; saved non-default settings open it
