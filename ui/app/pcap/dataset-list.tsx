@@ -1,5 +1,6 @@
 import type { LearnDataset } from "../../lib/api-learn";
 import { secondaryButton } from "./suggestion-review";
+import { formatEvidenceTime } from "./evidence-time";
 
 function facts(dataset: LearnDataset) {
   return {
@@ -13,7 +14,7 @@ function facts(dataset: LearnDataset) {
         {dataset.gaps.join(", ")}
       </details>
     ) : "None reported",
-    Expires: new Date(dataset.expiresAt).toLocaleString(),
+    Expires: formatEvidenceTime(dataset.expiresAt),
   };
 }
 

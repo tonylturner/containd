@@ -686,3 +686,82 @@ test("authority errors and pagination preserve an uncertain staging receipt", as
   await expect(page.getByRole("button", { name: "Retry same staging request", exact: true })).toBeDisabled();
   expect(state.writes).toHaveLength(1);
 });
+
+for (const [name, time] of [["zero", "0001-01-01T00:00:00Z"], ["missing", ""], ["invalid", "not-a-date"]]) {
+  test(`learner shows unknown for ${name} evidence dates without changing action guards`, async ({ page }) => {
+    const state = await mockLearner(page);
+    state.datasets[0].createdAt = time;
+    state.datasets[0].expiresAt = time;
+    state.watches = [{ id: "undated-watch", datasetId: "capture-1", startedAt: time, deadline: time, stoppedAt: time, stopReason: "restart" }];
+    for (const item of state.suggestions) {
+      item.expiresAt = time;
+      item.proof!.certifiedAt = time;
+      item.review = { actor: "admin", at: time, revision: item.revision, coordinateApproved: true };
+    }
+    await openDataset(page);
+    await expect(page.getByLabel("Dataset review", { exact: true })).toContainText("Created Unknown · expires Unknown");
+    await expect(page.getByLabel("Dataset list").getByRole("row").filter({ hasText: "capture-1" }).getByText("Unknown", { exact: true })).toBeVisible();
+    const modbus = page.getByRole("article", { name: "Suggestion modbus-1", exact: true });
+    await expect(modbus.getByText("Expires Unknown", { exact: true })).toBeVisible();
+    await expect(modbus).toContainText("Reviewed by admin at Unknown");
+    const proof = modbus.getByLabel("Frozen certification", { exact: true });
+    await proof.locator("summary").click();
+    await expect(proof).toContainText("checked Unknown");
+    await expect(page.getByRole("button", { name: "Stage 0 selected", exact: true })).toBeDisabled();
+    if (name === "zero") {
+      await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
+      await expect(modbus.getByRole("checkbox")).toBeDisabled();
+    }
+    if (time) await expect(page.getByRole("status", { name: "Abnormally stopped watches" })).toContainText("stopped Unknown");
+    await page.getByRole("tab", { name: "Watch live", exact: true }).click();
+    await expect(page.locator("#watch-undated-watch")).toContainText("deadline Unknown");
+    expect(state.writes).toEqual([]);
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`collection tabs meet text contrast and expose selection beyond colour at ${width}px`, async ({ page }) => {
+    const state = await mockLearner(page);
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/pcap/");
+    const tabs = page.getByRole("tablist", { name: "Collection source", exact: true });
+    const imported = tabs.getByRole("tab", { name: "Import capture", exact: true });
+    const watch = tabs.getByRole("tab", { name: "Watch live", exact: true });
+    for (const selected of [imported, watch]) {
+      await selected.click();
+      await expect(selected).toHaveAttribute("aria-selected", "true");
+      await expect(selected).toHaveCSS("text-decoration-line", "underline");
+      const inactive = selected === imported ? watch : imported;
+      await expect(inactive).toHaveAttribute("aria-selected", "false");
+      await expect(inactive).toHaveCSS("text-decoration-line", "none");
+      for (const tab of [selected, inactive]) {
+        const contrast = await tab.evaluate((element) => {
+          const style = getComputedStyle(element);
+          const luminance = (colour: string) => {
+            const rgb = colour.match(/[\d.]+/g)!.map(Number);
+            const channels = rgb.slice(0, 3).map((value) => {
+              const c = value / 255;
+              return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+            });
+            return { value: channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722, alpha: rgb[3] ?? 1 };
+          };
+          const text = luminance(style.color);
+          const background = luminance(style.backgroundColor);
+          return {
+            ratio: (Math.max(text.value, background.value) + 0.05) / (Math.min(text.value, background.value) + 0.05),
+            opaque: text.alpha === 1 && background.alpha === 1 && style.opacity === "1",
+          };
+        });
+        expect(contrast.opaque).toBe(true);
+        expect(contrast.ratio).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    await watch.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(imported).toBeFocused();
+    await expect(imported).toHaveAttribute("aria-selected", "true");
+    await expect(imported).toHaveCSS("outline-style", "solid");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(state.writes).toEqual([]);
+  });
+}
