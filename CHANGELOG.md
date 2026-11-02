@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Require protocol restrictions on every matching enforcing ALLOW and a refusing
   fallback before topology can count protocol whitelisting as a configured pass.
+  TCP and UDP grants must specify ports; port-less grants remain unknown.
 - Distinguish configured topology checks from heuristics and unknown evidence;
   remove assumed authentication and verification passes. Show global IDS settings
   without claiming conduit coverage.

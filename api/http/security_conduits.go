@@ -209,12 +209,15 @@ func conduitProtocolWhitelist(matching []config.Rule, fallback config.Action, mo
 			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
 				return unknown("Protocol whitelisting is not established: an ALLOW contains an unsupported protocol selector.")
 			}
+			if (p.Name == "tcp" || p.Name == "udp") && p.Port == "" {
+				return unknown("Protocol whitelisting is not established: a TCP or UDP ALLOW without a port admits every service on that transport.")
+			}
 		}
 	}
 	if !hasGrant {
 		return unknown("No enforcing ALLOW grants establish protocol whitelisting on this conduit.")
 	}
-	return true, conduitCheckEvidence{"configured", "The running firewall fallback refuses traffic and every matching enforcing ALLOW has explicit transport restrictions, including conditional grants; not a runtime test."}
+	return true, conduitCheckEvidence{"configured", "The running firewall fallback refuses traffic and every matching enforcing ALLOW has explicit transport restrictions with ports for TCP/UDP, including conditional grants; not a runtime test."}
 }
 
 func conduitCheckProvenance(encryptedPortHint bool, whitelistEvidence conduitCheckEvidence) map[string]conduitCheckEvidence {

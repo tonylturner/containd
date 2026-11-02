@@ -30,6 +30,11 @@ func TestSecurityConduitsProtocolWhitelistAllGrants(t *testing.T) {
 	monitor.ICS.Protocol, monitor.ICS.Mode = "modbus", "monitor"
 	enforce := monitor
 	enforce.ICS.Mode = "enforce"
+	tcpAny, udpAny, mixed, icmp := https, https, https, https
+	tcpAny.Protocols = []config.Protocol{{Name: "tcp"}}
+	udpAny.Protocols = []config.Protocol{{Name: "udp"}}
+	mixed.Protocols = []config.Protocol{{Name: "tcp", Port: "443"}, {Name: "udp"}}
+	icmp.Protocols = []config.Protocol{{Name: "icmp"}}
 	for _, tc := range []struct {
 		name     string
 		rules    []config.Rule
@@ -37,6 +42,10 @@ func TestSecurityConduitsProtocolWhitelistAllGrants(t *testing.T) {
 		want     bool
 	}{
 		{"restricted grant", []config.Rule{https}, config.ActionDeny, true},
+		{"tcp no port", []config.Rule{tcpAny}, config.ActionDeny, false},
+		{"udp no port", []config.Rule{udpAny}, config.ActionDeny, false},
+		{"tcp 443 and udp any", []config.Rule{mixed}, config.ActionDeny, false},
+		{"icmp no port", []config.Rule{icmp}, config.ActionDeny, true},
 		{"restricted conditional grants", []config.Rule{hostHTTPS, https}, config.ActionDeny, true},
 		{"unrestricted host first", []config.Rule{host, https}, config.ActionDeny, false},
 		{"unrestricted host last", []config.Rule{https, host}, config.ActionDeny, false},

@@ -106,7 +106,8 @@ logging or scanning. Conventional encrypted-service ports are a heuristic only;
 `tlsEnforced` is false because this summary cannot enforce or verify TLS.
 Protocol whitelisting is a conservative all-grants check: a configured pass
 requires a refusing fallback and explicit transport restrictions on every
-zone-matching enforcing ALLOW, including conditional grants. An unrestricted
+zone-matching enforcing ALLOW, including conditional grants. TCP and UDP entries
+must specify ports; ICMP does not require a port. An unrestricted
 host grant cannot be cancelled by a separate TCP/443 grant. Unproved cases
 (including ICS-only grants) remain unknown and never pass automatically.
 `traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).

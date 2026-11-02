@@ -3265,7 +3265,7 @@ components:
         mitre: {type: array, items: {type: string}}
         defaultDeny: {type: boolean}
         tlsEnforced: {type: boolean, description: Always false; conventional service ports do not enforce or verify TLS.}
-        protoWhitelist: {type: boolean, description: Conservative proof of a refusing fallback and explicit transport restrictions on every zone-matching enforcing ALLOW including conditional grants. Unproved cases are false with unknown provenance.}
+        protoWhitelist: {type: boolean, description: Conservative proof of a refusing fallback and explicit transport restrictions on every zone-matching enforcing ALLOW including conditional grants. TCP and UDP entries must specify ports; ICMP does not require a port. Unproved cases are false with unknown provenance.}
         mfaRequired: {type: boolean}
         auditLogged: {type: boolean}
         avEnabled: {type: boolean}

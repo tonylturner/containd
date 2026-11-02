@@ -108,3 +108,22 @@ test("an unrestricted host ALLOW alongside TCP/443 cannot pass protocol whitelis
     expect(checks.find(c => c.id === "SR-5.4")).toMatchObject({ met: false, provenance: "unknown" });
   }
 });
+
+test("port-less TCP or UDP grants remain unknown rather than passing the service whitelist", () => {
+  for (const rules of [
+    ["ALLOW TCP from LAN to WAN"],
+    ["ALLOW UDP from LAN to WAN"],
+    ["ALLOW HTTPS/UDP from LAN to WAN"],
+  ]) {
+    const conduit: Conduit = {
+      ...admitted, from: "lan", to: "wan", state: "partial", rules,
+      protoWhitelist: false,
+      checks: { ...securityChecks, protoWhitelist: {
+        provenance: "unknown",
+        reason: "A TCP or UDP ALLOW without a port admits every service on that transport.",
+      } },
+    };
+    const { checks } = scoreZone(mapZone({ name: "lan" }), [conduit]);
+    expect(checks.find(c => c.id === "SR-5.4")).toMatchObject({ met: false, provenance: "unknown" });
+  }
+});
