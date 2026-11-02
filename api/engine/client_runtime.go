@@ -22,9 +22,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
-// SimulationStatus holds the state of the synthetic traffic generator.
+// SimulationStatus holds the state of the recorded demo replayer.
 type SimulationStatus struct {
-	Running bool `json:"running"`
+	Running    bool   `json:"running"`
+	RunID      string `json:"runId"`
+	Loops      uint64 `json:"loops"`
+	CaptureSet string `json:"captureSet"`
+	Capture    string `json:"capture"`
+	Error      string `json:"error"`
 }
 
 // RuntimeHealth is the engine health needed by the management API.
@@ -326,7 +331,7 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	return out, nil
 }
 
-// SimulationStatus returns whether the synthetic traffic generator is running.
+// SimulationStatus returns whether the recorded demo replayer is running.
 func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, error) {
 	if c.BaseURL == "" {
 		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")
@@ -350,7 +355,7 @@ func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, er
 	return st, nil
 }
 
-// SimulationControl sends a start or stop action to the synthetic traffic generator.
+// SimulationControl sends a start or stop action to the recorded demo replayer.
 func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (SimulationStatus, error) {
 	if c.BaseURL == "" {
 		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")

@@ -101,7 +101,7 @@ func TestTelemetryConduitUnavailableAndMeasured(t *testing.T) {
 		t.Fatal(got)
 	}
 	f := &fakeHistory{response: wire.SeriesResponse{Collector: wire.CollectorState{State: "running"}}}
-	if got := measureConduit(context.Background(), f, "a", "b"); got.State != "unavailable" {
+	if got := measureConduit(context.Background(), f, "a", "b"); got.State != "none" {
 		t.Fatal(got)
 	}
 	value := uint64(23)

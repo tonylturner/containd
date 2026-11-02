@@ -2190,7 +2190,7 @@ components:
             iec104: {type: boolean}
             cip: {type: boolean}
           description: 'Unknown keys (true or false) return 400: dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
-        dpiMock: {type: boolean}
+        dpiMock: {type: boolean, description: Inspect all traffic; does not start demo replay.}
         dpiMode: {type: string, enum: ['', monitor, enforce], description: Empty inherits monitor mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
         enforceTable:
@@ -2235,9 +2235,24 @@ components:
         Timestamp: {format: date-time, type: string}
       type: object
     SimulationStatus:
-      properties:
-        running: {type: boolean}
       type: object
+      required: [preference, running, loops, captureSet, capture, error, reason]
+      description: >-
+        Management-owned demo preference, persisted in demo.json beside config.db.
+        An absent file resolves to auto. Auto waits for an observed sampler interval,
+        runs only while real interface/conduit traffic has never been observed,
+        and stops permanently once that sticky activity latch is set. On runs
+        regardless of real traffic; off never runs. An unreadable preference is
+        treated as off with an error. The engine boots stopped and receives demo
+        commands only after successful configuration sync.
+      properties:
+        preference: {type: string, enum: [auto, 'on', 'off']}
+        running: {type: boolean}
+        loops: {type: integer, minimum: 0}
+        captureSet: {type: string}
+        capture: {type: string}
+        error: {type: string, description: Empty on success; includes preference read or engine delivery failures.}
+        reason: {type: string, description: Explains stopped auto or pending delivery/configuration sync.}
     FirewallConfig:
       properties:
         defaultAction: {type: string, enum: ['', ALLOW, DENY], description: Omitted or empty means DENY.}
@@ -3138,7 +3153,9 @@ components:
       description: >-
         Current conduit or engine unavailability overrides retained measured
         history. Disabled enforcement returns state unavailable with reason
-        "enforcement disabled".
+        "enforcement disabled". Only pairs with no real series at all may use
+        current recorded demo coverage. Real series without retained coverage
+        remain unavailable; they are never replaced by demo.
       oneOf:
       - type: object
         required: [state, windowSeconds, packets, bytes, complete, coverage]
@@ -3149,6 +3166,19 @@ components:
           bytes: {type: string, pattern: '^[0-9]+$'}
           complete: {type: boolean}
           coverage: {type: string, enum: [routed], description: Routed forwarding that passed policy; excludes bridged L2 and AV/ICAP input-output gating.}
+      - type: object
+        required: [state, windowSeconds, packets, bytes, complete, coverage]
+        properties:
+          state: {type: string, enum: [demo]}
+          windowSeconds: {type: integer, enum: [3600]}
+          packets: {type: string, pattern: '^[0-9]+$'}
+          bytes: {type: string, pattern: '^[0-9]+$'}
+          complete: {type: boolean}
+          coverage: {type: string, enum: [recorded], description: Recorded traffic on an illustrative topology; not measured or routed traffic.}
+      - type: object
+        required: [state]
+        properties:
+          state: {type: string, enum: [none], description: No traffic recorded yet.}
       - type: object
         required: [state, reason]
         properties:
@@ -7239,18 +7269,26 @@ paths:
       summary: Inspect simulation
       tags: [Simulation]
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
-          description: Success
+          description: Demo preference and runtime status. Engine failures are reported in error with reason engine unreachable.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationStatus'}
+        '503':
+          description: Management demo controller unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     post:
-      summary: Start or stop synthetic traffic (admin)
+      summary: Start or stop demo replay (admin)
+      description: >-
+        Start persists on; Stop persists off. The preference is saved before
+        engine reconciliation, including when the engine is unreachable. An
+        engine delivery failure returns HTTP 200 with the persisted preference,
+        error "engine unreachable: <detail>" and reason "engine unreachable".
+        A preference write failure returns HTTP 500 and does not deliver a command.
+        Successful preference changes are audited as simulation.start or
+        simulation.stop with target demo.
       tags: [Simulation]
       requestBody:
         required: true
@@ -7262,16 +7300,26 @@ paths:
                 action: {type: string, enum: [start, stop]}
               required: [action]
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
-          description: Success
+          description: Preference persisted; runtime status may report an engine delivery error.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationStatus'}
+        '400':
+          description: Invalid action or JSON.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Preference could not be persisted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Management demo controller unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /system/stats:
     get:
       summary: Inspect system stats
