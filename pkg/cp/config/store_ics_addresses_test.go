@@ -29,6 +29,7 @@ func TestStoredUnsupportedAddressesRemainRepairable(t *testing.T) {
 			if _, err := store.db.Exec(`INSERT INTO configs (key,data,updated_at) VALUES (?,?,0)`, configKeyRunning, string(raw)); err != nil {
 				t.Fatal(err)
 			}
+			markLegacyIdentity(t, store)
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
 			}

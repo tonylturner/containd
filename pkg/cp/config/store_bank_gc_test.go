@@ -141,7 +141,7 @@ func TestBankGCPinsRecoveryAcrossImports(t *testing.T) {
 			caller, cancel := context.WithCancel(ctx)
 			defer cancel()
 			calls := 0
-			apply := func(ctx context.Context, _, next *Config) error {
+			apply := func(ctx context.Context, _, next *RunningSnapshot) error {
 				calls++
 				// White-box reads only: callbacks must never reenter Store. In each
 				// transition at least one saved bank has lost its live reference.
@@ -158,7 +158,7 @@ func TestBankGCPinsRecoveryAcrossImports(t *testing.T) {
 					cancel()
 					return errors.New("runtime apply failed")
 				}
-				if ctx.Err() != nil || !reflect.DeepEqual(next, running) {
+				if ctx.Err() != nil || !reflect.DeepEqual(next.Config, running) {
 					t.Fatal("recovery lost its bank or independent context")
 				}
 				return nil
@@ -199,7 +199,7 @@ func TestBankGCSuccessfulApplyAndWipeLeaveNoOrphans(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := resetTestStore(t)
 			ctx := context.Background()
-			apply := func(context.Context, *Config, *Config) error { return nil }
+			apply := func(context.Context, *RunningSnapshot, *RunningSnapshot) error { return nil }
 			var err error
 			if mode == "reset" {
 				err = testApplyReset(s, ctx, DefaultConfig(), apply)
@@ -231,7 +231,7 @@ func TestBankGCBootSweepsOrphansAndPreservesPendingRollback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.SetRuntimeApplyFault(ctx, "plain text: not JSON"); err != nil {
+			if err := s.SetRuntimeApplyFault(ctx, runningState(t, s).RunningRevision, "plain text: not JSON"); err != nil {
 				t.Fatal(err)
 			}
 			tx, err := s.db.BeginTx(ctx, nil)
@@ -304,9 +304,9 @@ func TestBankGCSweepFailureCompensatesApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = testApplyReset(s, ctx, DefaultConfig(), func(_ context.Context, _, next *Config) error {
+	err = testApplyReset(s, ctx, DefaultConfig(), func(_ context.Context, _, next *RunningSnapshot) error {
 		calls++
-		if calls == 2 && !reflect.DeepEqual(next, running) {
+		if calls == 2 && !reflect.DeepEqual(next.Config, running) {
 			t.Fatal("GC failure lost recovery target")
 		}
 		return nil

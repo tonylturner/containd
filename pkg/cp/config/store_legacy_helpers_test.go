@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package config
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // Helpers for fixtures written in the previous storage formats.
 func cloneConfigForPersist(cfg *Config) *Config {
@@ -21,4 +24,18 @@ func marshalStoredConfig(key string, cfg *Config) ([]byte, error) {
 		stored.SnapshotFormat = snapshotFormatEmbeddedBank
 	}
 	return json.Marshal(stored)
+}
+
+// markLegacyIdentity models a database from before identity metadata existed.
+func markLegacyIdentity(t *testing.T, s *SQLiteStore) {
+	t.Helper()
+	if _, err := s.db.Exec(`DELETE FROM running_identity_genesis`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM running_identity`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM runtime_transition`); err != nil {
+		t.Fatal(err)
+	}
 }

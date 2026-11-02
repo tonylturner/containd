@@ -63,7 +63,7 @@ func TestStoreReservationPersistenceBoundaries(t *testing.T) {
 		t.Fatalf("missing visible refusal: %q %v", fault, err)
 	}
 	base := testBaseRevision(store, ctx)
-	_, applyErr := store.ApplyChange(ctx, base, ChangeRollback, 0, func(context.Context, *Config, *Config) error {
+	_, applyErr := store.ApplyChange(ctx, base, ChangeRollback, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 		t.Fatal("refused rollback reached runtime apply")
 		return nil
 	})
