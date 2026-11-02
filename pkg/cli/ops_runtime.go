@@ -21,10 +21,10 @@ func opsConfirmed(api *API, name, path string) Command {
 
 func opsRetryProtection(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) != 3 || args[0] == "" || args[1] == "" || args[2] != "CONFIRM" {
-			return fmt.Errorf("usage: retry protection <boot-id> <apply-id> CONFIRM (immediate; inspect show protection first)")
+		if len(args) != 4 || args[0] == "" || args[1] == "" || args[2] == "" || args[3] != "CONFIRM" {
+			return fmt.Errorf("usage: retry protection <boot-id> <apply-id> <desired-revision> CONFIRM (immediate; inspect show protection first)")
 		}
-		return opsImmediate(ctx, api, out, http.MethodPost, "/api/v1/dataplane/protection/retry", map[string]string{"bootId": args[0], "applyId": args[1]})
+		return opsImmediate(ctx, api, out, http.MethodPost, "/api/v1/dataplane/protection/retry", map[string]string{"bootId": args[0], "applyId": args[1], "desiredRevision": args[2]})
 	}
 }
 
