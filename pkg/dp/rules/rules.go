@@ -20,6 +20,8 @@ type Snapshot struct {
 	LocalInput []LocalServiceRule
 	NAT        NATConfig
 	IDS        IDSConfig
+	// Zones contains all configured zone names in configuration order.
+	Zones []string
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
 	Default    Action

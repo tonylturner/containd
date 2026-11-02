@@ -61,10 +61,10 @@ type protectionState struct {
 	applying         bool
 	installFailed    bool
 	nflogLost        bool
-	store            *events.Store
+	store            *events.Writer
 }
 
-func newProtection(store *events.Store) *protectionState {
+func newProtection(store *events.Writer) *protectionState {
 	p := &protectionState{store: store, components: map[string]ProtectionComponent{}}
 	p.status = ProtectionStatus{BootID: rand.Text(), State: "pending", Components: []ProtectionComponent{}, Effects: []ProtectionEffect{}}
 	p.setLocked("nft", "pending", "awaiting configuration", 0, 0)

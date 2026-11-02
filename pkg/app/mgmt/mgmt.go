@@ -21,6 +21,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/services"
@@ -134,7 +135,18 @@ func Run(ctx context.Context, opts Options) error {
 			srv.RevokeConnections(initiator)
 		}
 	})
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
+	var counterReader telemetry.CounterReader
+	if transportClient != nil {
+		counterReader = transportClient
+	}
+	demoController := newDemoReconciler(engineClient)
+	telemetryStore, stopTelemetry := startTelemetry(ctx, logger, counterReader, serviceManager.Manager, demoController)
+	defer stopTelemetry()
+	var historyStore httpapi.TelemetryStore
+	if telemetryStore != nil {
+		historyStore = telemetryStore
+	}
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
@@ -178,7 +190,7 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 	}
-	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
+	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager, demoController)
 	defer stopEngineSync()
 	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
 	defer stopReload()

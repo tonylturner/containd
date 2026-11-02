@@ -13,6 +13,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/telemetry"
 )
 
 // envelopeSwitchTimeout bounds one envelope switch (a single nft
@@ -29,9 +30,12 @@ const envelopeSwitchTimeout = 5 * time.Second
 // serialises ruleset applies with switches, so a reapply always writes the
 // current state and a switch never races a reapply.
 type envelopeGate struct {
-	mu          sync.Mutex
-	switchError string
-	observe     func(state, reason string)
+	membership       *telemetry.Membership
+	accounting       *enforce.Accounting
+	accountingStatus atomic.Pointer[accountingView]
+	mu               sync.Mutex
+	switchError      string
+	observe          func(state, reason string)
 	// owned is the NFQUEUE group this engine has bound and registered; 0
 	// before the first bind and while a bind fault or source-down stands.
 	owned uint16
@@ -108,8 +112,27 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	if g.comp != nil {
 		retire = g.comp.RetireTables(comp)
 	}
-	if err := applier.Apply(ctx, comp.InstallScript(live, retire, compiled)); err != nil {
+	build := g.accounting
+	accountingScript := ""
+	if g.membership != nil && !build.Matches(comp.DynamicTable(), g.membership.Zones()) {
+		build = enforce.NewAccounting(comp.DynamicTable(), g.membership.Zones())
+		accountingScript, err = build.Script()
+		if err != nil {
+			return compiled, err
+		}
+	}
+	previous := g.accountingStatus.Load()
+	if accountingScript != "" {
+		g.accountingStatus.Store(&accountingView{reason: "accounting rebuilding"})
+	}
+	if err := applier.Apply(ctx, comp.InstallScript(live, retire, compiled)+accountingScript); err != nil {
+		if accountingScript != "" {
+			g.accountingStatus.Store(previous)
+		}
 		return compiled, err
+	}
+	if build != nil && accountingScript != "" {
+		g.publishAccounting(build, applier)
 	}
 	g.comp, g.applier = comp, applier
 	g.snap, g.planned = snap, comp.ScheduleFrom
@@ -130,13 +153,19 @@ func (g *envelopeGate) release() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.comp == nil {
+		g.accountingStatus.Store(&accountingView{reason: "enforcement disabled"})
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), envelopeSwitchTimeout)
 	defer cancel()
+	previous := g.accountingStatus.Load()
+	g.accountingStatus.Store(&accountingView{reason: "accounting rebuilding"})
 	if err := g.applier.Apply(ctx, g.comp.DeleteTables()); err != nil {
+		g.accountingStatus.Store(previous)
 		return err
 	}
+	g.accounting = nil
+	g.accountingStatus.Store(&accountingView{reason: "enforcement disabled"})
 	g.comp, g.applier, g.snap = nil, nil, nil
 	g.plan.Store(nil)
 	g.installed, g.open = false, false

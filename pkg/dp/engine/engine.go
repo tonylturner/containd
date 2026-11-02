@@ -47,6 +47,7 @@ type CaptureRunner interface {
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
+	counters              counterState
 	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
@@ -69,7 +70,8 @@ type Engine struct {
 	applier               enforce.Applier
 	updater               enforce.Updater
 	dpiMgr                *dpi.Manager
-	eventStore            *events.Store
+	eventStore            *events.Writer
+	detached              bool
 	rulesetStatus         atomic.Pointer[RulesetStatus]
 	inspectAll            bool
 	dpiEnabled            bool // master DPI on/off
@@ -252,10 +254,12 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
-	e.eventStore = cfg.Events
-	if e.eventStore == nil {
-		e.eventStore = events.NewStore(4096)
+	e.counters.tracker.Store(e.stats)
+	store := cfg.Events
+	if store == nil {
+		store = events.NewStore(4096)
 	}
+	e.eventStore = store.Writer("")
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.initIEC(cfg)
@@ -282,6 +286,9 @@ func New(cfg Config) (*Engine, error) {
 		} else {
 			e.updater = enforce.NewNftUpdater(comp.TableName)
 		}
+	}
+	if !cfg.Enforce.Enabled {
+		e.gate.accountingStatus.Store(&accountingView{reason: "enforcement disabled"})
 	}
 	e.bindProtection(true)
 	if err := e.initTransport(cfg); err != nil {
@@ -364,6 +371,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
 	e.stats = fresh.stats
+	e.counters.tracker.Store(e.stats)
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
@@ -625,8 +633,10 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 		e.policyMu.RLock()
 		defer e.policyMu.RUnlock()
 	}
-	metrics.PacketsTotal.Inc()
-	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	if !e.detached {
+		metrics.PacketsTotal.Inc()
+		metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	}
 	if pkt.Invalid != "" {
 		return invalidPacketDecision(pkt)
 	}
@@ -762,7 +772,9 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 		}
 		e.tcpISNs[key.MapKey()] = pkt.TCP.Seq
 	}
-	metrics.FlowsActive.Inc()
+	if !e.detached {
+		metrics.FlowsActive.Inc()
+	}
 	return state, forgotten
 }
 
@@ -793,7 +805,9 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	delete(e.tcpISNs, index)
 	delete(e.transportISNs, index)
 	delete(e.transportCoverage, st)
-	metrics.FlowsActive.Dec()
+	if !e.detached {
+		metrics.FlowsActive.Dec()
+	}
 	return st
 }
 
@@ -810,7 +824,9 @@ func (e *Engine) sweepFlows(now time.Time) {
 			delete(e.tcpISNs, k)
 			delete(e.transportISNs, k)
 			delete(e.transportCoverage, st)
-			metrics.FlowsActive.Dec()
+			if !e.detached {
+				metrics.FlowsActive.Dec()
+			}
 			if st != nil {
 				expired = append(expired, st)
 			}

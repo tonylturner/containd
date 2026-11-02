@@ -2,7 +2,7 @@
 
 import { Disclosure } from "../../components/Disclosure";
 import { Skeleton } from "../../components/Skeleton";
-import { Sparkline } from "../../components/Sparkline";
+import { ServiceHistory } from "../../components/TelemetryChart";
 
 import type { ServicesStatus } from "../../lib/api";
 
@@ -51,12 +51,6 @@ export function VPNRuntimeStatusCard({
               </div>
             </>
           ) : null}
-          <div className="md:col-span-2">
-            Rate: <span className="text-(--text)">{typeof svcStatus?.rate_per_min === "number" ? svcStatus.rate_per_min.toFixed(1) : "Unknown"} / min</span>
-          </div>
-          <div className="md:col-span-2">
-            Errors: <span>{typeof svcStatus?.errors_rate_per_min === "number" ? svcStatus.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
-          </div>
           <div className="md:col-span-2"><h3>Troubleshooting</h3><Disclosure title="Service details" indicator={svcStatus?.openvpn_pid === undefined || !svcStatus.openvpn_config_path ? "Some details unknown" : undefined}>
             <p>Process ID: {svcStatus?.openvpn_pid ?? "Unknown"}</p>
             <p>OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span></p>
@@ -66,16 +60,7 @@ export function VPNRuntimeStatusCard({
               {svcStatus.openvpn_last_error}
             </div>
           ) : null}
-          {svcStatus?.sparkline?.length ? (
-            <div className="md:col-span-2">
-              <Sparkline
-                values={svcStatus.sparkline}
-                color="var(--primary)"
-                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-                title="VPN events per minute"
-              />
-            </div>
-          ) : null}
+          <div className="md:col-span-2"><ServiceHistory service="vpn" title="VPN events per minute" /></div>
         </div>
       )}
     </section>

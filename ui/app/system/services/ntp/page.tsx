@@ -14,7 +14,7 @@ import { Shell } from "../../../../components/Shell";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
-import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceHistory } from "../../../../components/TelemetryChart";
 import { ServiceStatusStrip } from "../service-presentation";
 import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
@@ -195,28 +195,13 @@ export default function NTPPage() {
               Running:{" "}
               <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
             </div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
 
             {status?.last_error ? (
               <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
               </div>
             ) : null}
-            {status?.sparkline?.length ? (
-              <div className="md:col-span-2">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--teal)"
-                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                  title="NTP events per minute"
-                />
-              </div>
-            ) : null}
+            <div className="md:col-span-2"><ServiceHistory service="ntp" title="NTP events per minute" /></div>
             <div className="md:col-span-2">
               <h3 className="text-sm">Troubleshooting</h3>
               <Disclosure title="Service details" indicator={status.ntpd_path === "" ? "Binary not found" : status.pid === undefined || !status.ntpd_path ? "Some details unknown" : undefined}>

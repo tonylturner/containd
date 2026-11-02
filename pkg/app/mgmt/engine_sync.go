@@ -20,6 +20,7 @@ const (
 )
 
 type engineSync struct {
+	demo   *demoReconciler
 	store  config.Store
 	health httpapi.RuntimeHealthClient
 	apply  func(context.Context) ([]string, error)
@@ -34,7 +35,7 @@ type engineSync struct {
 
 // startEngineSync returns a stop-and-join function so Run never closes its
 // stores while a replay is still using them, including on listener errors.
-func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store config.Store, engine httpapi.EngineClient, services httpapi.ServicesApplier) func() {
+func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store config.Store, engine httpapi.EngineClient, services httpapi.ServicesApplier, demo ...*demoReconciler) func() {
 	health, ok := engine.(httpapi.RuntimeHealthClient)
 	if !ok {
 		return func() {}
@@ -47,6 +48,9 @@ func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store confi
 			return httpapi.ApplyBootConfig(ctx, store, engine, services)
 		},
 		logger: logger,
+	}
+	if len(demo) != 0 {
+		syncer.demo = demo[0]
 	}
 	// Register before the first poll: an earlier expiry is covered by boot
 	// replay; an expiry during that replay remains queued for another apply.
@@ -125,6 +129,9 @@ func (s *engineSync) poll(ctx context.Context) bool {
 		return false
 	}
 	if s.applied && health.BootID == s.lastBootID {
+		if s.demo != nil {
+			s.demo.Reconcile(ctx)
+		}
 		return true
 	}
 	warnings, err := s.apply(ctx)
@@ -138,6 +145,9 @@ func (s *engineSync) poll(ctx context.Context) bool {
 	s.lastError = ""
 	s.applied = true
 	s.lastBootID = health.BootID
+	if s.demo != nil {
+		s.demo.EngineSynced(ctx, health.BootID)
+	}
 	s.logger.Infof("replayed config to engine (bootId=%q recovery=%v)", health.BootID, recovery)
 	return true
 }

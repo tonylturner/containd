@@ -20,15 +20,14 @@ import {
   SetupChecklist,
   SystemHealthPanel,
   TrafficCounter,
+  TrafficHistory,
   type InterfaceBindings,
 } from "./dashboard-panels";
 import {
-  buildZoneSparklines,
   buildZoneThreatMap,
   deriveServices,
   NetworkPulseCanvas,
   NetworkPulseStats,
-  TrafficChart,
   ZoneList,
 } from "./dashboard-visuals";
 
@@ -37,7 +36,10 @@ const Console = dynamic(
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
 import { Skeleton } from "../components/Skeleton";
+import { ServiceTelemetryAttention } from "./dashboard-service-attention";
 import { useHealth } from "../hooks/useHealth";
+import type { SimulationStatus } from "../lib/api-console";
+import { simulationDescription } from "../lib/simulation-status";
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
 
@@ -52,13 +54,15 @@ export default function Home() {
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
   const [interfaceBindings, setInterfaceBindings] = useState<InterfaceBindings | null>(null);
   const [dashboardUnavailable, setDashboardUnavailable] = useState(false);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [eventsUnavailable, setEventsUnavailable] = useState(false);
   const [zonesUnavailable, setZonesUnavailable] = useState(false);
   const [statsUnavailable, setStatsUnavailable] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const clock = now === null ? "" : new Date(now).toLocaleTimeString("en-US", { hour12: false });
-  const [simRunning, setSimRunning] = useState<boolean | null>(null);
+  const [simulation, setSimulation] = useState<SimulationStatus | null>(null);
+  const simRunning = simulation?.running ?? null;
   const [simUnavailable, setSimUnavailable] = useState(false);
   const [flowsUnavailable, setFlowsUnavailable] = useState(false);
   const [simToggling, setSimToggling] = useState(false);
@@ -81,11 +85,11 @@ export default function Home() {
       Promise.all([api.listInterfaces(signal), api.listInterfaceState(signal)]).then(([configured, runtime]) => {
         setInterfaceBindings(configured?.data && runtime ? { configured: configured.data, runtime } : null);
       }).catch(() => { if (!signal.aborted) setInterfaceBindings(null); });
-      api.listEvents(50, signal).then((r) => { setEvents(r ?? []); setEventsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setEvents([]); setEventsUnavailable(true); } });
+      api.listEvents(50, signal).then((r) => { setEventsLoaded(true); setEvents(r ?? []); setEventsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setEventsLoaded(true); setEvents([]); setEventsUnavailable(true); } });
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => { setStats(r); setStatsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setStats(null); setStatsUnavailable(true); } });
       api.getServicesStatus(signal).then(setServicesStatus).catch(() => { if (!signal.aborted) setServicesStatus(null); });
-      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
+      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimulation(r); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimulation(null); } });
       api.diffConfig().then(snapshot => (snapshot?.data ?? null)).then((r) => {
         if (!r) { setConfigDirty(null); return; }
         const running = JSON.stringify(r.running ?? null);
@@ -111,7 +115,7 @@ export default function Home() {
         ? await api.stopSimulation()
         : await api.startSimulation();
       setSimUnavailable(r === null);
-      setSimRunning(r?.running ?? null);
+      setSimulation(r);
     } finally {
       setSimToggling(false);
     }
@@ -120,7 +124,7 @@ export default function Home() {
   async function retrySimulation() {
     const result = await api.getSimulationStatus();
     setSimUnavailable(result === null);
-    setSimRunning(result?.running ?? null);
+    setSimulation(result);
   }
 
   async function retryFlows() {
@@ -136,9 +140,8 @@ export default function Home() {
     alertCountsKnown && eventStats &&
     (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
-  const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
+  const services = useMemo(() => deriveServices(servicesStatus), [servicesStatus]);
   const zoneThreatMap = useMemo(() => buildZoneThreatMap(events, zones), [events, zones]);
-  const zoneSparklineMap = useMemo(() => buildZoneSparklines(events, zones), [events, zones]);
 
   return (
     <Shell title="Dashboard">
@@ -156,7 +159,7 @@ export default function Home() {
                 {health.hostname ?? "containd"}
               </span>
               <span className="text-xs text-slate-500">
-                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : "No recent IDS/AV alerts"}
+                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : eventStats?.complete === false ? "IDS/AV alerts: partial 24h coverage" : "No recent IDS/AV alerts"}
               </span>
             </div>
           ) : (
@@ -217,6 +220,7 @@ export default function Home() {
           <span className="tabular-nums">{clock}</span>
         </div>
       </div>
+      {simulation && <p role="status" data-simulation-status className={`mb-4 wrap-anywhere text-xs ${simulation.error ? "text-amber" : "text-(--text-muted)"}`}>{simulationDescription(simulation)}</p>}
 
       <SetupChecklist
         counts={data?.counts}
@@ -269,9 +273,11 @@ export default function Home() {
       {statsUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">System telemetry unavailable — resource usage is unknown.</p>}
       {flowsUnavailable && <div role="status" className="mb-3 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border px-3 py-1">Retry</button></div>}
       {zonesUnavailable && <p role="alert" className="mb-3 text-sm text-amber">Zones unavailable — zone configuration is unknown.</p>}
-      {services.filter(service => service.state === "unavailable" || service.state === "stopped" || (service.errorRate ?? 0) > 0).map(service => (
-        <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail}{(service.errorRate ?? 0) > 0 ? ` · ${service.errorRate!.toFixed(1)} err/min` : ""} — <Link className="underline" href={service.href}>Check service</Link></p>
+      {services.filter(service => service.state === "unavailable" || service.state === "stopped").map(service => (
+        <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail} — <Link className="underline" href={service.href}>Check service</Link></p>
       ))}
+
+      {services.filter(s => s.name !== "IPS").map(s => <ServiceTelemetryAttention key={s.name} service={s} />)}
 
       {/* ── Main grid ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_320px] gap-4">
@@ -293,8 +299,8 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Zone Status
           </h3>
-          {eventsUnavailable || zonesUnavailable ? <p className="text-xs text-amber">Zone activity unknown — check the traffic status above.</p> : zones.length > 0 ? (
-            <ZoneList zones={zones} threatMap={zoneThreatMap} sparklineMap={zoneSparklineMap} />
+          {zonesUnavailable ? <p className="text-xs text-amber">Zone activity unknown — check the traffic status above.</p> : zones.length > 0 ? (
+            <ZoneList zones={zones} threatMap={zoneThreatMap} threatsKnown={eventsLoaded && !eventsUnavailable} />
           ) : (
             <Skeleton className="h-32 w-full" />
           )}
@@ -309,16 +315,16 @@ export default function Home() {
         </div>
 
         {/* Traffic Chart */}
-        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
+        <div className="min-w-0 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
-              60s window
+              1h window
             </span>
           </h3>
-          <div className="h-[120px] mb-3">
-            <TrafficChart events={events} />
-          </div>
+          <TrafficHistory />
+          <p className="mb-2 text-[10px] text-(--text-muted)">Event totals: last 24 h{eventStats && !eventStats.complete ? " · Partial coverage" : ""}</p>
+          {data?.eventStatsError && <p role="status" className="text-xs text-amber">Event totals unavailable: {data.eventStatsError}</p>}
           <div className="grid grid-cols-3 gap-2">
             <TrafficCounter
               label="Total Events"
@@ -348,7 +354,7 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Event Stream
           </h3>
-          {eventsUnavailable ? <p className="text-xs text-amber">Recent events unavailable.</p> : <EventStream events={events} />}
+          {!eventsLoaded ? <p className="text-xs text-(--text-muted)">Loading recent events…</p> : eventsUnavailable ? <p className="text-xs text-amber">Recent events unavailable.</p> : <EventStream events={events} />}
         </div>
 
         {/* System Health — replaces old stats row */}

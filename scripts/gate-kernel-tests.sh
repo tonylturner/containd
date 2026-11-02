@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Runs the protection-bind and scanning-gate kernel tests headless in a disposable golang
 # container on Docker's Linux kernel: the nft steering (TestGateKernel) and
+# cross-zone accounting (TestAccountingKernel and its engine lifecycle),
 # the nft load of every golden ruleset in pkg/dp/enforce, the gate policy
 # routing in pkg/dp/netcfg (TestGateRoutingKernel) and the gate manager in
 # pkg/app/engine (TestGateManagerKernel). Network namespaces need SYS_ADMIN
@@ -13,7 +14,7 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 go_version="$(sed -n 's/^go \([0-9.]*\)$/\1/p' "$root/go.mod")"
 image="containd-gate-kernel:${go_version}"
-run="${KERNEL_TEST_RUN:-^TestProtectionBindKernel$|^TestGateKernel$|^TestKernelNFTLoadsGoldens$|^TestGateRoutingKernel$|^TestGateManagerKernel$}"
+run="${KERNEL_TEST_RUN:-^TestProtectionBindKernel$|^TestGateKernel$|^TestKernelNFTLoadsGoldens$|^TestGateRoutingKernel$|^TestGateManagerKernel$|^TestAccountingKernel$|^TestTelemetryAccountingKernelLifecycle$}"
 packages=(./pkg/dp/engine ./pkg/dp/enforce ./pkg/dp/netcfg ./pkg/app/engine)
 test_args=(-v)
 while (($#)); do

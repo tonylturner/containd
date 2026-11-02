@@ -22,11 +22,15 @@ const (
 // POST and removes the signature named by the id query parameter on DELETE.
 // Live changes last until the engine restarts. A signature ID is unique: POST
 // with an ID already loaded answers 409.
-func signaturesHandler(dpEngine *engine.Engine) http.HandlerFunc {
+func signaturesHandler(dpEngine *engine.Engine, sim *simulationManager) http.HandlerFunc {
 	// writes serializes the ID check with the add so concurrent POSTs cannot
 	// load two signatures with one ID.
 	var writes sync.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
+		if sim != nil {
+			sim.mu.Lock()
+			defer sim.mu.Unlock()
+		}
 		sigs := dpEngine.SignatureEngine()
 		if sigs == nil {
 			writeJSONStatus(w, http.StatusServiceUnavailable, map[string]string{"error": "signature engine unavailable"})
@@ -52,6 +56,9 @@ func signaturesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 				return
 			}
 			sigs.Add(sig)
+			if sim != nil {
+				sim.setSignaturesLocked(sigs.List())
+			}
 			writeJSON(w, sig)
 		case http.MethodDelete:
 			id := strings.TrimSpace(r.URL.Query().Get("id"))
@@ -64,6 +71,9 @@ func signaturesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			if !sigs.Remove(id) {
 				http.Error(w, "signature not found", http.StatusNotFound)
 				return
+			}
+			if sim != nil {
+				sim.setSignaturesLocked(sigs.List())
 			}
 			w.WriteHeader(http.StatusNoContent)
 		default:

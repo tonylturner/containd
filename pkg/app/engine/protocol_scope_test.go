@@ -43,7 +43,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := httptest.NewRecorder()
-			applyRulesHandler(dp.Engine, nil, testProtectionCoordinator(t, dp.Engine)).ServeHTTP(rec, protectionRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
+			applyRulesHandler(dp.Engine, nil, testProtectionCoordinator(t, dp.Engine), nil).ServeHTTP(rec, protectionRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("snapshot: %d %s", rec.Code, rec.Body)
 			}
@@ -55,7 +55,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 			t.Fatal(err)
 		}
 		rec := httptest.NewRecorder()
-		signaturesHandler(dp.Engine).ServeHTTP(rec, httptest.NewRequest("POST", "/internal/signatures", bytes.NewReader(body)))
+		signaturesHandler(dp.Engine, nil).ServeHTTP(rec, httptest.NewRequest("POST", "/internal/signatures", bytes.NewReader(body)))
 		if rec.Code != http.StatusBadRequest || len(dp.SignatureEngine().List()) != before {
 			t.Fatalf("signature: %d %s", rec.Code, rec.Body)
 		}

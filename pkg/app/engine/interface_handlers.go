@@ -19,7 +19,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
-func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http.HandlerFunc {
+// interfaceTelemetry records only successfully applied interface sets.
+type interfaceTelemetry interface {
+	SetTelemetryInterfaces(context.Context, []config.Interface) error
+}
+
+func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager, observers ...interfaceTelemetry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -58,6 +63,11 @@ func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager) h
 		}
 		if ownership != nil {
 			ownership.setInterfaces(ifaces)
+		}
+		for _, observer := range observers {
+			if err := observer.SetTelemetryInterfaces(ctx, ifaces); err != nil {
+				logger.Warnf("interface accounting unavailable: %v", err)
+			}
 		}
 		writeJSON(w, map[string]any{"status": "applied"})
 	}

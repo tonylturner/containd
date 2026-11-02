@@ -116,6 +116,10 @@ func CompileSnapshotWithInputs(cfg *config.Config, inputs SnapshotInputs) (dprul
 	// Local input allow rules (management plane + VPN listeners).
 	snap.LocalInput = append(snap.LocalInput, compileLocalInput(cfg)...)
 
+	// Preserve unbound zones and their config order independently of devices.
+	for _, zone := range cfg.Zones {
+		snap.Zones = append(snap.Zones, zone.Name)
+	}
 	// Deterministic zone->devices mapping for nftables bindings, shared with
 	// the gate selection.
 	snap.ZoneIfaces = config.ZoneDevices(cfg.Interfaces)

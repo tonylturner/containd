@@ -30,6 +30,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/dp/telemetry"
 	"github.com/tonylturner/containd/pkg/evidence"
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
@@ -160,13 +161,9 @@ func Run(ctx context.Context, opts Options) error {
 	// Startup capture uses the same lifetime and join discipline as later applies.
 	coordinator.start()
 
-	// Simulation manager for synthetic traffic (lab/demo mode).
-	simMgr := &simulationManager{dpEngine: dpEngine, logger: logger}
-
-	// Auto-start synthetic traffic generator if CONTAIND_DPI_MOCK=1.
-	if common.Env("CONTAIND_DPI_MOCK", "") == "1" {
-		simMgr.start(nil) // nil subnets → uses DefaultSubnets
-	}
+	// Replay has a separate, capability-free engine and boots stopped.
+	simMgr := &simulationManager{dpEngine: dpEngine}
+	defer simMgr.stop()
 
 	ownership.start(ctx)
 	dhcpMgr := dhcpd.NewManager()
@@ -206,7 +203,7 @@ func Run(ctx context.Context, opts Options) error {
 		writeJSON(w, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("/internal/protection/retry", coordinator.retryHandler(gateMgr))
-	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine, gateMgr, coordinator))
+	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine, gateMgr, coordinator, simMgr))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules/preview", previewRuleHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset/preview", previewRulesetHandler(dpEngine))
@@ -224,10 +221,11 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine, evidenceStore))
 	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine, evidenceStore))
-	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
+	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership, dpEngine))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
+	mux.HandleFunc("/internal/telemetry/counters", telemetryCountersHandler(telemetry.Collector{BootID: engineBootID, Membership: dpEngine.TelemetryMembership, Tracker: dpEngine.TelemetryTracker, Events: dpEngine.Events().TelemetryCounts, AV: avMgr.TelemetryCounts, Conduits: dpEngine.TelemetryConduits, Demo: simMgr.samples}))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
 	mux.HandleFunc("/internal/events/forward", eventsFeedHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
@@ -241,7 +239,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
 	mux.HandleFunc("/internal/anomalies", anomaliesHandler(dpEngine))
-	mux.HandleFunc("/internal/signatures", signaturesHandler(dpEngine))
+	mux.HandleFunc("/internal/signatures", signaturesHandler(dpEngine, simMgr))
 	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/firewall/counters", ruleCountersHandler(dpEngine))

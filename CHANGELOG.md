@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- The appliance keeps counter history in a new SQLite file, `/data/telemetry.db`
+  (`CONTAIND_TELEMETRY_DB`), capped at 64 MiB: 10 s points for 1 hour, 1 minute
+  for 24 hours and 15 minutes for 30 days. History starts empty after the upgrade.
+- API: `GET /api/v1/services/status` no longer returns `sparkline`,
+  `errors_sparkline`, `rate_per_min` or `errors_rate_per_min`; read history from
+  `GET /api/v1/telemetry/series`. `/api/v1/dashboard` `eventStats` now covers the
+  last 24 hours from retained counters, with `windowSeconds` and `complete`; it is
+  `null` with `eventStatsError` when history is unavailable, never zero.
+  `/api/v1/security/conduits` `traffic` is now an object: measured packets and
+  bytes for the last hour, or `unavailable` with a reason.
+- The engine owns a third nftables table, `inet <enforceTable>_acct`. It only
+  counts traffic and never drops or accepts.
+- `CONTAIND_DPI_MOCK` now only enables inspect-all; it no longer starts demo.
+  `CONTAIND_DEMO_CAPTURES` selects the demo capture directory (default
+  `/usr/share/containd/demo`). `GET/POST /api/v1/simulation` return
+  `preference`, `running`, `loops`, `captureSet`, `capture`, `error` and
+  `reason`; an unreachable engine is reported in `error` with HTTP 200.
+
+### Added
+
+- Charts show retained history of real counters: interface throughput per zone
+  (Dashboard Traffic, Zone Status, Monitoring, Topology), events, services and
+  antivirus. A missed sample shows as a gap, a counter restart as a reset mark,
+  and a failed read as unavailable, never as zero.
+- Conduits show measured routed traffic between zones that passed policy, from
+  per-zone-pair kernel counters. "% of baseline" is gone.
+- `GET /api/v1/telemetry/series` returns retained counter history.
+- Demo mode replays bundled recorded ICS and IT captures through the real
+  decoders and detection chain on an illustrative topology, instead of writing
+  random events. Replay is detached: it never transmits frames, changes
+  enforcement or touches kernel state. Its events, flows and counters carry
+  `origin: "demo"`; the UI marks them Demo. Demo records are never sent to
+  syslog, learned, counted as real (including `/metrics`), or kept in the real
+  event, DENY or IEC 104 incident retention. Demo would-deny results are your
+  ICS rules evaluated in monitor mode.
+- Each chart shows labelled demo data until its own metric has real data.
+  Demo conduit traffic is reported as `recorded`, never measured.
+- The Dashboard SIM Start/Stop choice persists (`demo.json` beside
+  `config.db`). With no saved choice, demo runs until the firewall does real
+  work (traffic forwarded between zones, or a real IDS alert or antivirus
+  detection), then stops for good. Management sessions and ARP chatter alone do
+  not stop it.
+
 ## [0.1.38] - 2026-11-01
 
 ### Upgrade notes

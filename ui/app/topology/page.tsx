@@ -190,7 +190,7 @@ function TopologyInner() {
         </div>
       )}
 
-      <p className="px-4 py-2 text-xs text-(--text-muted)">{currentView === "security" ? "Live · Conduit observations / Saved target · Candidate zone settings" : currentView === "physical" ? "Live · Deployment details" : "Live · Running network and traffic observations"}</p>
+      <p className="px-4 py-2 text-xs text-(--text-muted)">{currentView === "security" ? "Conduit traffic · Measured or labelled Demo / Saved target · Candidate zone settings" : currentView === "physical" ? "Live · Deployment details" : "Live · Running network and traffic observations"}</p>
 
       {/* WORKSPACE — switches between views */}
       {currentView === "physical" ? (

@@ -5,7 +5,7 @@ import { mapZone, scoreZone } from "../lib/security-scoring";
 
 const admitted: Conduit = {
   from: "OT-1", to: "dmz",
-  state: "allow", ids: "full", proto: [], traffic: 0,
+  state: "allow", ids: "full", proto: [], traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const },
   rules: [], gaps: [], mitre: [], defaultDeny: true,
   tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
   auditLogged: true, avEnabled: false,

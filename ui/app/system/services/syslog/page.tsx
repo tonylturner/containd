@@ -16,7 +16,7 @@ import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
-import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceHistory } from "../../../../components/TelemetryChart";
 import { ServiceStatusStrip } from "../service-presentation";
 import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
@@ -317,24 +317,7 @@ export default function SyslogPage() {
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />
             </div>
-          ) : status?.sparkline?.length ? (
-            <Sparkline
-              values={status.sparkline}
-              color="var(--primary)"
-              background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-              title="Syslog events per minute"
-            />
-          ) : null}
-          {!loading && typeof status?.rate_per_min === "number" ? (
-            <p className="mt-2 text-xs text-(--text-muted)">
-              Rate: {status?.rate_per_min.toFixed(1)} / min
-            </p>
-          ) : null}
-          {!loading && typeof status?.errors_rate_per_min === "number" ? (
-            <p className="mt-1 text-xs">
-              Errors: {status?.errors_rate_per_min.toFixed(1)} / min
-            </p>
-          ) : null}
+          ) : <ServiceHistory service="syslog" title="Syslog events per minute" />}
         </div>
       {status && (
         <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">

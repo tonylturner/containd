@@ -57,6 +57,7 @@ services:
       - CONTAIND_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
       - CONTAIND_AUDIT_DB=${CONTAIND_AUDIT_DB:-/data/audit.db}
       - CONTAIND_USERS_DB=${CONTAIND_USERS_DB:-/data/users.db}
+      - CONTAIND_TELEMETRY_DB=${CONTAIND_TELEMETRY_DB:-/data/telemetry.db}
 
       # SSH
       - CONTAIND_SSH_ADDR=${CONTAIND_SSH_ADDR:-:2222}
@@ -77,7 +78,9 @@ services:
       - CONTAIND_ALLOWED_ORIGINS=${CONTAIND_ALLOWED_ORIGINS:-}
       - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
       - CONTAIND_DEFAULT_ADMIN_PASSWORD=${CONTAIND_DEFAULT_ADMIN_PASSWORD:-}
+      # Inspect-all DPI only; demo replay is controlled by the persisted SIM preference.
       - CONTAIND_DPI_MOCK=${CONTAIND_DPI_MOCK:-0}
+      - CONTAIND_DEMO_CAPTURES=${CONTAIND_DEMO_CAPTURES:-/usr/share/containd/demo}
     ports:
       - "${CONTAIND_PUBLISH_HTTP_PORT:-8080}:8080"
       - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"

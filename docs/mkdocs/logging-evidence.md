@@ -12,6 +12,23 @@
   `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
   depend on a writable directory; generic `NewService` application loggers do not
   configure a file path. `CONTAIND_LOG_FILE=0` disables configured file sinks.
+- Retained counter history is separate from event evidence: management writes
+  `CONTAIND_TELEMETRY_DB` (default `data/telemetry.db`, `/data/telemetry.db` in
+  Compose), an independent SQLite WAL file. It retains 10-second buckets for one
+  hour, minute buckets for 24 hours and 15-minute buckets for 30 days, subject to
+  a 64 MiB database-plus-WAL budget and a 320-series cap. Old coarse history is
+  reclaimed under pressure; conservative whole-transaction WAL headroom can
+  reclaim coarse history before the physical high-water mark. Missing coverage
+  remains a gap. This store does not retain event payloads. Management must be
+  running to collect history.
+- Events marked `origin: demo` are labelled demonstration records. They never
+  charge real counter history or Prometheus metrics, never enter learner or
+  inventory evidence, and are never exported to syslog. Demo events come from
+  [recorded capture replay](services.md#recorded-demo-replay), including flagged
+  mutated negative fixtures, on an illustrative topology. Identification events
+  are not replayed. Demo would-deny is an operator ICS rule evaluated in monitor
+  mode, not an enforced drop. `CONTAIND_DPI_MOCK` enables inspect-all only, not
+  demo replay; `CONTAIND_DEMO_CAPTURES` selects the replay assets.
 - `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
 File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
@@ -261,8 +278,11 @@ The dashboard shows all four First-Run Checklist tasks, including completed
 ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
 System Health stay visible alongside attention and failure notices. Open
 Monitoring for live investigation. The header holds the SIM toggle; simulation
-controls act immediately, not on commit. CLI Console opens on demand below
-the panels.
+controls act immediately, not on commit. Start saves `on`, Stop saves `off`
+across restarts. `auto` stops for good once the firewall forwards traffic between
+zones or raises a real IDS alert or antivirus detection or block; interface
+chatter and other events do not stop it. CLI Console opens on demand below the
+panels.
 
 Events keeps timestamps, endpoints, activity and protection evidence visible.
 Advanced event filters holds exact IDs, protocol, decision, outcome, time and

@@ -7,14 +7,15 @@ import Link from "next/link";
 import { api, type FlowSummary, type ServicesStatus, type TelemetryEvent } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
-import { Sparkline } from "../../components/Sparkline";
+import { DemoBadge, TelemetryChart, TelemetryLegend, TelemetryRate } from "../../components/TelemetryChart";
+import { TelemetryProtocols } from "../../components/TelemetryProtocols";
 import { Card } from "../../components/Card";
 
 export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [flowStatus, setFlowStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
-  const [activityNow, setActivityNow] = useState(0);
+  const [eventsStatus, setEventsStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [services, setServices] = useState<ServicesStatus | null>(null);
 
   useEffect(() => {
@@ -30,10 +31,12 @@ export default function MonitoringOverviewPage() {
         setFlows(f ?? []);
         setFlowStatus(f === null ? "unavailable" : "ready");
         setEvents(e ?? []);
-        setActivityNow(Date.now());
+        setEventsStatus(e === null ? "unavailable" : "ready");
         setServices(s);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
+        setEvents([]);
+        setEventsStatus("unavailable");
       }
     }
 
@@ -58,54 +61,6 @@ export default function MonitoringOverviewPage() {
     (ev) => ev.proto === "ids" && ev.kind === "alert",
   ).length;
   const dpiCount = events.filter((ev) => ev.proto !== "ids").length;
-  const protoSeries = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const ev of events) {
-      const key = (ev.proto || "unknown").toLowerCase();
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    const max = Math.max(1, ...entries.map(([, c]) => c));
-    const colorFor = (proto: string) => {
-      switch (proto) {
-        case "ids":
-          return "var(--warning)";
-        case "firewall":
-          return "var(--primary)";
-        case "dns":
-          return "var(--teal)";
-        case "modbus":
-          return "var(--orange)";
-        case "http":
-          return "var(--purple)";
-        case "tls":
-          return "var(--primary-hover)";
-        default:
-          return "var(--pink)";
-      }
-    };
-    return entries.map(([proto, count]) => ({
-      proto,
-      count,
-      pct: Math.round((count / max) * 100),
-      color: colorFor(proto),
-    }));
-  }, [events]);
-  const activitySeries = useMemo(() => {
-    const buckets = 12;
-    const windowMs = 60 * 60 * 1000;
-    const now = activityNow;
-    const start = now - windowMs;
-    const bucketMs = windowMs / buckets;
-    const values = Array.from({ length: buckets }, () => 0);
-    for (const ev of events) {
-      const ts = new Date(ev.timestamp).getTime();
-      if (!Number.isFinite(ts) || ts < start || ts > now) continue;
-      const idx = Math.min(buckets - 1, Math.max(0, Math.floor((ts - start) / bucketMs)));
-      values[idx] += 1;
-    }
-    return values;
-  }, [events, activityNow]);
   const appSeries = useMemo(() => {
     const counts = new Map<string, number>();
     for (const flow of flows) {
@@ -152,10 +107,6 @@ export default function MonitoringOverviewPage() {
       dstPct: Math.round((dst.size / total) * 100),
     };
   }, [flows]);
-
-  const envoyRate = services?.envoy?.rate_per_min ?? null;
-  const envoyErrors = services?.envoy?.errors_rate_per_min ?? null;
-  const nginxRate = services?.nginx?.rate_per_min ?? null;
 
   const serviceCards = services
     ? [
@@ -227,13 +178,13 @@ export default function MonitoringOverviewPage() {
           </Link>
         </Card>
         <Card title="DPI Events">
-          <div className="text-3xl font-bold text-(--text)">{dpiCount}</div>
+          <div className="text-3xl font-bold text-(--text)">{eventsStatus === "ready" ? dpiCount : eventsStatus === "loading" ? "Loading…" : "Unavailable"}</div>
           <Link href="/events/" className="text-xs text-(--text) hover:text-(--text)">
             View events →
           </Link>
         </Card>
         <Card title="IDS Alerts">
-          <div className="text-3xl font-bold text-(--text)">{alertCount}</div>
+          <div className="text-3xl font-bold text-(--text)">{eventsStatus === "ready" ? alertCount : eventsStatus === "loading" ? "Loading…" : "Unavailable"}</div>
           <Link href="/alerts/" className="text-xs text-(--text) hover:text-(--text)">
             View alerts →
           </Link>
@@ -249,13 +200,9 @@ export default function MonitoringOverviewPage() {
                 Proxies
               </span>
               <span>
-                {envoyRate !== null ? envoyRate.toFixed(1) : "Unknown"} /min
-                {nginxRate !== null && (
-                  <span className="text-(--text-dim)"> · reverse proxy {nginxRate.toFixed(1)}/min</span>
-                )}
-                {envoyErrors !== null && (
-                  <span> · {envoyErrors.toFixed(1)} err/min</span>
-                )}
+                <TelemetryRate queries={[{ metric: "service.events", service: "envoy" }]} />
+                <span> · reverse proxy <TelemetryRate queries={[{ metric: "service.events", service: "nginx" }]} /></span>
+                <span> · errors <TelemetryRate queries={[{ metric: "service.errors", service: "envoy" }]} /></span>
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -280,30 +227,11 @@ export default function MonitoringOverviewPage() {
           </div>
         </Card>
         <Card title="Top Protocols">
-          {protoSeries.length === 0 && (
-            <div className="text-sm text-(--text-muted)">No traffic records yet.</div>
-          )}
-          {protoSeries.length > 0 && (
-            <div className="space-y-2 text-xs text-(--text)">
-              {protoSeries.map((row) => (
-                <div key={row.proto} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="uppercase text-(--text-muted)">{row.proto}</span>
-                    <span>{row.count}</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-(--surface)">
-                    <div
-                      className="h-2 rounded-full"
-                      style={{ width: `${row.pct}%`, background: row.color }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <TelemetryProtocols />
         </Card>
         <Card title="Recent Alerts">
-          {alertCount === 0 && (
+          {eventsStatus !== "ready" && <div role="status" className="text-sm text-amber">{eventsStatus === "loading" ? "Loading recent events…" : "Recent events unavailable — alert counts unknown."}</div>}
+          {eventsStatus === "ready" && alertCount === 0 && (
             <div className="text-sm text-(--text-muted)">No alerts.</div>
           )}
           {events
@@ -312,7 +240,7 @@ export default function MonitoringOverviewPage() {
             .map((ev) => (
               <div key={ev.id} className="mb-2 rounded-lg bg-(--surface) p-2 text-xs">
                 <div className="text-slate-100">
-                  {(ev.attributes?.["message"] as string) ?? "IDS alert"}
+                  {(ev.attributes?.["message"] as string) ?? "IDS alert"}<DemoBadge origin={ev.origin} />
                 </div>
                 <div className="text-(--text-muted)">
                   {new Date(ev.timestamp).toLocaleString()}
@@ -324,20 +252,12 @@ export default function MonitoringOverviewPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card title="Traffic Pulse">
-          <div className="flex items-center justify-between text-xs text-(--text-muted)">
-            <span>Last 60 min</span>
-            <span className="text-(--text)">{events.length.toLocaleString()} events</span>
-          </div>
-          <div className="mt-3">
-            <Sparkline values={activitySeries} color="var(--primary)" />
-          </div>
+          <p className="text-xs text-(--text-muted)">Last 60 min · bytes/s</p>
+          <TelemetryChart title="Traffic Pulse" queries={[{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]} />
+          <TelemetryLegend />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-(--text)">
-            <div className="rounded-lg border bg-black/20 px-2 py-1">
-              DPI {dpiCount.toLocaleString()}
-            </div>
-            <div className="rounded-lg border bg-black/20 px-2 py-1">
-              Alerts {alertCount.toLocaleString()}
-            </div>
+            <div>DPI {eventsStatus === "ready" ? dpiCount.toLocaleString() : "Unknown"}</div>
+            <div>Alerts {eventsStatus === "ready" ? alertCount.toLocaleString() : "Unknown"}</div>
           </div>
         </Card>
         <Card title="Top Applications">

@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -345,7 +347,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-(--text)">
-                <span>{eventHeadline(ev)}</span>
+                <span>{eventHeadline(ev)}</span><DemoBadge origin={ev.origin} />
                 <span className="ml-2 text-xs font-normal text-(--text-muted)">{ev.kind}</span>
               </div>
               <div className="text-xs text-(--text-muted)">

@@ -66,6 +66,18 @@ is using, and an unchanged default does not override an explicit open/close
 choice. In Configuration, **Advanced** and **Recovery** remain inspectable
 when configuration reads fail; configuration mutation actions stay disabled.
 
+## Demo and inspection runtime settings
+
+`dataplane.dpiMock` and engine environment variable `CONTAIND_DPI_MOCK` enable
+inspect-all DPI only. They do not generate events or start demo replay.
+Management keeps the separate `auto`/`on`/`off` demo preference in `demo.json`
+beside `config.db`, not in the configuration document. Start and Stop on the
+Dashboard take effect without commit and persist across restarts.
+`CONTAIND_DEMO_CAPTURES` selects the engine's capture directory, default
+`/usr/share/containd/demo`; its manifest and capture hashes must validate.
+See [recorded demo replay](services.md#recorded-demo-replay) for topology,
+pacing, licensing and preference semantics.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema
@@ -299,7 +311,7 @@ Notes:
 - Config backups are stored beside the config DB in `config-backups/` (normally `/data/config-backups/` in Compose) and can be created redacted or full (admin-only for unredacted).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
-  - `enforceTable` names the engine's nftables tables (default `containd`): `inet <enforceTable>` holds temporary blocks and connection revocations, and `inet <enforceTable>_policy` holds the firewall policy. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. It must not be an nft keyword such as `table`, `inet`, `ip`, `accept` or `drop`, which nft cannot address as a table name even quoted; keywords are lowercase, so `Table` is accepted. `containd_dhcp` is reserved for the DHCP redirect table.
+  - `enforceTable` names the engine's nftables tables (default `containd`): `inet <enforceTable>` holds temporary blocks and connection revocations, `inet <enforceTable>_policy` holds the firewall policy, and `inet <enforceTable>_acct` holds routed cross-zone packet and byte counters that survive policy applies. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. It must not be an nft keyword such as `table`, `inet`, `ip`, `accept` or `drop`, which nft cannot address as a table name even quoted; keywords are lowercase, so `Table` is accepted. `containd_dhcp` is reserved for the DHCP redirect table.
 - `routing` configures kernel routing when applying running config:
   - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
     selects main; explicit tables use IDs 1–252.
