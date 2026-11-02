@@ -175,16 +175,16 @@ func TestProtectionGateAndNFLog(t *testing.T) {
 	e.LoadRules(snap)
 	e.protectionInstalled(nil, true)
 	e.hooks.onSource(capture.SourceEvent{Ready: true})
-	e.SetScanProtection("ready", "", false, "starting", false)
+	e.SetScanProtection("ready", "", true, false, "starting", false)
 	if e.Protection().State != "pending" {
 		t.Fatalf("scanner unready: %+v", e.Protection())
 	}
-	e.SetScanProtection("failed", "admission failed", true, "", true)
+	e.SetScanProtection("failed", "admission failed", true, true, "", true)
 	st := e.Protection()
 	if st.State != "failed" || st.Effects[len(st.Effects)-1].Effect != "unknown" {
 		t.Fatalf("admission failure: %+v", st)
 	}
-	e.SetScanProtection("ready", "", true, "", false)
+	e.SetScanProtection("ready", "", true, true, "", false)
 	e.protection.update(func() { e.protection.setLocked("nflog", "failed", "lost", 3, 3) })
 	if st = e.Protection(); st.State != "degraded" || !st.Retryable {
 		t.Fatalf("NFLOG loss: %+v", st)

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
@@ -32,6 +34,7 @@ func TestProtectionGateObservesScannerWithoutHealthRequests(t *testing.T) {
 		}
 		t.Fatalf("%s did not become %s: %+v", name, state, dp.Protection())
 	}
+	env.g.applyAV(config.AVConfig{Enabled: true})
 	env.g.setEnforcing(true)
 	env.admit.await(t, enforce.GateAdmitOpen)
 	await("scan-gate", "ready")
@@ -54,6 +57,42 @@ func TestProtectionGateObservesScannerWithoutHealthRequests(t *testing.T) {
 	env.g.mu.Unlock()
 	env.g.publishProtection()
 	await("scan-gate", "failed")
+}
+
+func TestProtectionGateProjectsDisabledScannerOff(t *testing.T) {
+	dp := newCountingDP(t).Engine
+	env := newGateTestEnv(t)
+	env.g.protection = dp
+
+	env.g.publishProtection()
+	st := dp.Protection()
+	componentFound := false
+	for _, component := range st.Components {
+		if component.Name == "scanner" {
+			componentFound = true
+			if component.State != "off" || component.Reason != "" {
+				t.Fatalf("disabled scanner component = %+v", component)
+			}
+			break
+		}
+	}
+	if !componentFound {
+		t.Fatalf("disabled scanner component missing: %+v", st)
+	}
+	for _, outcome := range st.Subsystems {
+		if outcome.Name != protection.SubsystemScanner {
+			continue
+		}
+		if outcome.State != protection.DeliveryOff || outcome.Fault != nil ||
+			outcome.Retryable || outcome.NextRetryAt != nil {
+			t.Fatalf("disabled scanner outcome = %+v", outcome)
+		}
+		if st.Retryable {
+			t.Fatalf("disabled scanner made protection retryable: %+v", st)
+		}
+		return
+	}
+	t.Fatalf("disabled scanner outcome missing: %+v", st)
 }
 
 func TestProtectionGateLossPublishesDuringAdmissionIO(t *testing.T) {
