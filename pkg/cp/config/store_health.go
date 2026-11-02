@@ -15,14 +15,14 @@ type HealthSnapshot struct {
 	ApplyFault string
 }
 
-// HealthReader provides observation within the caller's shared budget without
-// exposing an intermediate promotion.
+// HealthReader observes committed running metadata within the shared budget;
+// runtime readiness must be obtained from the revision-bound protection aggregate.
 type HealthReader interface {
 	ReadHealthSnapshot(context.Context) (HealthSnapshot, error)
 }
 
 // ErrHealthBusy means the store stayed busy until the observation budget ended.
-// Health must report unknown rather than observe an unapplied document.
+// Health must report unknown when committed metadata cannot be read in time.
 var ErrHealthBusy = errors.New("configuration health snapshot busy")
 
 func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, error) {
@@ -30,7 +30,7 @@ func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, e
 		return HealthSnapshot{}, err
 	}
 	if !s.mu.TryLock() {
-		// Brief reads and candidate writes share this mutex with runtime apply.
+		// Brief reads and configuration writes share this mutex.
 		// Allow those to finish without extending the caller's shared budget.
 		retry := time.NewTicker(2 * time.Millisecond)
 		defer retry.Stop()
