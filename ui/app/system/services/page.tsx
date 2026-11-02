@@ -6,24 +6,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type ServiceMeter, type ServicesStatus } from "../../../lib/api";
+import { api, type ServicesStatus } from "../../../lib/api";
 import { staticAssetURL } from "../../../lib/api-core";
 import { ServiceFaultBanner } from "../../../components/ServiceFaultBanner";
 import { Shell } from "../../../components/Shell";
 import { Card as BaseCard } from "../../../components/Card";
 import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
-import { Sparkline } from "../../../components/Sparkline";
+import { ServiceHistory, TelemetryRate } from "../../../components/TelemetryChart";
 import { InfoTip } from "../../../components/InfoTip";
 import { Disclosure } from "../../../components/Disclosure";
 
 type MeteredService = "syslog" | "proxy" | "envoy" | "nginx" | "dns" | "ntp" | "dhcp" | "vpn" | "av";
-
-// The engine reports antivirus scans only while it answers.
-function meterOf(status: ServicesStatus | null, svc: MeteredService): ServiceMeter | undefined {
-  if (svc === "av") return status?.av?.available ? status.av : undefined;
-  return status?.[svc];
-}
 
 export default function ServicesOverviewPage() {
   const toast = useToast();
@@ -31,26 +25,6 @@ export default function ServicesOverviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
-
-  // A trend needs multiple observations and some activity; rates still show
-  // empty, single-observation and quiet series without an empty chart.
-  const spark = useCallback(
-    (svc: MeteredService, title: string, color: string, background: string) => {
-      const values = meterOf(status, svc)?.sparkline;
-      if (!values || values.length < 2 || !values.some(value => value > 0)) return undefined;
-      return { values, title, color, background };
-    },
-    [status],
-  );
-
-  const rate = useCallback(
-    (svc: MeteredService) => meterOf(status, svc)?.rate_per_min ?? null,
-    [status],
-  );
-  const errRate = useCallback(
-    (svc: MeteredService) => meterOf(status, svc)?.errors_rate_per_min ?? null,
-    [status],
-  );
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
     try {
@@ -162,14 +136,8 @@ export default function ServicesOverviewPage() {
           title="DNS"
           software="Unbound"
           loading={loading}
-          spark={spark(
-            "dns",
-            "DNS events per minute",
-            "var(--primary)",
-            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))",
-          )}
-          rate={rate("dns")}
-          errorsRate={errRate("dns")}
+          service="dns"
+          historyTitle="DNS events per minute"
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>DNS resolver</span>
@@ -181,12 +149,7 @@ export default function ServicesOverviewPage() {
             <br />
             Upstreams: {status?.dns?.configured_upstreams ?? "Unknown"}{" "}
             {status?.dns?.last_error && `(error=${status?.dns?.last_error})`}
-            {rate("dns") !== null && (
-              <>
-                <br />
-                Rate: {(rate("dns") ?? 0).toFixed(1)} /min
-              </>
-            )}
+
           </p>
           <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -196,14 +159,8 @@ export default function ServicesOverviewPage() {
           title="NTP"
           software="chrony"
           loading={loading}
-          spark={spark(
-            "ntp",
-            "NTP events per minute",
-            "var(--teal)",
-            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(37,99,235,0.04))",
-          )}
-          rate={rate("ntp")}
-          errorsRate={errRate("ntp")}
+          service="ntp"
+          historyTitle="NTP events per minute"
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>Time synchronization</span>
@@ -215,12 +172,7 @@ export default function ServicesOverviewPage() {
             <br />
             Servers: {status?.ntp?.servers_count ?? "Unknown"}{" "}
             {status?.ntp?.last_error && `(error=${status?.ntp?.last_error})`}
-            {rate("ntp") !== null && (
-              <>
-                <br />
-                Rate: {(rate("ntp") ?? 0).toFixed(1)} /min
-              </>
-            )}
+
           </p>
           <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -229,14 +181,8 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="DHCP"
           loading={loading}
-          spark={spark(
-            "dhcp",
-            "DHCP events per minute",
-            "var(--teal)",
-            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))",
-          )}
-          rate={rate("dhcp")}
-          errorsRate={errRate("dhcp")}
+          service="dhcp"
+          historyTitle="DHCP events per minute"
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>LAN DHCP server</span>
@@ -246,12 +192,7 @@ export default function ServicesOverviewPage() {
             Enabled: {typeof status?.dhcp?.enabled === "boolean" ? (status.dhcp.enabled ? "yes" : "no") : "Unknown"}{" "}
             {(status?.dhcp?.listen_ifaces ?? 0) > 0 &&
               `(ifaces=${status?.dhcp?.listen_ifaces ?? 0})`}
-            {rate("dhcp") !== null && (
-              <>
-                <br />
-                Rate: {(rate("dhcp") ?? 0).toFixed(1)} /min
-              </>
-            )}
+
           </p>
           <Link href="/dhcp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -264,14 +205,8 @@ export default function ServicesOverviewPage() {
           title="Proxies"
           software="Envoy + Nginx"
           loading={loading}
-          spark={spark(
-            "proxy",
-            "Proxy events per minute",
-            "var(--purple)",
-            "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))",
-          )}
-          rate={rate("proxy")}
-          errorsRate={errRate("proxy")}
+          service="proxy"
+          historyTitle="Proxy events per minute"
         >
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={16} height={16} className="h-4 w-4" />
@@ -288,28 +223,13 @@ export default function ServicesOverviewPage() {
             <br />
             Reverse proxy: {typeof status?.proxy?.nginx_running === "boolean" ? (status.proxy.nginx_running ? "running" : "stopped") : "Unknown"}{" "}
             {status?.proxy?.nginx_last_error && `(error=${status?.proxy?.nginx_last_error})`}
-            {rate("proxy") !== null && (
-              <>
-                <br />
-                Rate: {(rate("proxy") ?? 0).toFixed(1)} /min
-              </>
-            )}
-            {rate("envoy") !== null && (
-              <>
-                <br />
-                Forward proxy activity: {(rate("envoy") ?? 0).toFixed(1)} /min
-                {errRate("envoy") !== null && <> · errors {(errRate("envoy") ?? 0).toFixed(1)}/min</>}
-              </>
-            )}
-            {rate("nginx") !== null && (
-              <>
-                <br />
-                Reverse proxy activity: {(rate("nginx") ?? 0).toFixed(1)} /min
-                {errRate("nginx") !== null && <> · errors {(errRate("nginx") ?? 0).toFixed(1)}/min</>}
-              </>
-            )}
+
             <br />
-            Telemetry: access logs when enabled.
+            Forward proxy activity: <TelemetryRate queries={[{ metric: "service.events", service: "envoy" }]} />
+            · errors <TelemetryRate queries={[{ metric: "service.errors", service: "envoy" }]} />
+            <br />Reverse proxy activity: <TelemetryRate queries={[{ metric: "service.events", service: "nginx" }]} />
+            · errors <TelemetryRate queries={[{ metric: "service.errors", service: "nginx" }]} />
+            <br />Telemetry: access logs when enabled.
           </p>
           <Link href="/proxies/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -318,14 +238,8 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="VPN"
           loading={loading}
-          spark={spark(
-            "vpn",
-            "VPN events per minute",
-            "var(--primary)",
-            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
-          )}
-          rate={rate("vpn")}
-          errorsRate={errRate("vpn")}
+          service="vpn"
+          historyTitle="VPN events per minute"
         >
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/wireguard.svg")} alt="" width={16} height={16} className="h-4 w-4" />
@@ -337,12 +251,7 @@ export default function ServicesOverviewPage() {
             WireGuard: {typeof status?.vpn?.wireguard_enabled === "boolean" ? (status.vpn.wireguard_enabled ? "on" : "off") : "Unknown"}{" "}
             {(status?.vpn?.wg_peers ?? 0) > 0 &&
               `(peers=${status?.vpn?.wg_peers ?? 0})`}
-            {rate("vpn") !== null && (
-              <>
-                <br />
-                Rate: {(rate("vpn") ?? 0).toFixed(1)} /min
-              </>
-            )}
+
           </p>
           <Link href="/vpn/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -354,14 +263,8 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
-          spark={spark(
-            "av",
-            "AV scans per minute",
-            "var(--purple)",
-            "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))",
-          )}
-          rate={rate("av")}
-          errorsRate={errRate("av")}
+          service="av"
+          historyTitle="AV scans per minute"
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>AV scanning</span>
@@ -396,7 +299,7 @@ export default function ServicesOverviewPage() {
               )}
               </details>
               <br />
-              Rate: {typeof av.rate_per_min === "number" ? av.rate_per_min.toFixed(1) : "Unknown"} /min
+              Rate: <TelemetryRate queries={[{ metric: "av.scans" }]} />
             </div>
           ) : null}
           <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
@@ -409,23 +312,15 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Syslog"
           loading={loading}
-          spark={spark(
-            "syslog",
-            "Syslog events per minute",
-            "var(--primary)",
-            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
-          )}
-          rate={rate("syslog")}
-          errorsRate={errRate("syslog")}
+          service="syslog"
+          historyTitle="Syslog events per minute"
         >
           <p className="text-sm text-(--text)">
             Forward unified events to external collectors.
           </p>
           <p className="mt-2 text-xs text-(--text-muted)">
             Forwarders: {status?.syslog?.configured_forwarders ?? "Unknown"}
-            {rate("syslog") !== null && (
-              <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
-            )}
+
           </p>
           <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
@@ -437,81 +332,19 @@ export default function ServicesOverviewPage() {
   );
 }
 
-function ServiceCard({
-  title,
-  children,
-  loading = false,
-  spark,
-  rate,
-  errorsRate,
-  software,
-}: {
-  title: string;
-  children: React.ReactNode;
-  loading?: boolean;
-  spark?: { values: number[]; color: string; background: string; title?: string };
-  rate?: number | null;
-  errorsRate?: number | null;
-  software?: string;
+function ServiceCard({ title, children, loading = false, service, historyTitle, software }: {
+  title: string; children: React.ReactNode; loading?: boolean;
+  service: MeteredService; historyTitle: string; software?: string;
 }) {
-  const trend =
-    spark && spark.values.length > 1
-      ? spark.values[spark.values.length - 1] - spark.values[0]
-      : 0;
   return (
-    <div className="rounded-xs border bg-(--surface) p-5 shadow-card">
-      <p className="text-xs uppercase tracking-[0.2em] text-(--text)">
-        {title}
-      </p>
-      <div className="mt-3">
-        {loading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-24" />
-            <Skeleton className="h-4 w-36" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        ) : (
-          children
-        )}
-      </div>
-      {!loading && spark ? (
-        <div className="mt-3 space-y-2">
-          <Sparkline
-            values={spark.values}
-            color={spark.color}
-            background={spark.background}
-            title={spark.title}
-            className="h-14"
-          />
-          <div className="text-xs text-(--text-muted)">
-            Trend:{" "}
-            <span className={trend > 0 ? "text-emerald-400" : trend < 0 ? "" : "text-(--text)"}>
-              {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {trend}
-            </span>
-            {typeof rate === "number" ? (
-              <span className="ml-2 text-(--text-muted)">
-                Rate: <span className="text-(--text)">{rate.toFixed(1)}/min</span>
-              </span>
-            ) : null}
-            {typeof errorsRate === "number" ? (
-              <span className="ml-2">
-                Errors: {errorsRate.toFixed(1)}/min
-              </span>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      {!loading && !spark && typeof errorsRate === "number" && (
-        <p className="mt-2 text-xs text-(--text-muted)">Errors: {errorsRate.toFixed(1)}/min</p>
-      )}
-      {!loading && software && (
-        <div className="mt-3">
-          <h3 className="mb-2 text-sm">Troubleshooting</h3>
-          <Disclosure title="Service details">
-            <p className="text-xs text-(--text-muted)">Software: {software}</p>
-          </Disclosure>
-        </div>
-      )}
+    <div className="min-w-0 rounded-xs border bg-(--surface) p-5 shadow-card">
+      <p className="text-xs uppercase tracking-[0.2em] text-(--text)">{title}</p>
+      <div className="mt-3">{loading ? <Skeleton className="h-14 w-full" /> : children}</div>
+      {!loading && <div className="mt-3"><ServiceHistory service={service} title={historyTitle} ranges={false} /></div>}
+      {!loading && software && <div className="mt-3">
+        <h3 className="mb-2 text-sm">Troubleshooting</h3>
+        <Disclosure title="Service details"><p className="text-xs text-(--text-muted)">Software: {software}</p></Disclosure>
+      </div>}
     </div>
   );
 }

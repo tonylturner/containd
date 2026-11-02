@@ -1,3 +1,4 @@
+import { seriesResponse, fulfillSeries } from "./fixtures/telemetry";
 import { expect, test, type Page } from "@playwright/test";
 import { observation } from "./fixtures/protection-api";
 
@@ -9,12 +10,8 @@ const zones = [{ name: "lan" }, { name: "dmz" }, { name: "ot" }];
 
 function meter(sparkline: number[] = []) {
   return {
-    sparkline,
     count: sparkline.reduce((a, b) => a + b, 0),
-    rate_per_min: 0,
-    errors_sparkline: [],
     errors_count: 0,
-    errors_rate_per_min: 0,
   };
 }
 
@@ -54,6 +51,7 @@ type Mocks = {
   dashboardStatus?: number;
   protection?: ReturnType<typeof observation>;
   enforcement?: string;
+  syslogErrors?: boolean;
 };
 
 async function openDashboard(page: Page, mocks: Mocks) {
@@ -63,6 +61,15 @@ async function openDashboard(page: Page, mocks: Mocks) {
   });
   await page.route("**/api/v1/**", async (route) => {
     const p = new URL(route.request().url()).pathname;
+    if (p === "/api/v1/telemetry/series") {
+      const url = new URL(route.request().url());
+      if (mocks.syslogErrors && url.searchParams.get("metric") === "service.errors" && url.searchParams.get("service") === "syslog") {
+        const response = seriesResponse(url, [1]);
+        Object.assign(response.series[0].points.at(-1)!, { v: "1", d: 30, q: "partial" });
+        return route.fulfill({ json: response });
+      }
+      return fulfillSeries(route);
+    }
     let body: unknown = {};
     let status = 200;
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
@@ -72,7 +79,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
         user,
         health: mocks.health ?? { status: "ok", hostname: "test" },
         counts: { assets: 0, zones: zones.length, interfaces: mocks.interfaceCount ?? 0, rules: mocks.ruleCount ?? 0, icsRules: 0 },
-        eventStats: "eventStats" in mocks ? mocks.eventStats : { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
+        eventStats: "eventStats" in mocks ? mocks.eventStats : { windowSeconds: 86400, complete: true, total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
         services: null,
         lastActivity: null,
       };
@@ -224,7 +231,7 @@ test("only alerts that name a zone mark it", async ({ page }) => {
 
 test("a quiet traffic window draws no invented baseline", async ({ page }) => {
   await openDashboard(page, { events: [], services });
-  await expect(page.getByText("60s window", { exact: true })).toBeVisible();
+  await expect(page.getByText("1h window", { exact: true })).toBeVisible();
   await expect(page.getByText("24h baseline")).toHaveCount(0);
 });
 
@@ -255,10 +262,10 @@ for (const scenario of [
   { name: "unavailable scanner", status: { ...services, av: { available: false, error: "engine unavailable" } }, message: "AV: Scanner unavailable" },
   { name: "stopped DNS", status: { ...services, dns: { enabled: true, running: false } }, message: "DNS: Stopped" },
   { name: "stopped proxy", status: { ...services, proxy: { forward_enabled: true, reverse_enabled: false, envoy_running: false, nginx_running: false } }, message: "Proxy: Stopped" },
-  { name: "syslog errors", status: { ...services, syslog: { configured_forwarders: 1, ...meter(), errors_rate_per_min: 2 } }, message: "Syslog: 1 fwd · 0/min · 2.0 err/min" },
+  { name: "syslog errors", status: { ...services, syslog: { configured_forwarders: 1, ...meter(), errors_count: 2 } }, syslogErrors: true, message: "Syslog: 1 fwd · 2.0 err/min" },
 ]) {
   test(`service attention stays visible on load: ${scenario.name}`, async ({ page }) => {
-    await openDashboard(page, { events: [], services: scenario.status });
+    await openDashboard(page, { events: [], services: scenario.status, syslogErrors: "syslogErrors" in scenario && scenario.syslogErrors });
     const attention = page.getByRole("status").filter({ hasText: scenario.message });
     await expect(attention).toBeVisible();
     await expect(attention.getByRole("link", { name: "Check service" })).toBeVisible();
@@ -424,7 +431,7 @@ const panelHeadings = ["Network Pulse", "Zone Status", "Service Health", "Traffi
 test("all six dashboard panels and the SIM toggle are visible on load without any click", async ({ page }) => {
   await openDashboard(page, { events: [], services });
   for (const heading of panelHeadings) {
-    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic60s window" : heading, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic1h window" : heading, exact: true })).toBeVisible();
   }
   await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Dashboard details$|^Tools$/ })).toHaveCount(0);
@@ -454,7 +461,7 @@ test("all dashboard panels stay within a 390px viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDashboard(page, { events: [idsAlert(1)], services, simulation: true });
   for (const heading of panelHeadings) {
-    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic60s window" : heading, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic1h window" : heading, exact: true })).toBeVisible();
   }
   await expect(page.getByTitle("Stop traffic simulation")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

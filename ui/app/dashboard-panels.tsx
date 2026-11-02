@@ -10,6 +10,7 @@ import type {
   TelemetryEvent,
 } from "../lib/api";
 
+import { DemoBadge, TelemetryChart, TelemetryRate } from "../components/TelemetryChart";
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
@@ -26,8 +27,6 @@ export type ServiceInfo = {
   active: boolean | null;
   detail: string;
   href: string;
-  sparkline?: number[];
-  errorRate?: number;
 };
 
 export function SetupChecklist({
@@ -161,31 +160,12 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
           <div className="text-2xs text-slate-500 mt-0.5 truncate">
             {service.detail}
           </div>
-          {service.sparkline && service.sparkline.length > 0 && (
-            <div className="flex items-end gap-0.5 h-5 mt-2">
-              {service.sparkline.map((value, index) => {
-                const max = Math.max(...service.sparkline!, 1);
-                const height = Math.max(2, Math.round((value / max) * 20));
-                return (
-                  <div
-                    key={index}
-                    className="flex-1 rounded-t-xs transition-all duration-300"
-                    style={{
-                      height: `${height}px`,
-                      background: service.active
-                        ? `rgba(34,197,94,${0.3 + (value / max) * 0.5})`
-                        : "rgba(55,65,81,0.4)",
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )}
-          {service.errorRate !== undefined && service.errorRate > 0 && (
-            <div className="text-2xs text-red-400/70 mt-1 font-mono">
-              {service.errorRate.toFixed(1)} err/min
-            </div>
-          )}
+          <TelemetryChart title={`${service.name} activity`} compact queries={service.name === "IPS"
+            ? [{ metric: "events.class", class: "ids_alert" }]
+            : [{ metric: "service.events", service: service.name === "Proxy" ? "proxy" : service.name.toLowerCase() }]} />
+          {service.name !== "IPS" && <div className="mt-1 text-[10px] text-(--text-muted)">Errors: <TelemetryRate queries={[
+            { metric: "service.errors", service: service.name === "Proxy" ? "proxy" : service.name.toLowerCase() },
+          ]} /></div>}
         </Link>
       ))}
     </div>
@@ -246,7 +226,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
             <span className="text-slate-500 truncate">
               {event.proto || event.kind}
             </span>
-            <span className="text-slate-300 truncate">{eventMessage(event)}</span>
+            <span className="text-slate-300 truncate"><DemoBadge origin={event.origin} /> {eventMessage(event)}</span>
             <span className="text-slate-600 text-right">{event.srcIp ?? ""}</span>
           </div>
         );

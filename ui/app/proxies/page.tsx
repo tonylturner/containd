@@ -24,7 +24,7 @@ import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { Skeleton } from "../../components/Skeleton";
-import { Sparkline } from "../../components/Sparkline";
+import { ServiceHistory } from "../../components/TelemetryChart";
 import { InfoTip } from "../../components/InfoTip";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { ProxyStatus } from "./proxy-status";
@@ -108,8 +108,6 @@ export default function ProxiesPage() {
   // Envoy and nginx report their own access-log meters next to the proxy
   // service entry.
   const proxy = status?.proxy;
-  const envoy = status?.envoy;
-  const nginx = status?.nginx;
 
   async function onSaveForward() {
     if (!canEdit || !canSave || loading) return;
@@ -503,12 +501,6 @@ export default function ProxiesPage() {
               <p className="mt-2 text-xs text-(--text-muted)">
                 Live running: {typeof proxy?.envoy_running === "boolean" ? (proxy.envoy_running ? "yes" : "no") : "Unknown"}{" "}
               </p>
-              <p className="text-xs text-(--text-muted)">
-                Rate: {typeof envoy?.rate_per_min === "number" ? envoy.rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs">
-                Errors: {typeof envoy?.errors_rate_per_min === "number" ? envoy.errors_rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
               <p className="text-xs text-(--text-dim)">
                 Activity source: access logs when enabled.
               </p>
@@ -517,16 +509,7 @@ export default function ProxiesPage() {
                 <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
                 <p>Last start: {proxy?.envoy_last_start || "n/a"}</p>
               </Disclosure>
-              {envoy?.sparkline.length ? (
-                <div className="mt-4">
-                  <Sparkline
-                    values={envoy.sparkline}
-                    color="var(--primary)"
-                    background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                    title="Envoy events per minute"
-                  />
-                </div>
-              ) : null}
+              <div className="mt-4"><ServiceHistory service="envoy" title="Envoy events per minute" /></div>
             </>
           )}
         </Card>
@@ -551,12 +534,6 @@ export default function ProxiesPage() {
               <p className="mt-2 text-xs text-(--text-muted)">
                 Live running: {typeof proxy?.nginx_running === "boolean" ? (proxy.nginx_running ? "yes" : "no") : "Unknown"}{" "}
               </p>
-              <p className="text-xs text-(--text-muted)">
-                Rate: {typeof nginx?.rate_per_min === "number" ? nginx.rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs">
-                Errors: {typeof nginx?.errors_rate_per_min === "number" ? nginx.errors_rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
               <p className="text-xs text-(--text-dim)">
                 Activity source: access logs from published apps.
               </p>
@@ -565,16 +542,7 @@ export default function ProxiesPage() {
                 <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>
                 <p>Last start: {proxy?.nginx_last_start || "n/a"}</p>
               </Disclosure>
-              {nginx?.sparkline.length ? (
-                <div className="mt-4">
-                  <Sparkline
-                    values={nginx.sparkline}
-                    color="var(--purple)"
-                    background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
-                    title="Nginx events per minute"
-                  />
-                </div>
-              ) : null}
+              <div className="mt-4"><ServiceHistory service="nginx" title="Nginx events per minute" /></div>
             </>
           )}
         </Card>

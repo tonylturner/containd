@@ -23,12 +23,10 @@ import {
   type InterfaceBindings,
 } from "./dashboard-panels";
 import {
-  buildZoneSparklines,
   buildZoneThreatMap,
   deriveServices,
   NetworkPulseCanvas,
   NetworkPulseStats,
-  TrafficChart,
   ZoneList,
 } from "./dashboard-visuals";
 
@@ -36,7 +34,9 @@ const Console = dynamic(
   () => import("../components/Console").then((m) => m.Console),
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
+import { TelemetryChart } from "../components/TelemetryChart";
 import { Skeleton } from "../components/Skeleton";
+import { ServiceTelemetryAttention } from "./dashboard-service-attention";
 import { useHealth } from "../hooks/useHealth";
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ export default function Home() {
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
   const [interfaceBindings, setInterfaceBindings] = useState<InterfaceBindings | null>(null);
   const [dashboardUnavailable, setDashboardUnavailable] = useState(false);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [eventsUnavailable, setEventsUnavailable] = useState(false);
   const [zonesUnavailable, setZonesUnavailable] = useState(false);
   const [statsUnavailable, setStatsUnavailable] = useState(false);
@@ -81,7 +82,7 @@ export default function Home() {
       Promise.all([api.listInterfaces(signal), api.listInterfaceState(signal)]).then(([configured, runtime]) => {
         setInterfaceBindings(configured?.data && runtime ? { configured: configured.data, runtime } : null);
       }).catch(() => { if (!signal.aborted) setInterfaceBindings(null); });
-      api.listEvents(50, signal).then((r) => { setEvents(r ?? []); setEventsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setEvents([]); setEventsUnavailable(true); } });
+      api.listEvents(50, signal).then((r) => { setEventsLoaded(true); setEvents(r ?? []); setEventsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setEventsLoaded(true); setEvents([]); setEventsUnavailable(true); } });
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => { setStats(r); setStatsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setStats(null); setStatsUnavailable(true); } });
       api.getServicesStatus(signal).then(setServicesStatus).catch(() => { if (!signal.aborted) setServicesStatus(null); });
@@ -136,9 +137,8 @@ export default function Home() {
     alertCountsKnown && eventStats &&
     (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
-  const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
+  const services = useMemo(() => deriveServices(servicesStatus), [servicesStatus]);
   const zoneThreatMap = useMemo(() => buildZoneThreatMap(events, zones), [events, zones]);
-  const zoneSparklineMap = useMemo(() => buildZoneSparklines(events, zones), [events, zones]);
 
   return (
     <Shell title="Dashboard">
@@ -156,7 +156,7 @@ export default function Home() {
                 {health.hostname ?? "containd"}
               </span>
               <span className="text-xs text-slate-500">
-                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : "No recent IDS/AV alerts"}
+                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : eventStats?.complete === false ? "IDS/AV alerts: partial 24h coverage" : "No recent IDS/AV alerts"}
               </span>
             </div>
           ) : (
@@ -269,9 +269,11 @@ export default function Home() {
       {statsUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">System telemetry unavailable — resource usage is unknown.</p>}
       {flowsUnavailable && <div role="status" className="mb-3 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border px-3 py-1">Retry</button></div>}
       {zonesUnavailable && <p role="alert" className="mb-3 text-sm text-amber">Zones unavailable — zone configuration is unknown.</p>}
-      {services.filter(service => service.state === "unavailable" || service.state === "stopped" || (service.errorRate ?? 0) > 0).map(service => (
-        <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail}{(service.errorRate ?? 0) > 0 ? ` · ${service.errorRate!.toFixed(1)} err/min` : ""} — <Link className="underline" href={service.href}>Check service</Link></p>
+      {services.filter(service => service.state === "unavailable" || service.state === "stopped").map(service => (
+        <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail} — <Link className="underline" href={service.href}>Check service</Link></p>
       ))}
+
+      {services.filter(s => s.name !== "IPS").map(s => <ServiceTelemetryAttention key={s.name} service={s} />)}
 
       {/* ── Main grid ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_320px] gap-4">
@@ -293,8 +295,8 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Zone Status
           </h3>
-          {eventsUnavailable || zonesUnavailable ? <p className="text-xs text-amber">Zone activity unknown — check the traffic status above.</p> : zones.length > 0 ? (
-            <ZoneList zones={zones} threatMap={zoneThreatMap} sparklineMap={zoneSparklineMap} />
+          {zonesUnavailable ? <p className="text-xs text-amber">Zone activity unknown — check the traffic status above.</p> : zones.length > 0 ? (
+            <ZoneList zones={zones} threatMap={zoneThreatMap} threatsKnown={eventsLoaded && !eventsUnavailable} />
           ) : (
             <Skeleton className="h-32 w-full" />
           )}
@@ -313,12 +315,19 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
-              60s window
+              1h window
             </span>
           </h3>
-          <div className="h-[120px] mb-3">
-            <TrafficChart events={events} />
+          <div className="mb-3 space-y-2">
+            <p className="text-xs text-(--text-muted)">In · bytes/s</p>
+            <TelemetryChart title="In bytes/s" queries={[{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]} />
+            <p className="text-xs text-(--text-muted)">Out · bytes/s</p>
+            <TelemetryChart title="Out bytes/s" queries={[{ metric: "iface.tx_bytes", role: "leaf", group: "role" }]} />
+            <h4 className="text-xs text-(--text-muted)">Events</h4>
+            <TelemetryChart title="Events" queries={[{ metric: "events.total" }]} />
           </div>
+          <p className="mb-2 text-[10px] text-(--text-muted)">Event totals: last 24 h{eventStats && !eventStats.complete ? " · Partial coverage" : ""}</p>
+          {data?.eventStatsError && <p role="status" className="text-xs text-amber">Event totals unavailable: {data.eventStatsError}</p>}
           <div className="grid grid-cols-3 gap-2">
             <TrafficCounter
               label="Total Events"
@@ -348,7 +357,7 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Event Stream
           </h3>
-          {eventsUnavailable ? <p className="text-xs text-amber">Recent events unavailable.</p> : <EventStream events={events} />}
+          {!eventsLoaded ? <p className="text-xs text-(--text-muted)">Loading recent events…</p> : eventsUnavailable ? <p className="text-xs text-amber">Recent events unavailable.</p> : <EventStream events={events} />}
         </div>
 
         {/* System Health — replaces old stats row */}

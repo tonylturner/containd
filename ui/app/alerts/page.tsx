@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, type TelemetryEvent } from "../../lib/api";
@@ -198,7 +200,7 @@ export default function AlertsPage() {
                         <td className="px-4 py-2.5 font-medium text-(--text) max-w-[200px]" title={msg}>
                           <button id={`alert-inspect-${ev.id}`} type="button" aria-expanded={isActive} aria-controls="alert-inspection"
                             onClick={e => { e.stopPropagation(); setSelected(isActive ? null : ev); }}
-                            className={`block w-full text-left underline decoration-dotted underline-offset-4 ${ev.attributes?.error ? "wrap-anywhere" : "truncate"}`}>{msg}</button>
+                            className={`block w-full text-left underline decoration-dotted underline-offset-4 ${ev.attributes?.error ? "wrap-anywhere" : "truncate"}`}>{msg}<DemoBadge origin={ev.origin} /></button>
                         </td>
                         <td className="px-4 py-2.5"><StatusBadge variant={severityVariant(sev)} dot>{sev}</StatusBadge></td>
                         <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{formatEndpoint(ev.srcIp, ev.srcPort)}</td>
@@ -309,6 +311,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           {view.identifier && <DetailRow label={view.identifier.label} value={view.identifier.value} mono />}
           {view.description && <DetailRow label="Description" value={view.description} />}
           {view.triggeredBy && <DetailRow label="Triggered by" value={view.triggeredBy} />}
+          <DemoBadge origin={event.origin} />
           <DetailRow label="Time" value={new Date(event.timestamp).toLocaleString()} />
         </DetailSection>
 

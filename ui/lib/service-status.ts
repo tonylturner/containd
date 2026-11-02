@@ -16,7 +16,7 @@ export function parseServicesStatus(value: unknown): ServicesStatus | null {
   if (!isRecord(value) || !Array.isArray(value.faults) || !value.faults.every(isFault) ||
       !isRecord(value.av) || typeof value.av.available !== "boolean") return null;
   if (value.av.available
-    ? typeof value.av.rate_per_min !== "number" || !Array.isArray(value.av.sparkline)
+    ? typeof value.av.count !== "number" || typeof value.av.errors_count !== "number"
     : typeof value.av.error !== "string") return null;
   if (new Set(value.faults.map((fault) => fault.service)).size !== value.faults.length) return null;
   for (const name of [...serviceNames, "vpn", "envoy", "nginx"]) {
@@ -30,13 +30,9 @@ export function parseServicesStatus(value: unknown): ServicesStatus | null {
         !value.faults.some((fault) => fault.service === name &&
           fault.kind === (entry.fault as ServiceFault).kind &&
           fault.message === (entry.fault as ServiceFault).message)) return null;
-    for (const key of ["sparkline", "errors_sparkline"]) {
-      const series = entry[key];
-      if (series !== undefined &&
-          (!Array.isArray(series) || !series.every((n: unknown) => typeof n === "number" && Number.isFinite(n)))) return null;
-    }
-    for (const key of ["rate_per_min", "errors_rate_per_min", "count", "errors_count"]) {
-      if (entry[key] !== undefined && typeof entry[key] !== "number") return null;
+    for (const key of ["count", "errors_count"]) {
+      const n = entry[key];
+      if (n !== undefined && (typeof n !== "number" || !Number.isFinite(n) || n < 0)) return null;
     }
   }
   // Each fault must have its corresponding independent service entry.

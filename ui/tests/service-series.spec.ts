@@ -1,18 +1,15 @@
+import { fulfillSeries } from "./fixtures/telemetry";
 import { expect, test, type Page } from "@playwright/test";
 
-// Service pages chart only the per-minute series the status API reports and
+// Service pages chart only the retained series the telemetry API reports and
 // never draw a made-up trend.
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
 function meter(sparkline: number[]) {
   return {
-    sparkline,
     count: sparkline.reduce((a, b) => a + b, 0),
-    rate_per_min: 0,
-    errors_sparkline: [],
     errors_count: 0,
-    errors_rate_per_min: 0,
   };
 }
 
@@ -32,13 +29,14 @@ function servicesStatus(sparkline: number[]) {
   };
 }
 
-async function open(page: Page, path: string, status: unknown) {
+async function open(page: Page, path: string, status: unknown, values: number[] = []) {
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
   });
   await page.route("**/api/v1/**", async (route) => {
     const p = new URL(route.request().url()).pathname;
+    if (p === "/api/v1/telemetry/series") return fulfillSeries(route, values);
     let body: unknown = {};
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
     if (p === "/api/v1/services/status") body = status;
@@ -63,11 +61,12 @@ const pages = [
 
 for (const { path, charts } of pages) {
   test(`${path} charts the reported series`, async ({ page }) => {
-    await open(page, path, servicesStatus([2, 0, 5]));
+    await open(page, path, servicesStatus([2, 0, 5]), [2, 0, 5]);
     for (const title of charts) {
       const chart = page.getByTitle(title, { exact: true });
       await expect(chart).toBeVisible();
-      await expect(chart.locator(":scope > div")).toHaveCount(3);
+      await expect(page.getByRole("combobox", { name: `${title} range`, exact: true })).toBeVisible();
+      await expect(chart.locator("[data-bar]")).toHaveCount(3);
     }
   });
 

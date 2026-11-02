@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
       "/api/v1/zones": [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }],
       "/api/v1/security/conduits": [{
         from: "it", to: "ot", state: "allow", ids: "none", proto: [{ n: "tcp", t: "allowed" }],
-        traffic: 0, rules: ["allow-test"], gaps: ["No IDS coverage"], mitre: ["T0001"],
+        traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: ["allow-test"], gaps: ["No IDS coverage"], mitre: ["T0001"],
       }],
       "/api/v1/system/inspection": {
         host: { os: "Linux", kernel: "6.1", arch: "arm64", numCPU: 2 }, runtime: { dockerVersion: "27" },
@@ -65,7 +65,7 @@ test("security gaps and conduit inspector are keyboard reachable with distinct s
   await expect(inspector.getByText("No IDS coverage", { exact: true })).toBeVisible();
   await expect(inspector.getByText("T0001", { exact: true })).toBeVisible();
   await expect(inspector.getByText("Saved target", { exact: true })).toHaveCount(2);
-  await expect(inspector.getByText("Live", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("routed traffic that passed policy, last hour", { exact: true })).toBeVisible();
   await expect(page.getByText("Automated checks tag requirements from observed policy; not a standards assessment.", { exact: false })).toBeVisible();
   await inspector.getByRole("button", { name: "Hide detail panel" }).click();
   await expect(cell).toBeFocused();

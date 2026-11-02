@@ -1,5 +1,7 @@
 "use client";
 
+import { TelemetryRate } from "../../components/TelemetryChart";
+
 import type { TopoNodeData } from "./topology-shared";
 import {
   nextActionsForNode,
@@ -99,8 +101,8 @@ export function DetailContent({ data }: { data: TopoNodeData }) {
                   <TopologyAddress address={ifc.address} fullAddrs={ifc.fullAddrs} /> &middot; {ifc.zone}
                 </div>
                 <div className={s.ifaceStats}>
-                  <span>&darr; {ifc.rx}</span>
-                  <span>&uarr; {ifc.tx}</span>
+                  <span>RX <TelemetryRate queries={[{ metric: "iface.rx_packets", interface: ifc.name }]} perMinute={false} /> packets</span>
+                  <span>TX <TelemetryRate queries={[{ metric: "iface.tx_packets", interface: ifc.name }]} perMinute={false} /> packets</span>
                 </div>
               </div>
             ))}

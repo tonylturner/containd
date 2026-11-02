@@ -16,7 +16,7 @@ import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
-import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceHistory } from "../../../../components/TelemetryChart";
 import { ServiceStatusStrip } from "../service-presentation";
 import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
@@ -495,23 +495,8 @@ export default function AVPage() {
             <div>Detections: <span className="text-(--text)">{status?.detections ?? "Unknown"}</span></div>
             <div>Mode: <span className="text-(--text)">{effectiveMode(status.mode)}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? "Unknown"}</span></div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
 
-            {status.sparkline?.length ? (
-              <div className="md:col-span-3">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--purple)"
-                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                  title="Scans per minute"
-                />
-              </div>
-            ) : null}
+            <div className="md:col-span-3"><ServiceHistory service="av" title="Scans per minute" /></div>
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
             <div className="md:col-span-3">

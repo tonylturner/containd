@@ -220,7 +220,7 @@ for (const [name, body] of [
   ["unknown kind", { ...statusWith(), faults: [{ ...configFault, kind: "unknown" }] }],
   ["non-text message", { ...statusWith(), faults: [{ ...configFault, message: {} }] }],
   ["broken entry", { ...statusWith(), dns: [] }],
-  ["broken meter", { ...statusWith(), dns: { sparkline: "invalid" } }],
+  ["broken meter", { ...statusWith(), dns: { count: "invalid" } }],
   ["missing AV meter", { ...statusWith(), av: { available: true } }],
   ["broken AV gate", { ...statusWith(), av: { available: true, ...meter, gate: {} } }],
   ["fault without state", { ...statusWith(), faults: [configFault] }],
