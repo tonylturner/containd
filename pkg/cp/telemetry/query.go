@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	wire "github.com/tonylturner/containd/pkg/common/telemetry"
@@ -67,6 +68,7 @@ func (s *Store) Query(ctx context.Context, q Query, now time.Time) (wire.SeriesR
 	to := now.UTC().Truncate(res)
 	from := to.Add(-duration)
 	out := wire.SeriesResponse{Metric: q.Metric, Unit: wire.MetricUnits[q.Metric], Origin: q.Origin, Range: q.Range, ResolutionSeconds: int(res / time.Second), From: from, To: to, Collector: s.state, Series: []wire.Series{}}
+	out.Collector.Unavailable = q.unavailable(s.state.Unavailable)
 	var covered, active int
 	err := s.db.QueryRowContext(ctx, "SELECT covered,active FROM coverage WHERE metric=?", q.Metric).Scan(&covered, &active)
 	if err != nil && err != sql.ErrNoRows {
@@ -166,6 +168,37 @@ func (s *Store) Query(ctx context.Context, q Query, now time.Time) (wire.SeriesR
 		out.Series = append(out.Series, series)
 	}
 	return out, nil
+}
+
+// unavailable applies the query's selection before grouping. Match selectors,
+// not retained members: a failed series may not have any history yet.
+func (q Query) unavailable(entries []wire.SourceUnavailable) []wire.SourceUnavailable {
+	source, _, _ := strings.Cut(string(q.Metric), ".")
+	engineSourced := source != "service" && !(source == "events" && q.Filters["source"] == "services")
+	var out []wire.SourceUnavailable
+	for _, entry := range entries {
+		if entry.Source != source && !(entry.Source == "engine" && engineSourced) {
+			continue
+		}
+		if entry.Metric != "" && entry.Metric != q.Metric {
+			continue
+		}
+		match := true
+		for key, value := range q.Filters {
+			if dim, exists := entry.Dims[key]; exists && dim != value {
+				match = false
+			}
+		}
+		if q.Group == "zone" && source == "iface" {
+			if role, exists := entry.Dims["role"]; exists && role != "leaf" {
+				match = false
+			}
+		}
+		if match {
+			out = append(out, entry)
+		}
+	}
+	return cloneUnavailable(out)
 }
 
 // Total aggregates a returned window without concealing incomplete coverage.

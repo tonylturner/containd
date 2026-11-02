@@ -102,7 +102,11 @@ func securityConduitsHandler(store config.Store, telemetryStore TelemetryStore) 
 					continue
 				}
 				conduit := buildConduitResult(cfg, globals, from, to)
-				conduit.Traffic = measureConduit(c.Request.Context(), telemetryStore, from, to)
+				if !cfg.DataPlane.Enforcement {
+					conduit.Traffic = conduitTraffic{State: "unavailable", Reason: "enforcement disabled"}
+				} else {
+					conduit.Traffic = measureConduit(c.Request.Context(), telemetryStore, from, to)
+				}
 				result = append(result, conduit)
 			}
 		}
@@ -488,6 +492,11 @@ func measureConduit(ctx context.Context, store TelemetryStore, from, to string) 
 		resp, err := store.Query(ctx, history.Query{Metric: metric, Range: wire.Range1h, Origin: wire.OriginReal, Filters: map[string]string{"from": from, "to": to}}, now)
 		if err != nil {
 			return unavailable(err.Error())
+		}
+		for _, entry := range resp.Collector.Unavailable {
+			if entry.Source == "conduit" || entry.Source == "engine" {
+				return unavailable(entry.Reason)
+			}
 		}
 		if resp.Collector.State != "running" {
 			return unavailable("telemetry collector " + resp.Collector.State)

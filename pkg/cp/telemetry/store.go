@@ -137,8 +137,23 @@ func checkSchema(version, tables int) error {
 	return nil
 }
 
-func (s *Store) Close() error               { s.mu.Lock(); defer s.mu.Unlock(); return s.db.Close() }
-func (s *Store) State() wire.CollectorState { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
+func (s *Store) Close() error { s.mu.Lock(); defer s.mu.Unlock(); return s.db.Close() }
+func (s *Store) State() wire.CollectorState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.state
+	state.Unavailable = cloneUnavailable(state.Unavailable)
+	return state
+}
+
+func cloneUnavailable(entries []wire.SourceUnavailable) []wire.SourceUnavailable {
+	var out []wire.SourceUnavailable
+	for _, entry := range entries {
+		entry.Dims = maps.Clone(entry.Dims)
+		out = append(out, entry)
+	}
+	return out
+}
 
 func (s *Store) fail(err error) error {
 	s.state.State = "stalled"

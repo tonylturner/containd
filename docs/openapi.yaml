@@ -1936,8 +1936,18 @@ components:
       description: The engine's live antivirus status; the keys beside gate are the applied settings, readiness, counters and the clamd and FreshClam state.
       type: object
       additionalProperties: true
+      required: [available]
+      oneOf:
+      - required: [count, errors_count]
+        properties:
+          available: {type: boolean, enum: [true]}
+      - required: [error]
+        properties:
+          available: {type: boolean, enum: [false]}
       properties:
         available: {type: boolean, description: false when the engine cannot be reached; management-known state and fault remain visible alongside error}
+        count: {type: integer, minimum: 0, description: Lifetime scan count as a JSON number; present when available is true}
+        errors_count: {type: integer, minimum: 0, description: Lifetime scan error count as a JSON number; present when available is true}
         state: {type: string, enum: [faulted], description: Management-known service fault; independent of engine availability}
         fault: {$ref: '#/components/schemas/ServiceFault'}
         error: {type: string}
@@ -3125,6 +3135,10 @@ components:
         ttlSeconds: {type: integer, minimum: 0}
       required: [srcIp, dstIp, proto, dstPort]
     ConduitTraffic:
+      description: >-
+        Current conduit or engine unavailability overrides retained measured
+        history. Disabled enforcement returns state unavailable with reason
+        "enforcement disabled".
       oneOf:
       - type: object
         required: [state, windowSeconds, packets, bytes, complete, coverage]
@@ -3143,10 +3157,16 @@ components:
     TelemetryPoint:
       type: object
       required: [t, q]
+      description: >-
+        observed, partial and reset points carry v, including observed zero.
+        observed points carry d equal to the resolution; partial and reset
+        points carry the observation duration in d. A grouped point whose
+        valued members have different durations is partial and omits d, so
+        no rate is defined. gap points omit both v and d.
       properties:
         t: {type: string, format: date-time}
         v: {type: string, pattern: '^[0-9]+$', description: Exact uint64 count; absent for a gap.}
-        d: {type: integer, description: Seconds of observation; absent for grouped counts whose member durations differ. No rate is defined without d.}
+        d: {type: integer, minimum: 1, description: Seconds of observation; absent for gaps and grouped counts whose member durations differ. No rate is defined without d.}
         q: {type: string, enum: [observed, partial, reset, gap]}
     TelemetrySeriesResponse:
       type: object
@@ -3170,6 +3190,25 @@ components:
             lastSampleAt: {type: string, format: date-time}
             error: {type: string}
             droppedSeries: {type: string, pattern: '^[0-9]+$'}
+            unavailable:
+              type: array
+              description: >-
+                Sources or series unavailable on the latest tick, replaced
+                every tick and omitted when empty. Only entries relevant to
+                this metric and dimension selection are included, before
+                grouping. Metric prefixes map to sources iface, conduit,
+                proto, events, av and service. Source engine also applies to
+                all metrics except service.* and events.* filtered to
+                source=services. Per-series entries apply to matching metric
+                and dimensions. Retained history does not imply availability now.
+              items:
+                type: object
+                required: [source, reason]
+                properties:
+                  source: {type: string, enum: [engine, iface, conduit, proto, events, av, service]}
+                  metric: {type: string, description: Omitted for a whole-source outage}
+                  dims: {type: object, additionalProperties: {type: string}}
+                  reason: {type: string}
         series:
           type: array
           items:
@@ -8590,7 +8629,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                required: [faults]
+                required: [faults, av]
                 properties:
                   faults:
                     type: array
