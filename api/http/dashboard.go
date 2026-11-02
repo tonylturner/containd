@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -125,26 +126,31 @@ func dashboardEvents(ctx context.Context, engine EngineClient, services Services
 }
 
 func accumulateDashboardEventStats(stats *dashboardEventStats, e dpevents.Event) {
-	if e.Proto == "ids" && e.Kind == "alert" {
-		stats.IDSAlerts++
-	}
-	if e.Kind == "service.av.detected" {
-		stats.AVDetections++
-	}
-	if e.Kind == "service.av.block_flow" {
-		stats.AVBlocks++
-	}
-	if e.Proto == "modbus" && e.Kind == "request" && modbusWriteEvent(e) {
-		stats.ModbusWrites++
+	for _, class := range dpevents.Classify(e) {
+		switch class {
+		case telemetry.ClassIDSAlert:
+			stats.IDSAlerts++
+		case telemetry.ClassAVDetection:
+			stats.AVDetections++
+		case telemetry.ClassAVBlock:
+			stats.AVBlocks++
+		case telemetry.ClassModbusWrite:
+			stats.ModbusWrites++
+		}
 	}
 }
 
 func modbusWriteEvent(e dpevents.Event) bool {
-	if e.Attributes == nil {
-		return false
+	// The historical helper accepted only the Modbus attributes. Preserve
+	// that narrow contract while delegating its write predicate to Classify.
+	e.Proto = "modbus"
+	e.Kind = "request"
+	for _, class := range dpevents.Classify(e) {
+		if class == telemetry.ClassModbusWrite {
+			return true
+		}
 	}
-	isWrite, ok := e.Attributes["is_write"].(bool)
-	return ok && isWrite
+	return false
 }
 
 func dashboardServicesStatus(services ServicesApplier) any {

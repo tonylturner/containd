@@ -8,6 +8,7 @@ import "sort"
 const denyCapacity = 1024
 
 func (s *Store) appendEvent(ev Event) {
+	s.incrementTelemetryCounts(ev)
 	s.feedTail++
 	s.feed.push(ev)
 	if isDeny(ev) {

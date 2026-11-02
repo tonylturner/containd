@@ -18,6 +18,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -320,6 +321,7 @@ func (g *generator) next() dpevents.Event {
 	g.flowSeq++
 
 	return dpevents.Event{
+		Origin:     telemetry.OriginDemo,
 		FlowID:     flowID,
 		Proto:      sc.proto,
 		Kind:       sc.kind,

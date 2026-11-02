@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
@@ -83,6 +84,9 @@ func TestGeneratorNextAndModbusHelpers(t *testing.T) {
 	ev := g.next()
 	if ev.Proto == "" || ev.Kind == "" || ev.FlowID == "" {
 		t.Fatalf("next event = %#v", ev)
+	}
+	if ev.Origin != telemetry.OriginDemo {
+		t.Fatalf("generated origin = %q, want demo", ev.Origin)
 	}
 	if ev.Attributes["srcZone"] == ev.Attributes["dstZone"] {
 		t.Fatalf("expected cross-zone synthetic flow, got %#v", ev.Attributes)
@@ -156,6 +160,9 @@ func TestRunGeneratesEventsAndCallsCallback(t *testing.T) {
 	}
 	if events[0].Proto == "" || events[0].FlowID == "" {
 		t.Fatalf("unexpected stored event: %#v", events[0])
+	}
+	if events[0].Origin != telemetry.OriginDemo {
+		t.Fatalf("stored synthetic origin = %q, want demo", events[0].Origin)
 	}
 }
 

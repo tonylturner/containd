@@ -17,6 +17,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
@@ -391,6 +392,7 @@ func synthIDSCallback(dpEngine *engine.Engine) func(dpevents.Event) {
 		alerts := eval.Evaluate(dpiEv)
 		for _, a := range alerts {
 			dpEngine.Events().Append(dpevents.Event{
+				Origin:     telemetry.OriginDemo,
 				FlowID:     ev.FlowID,
 				Proto:      a.Proto,
 				Kind:       a.Kind,

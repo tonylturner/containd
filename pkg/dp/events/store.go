@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
@@ -25,6 +26,7 @@ type Event struct {
 	FlowID                string                     `json:"flowId"`
 	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
 	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
+	Origin                telemetry.Origin           `json:"origin,omitempty"`
 	Proto                 string                     `json:"proto"`
 	Kind                  string                     `json:"kind"`
 	Attributes            map[string]any             `json:"attributes,omitempty"`
@@ -42,6 +44,7 @@ type FlowSummary struct {
 	FlowID                string                     `json:"flowId"`
 	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
 	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
+	Origin                telemetry.Origin           `json:"origin,omitempty"`
 	FirstSeen             time.Time                  `json:"firstSeen"`
 	LastSeen              time.Time                  `json:"lastSeen"`
 	SrcIP                 string                     `json:"srcIp,omitempty"`
@@ -91,6 +94,9 @@ type Store struct {
 	spillCh   chan Event
 	spillDone chan struct{}
 
+	telemetryMu       sync.RWMutex
+	telemetryCounters map[telemetry.Origin]*eventTelemetryCounters
+
 	SpillCount atomic.Uint64
 }
 
@@ -102,7 +108,15 @@ func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &Store{capacity: capacity, idBase: idBase, epoch: newFeedEpoch(), feed: eventRing{capacity: capacity}, general: eventRing{capacity: capacity}, denies: eventRing{capacity: denyCapacity}}
+	return &Store{
+		capacity:          capacity,
+		idBase:            idBase,
+		epoch:             newFeedEpoch(),
+		feed:              eventRing{capacity: capacity},
+		general:           eventRing{capacity: capacity},
+		denies:            eventRing{capacity: denyCapacity},
+		telemetryCounters: newEventTelemetryCounters(),
+	}
 }
 
 // NewStoreWithSpill creates a Store with spill-to-disk enabled.
@@ -385,6 +399,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 				FlowID:                ev.FlowID,
 				TransportConnectionID: ev.TransportConnectionID,
 				CorrelationStatus:     ev.CorrelationStatus,
+				Origin:                ev.Origin,
 				FirstSeen:             ev.Timestamp,
 				LastSeen:              ev.Timestamp,
 				SrcIP:                 ev.SrcIP,
@@ -399,6 +414,11 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			}
 			byFlow[key] = f
 			order = append(order, key)
+		}
+		if ev.Origin != telemetry.OriginDemo {
+			// A mixed-origin flow remains real; only flows made entirely of
+			// demo events are labelled demo.
+			f.Origin = ""
 		}
 		if f.CorrelationStatus != ev.CorrelationStatus {
 			f.CorrelationStatus = "mixed"
