@@ -15,6 +15,7 @@ import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
 import { Sparkline } from "../../../components/Sparkline";
 import { InfoTip } from "../../../components/InfoTip";
+import { Disclosure } from "../../../components/Disclosure";
 
 type MeteredService = "syslog" | "proxy" | "envoy" | "nginx" | "dns" | "ntp" | "dhcp" | "vpn" | "av";
 
@@ -31,12 +32,12 @@ export default function ServicesOverviewPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // A card charts only the per-minute series the API reports; without one it
-  // shows no chart.
+  // A trend needs multiple observations and some activity; rates still show
+  // empty, single-observation and quiet series without an empty chart.
   const spark = useCallback(
     (svc: MeteredService, title: string, color: string, background: string) => {
       const values = meterOf(status, svc)?.sparkline;
-      if (!values?.length) return undefined;
+      if (!values || values.length < 2 || !values.some(value => value > 0)) return undefined;
       return { values, title, color, background };
     },
     [status],
@@ -159,6 +160,7 @@ export default function ServicesOverviewPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <ServiceCard
           title="DNS"
+          software="Unbound"
           loading={loading}
           spark={spark(
             "dns",
@@ -170,7 +172,7 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("dns")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>DNS resolver</span><span className="text-xs text-(--text-muted)">Software: Unbound</span>
+            <span>DNS resolver</span>
             <InfoTip label="Embedded resolver with upstream forwarding and caching." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
@@ -192,6 +194,7 @@ export default function ServicesOverviewPage() {
         </ServiceCard>
         <ServiceCard
           title="NTP"
+          software="chrony"
           loading={loading}
           spark={spark(
             "ntp",
@@ -203,7 +206,7 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("ntp")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Time synchronization</span><span className="text-xs text-(--text-muted)">Software: chrony</span>
+            <span>Time synchronization</span>
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
@@ -259,6 +262,7 @@ export default function ServicesOverviewPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <ServiceCard
           title="Proxies"
+          software="Envoy + Nginx"
           loading={loading}
           spark={spark(
             "proxy",
@@ -272,7 +276,7 @@ export default function ServicesOverviewPage() {
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={16} height={16} className="h-4 w-4" />
             <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={16} height={16} className="h-4 w-4" />
-            <span>Web proxies</span><span className="text-xs text-(--text-muted)">Software: Envoy + Nginx</span>
+            <span>Web proxies</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>Outbound and published web apps</span>
@@ -440,6 +444,7 @@ function ServiceCard({
   spark,
   rate,
   errorsRate,
+  software,
 }: {
   title: string;
   children: React.ReactNode;
@@ -447,6 +452,7 @@ function ServiceCard({
   spark?: { values: number[]; color: string; background: string; title?: string };
   rate?: number | null;
   errorsRate?: number | null;
+  software?: string;
 }) {
   const trend =
     spark && spark.values.length > 1
@@ -475,6 +481,7 @@ function ServiceCard({
             color={spark.color}
             background={spark.background}
             title={spark.title}
+            className="h-14"
           />
           <div className="text-xs text-(--text-muted)">
             Trend:{" "}
@@ -494,6 +501,17 @@ function ServiceCard({
           </div>
         </div>
       ) : null}
+      {!loading && !spark && typeof errorsRate === "number" && (
+        <p className="mt-2 text-xs text-(--text-muted)">Errors: {errorsRate.toFixed(1)}/min</p>
+      )}
+      {!loading && software && (
+        <div className="mt-3">
+          <h3 className="mb-2 text-sm">Troubleshooting</h3>
+          <Disclosure title="Service details">
+            <p className="text-xs text-(--text-muted)">Software: {software}</p>
+          </Disclosure>
+        </div>
+      )}
     </div>
   );
 }

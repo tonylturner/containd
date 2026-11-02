@@ -88,6 +88,22 @@ test("DHCP lease refresh stays usable when configuration cannot load", async ({ 
   expect(writes).toEqual([]);
 });
 
+test("DHCP reports its available diagnostics inline without an empty troubleshooting expander", async ({ page }) => {
+  await mock(page, { ...status, dhcp: { ...status.dhcp, pools: 2, reservations: 3, listen_ifaces: 1,
+    note: "DHCP runtime is handled by the engine; this status reflects config render state.",
+    last_error: "Configuration render failed",
+  } });
+  await page.goto("/dhcp/");
+  const activity = page.getByRole("heading", { name: "Live runtime status", exact: true }).locator("xpath=ancestor::section[1]");
+  await expect(activity).toContainText("Pools: 2");
+  await expect(activity).toContainText("Reservations: 3");
+  await expect(activity).toContainText("Listen ifaces: 1");
+  await expect(activity.getByText("DHCP runtime is handled by the engine; this status reflects config render state.")).toBeVisible();
+  await expect(activity.getByText("Configuration render failed")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Service details", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Troubleshooting", exact: true })).toHaveCount(0);
+});
+
 test("IDS retained rules and inspection stay readable after a failed refresh without enabling mutations", async ({ page }) => {
   let failed = false;
   const writes = await mock(page, status, p => failed && p === "/ids/rules");

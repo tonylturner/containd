@@ -494,7 +494,7 @@ export default function ProxiesPage() {
         <Card padding="lg" className="backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-(--text)">Forward proxy (Envoy)</h2>
+            <h2 className="text-sm font-semibold text-(--text)">Forward proxy</h2>
             <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to report request counts." />
           </div>
           {loading ? (
@@ -547,7 +547,7 @@ export default function ProxiesPage() {
         <Card padding="lg" className="backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-(--text)">Reverse proxy (Nginx)</h2>
+            <h2 className="text-sm font-semibold text-(--text)">Reverse proxy</h2>
             <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
           </div>
           {loading ? (
