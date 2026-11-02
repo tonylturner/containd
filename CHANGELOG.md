@@ -12,13 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Upgrade notes
 
 - No configuration schema, API or wire change; this release changes the web
-  UI only. Upgrade in place.
+  UI and CLI. Upgrade in place.
 - Automatic antivirus definition updates were already off wherever
   `clamav.freshclamEnabled` was never saved, although the UI showed them as
   on. The UI now shows them as off. Turn them on explicitly if you want
   FreshClam updates.
 
 ### Added
+
+- CLI policy editors now stage existing firewall/ICS rule updates, default
+  action, DPI settings and capture groups, zone consequence, asset hostnames,
+  and ICS template preview/apply with revision checks. `add firewall ics-rule`
+  creates rules; `set firewall rule` and `set firewall ics-rule` now only edit.
 
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
