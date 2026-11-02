@@ -82,6 +82,74 @@ for (const width of [1280, 390]) {
   });
 }
 
+for (const metadata of [false, true]) {
+  test(`an engine member gap plus covered services zero cannot hide behind retained Events demo (metadata=${metadata})`, async ({ page }) => {
+    await page.clock.install();
+    let outage = false;
+    const requests = await open(page, "/", { mutate: (body, url) => {
+      if (body.metric !== "events.total") return;
+      body.realActive = false;
+      if (body.origin === "demo") {
+        body.series = seriesResponse(url, outage ? [5, 5, null] : [5, 5, 5]).series;
+        body.series[0].dims = { source: "engine" };
+        return;
+      }
+      const engine = seriesResponse(url, outage ? [0, 0, null] : [0, 0, 0]).series[0];
+      engine.dims = { source: "engine" };
+      const services = seriesResponse(url, [0, 0, 0]).series[0];
+      services.dims = { source: "services" };
+      body.series = [engine, services];
+      if (outage && metadata) body.collector.unavailable = [{ source: "engine", reason: "engine connection refused" }];
+    } });
+    const events = page.locator('[data-telemetry="Events"]');
+    await expect(events.getByText("Demo data", { exact: true })).toBeVisible();
+    const demoReads = requests.filter(url => url.searchParams.get("origin") === "demo").length;
+    outage = true;
+    await page.clock.fastForward(10_000);
+    await expect(events).toContainText(metadata ? "Telemetry unavailable: engine connection refused" : "Telemetry unavailable: latest real bucket is a gap");
+    await expect(events.getByText("Demo data", { exact: true })).toHaveCount(0);
+    expect(requests.filter(url => url.searchParams.get("origin") === "demo")).toHaveLength(demoReads);
+    if (metadata) {
+      await expect(events.getByRole("img")).toBeVisible();
+      await expect(events.locator('[data-quality="partial"][data-value="0"]')).toHaveCount(1);
+    }
+    outage = false;
+    await page.clock.fastForward(10_000);
+    await expect(events.getByText("Demo data", { exact: true })).toBeVisible();
+    await expect(events.getByRole("status")).toHaveCount(0);
+  });
+}
+
+test("any unavailable real response prevents demo for a multi-metric zone chart", async ({ page }) => {
+  await open(page, "/", { mutate: (body, url) => {
+    if (!body.metric.startsWith("iface.") || url.searchParams.get("group") !== "zone") return;
+    body.realActive = false;
+    body.series = seriesResponse(url, body.origin === "real" ? [0, 0, 0] : [10, 10, 10]).series;
+    if (body.origin === "real" && body.metric === "iface.tx_bytes") {
+      body.collector.unavailable = [{ source: "iface", reason: "interface eth9 missing" }];
+    }
+  } });
+  const zone = page.locator('[data-telemetry="it throughput"]');
+  await expect(zone.getByRole("status")).toHaveText("Telemetry unavailable: interface eth9 missing");
+  await expect(zone.getByText("Demo data", { exact: true })).toHaveCount(0);
+  await expect(zone.getByRole("img")).toBeVisible();
+});
+
+test("an active real metric still shows partial member coverage without demo", async ({ page }) => {
+  await open(page, "/", { mutate: (body, url) => {
+    if (body.metric !== "events.total") return;
+    const engine = seriesResponse(url, [10, 0, null]).series[0];
+    engine.dims = { source: "engine" };
+    const services = seriesResponse(url, [0, 0, 20]).series[0];
+    services.dims = { source: "services" };
+    body.series = [engine, services];
+  } });
+  const events = page.locator('[data-telemetry="Events"]');
+  await expect(events).toContainText("Rate: 2.0 /s");
+  await expect(events.locator('[data-quality="partial"][data-value="20"]')).toHaveCount(1);
+  await expect(events.getByText("Demo data", { exact: true })).toHaveCount(0);
+});
+
 test("failed event reads leave Dashboard totals and stream unknown, but independent interface telemetry remains", async ({ page }) => {
   await open(page, "/", { eventsFailed: true, totalsFailed: true });
   await expect(page.getByRole("alert").filter({ hasText: "Recent events unavailable" })).toBeVisible();

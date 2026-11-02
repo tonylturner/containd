@@ -123,6 +123,49 @@ test("covered quiet charts use explicitly labelled demo data only until real act
   await expect(chart(page).getByRole("img")).toBeVisible();
 });
 
+test("old demo history with a latest gap cannot replace covered quiet real data", async ({ page }) => {
+  const requests = await open(page, { mutate: (body, url) => {
+    body.realActive = false;
+    body.series = seriesResponse(url, body.origin === "real" ? [0, 0, 0] : [5, 5, null]).series;
+  } });
+  await expect(chart(page)).toContainText("Rate: 0.0 /min");
+  await expect(chart(page).getByText("Demo data", { exact: true })).toHaveCount(0);
+  await expect(chart(page).locator('[data-quality="observed"][data-value="0"]')).toHaveCount(3);
+  expect(requests.some(url => url.searchParams.get("origin") === "demo")).toBe(true);
+});
+
+for (const active of [false, true]) {
+  test(`current unavailable sources keep real history and show all reasons (realActive=${active})`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const requests = await open(page, { mutate: body => {
+      body.realActive = active;
+      body.collector.unavailable = [
+        { source: "service", metric: body.metric, dims: { service: "dns" }, reason: "enforcement disabled" },
+        { source: "engine", reason: "engine connection refused" },
+      ];
+    } });
+    const reason = "Telemetry unavailable: enforcement disabled; engine connection refused";
+    await expect(chart(page).getByRole("status")).toHaveText(reason);
+    await expect(chart(page).getByRole("img")).toBeVisible();
+    await expect(chart(page).locator('[data-value="20"]')).toHaveCount(1);
+    await expect(chart(page)).toContainText("Rate: Unknown /min");
+    await expect(page.getByText("Errors:", { exact: false })).toContainText(`Errors: Unknown /min${reason}`);
+    await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
+    expect(requests.every(url => url.searchParams.get("origin") === "real")).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+}
+
+test("a current source failure discovered during demo loading preserves real history instead", async ({ page }) => {
+  await open(page, { mutate: body => {
+    body.realActive = false;
+    if (body.origin === "demo") body.collector.unavailable = [{ source: "engine", reason: "engine went offline" }];
+  } });
+  await expect(chart(page)).toContainText("Telemetry unavailable: engine went offline");
+  await expect(chart(page).getByRole("img")).toBeVisible();
+  await expect(chart(page).getByText("Demo data", { exact: true })).toHaveCount(0);
+});
+
 test("a running collector with no real activity cannot mask the latest real gap with demo", async ({ page }) => {
   await page.clock.install();
   let gap = false;
@@ -197,6 +240,30 @@ test("wire parser preserves uint64 exactly and rejects overflow, numbers, invali
   body.series[0].points.at(-1)!.d = 10;
   body.series[0].points.pop();
   expect(() => parseSeries(body)).toThrow("Incomplete telemetry buckets");
+});
+
+test("collector unavailable metadata is optional but strictly validated when present", () => {
+  const body = seriesResponse(new URL("http://localhost/api/v1/telemetry/series?metric=service.events&range=1h&origin=real"));
+  expect(parseSeries(body).collector.unavailable).toBeUndefined();
+  body.collector.unavailable = [];
+  expect(parseSeries(body).collector.unavailable).toEqual([]);
+  body.collector.unavailable = [
+    { source: "engine", reason: "connection refused" },
+    { source: "service", metric: "service.events", dims: { service: "dns" }, reason: "meter unavailable" },
+  ];
+  expect(parseSeries(body).collector.unavailable).toEqual(body.collector.unavailable);
+  for (const unavailable of [
+    null, {}, "offline", [null], [{}],
+    [{ source: 1, reason: "offline" }], [{ source: "engine" }], [{ source: "engine", reason: 1 }],
+    [{ source: "service", reason: "offline", metric: "unknown" }],
+    [{ source: "service", reason: "offline", metric: 1 }],
+    [{ source: "service", reason: "offline", metric: "toString" }],
+    [{ source: "service", reason: "offline", dims: [] }],
+    [{ source: "service", reason: "offline", dims: null }],
+    [{ source: "service", reason: "offline", dims: { service: 1 } }],
+  ]) {
+    expect(() => parseSeries({ ...body, collector: { ...body.collector, unavailable } })).toThrow("Malformed collector unavailable metadata");
+  }
 });
 
 test("aggregates both event sources without converting missing coverage to zero", () => {

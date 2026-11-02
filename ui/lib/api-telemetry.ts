@@ -12,11 +12,12 @@ export type Origin = "real" | "demo";
 export type Quality = "observed" | "partial" | "reset" | "gap";
 export type Point = { t: string; q: Quality; v?: bigint; d?: number };
 export type Series = { dims: Record<string, string>; points: Point[] };
+export type SourceUnavailable = { source: string; metric?: Metric; dims?: Record<string, string>; reason: string };
 export type SeriesResponse = {
   metric: Metric; unit: string; origin: Origin; range: TelemetryRange;
   resolutionSeconds: number; from: string; to: string; retainedFrom?: string;
   realCovered: boolean; realActive: boolean;
-  collector: { state: "running" | "stalled" | "unavailable"; lastSampleAt?: string; error?: string; droppedSeries: bigint };
+  collector: { state: "running" | "stalled" | "unavailable"; lastSampleAt?: string; error?: string; droppedSeries: bigint; unavailable?: SourceUnavailable[] };
   series: Series[];
 };
 export type SeriesQuery = { metric: Metric; group?: string } & Record<string, string>;
@@ -50,6 +51,11 @@ export function parseSeries(value: unknown): SeriesResponse {
   if ((value.retainedFrom !== undefined && !timestamp(value.retainedFrom)) ||
       (collector.lastSampleAt !== undefined && !timestamp(collector.lastSampleAt)) ||
       (collector.error !== undefined && typeof collector.error !== "string")) throw new Error("Malformed collector metadata");
+  if (collector.unavailable !== undefined && (!Array.isArray(collector.unavailable) || collector.unavailable.some(entry =>
+    !isRecord(entry) || typeof entry.source !== "string" || typeof entry.reason !== "string" ||
+    (entry.metric !== undefined && (typeof entry.metric !== "string" || !Object.hasOwn(metricUnits, entry.metric))) ||
+    (entry.dims !== undefined && (!isRecord(entry.dims) || !Object.values(entry.dims).every(v => typeof v === "string")))
+  ))) throw new Error("Malformed collector unavailable metadata");
   const series = value.series.map((entry): Series => {
     if (!isRecord(entry) || !Array.isArray(entry.points) ||
         (entry.dims !== undefined && (!isRecord(entry.dims) || !Object.values(entry.dims).every(v => typeof v === "string")))) {

@@ -12,7 +12,8 @@ export function DemoBadge({ origin }: { origin?: string }) {
 export function TelemetryNotice({ read }: { read: TelemetryRead | null }) {
   if (!read) return <span className="text-xs text-(--text-muted)">Loading telemetry…</span>;
   if (read.error) return <span role="status" className="wrap-anywhere text-xs text-amber">{read.error}</span>;
-  return <>{read.demo && <span className="rounded-xs border border-amber-400/40 px-1 text-[10px] text-amber">Demo data</span>}
+  return <>{read.unavailable && <span role="status" className="wrap-anywhere text-xs text-amber">{read.unavailable}</span>}
+    {read.demo && <span className="rounded-xs border border-amber-400/40 px-1 text-[10px] text-amber">Demo data</span>}
     {read.data.some(r => r.collector.droppedSeries > BigInt(0)) && <span className="ml-1 text-xs text-amber">Series limit reached — coverage incomplete</span>}</>;
 }
 
@@ -30,7 +31,7 @@ export function TelemetryChart({ queries, title, ranges = false, perMinute = fal
   const read = useTelemetry(queries, range);
   const points = read ? responsePoints(read.data) : [];
   const covered = points.some(p => p.v !== undefined);
-  const rate = pointRate(points.at(-1), perMinute);
+  const rate = read?.unavailable ? null : pointRate(points.at(-1), perMinute);
   const firstCovered = points.findIndex(p => p.v !== undefined);
   const continuous = firstCovered >= 0 ? points.slice(firstCovered) : [];
   const first = continuous.every(p => p.q === "observed") ? continuous[0] : undefined, last = points.at(-1);
@@ -46,7 +47,7 @@ export function TelemetryChart({ queries, title, ranges = false, perMinute = fal
       {!compact && <p className="text-xs text-(--text-muted)">Rate: {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
         {showTrend && trend !== null && continuous.length > 1 && <span className="ml-2">Trend: {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {Number(trend.toFixed(2))}</span>}
       </p>}
-      {last?.v !== undefined && rate === null && <p className="wrap-anywhere text-xs text-amber">Count: {last.v.toLocaleString()} · Partial bucket — rate unavailable</p>}
+      {!read.unavailable && last?.v !== undefined && rate === null && <p className="wrap-anywhere text-xs text-amber">Count: {last.v.toLocaleString()} · Partial bucket — rate unavailable</p>}
     </> : <p className="text-xs text-(--text-muted)">{read.data.some(r => r.realCovered || r.realActive) ? "No observed coverage in this range" : "No traffic recorded yet"}</p>)}
   </div>;
 }
@@ -55,13 +56,14 @@ export function TelemetryRate({ queries, perMinute = true, range = "1h" }: { que
   const read = useTelemetry(queries, range);
   const points = read ? responsePoints(read.data) : [];
   const last = points.at(-1);
-  const rate = read?.error ? null : pointRate(last, perMinute);
-  return <span title={read?.error} className="wrap-anywhere">
+  const notice = read?.error ?? read?.unavailable;
+  const rate = notice ? null : pointRate(last, perMinute);
+  return <span title={notice} className="wrap-anywhere">
     {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
     {read?.demo && <span className="ml-1 text-amber">Demo data</span>}
     {last && last.q !== "observed" && rate !== null && <span className="ml-1 text-amber">({last.q === "reset" ? "counter reset" : "partial"})</span>}
-    {!read?.error && last?.v !== undefined && rate === null && <span className="ml-1 text-amber">(Partial bucket · Count: {last.v.toLocaleString()}; rate unavailable)</span>}
-    {read?.error && <span className="ml-1 text-amber">{read.error}</span>}
+    {!notice && last?.v !== undefined && rate === null && <span className="ml-1 text-amber">(Partial bucket · Count: {last.v.toLocaleString()}; rate unavailable)</span>}
+    {notice && <span className="ml-1 text-amber">{notice}</span>}
   </span>;
 }
 
