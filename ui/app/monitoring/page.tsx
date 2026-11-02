@@ -7,7 +7,7 @@ import Link from "next/link";
 import { api, type FlowSummary, type ServicesStatus, type TelemetryEvent } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
-import { DemoBadge, TelemetryChart, TelemetryRate } from "../../components/TelemetryChart";
+import { DemoBadge, TelemetryChart, TelemetryLegend, TelemetryRate } from "../../components/TelemetryChart";
 import { TelemetryProtocols } from "../../components/TelemetryProtocols";
 import { Card } from "../../components/Card";
 
@@ -254,6 +254,7 @@ export default function MonitoringOverviewPage() {
         <Card title="Traffic Pulse">
           <p className="text-xs text-(--text-muted)">Last 60 min · bytes/s</p>
           <TelemetryChart title="Traffic Pulse" queries={[{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]} />
+          <TelemetryLegend />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-(--text)">
             <div>DPI {eventsStatus === "ready" ? dpiCount.toLocaleString() : "Unknown"}</div>
             <div>Alerts {eventsStatus === "ready" ? alertCount.toLocaleString() : "Unknown"}</div>

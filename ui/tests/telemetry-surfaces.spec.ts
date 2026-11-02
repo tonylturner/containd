@@ -69,6 +69,8 @@ for (const width of [1280, 390]) {
     for (const title of ["Network Pulse", "Zone Status", "Service Health", "Traffic", "Event Stream", "System Health"]) await expect(page.getByRole("heading", { name: new RegExp(`^${title}(1h window)?$`) })).toBeVisible();
     for (const title of ["In bytes/s", "Out bytes/s"]) await expect(page.locator(`[data-telemetry="${title}"]`)).toContainText("Rate: 2.0 /s");
     await expect(page.locator('[data-telemetry="Events"]')).toContainText("Rate: 4.0 /s");
+    await expect(page.locator("[data-telemetry-legend]")).toHaveCount(1);
+    await expect(page.getByText("Trend:", { exact: false })).toHaveCount(0);
     expect(requests.some(q => q.searchParams.get("metric") === "iface.rx_bytes" && q.searchParams.get("role") === "leaf" && q.searchParams.get("group") === "role")).toBe(true);
     await expect(page.getByText("in + out at this zone · bytes/s", { exact: true })).toHaveCount(2);
     await expect(page.locator('[data-telemetry="it throughput"] [data-value="40"]')).toHaveCount(1);
@@ -97,6 +99,8 @@ test("Monitoring protocol totals and Traffic Pulse use retained packet and inter
   await expect(protocols).toContainText("30 · Partial coverage");
   await expect(protocols).not.toContainText("ids");
   await expect(page.getByRole("region", { name: "Traffic Pulse", exact: true })).toContainText("Rate: 2.0 /s");
+  await expect(page.locator("[data-telemetry-legend]")).toHaveCount(1);
+  await expect(page.getByText("Trend:", { exact: false })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Recent Alerts", exact: true }).getByText("Demo", { exact: true })).toBeVisible();
 });
 

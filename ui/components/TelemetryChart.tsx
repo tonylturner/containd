@@ -16,9 +16,13 @@ export function TelemetryNotice({ read }: { read: TelemetryRead | null }) {
     {read.data.some(r => r.collector.droppedSeries > BigInt(0)) && <span className="ml-1 text-xs text-amber">Series limit reached — coverage incomplete</span>}</>;
 }
 
-export function TelemetryChart({ queries, title, ranges = false, perMinute = false, compact = false, color, range: selectedRange, onRangeChange }: {
+export function TelemetryLegend() {
+  return <p data-telemetry-legend className="text-[10px] text-(--text-muted)">Gaps: breaks · Partial: dashed · ◆ Counter reset · Zero: baseline tick</p>;
+}
+
+export function TelemetryChart({ queries, title, ranges = false, perMinute = false, compact = false, showTrend = false, color, range: selectedRange, onRangeChange }: {
   queries: SeriesQuery[]; title: string; ranges?: boolean; perMinute?: boolean; compact?: boolean; color?: string;
-  range?: TelemetryRange; onRangeChange?: (range: TelemetryRange) => void;
+  range?: TelemetryRange; onRangeChange?: (range: TelemetryRange) => void; showTrend?: boolean;
 }) {
   const [localRange, setLocalRange] = useState<TelemetryRange>("1h");
   const range = selectedRange ?? localRange;
@@ -40,9 +44,8 @@ export function TelemetryChart({ queries, title, ranges = false, perMinute = fal
     {read && !read.error && (covered ? <>
       <Sparkline points={points} title={title} perMinute={perMinute} color={color} className={compact ? "h-5" : "h-14"} />
       {!compact && <p className="text-xs text-(--text-muted)">Rate: {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
-        {trend !== null && continuous.length > 1 && <span className="ml-2">Trend: {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {Number(trend.toFixed(2))}</span>}
+        {showTrend && trend !== null && continuous.length > 1 && <span className="ml-2">Trend: {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {Number(trend.toFixed(2))}</span>}
       </p>}
-      {!compact && <p className="text-[10px] text-(--text-muted)">Gaps: breaks · Partial: dashed · ◆ Counter reset · Zero: baseline tick</p>}
     </> : <p className="text-xs text-(--text-muted)">{read.data.some(r => r.realCovered || r.realActive) ? "No observed coverage in this range" : "No traffic recorded yet"}</p>)}
   </div>;
 }
@@ -60,11 +63,14 @@ export function TelemetryRate({ queries, perMinute = true, range = "1h" }: { que
   </span>;
 }
 
-export function ServiceHistory({ service, title, ranges = true }: { service: string; title: string; ranges?: boolean }) {
+export function ServiceHistory({ service, title, ranges = true, showTrend = false, legend = true }: {
+  service: string; title: string; ranges?: boolean; showTrend?: boolean; legend?: boolean;
+}) {
   const [range, setRange] = useState<TelemetryRange>("1h");
   return <div className="min-w-0 space-y-2">
-    <TelemetryChart queries={[{ metric: service === "av" ? "av.scans" : "service.events", ...(service === "av" ? {} : { service }) }]} title={title} ranges={ranges} perMinute range={range} onRangeChange={setRange} />
+    <TelemetryChart queries={[{ metric: service === "av" ? "av.scans" : "service.events", ...(service === "av" ? {} : { service }) }]} title={title} ranges={ranges} perMinute range={range} onRangeChange={setRange} showTrend={showTrend} />
     <p className="text-xs text-(--text-muted)">Errors: <TelemetryRate range={range} queries={[{ metric: service === "av" ? "av.scan_errors" : "service.errors", ...(service === "av" ? {} : { service }) }]} /></p>
     {service === "av" && <TelemetryChart queries={[{ metric: "av.detections" }]} title="Detections per minute" range={range} perMinute />}
+    {legend && <TelemetryLegend />}
   </div>;
 }

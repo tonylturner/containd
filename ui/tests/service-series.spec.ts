@@ -68,6 +68,8 @@ for (const { path, charts } of pages) {
       await expect(page.getByRole("combobox", { name: `${title} range`, exact: true })).toBeVisible();
       await expect(chart.locator("[data-bar]")).toHaveCount(3);
     }
+    await expect(page.locator("[data-telemetry-legend]")).toHaveCount(charts.length);
+    await expect(page.getByText("Trend:", { exact: false })).toHaveCount(0);
   });
 
   test(`${path} shows no chart before any event`, async ({ page }) => {

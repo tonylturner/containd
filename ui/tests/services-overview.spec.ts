@@ -68,6 +68,7 @@ test("services without a reported series show no chart", async ({ page }) => {
   const syslog = page.getByTitle("Syslog events per minute");
   await expect(syslog).toBeVisible();
   await expect(syslog.locator("[data-bar]")).toHaveCount(3);
+  await expect(page.locator("[data-telemetry-legend]")).toHaveCount(1);
   // Idle services and the unreachable antivirus engine have no series.
   await expect(page.locator("[title*='per minute']")).toHaveCount(1);
   await expect(page.locator("[title*='simulated']")).toHaveCount(0);

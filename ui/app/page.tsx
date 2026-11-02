@@ -34,7 +34,7 @@ const Console = dynamic(
   () => import("../components/Console").then((m) => m.Console),
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
-import { TelemetryChart } from "../components/TelemetryChart";
+import { TelemetryChart, TelemetryLegend } from "../components/TelemetryChart";
 import { Skeleton } from "../components/Skeleton";
 import { ServiceTelemetryAttention } from "./dashboard-service-attention";
 import { useHealth } from "../hooks/useHealth";
@@ -325,6 +325,7 @@ export default function Home() {
             <TelemetryChart title="Out bytes/s" queries={[{ metric: "iface.tx_bytes", role: "leaf", group: "role" }]} />
             <h4 className="text-xs text-(--text-muted)">Events</h4>
             <TelemetryChart title="Events" queries={[{ metric: "events.total" }]} />
+            <TelemetryLegend />
           </div>
           <p className="mb-2 text-[10px] text-(--text-muted)">Event totals: last 24 h{eventStats && !eventStats.complete ? " · Partial coverage" : ""}</p>
           {data?.eventStatsError && <p role="status" className="text-xs text-amber">Event totals unavailable: {data.eventStatsError}</p>}

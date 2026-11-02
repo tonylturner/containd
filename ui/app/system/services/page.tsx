@@ -13,7 +13,7 @@ import { Shell } from "../../../components/Shell";
 import { Card as BaseCard } from "../../../components/Card";
 import { Skeleton } from "../../../components/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
-import { ServiceHistory, TelemetryRate } from "../../../components/TelemetryChart";
+import { ServiceHistory, TelemetryLegend, TelemetryRate } from "../../../components/TelemetryChart";
 import { InfoTip } from "../../../components/InfoTip";
 import { Disclosure } from "../../../components/Disclosure";
 
@@ -88,6 +88,7 @@ export default function ServicesOverviewPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"} {autoRefresh ? "(auto)" : ""}
       </p>
+      <div className="mb-4"><TelemetryLegend /></div>
       <BaseCard className="mb-4" padding="md">
         <div className="flex items-center justify-between">
           <div>
@@ -340,7 +341,7 @@ function ServiceCard({ title, children, loading = false, service, historyTitle, 
     <div className="min-w-0 rounded-xs border bg-(--surface) p-5 shadow-card">
       <p className="text-xs uppercase tracking-[0.2em] text-(--text)">{title}</p>
       <div className="mt-3">{loading ? <Skeleton className="h-14 w-full" /> : children}</div>
-      {!loading && <div className="mt-3"><ServiceHistory service={service} title={historyTitle} ranges={false} /></div>}
+      {!loading && <div className="mt-3"><ServiceHistory service={service} title={historyTitle} ranges={false} showTrend legend={false} /></div>}
       {!loading && software && <div className="mt-3">
         <h3 className="mb-2 text-sm">Troubleshooting</h3>
         <Disclosure title="Service details"><p className="text-xs text-(--text-muted)">Software: {software}</p></Disclosure>
