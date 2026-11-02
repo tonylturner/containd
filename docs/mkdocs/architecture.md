@@ -68,9 +68,11 @@ See [Code Boundaries](code-boundaries.md) for contributor guidance.
 Zones, Interfaces, Routing and NAT share a **Zones → Logical interfaces →
 Connectivity → Review** navigation strip, with a separate NAT link. Navigation
 never adopts devices or stages settings; Review opens the Config diff directly.
-In Interfaces, the logical interface
-list comes before Create interface. Each row keeps its device, zone, link and
-addresses together. **Inspect** reveals Type, Mode, Network and Access, including
+In Interfaces, logical-interface and live-device counts occupy a separate line
+below navigation. The logical interface list comes before Create interface.
+Each row keeps its device, zone, link and addresses together. Mode, type and
+live/access/gateway attention indicators accompany Device, not the action buttons.
+**Inspect** reveals Type, Mode, Network and Access, including
 MAC, MTU, detected versus configured addresses and gateway. Edit opens inspection;
 Save still stages the same candidate settings. Saved bridge/VLAN, gateway or
 customized access settings open inspection by default. Detected network devices
