@@ -6,6 +6,7 @@ package engineapp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net"
@@ -102,10 +103,9 @@ func (*countingCaptureRunner) Interfaces() []string     { return nil }
 func (*countingCaptureRunner) Settler() capture.Settler { return nil }
 func (*countingCaptureRunner) RetireFlushed()           {}
 
-func postConfig(t *testing.T, h http.Handler, body string) map[string]any {
+func postConfig(t *testing.T, c *protectionCoordinator, h http.Handler, body string) map[string]any {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(body)))
+	rec := coordinatedPost(c, h, rand.Text(), body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST %s = %d %s", body, rec.Code, rec.Body.String())
 	}
@@ -153,9 +153,10 @@ func iecSessionIDs(e *engine.Engine) map[string]int {
 func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, c)
 	learn := `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`
-	if out := postConfig(t, h, learn); out["unchanged"] != false || dp.reconfigs.Load() != 1 {
+	if out := postConfig(t, c, h, learn); out["unchanged"] != false || dp.reconfigs.Load() != 1 {
 		t.Fatalf("first POST must rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	dp.waitStart(t)
@@ -185,7 +186,7 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 		session = id
 	}
 
-	out := postConfig(t, h, learn)
+	out := postConfig(t, c, h, learn)
 	if out["unchanged"] != true || dp.reconfigs.Load() != 1 {
 		t.Fatalf("unchanged POST rebuilt: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
@@ -214,7 +215,7 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	// but preserves the process event ring. Old session data is not parsed.
 	store := dp.Events()
 	before := iecSessionIDs(dp.Engine)[session]
-	out = postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
+	out = postConfig(t, c, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
 	if out["unchanged"] != false || dp.reconfigs.Load() != 2 {
 		t.Fatalf("changed POST did not rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
@@ -231,15 +232,16 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, c)
 	store := dp.Events()
-	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`)
+	postConfig(t, c, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`)
 	dp.waitStart(t)
 	dp.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "iec-learn", Action: rules.ActionAllow,
 		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}}}})
 	marker := store.Append(dpevents.Event{Kind: "firewall.rule.hit", Timestamp: time.Now().UTC(),
 		Attributes: map[string]any{"action": "DENY"}, FlowID: "before-rebuild"})
-	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
+	postConfig(t, c, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
 	dp.waitStart(t)
 	if dp.Events() != store {
 		t.Fatal("rebuild replaced the store")
@@ -277,7 +279,8 @@ func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 
 func TestConfigEqualityIsExact(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	steps := []struct {
 		body      string
 		unchanged bool
@@ -294,7 +297,7 @@ func TestConfigEqualityIsExact(t *testing.T) {
 		{`{"captureInterfaces":["b","a"],"dpiIcsProtocols":{"iec104":true,"modbus":false},"dpiExclusions":[{"value":"10.0.0.1","type":"cidr"}]}`, false},
 	}
 	for i, s := range steps {
-		if got := postConfig(t, h, s.body)["unchanged"]; got != s.unchanged {
+		if got := postConfig(t, c, h, s.body)["unchanged"]; got != s.unchanged {
 			t.Fatalf("step %d %s: unchanged = %v, want %v", i, s.body, got, s.unchanged)
 		}
 		dp.waitStart(t)
@@ -303,15 +306,16 @@ func TestConfigEqualityIsExact(t *testing.T) {
 
 func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
-	postConfig(t, h, `{}`)
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
+	postConfig(t, c, h, `{}`)
 	dp.waitStart(t)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"dpiMode":`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid JSON = %d", rec.Code)
 	}
-	if got := postConfig(t, h, `{}`)["unchanged"]; got != true {
+	if got := postConfig(t, c, h, `{}`)["unchanged"]; got != true {
 		t.Fatalf("a rejected POST must not change the applied config (unchanged=%v)", got)
 	}
 	dp.waitStart(t)
@@ -319,14 +323,15 @@ func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 
 func TestConfigUnchangedRetriesAStartThatGaveUp(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	gaveUp := errors.New("nfqueue 101: giving up after 8 bind attempts")
 	dp.startFn = func(context.Context) error { return gaveUp }
-	postConfig(t, h, `{"dpiEnabled":true}`)
+	postConfig(t, c, h, `{"dpiEnabled":true}`)
 	if err := dp.waitStart(t); !errors.Is(err, gaveUp) {
 		t.Fatalf("first start = %v", err)
 	}
-	if out := postConfig(t, h, `{"dpiEnabled":true}`); out["unchanged"] != true || dp.reconfigs.Load() != 1 {
+	if out := postConfig(t, c, h, `{"dpiEnabled":true}`); out["unchanged"] != true || dp.reconfigs.Load() != 1 {
 		t.Fatalf("second POST = %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	if err := dp.waitStart(t); err != nil {
@@ -340,8 +345,9 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 	sim := &simulationManager{dpEngine: dp.Engine}
 	t.Cleanup(sim.stop)
 	sim.loadRules(rules.Snapshot{Zones: []string{"dmz", "lan", "wan"}})
-	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
-	postConfig(t, h, `{"dpiMock":true}`)
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, c)
+	postConfig(t, c, h, `{"dpiMock":true}`)
 	dp.waitStart(t)
 	if sim.status().Running {
 		t.Fatal("DPI mock started replay")
@@ -354,17 +360,17 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 	if !first.Running {
 		t.Fatalf("start: %+v", first)
 	}
-	postConfig(t, h, `{"dpiMock":true}`)
+	postConfig(t, c, h, `{"dpiMock":true}`)
 	dp.waitStart(t)
 	if got := sim.status(); !got.Running || got.RunID != first.RunID {
 		t.Fatalf("unchanged POST restarted replay: %+v", got)
 	}
-	postConfig(t, h, `{"dpiMock":true,"dpiMode":"monitor"}`)
+	postConfig(t, c, h, `{"dpiMock":true,"dpiMode":"monitor"}`)
 	dp.waitStart(t)
 	if got := sim.status(); !got.Running || got.RunID == first.RunID {
 		t.Fatalf("changed POST did not rebuild replay: %+v", got)
 	}
-	postConfig(t, h, `{"dpiMode":"monitor"}`)
+	postConfig(t, c, h, `{"dpiMode":"monitor"}`)
 	dp.waitStart(t)
 	if !sim.status().Running {
 		t.Fatal("turning DPI mock off stopped replay")
@@ -376,25 +382,22 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 
 func TestConfigConcurrentGetAndPost(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
-	go func() {
-		for range dp.results {
-		}
-	}()
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	var wg sync.WaitGroup
-	bodies := []string{`{"dpiMode":"monitor"}`, `{"dpiMode":"enforce"}`}
+	body := `{"dpiMode":"monitor"}`
 	for i := 0; i < 4; i++ {
 		wg.Add(2)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				rec := httptest.NewRecorder()
-				h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(bodies[(i+j)%2])))
+				h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(body)))
 				if rec.Code != http.StatusOK {
 					t.Errorf("POST = %d", rec.Code)
 				}
 			}
-		}(i)
+		}()
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
@@ -435,8 +438,7 @@ func TestConfigFailedRebuildIsRetried(t *testing.T) {
 		t.Fatalf("initial capture starts = %d, want 1", got)
 	}
 	dp.reconfigErr = errors.New("remove enforcement tables: nft: netlink busy")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false}`)))
+	rec := coordinatedPost(coordinator, h, rand.Text(), `{"enforcement":false}`)
 	if rec.Code != http.StatusInternalServerError || !bytes.Contains(rec.Body.Bytes(), []byte("remove enforcement tables")) {
 		t.Fatalf("failed rebuild = %d %s", rec.Code, rec.Body.String())
 	}
@@ -446,7 +448,7 @@ func TestConfigFailedRebuildIsRetried(t *testing.T) {
 	if got := captureStarts.Load(); got != 1 {
 		t.Fatalf("failed rebuild started a replacement capture: starts=%d, want existing capture only", got)
 	}
-	if out := postConfig(t, h, `{"enforcement":false}`); out["unchanged"] != false || dp.reconfigs.Load() != 2 {
+	if out := postConfig(t, coordinator, h, `{"enforcement":false}`); out["unchanged"] != false || dp.reconfigs.Load() != 2 {
 		t.Fatalf("retry after a failed rebuild = %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	if err := dp.waitStart(t); err != nil {

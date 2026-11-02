@@ -5,6 +5,7 @@ package engineapp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -294,7 +295,7 @@ func TestSimulationRunningUpdates(t *testing.T) {
 	t.Cleanup(sm.stop)
 	c := testProtectionCoordinator(t, dp)
 	conf := configHandler(zap.NewNop().Sugar(), dp, sm, c)
-	postConfig(t, conf, `{"dpiIcsParsing":{"modbus":"tolerant"}}`)
+	postConfig(t, c, conf, `{"dpiIcsParsing":{"modbus":"tolerant"}}`)
 	dp.waitStart(t)
 	apply := applyRulesHandler(dp.Engine, nil, c, sm)
 	push := func(snap rules.Snapshot) {
@@ -303,7 +304,7 @@ func TestSimulationRunningUpdates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := coordinatedPost(apply, "test-apply", string(raw))
+		w := coordinatedPost(c, apply, rand.Text(), string(raw))
 		if w.Code != http.StatusOK {
 			t.Fatalf("rules apply: %d %s", w.Code, w.Body)
 		}
@@ -315,7 +316,7 @@ func TestSimulationRunningUpdates(t *testing.T) {
 	sm.mu.Lock()
 	worker := sm.active
 	sm.mu.Unlock()
-	postConfig(t, conf, `{"dpiIcsParsing":{"modbus":"strict"}}`)
+	postConfig(t, c, conf, `{"dpiIcsParsing":{"modbus":"strict"}}`)
 	dp.waitStart(t)
 	sm.mu.Lock()
 	unchanged := sm.active == worker && sm.config.DPIICSParsing["modbus"] == "strict"

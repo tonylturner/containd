@@ -6,15 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"go.uber.org/zap"
 )
-
-const applyIDHeader = "X-Containd-Apply-Id"
 
 // applyReplayWindow exceeds the management client and engine read deadlines.
 // IDs remain opaque; only the local monotonic supersession time is compared.
@@ -23,6 +21,8 @@ const applyReplayWindow = 5 * time.Minute
 type protectionPlane interface {
 	SetProtectionBootID(string)
 	BeginProtection(bootID, applyID string)
+	BindProtection(protection.Metadata)
+	SetProtectionOutcome(protection.Metadata, protection.OwnerOutcome)
 	Protection() engine.ProtectionStatus
 	StartProtection(retryContext, lifetime context.Context) error
 	RetryProtection(context.Context) error
@@ -40,6 +40,9 @@ type protectionCoordinator struct {
 	seen         map[string]time.Time // superseded IDs only
 	now          func() time.Time
 	current      string
+	metadata     protection.Metadata
+	inputs       map[string]string
+	completed    map[string]bool
 	workerCancel context.CancelFunc
 	workerDone   chan struct{}
 	closed       bool
@@ -51,65 +54,10 @@ func newProtectionCoordinator(ctx context.Context, dp protectionPlane, logger *z
 	return &protectionCoordinator{ctx: ctx, cancel: cancel, dp: dp, logger: logger, seen: map[string]time.Time{}, now: time.Now}
 }
 
-func applyID(w http.ResponseWriter, r *http.Request) (string, bool) {
-	id := r.Header.Get(applyIDHeader)
-	if strings.TrimSpace(id) == "" || len(id) > 64 {
-		protectionError(w, http.StatusBadRequest, "invalid_apply_id", "X-Containd-Apply-Id must contain 1 to 64 bytes")
-		return "", false
-	}
-	return id, true
-}
-
 func protectionError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	writeJSON(w, map[string]string{"error": message, "code": code})
-}
-
-func (c *protectionCoordinator) admit(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			next(w, r)
-			return
-		}
-		id, ok := applyID(w, r)
-		if !ok {
-			return
-		}
-		arrived := c.now()
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		now := c.now()
-		// Client timeouts do not bound time spent waiting for this lock.
-		// Never admit a queued request after its replay protection expires.
-		if r.Context().Err() != nil || now.Sub(arrived) >= applyReplayWindow {
-			protectionError(w, http.StatusRequestTimeout, "apply_expired", "application request expired before admission")
-			return
-		}
-		if c.closed {
-			protectionError(w, http.StatusServiceUnavailable, "engine_stopping", "engine stopping")
-			return
-		}
-		for old, superseded := range c.seen {
-			if now.Sub(superseded) >= applyReplayWindow {
-				delete(c.seen, old)
-			}
-		}
-		if _, superseded := c.seen[id]; superseded {
-			protectionError(w, http.StatusConflict, "apply_superseded", "application was superseded")
-			return
-		}
-		// Every mutating phase re-enters pending: a repeated config/services
-		// request cannot reuse an earlier rules acknowledgement for this ID.
-		c.dp.BeginProtection(engineBootID, id)
-		if id != c.current {
-			if c.current != "" {
-				c.seen[c.current] = now
-			}
-			c.current = id
-		}
-		next(w, r)
-	}
 }
 
 // Caller holds mu. Only the retry loop is canceled here: a healthy run uses
@@ -154,7 +102,7 @@ func (c *protectionCoordinator) retryHandler(gate *gateManager) http.HandlerFunc
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		id, ok := applyID(w, r)
+		admission, ok := readAdmission(w, r)
 		if !ok {
 			return
 		}
@@ -165,10 +113,16 @@ func (c *protectionCoordinator) retryHandler(gate *gateManager) http.HandlerFunc
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		arrived := c.now()
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		if r.Context().Err() != nil || c.now().Sub(arrived) >= applyReplayWindow {
+			protectionError(w, http.StatusRequestTimeout, "apply_expired", "application request expired before admission")
+			return
+		}
 		st := c.dp.Protection()
-		if c.closed || id != c.current || body.BootID != st.BootID {
+		id := string(admission.ApplyID)
+		if c.closed || admission.Metadata != c.metadata || id != c.current || body.BootID != st.BootID {
 			protectionError(w, http.StatusConflict, "protection_superseded", "protection observation was superseded")
 			return
 		}

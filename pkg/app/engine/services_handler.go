@@ -12,6 +12,7 @@ import (
 	"time"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dhcpd"
 	"github.com/tonylturner/containd/pkg/dp/engine"
@@ -46,7 +47,7 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 	if dhcpMgr != nil {
 		dhcp = dhcpMgr
 	}
-	return coordinator.admit(serviceApplyHandler(logger, dpEngine, ownership, dhcp, av, gate, netcfg.ApplyWireGuard))
+	return coordinator.admit("services", serviceApplyHandler(logger, dpEngine, ownership, dhcp, av, gate, netcfg.ApplyWireGuard))
 }
 
 func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr dhcpConfigApplier, av avConfigApplier, gate *gateManager, applyWireGuard func(context.Context, config.WireGuardConfig) error) http.HandlerFunc {
@@ -73,6 +74,12 @@ func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, own
 			if ownership != nil {
 				ownership.applyMu.Lock()
 				defer ownership.applyMu.Unlock()
+				if !resolvedPhaseInput(w, r, "services", struct {
+					Services   config.ServicesConfig
+					Interfaces []config.Interface
+				}{svc, ownership.currentInterfaces()}) {
+					return
+				}
 			}
 			if dpEngine != nil {
 				if err := config.ValidateManagementServices(svc, dpEngine.ManagementReservation()); err != nil {
@@ -83,8 +90,8 @@ func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, own
 			currentMu.Lock()
 			defer currentMu.Unlock()
 			result := engineapi.ServicesApplyResult{Faults: []config.ServiceFault{}}
-			failed := func(service string, err error) {
-				logger.Errorf("apply %s failed: %v", service, err)
+			failed := func(service string) {
+				logger.Errorf("apply %s failed: runtime apply failed", service)
 				// Never send raw backend errors: they may contain credentials.
 				result.Faults = append(result.Faults, config.ServiceFault{Service: service, Kind: "runtime", Message: "runtime apply failed"})
 			}
@@ -102,15 +109,17 @@ func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, own
 			}
 			gate.applyAV(svc.AV)
 			wgCtx, cancelWG := context.WithTimeout(r.Context(), 5*time.Second)
-			if err := applyWireGuard(wgCtx, svc.VPN.WireGuard); err != nil {
-				failed(config.ServiceWireGuard, err)
+			wgErr := applyWireGuard(wgCtx, svc.VPN.WireGuard)
+			ownerCompletion(r, protection.SubsystemWireGuard, svc.VPN.WireGuard.Enabled, wgErr)
+			if err := wgErr; err != nil {
+				failed(config.ServiceWireGuard)
 				if dpEngine != nil && dpEngine.Events() != nil {
 					dpEngine.Events().Append(dpevents.Event{
 						Proto:     "vpn",
 						Kind:      "service.wireguard.apply_failed",
 						Timestamp: time.Now().UTC(),
 						Attributes: map[string]any{
-							"error": err.Error(),
+							"error": "runtime apply failed",
 						},
 					})
 				}
@@ -147,20 +156,22 @@ func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, own
 					ifaces = ownership.currentInterfaces()
 				}
 				dhcpCtx, cancelDHCP := context.WithTimeout(r.Context(), 5*time.Second)
-				if err := dhcpMgr.Apply(dhcpCtx, svc.DHCP, ifaces); err != nil {
-					failed(config.ServiceDHCP, err)
+				dhcpErr := dhcpMgr.Apply(dhcpCtx, svc.DHCP, ifaces)
+				ownerCompletion(r, protection.SubsystemDHCP, svc.DHCP.Enabled, dhcpErr)
+				if err := dhcpErr; err != nil {
+					failed(config.ServiceDHCP)
 				}
 				cancelDHCP()
 			}
 			current = svc
 			if avErr != nil && !avPending {
-				failed(config.ServiceAV, avErr)
+				failed(config.ServiceAV)
 			}
 			if avPending {
 				warning := "AV backend is still starting; scanning is pending until it is ready"
 				logger.Warnf("services apply: %s", warning)
 				if dpEngine != nil && dpEngine.Events() != nil {
-					dpEngine.Events().Append(dpevents.Event{Proto: "av", Kind: gateEventPending, Timestamp: time.Now().UTC(), Attributes: map[string]any{"error": avErr.Error()}})
+					dpEngine.Events().Append(dpevents.Event{Proto: "av", Kind: gateEventPending, Timestamp: time.Now().UTC(), Attributes: map[string]any{"error": warning}})
 				}
 				result.Warnings = []string{warning}
 			}

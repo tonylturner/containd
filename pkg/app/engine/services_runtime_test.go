@@ -5,19 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
-	engineapi "github.com/tonylturner/containd/api/engine"
-	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/services"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 	"go.uber.org/zap"
 )
 
@@ -41,37 +34,54 @@ func (a *runtimeAVApplier) Apply(context.Context, config.AVConfig) error {
 	return nil
 }
 
+func TestServiceRuntimeWireGuardDisableVerified(t *testing.T) {
+	dp := protocolEngine(t)
+	c := testProtectionCoordinator(t, dp)
+	m := protocolMetadata("disable")
+	if w := protocolPost(applyRulesHandler(dp, nil, c, nil), m, "", `{}`); w.Code != 200 {
+		t.Fatalf("rules: %d %s", w.Code, w.Body)
+	}
+	installed := dp.Protection().Installed
+	running, fail := true, true
+	h := c.admit("services", serviceApplyHandler(zap.NewNop().Sugar(), dp, nil, nil, nil, nil,
+		func(context.Context, config.WireGuardConfig) error {
+			if fail {
+				return errors.New("stop failed")
+			}
+			running = false
+			return nil
+		}))
+	for _, failure := range []bool{true, false} {
+		fail = failure
+		if w := protocolPost(h, m, "", `{}`); w.Code != 200 {
+			t.Fatalf("services: %d %s", w.Code, w.Body)
+		}
+		o := subsystem(t, dp.Protection(), protection.SubsystemWireGuard)
+		st := dp.Protection()
+		if st.State == "pending" || st.Installed == nil || installed == nil || *st.Installed != *installed {
+			t.Fatalf("service retry invalidated installed policy: %+v", st)
+		}
+		if o.Operation != protection.OperationStop || running != failure ||
+			(o.Acknowledged == nil) != failure {
+			t.Fatalf("unverified WireGuard teardown: %+v running=%v", o, running)
+		}
+		if !failure && (o.State != protection.DeliveryOff || o.Acknowledged.Operation != protection.OperationStop) {
+			t.Fatalf("missing verified stop: %+v", o)
+		}
+	}
+}
+
 func TestServiceRuntimeFaultReplay(t *testing.T) {
 	for _, service := range []string{config.ServiceWireGuard, config.ServiceDHCP} {
 		t.Run(service, func(t *testing.T) {
-			ctx := context.Background()
-			store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer store.Close()
-			cfg := config.DefaultConfig()
-			cfg.Interfaces = []config.Interface{{Name: "test0", Device: "ct-test0", Zone: "lan", Addresses: []string{"198.51.100.1/24"}}}
-			cfg.Services.VPN.WireGuard = config.WireGuardConfig{
-				Enabled: true, Interface: "ct-vpn", ListenPort: 51820,
-				PrivateKey: "ERERERERERERERERERERERERERERERERERERERERERE=",
-			}
-			cfg.Services.DHCP = config.DHCPConfig{
-				Enabled: true, ListenIfaces: []string{"test0"},
-				Pools: []config.DHCPPool{{Iface: "test0", Start: "198.51.100.100", End: "198.51.100.150"}},
-			}
-			cfg.Services.AV.Enabled = true
-			if err := store.Save(ctx, cfg); err != nil {
-				t.Fatal(err)
-			}
-			m := services.NewManager(services.ManagerOptions{BaseDir: t.TempDir()})
-			m.Syslog, m.DNS, m.NTP, m.Proxy, m.VPN = nil, nil, nil, nil, nil
-			var failWG, failDHCP, requestFailure atomic.Bool
+			dp := newCountingDP(t)
+			c := testProtectionCoordinator(t, dp)
+			var failWG, failDHCP atomic.Bool
 			failWG.Store(service == config.ServiceWireGuard)
 			failDHCP.Store(service == config.ServiceDHCP)
 			dhcp := &runtimeDHCPApplier{fail: &failDHCP}
 			av := &runtimeAVApplier{}
-			var wgCalls, rulesCalls atomic.Int32
+			var wgCalls atomic.Int32
 			applyWG := func(context.Context, config.WireGuardConfig) error {
 				wgCalls.Add(1)
 				if failWG.Load() {
@@ -79,86 +89,68 @@ func TestServiceRuntimeFaultReplay(t *testing.T) {
 				}
 				return nil
 			}
-			handler := serviceApplyHandler(zap.NewNop().Sugar(), nil, nil, dhcp, av, nil, applyWG)
-			mux := http.NewServeMux()
-			mux.HandleFunc("/internal/services", func(w http.ResponseWriter, r *http.Request) {
-				if requestFailure.Load() {
-					if _, err := io.Copy(io.Discard, r.Body); err != nil {
-						t.Error(err)
-					}
-					http.Error(w, "request refused", http.StatusServiceUnavailable)
-					return
-				}
-				handler.ServeHTTP(w, r)
-			})
-			mux.HandleFunc("/internal/apply_rules", func(w http.ResponseWriter, r *http.Request) {
-				var snap rules.Snapshot
-				if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
-					t.Error(err)
-				}
-				rulesCalls.Add(1)
-				_, _ = w.Write([]byte(`{}`))
-			})
-			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				if _, err := io.Copy(io.Discard, r.Body); err != nil {
-					t.Error(err)
-				}
-				_, _ = w.Write([]byte(`{}`))
-			})
-			server := httptest.NewServer(mux)
-			defer server.Close()
-			client := engineapi.NewHTTPClient(server.URL)
-			for i := range 4 {
+			gate := &gateManager{}
+			handler := c.admit("services", serviceApplyHandler(zap.NewNop().Sugar(), dp.Engine, nil, dhcp, av, gate, applyWG))
+			apply := applyRulesHandler(dp.Engine, gate, c, nil)
+			svc := config.ServicesConfig{}
+			if err := json.Unmarshal([]byte(`{"av":{"scan":{"include":[{"destPorts":["80"]}]}}}`), &svc); err != nil {
+				t.Fatal(err)
+			}
+			svc.VPN.WireGuard.Enabled = true
+			svc.DHCP.Enabled = true
+			// The backend is quarantined but the selected fail-closed policy survives.
+			svc.AV.Enabled, svc.AV.BackendDisabled = true, true
+			svc.AV.FailPolicy, svc.AV.HTTPDownload = "closed", true
+			body, err := json.Marshal(svc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range 3 {
 				if i == 2 {
-					requestFailure.Store(true)
-				}
-				if i == 3 {
-					requestFailure.Store(false)
 					failWG.Store(false)
 					failDHCP.Store(false)
 				}
-				warnings, err := httpapi.ApplyRunningConfig(ctx, store, client, m)
-				serviceCalls := int32(i + 1)
-				if i >= 2 {
-					serviceCalls--
+				w := coordinatedPost(c, handler, "runtime", string(body))
+				var result struct {
+					Faults []config.ServiceFault `json:"faults"`
 				}
-				if err != nil || wgCalls.Load() != serviceCalls || dhcp.calls.Load() != serviceCalls || av.calls.Load() != serviceCalls || rulesCalls.Load() != int32(i+1) {
-					t.Fatalf("failure prevented another apply: wg=%d dhcp=%d rules=%d err=%v", wgCalls.Load(), dhcp.calls.Load(), rulesCalls.Load(), err)
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
+					t.Fatalf("services: %d %s", w.Code, w.Body)
 				}
-				faults := m.Faults()
-				status := m.Status().(map[string]any)[service].(map[string]any)
-				if i < 3 {
-					if len(faults) != 1 || faults[0].Service != service || faults[0].Kind != "runtime" {
-						t.Fatalf("fault attributed incorrectly: %+v", faults)
-					}
-					if status["state"] != "faulted" || status["fault"] != faults[0] {
-						t.Fatalf("runtime service status lost fault: %+v", status)
-					}
-					wantWarning := service + ": runtime apply failed"
-					if i == 2 {
-						wantWarning = "engine services status 503"
-					}
-					if !strings.Contains(strings.Join(warnings, ","), wantWarning) ||
-						strings.Contains(strings.Join(warnings, ","), "secret-material") {
-						t.Fatalf("missing or unsanitized warning: %v", warnings)
-					}
-				} else if len(faults) != 0 {
-					t.Fatalf("clean apply did not clear runtime fault: %+v", faults)
-				} else if status["state"] == "faulted" {
-					t.Fatalf("clean apply retained faulted status: %+v", status)
+				if strings.Contains(w.Body.String(), "secret-material") {
+					t.Fatalf("secret leaked: %s", w.Body)
 				}
-			}
-			raised, cleared := 0, 0
-			for _, event := range m.ListTelemetryEvents(0) {
-				switch event.Kind {
-				case "service.runtime_fault":
-					raised++
-				case "service.runtime_fault.cleared":
-					cleared++
+				if i < 2 && (len(result.Faults) != 1 || result.Faults[0].Service != service) {
+					t.Fatalf("fault attribution: %+v", result)
+				}
+				if i == 2 && len(result.Faults) != 0 {
+					t.Fatalf("recovery retained fault: %+v", result)
+				}
+				if !gate.av.Enabled || !gate.av.ScanGateEnabled() {
+					t.Fatal("quarantine removed selected policy")
+				}
+				if w := coordinatedPost(c, apply, "runtime", `{}`); w.Code != 200 {
+					t.Fatalf("rules blocked: %d %s", w.Code, w.Body)
+				}
+				var found bool
+				for _, o := range dp.Protection().Subsystems {
+					if string(o.Name) == service {
+						found = true
+						if (o.Acknowledged != nil) != (i == 2) {
+							t.Fatalf("owner proof: %+v", o)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("missing outcome for %s", service)
 				}
 			}
-			if raised != 1 || cleared != 1 {
-				t.Fatalf("fault replay emitted duplicate transitions: raised=%d cleared=%d", raised, cleared)
+			if wgCalls.Load() != 3 || dhcp.calls.Load() != 3 || av.calls.Load() != 3 {
+				t.Fatal("runtime fault prevented owner retry")
+			}
+			events, err := json.Marshal(dp.Events().List(100))
+			if err != nil || strings.Contains(string(events), "secret-material") {
+				t.Fatalf("secret-bearing runtime diagnostic: %s %v", events, err)
 			}
 		})
 	}

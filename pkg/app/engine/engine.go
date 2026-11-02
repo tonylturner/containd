@@ -151,6 +151,7 @@ func Run(ctx context.Context, opts Options) error {
 	// drives the data plane's gate admission switch.
 	gateMgr := newGateManager(logger, avMgr, dpEngine, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
 	coordinator := newProtectionCoordinator(ctx, dpEngine, logger)
+	ownership.coordinator = coordinator
 	defer coordinator.close()
 	gateMgr.protection = dpEngine
 	gateMgr.lifetime = ctx
@@ -221,8 +222,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine, evidenceStore))
 	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine, evidenceStore))
-	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership, dpEngine))
-	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
+	mux.HandleFunc("/internal/interfaces", coordinator.admit("interfaces", interfacesHandler(logger, ownership, dpEngine)))
+	mux.HandleFunc("/internal/routing", coordinator.admit("routing", routingHandler(logger, ownership)))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
 	mux.HandleFunc("/internal/telemetry/counters", telemetryCountersHandler(telemetry.Collector{BootID: engineBootID, Membership: dpEngine.TelemetryMembership, Tracker: dpEngine.TelemetryTracker, Events: dpEngine.Events().TelemetryCounts, AV: avMgr.TelemetryCounts, Conduits: dpEngine.TelemetryConduits, Demo: simMgr.samples}))
@@ -249,7 +250,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/blocks/clear", clearBlocksHandler(dpEngine))
 	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr, gateMgr, coordinator))
 	registerAVHandlers(mux, avMgr, gateMgr)
-	mux.HandleFunc("/internal/trust", trustHandler(avMgr))
+	mux.HandleFunc("/internal/trust", coordinator.admit("trust", trustHandler(avMgr)))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 	mux.HandleFunc("/internal/simulation", simulationHandler(simMgr))

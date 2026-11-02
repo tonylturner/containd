@@ -3,6 +3,7 @@ package engineapp
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,7 +18,8 @@ import (
 
 func TestRemovedProtocolInternalHandlers(t *testing.T) {
 	dp := newCountingDP(t)
-	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{}, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{}, c)
 	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		want := fmt.Sprintf("protocol %q is not supported; supported: modbus, dnp3, iec104, cip", name)
 		if strings.EqualFold(strings.TrimSpace(name), "enip") {
@@ -28,8 +30,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rec := httptest.NewRecorder()
-			config.ServeHTTP(rec, protectionRequest("POST", "/internal/config", bytes.NewReader(body)))
+			rec := coordinatedPost(c, config, rand.Text(), string(body))
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
 				t.Fatalf("%s toggle: %d %s", name, rec.Code, rec.Body)
 			}

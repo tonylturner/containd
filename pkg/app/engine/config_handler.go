@@ -58,7 +58,7 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager, coordinator *protectionCoordinator) http.HandlerFunc {
 	store := dp.Events()
 	var current appliedConfig
-	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
+	return coordinator.admit("config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, current.get())
@@ -91,6 +91,9 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 			previous.DPIICSParsing = next.DPIICSParsing
 			parsingOnly := current.applied && sameDataPlane(previous, next)
 			current.mu.Unlock()
+			if !unchanged {
+				coordinator.dp.BeginProtection(engineBootID, coordinator.current)
+			}
 			if !unchanged && parsingOnly {
 				dp.SetICSParsing(next.DPIICSParsing)
 				simMgr.setParsing(next.DPIICSParsing)
