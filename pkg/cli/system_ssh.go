@@ -23,15 +23,24 @@ func showSystemSSH(store config.Store, api *API) Command {
 		if err != nil {
 			return err
 		}
+		cfg, err := store.Load(ctx)
+		if err != nil {
+			return err
+		}
+		fields := sshProfileFields(policy, cfg.System.SSH.ShellMode)
 		if out != nil {
-			kvTable(out, map[string]string{
+			values := map[string]string{
 				"allow_password":         yesNoStr(policy.AllowPassword),
 				"password_source":        policy.PasswordSource,
 				"authorized_keys_dir":    policy.AuthorizedKeysDir,
 				"host_key_rotation_days": fmt.Sprint(policy.HostKeyRotationDays),
-				"shell_mode":             policy.ShellMode,
+				"shell_mode":             fields.ShellMode,
 				"shell_mode_source":      policy.ShellModeSource,
-			})
+			}
+			if fields.ShellModeSaved != nil {
+				values["shell_mode_saved"] = displaySavedShell(*fields.ShellModeSaved)
+			}
+			kvTable(out, values)
 		}
 		return nil
 	}
@@ -57,17 +66,42 @@ func showSSHShellMode(ctx context.Context, store config.Store, out io.Writer, sa
 	}
 	fmt.Fprintf(out, "ssh.shell_mode: %s\n", policy.ShellMode)
 	fmt.Fprintf(out, "ssh.shell_mode_source: %s\n", policy.ShellModeSource)
-	if saved == "" {
-		saved = config.SSHShellModeAppliance
+	fields := sshProfileFields(policy, saved)
+	if fields.ShellModeSaved == nil {
+		return nil
 	}
+	saved = displaySavedShell(*fields.ShellModeSaved)
 	switch {
-	case saved == policy.ShellMode:
+	case fields.ShellModeSource == "profile":
+		fmt.Fprintf(out, "ssh.shell_mode_saved: %s (overridden by profile)\n", saved)
 	case policy.ShellModeSource == config.SSHShellModeSourceEnvironment:
 		fmt.Fprintf(out, "ssh.shell_mode_saved: %s (overridden by %s)\n", saved, config.EnvSSHShellMode)
 	default:
 		fmt.Fprintf(out, "ssh.shell_mode_saved: %s (applies after restart)\n", saved)
 	}
 	return nil
+}
+
+func sshProfileFields(policy config.SSHRuntimePolicy, saved string) config.SSHProfileFields {
+	fields := config.SSHProfileFields{ShellMode: policy.ShellMode, ShellModeSource: policy.ShellModeSource}
+	switch policy.ShellModeSource {
+	case config.SSHShellModeSourceProfile:
+		fields.ShellModeSource = "profile"
+	case config.SSHShellModeSourceEnvironment:
+		fields.ShellModeSource = "environment"
+	}
+	resolved, _ := config.ResolveSSHShellMode(saved, "")
+	if resolved != fields.ShellMode {
+		fields.ShellModeSaved = &saved
+	}
+	return fields
+}
+
+func displaySavedShell(saved string) string {
+	if saved == "" {
+		return `""`
+	}
+	return saved
 }
 
 // executeOnAppliance runs line through the appliance's CLI endpoint and
