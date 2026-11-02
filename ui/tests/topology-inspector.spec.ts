@@ -75,7 +75,11 @@ test("security gaps and conduit inspector are keyboard reachable with distinct s
 test("logical graph node opens its inspector with Enter", async ({ page }) => {
   await page.goto("/topology/");
   const node = page.locator('.react-flow__node[data-id="fw-main"]');
+  // ReactFlow attaches nodes hidden until measured; focus() alone does not wait
+  // for visibility and can silently leave keyboard focus on the document.
+  await expect(node).toBeVisible();
   await node.focus();
+  await expect(node).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByText("Policy Rules", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Topology inspector", exact: true }).getByText("Hostname", { exact: true })).toBeVisible();

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillSeries } from "./fixtures/telemetry";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
@@ -67,13 +68,14 @@ test("trusted CA upload without a config store is an error, not stored", async (
   await expect(page.getByText(/Trusted CA bundle (stored|applied)/)).toHaveCount(0);
 });
 
-// A reachable engine's antivirus status carries its scan meter.
-async function openServices(page: Page, av: Record<string, unknown>, sparkline: number[]) {
+// Engine status carries lifetime counts; retained scans come from telemetry.
+async function openServices(page: Page, av: Record<string, unknown>, scans: number[]) {
   const meter = {
-    sparkline, count: sparkline.reduce((a, b) => a + b, 0), rate_per_min: 0,
-    errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0,
+    count: scans.reduce((a, b) => a + b, 0), errors_count: 0,
   };
   await mockAPI(page, { "/api/v1/services/status": { json: { faults: [], av: { available: true, ...meter, ...av } } } });
+  await page.route("**/api/v1/telemetry/series?*", route => fulfillSeries(route,
+    new URL(route.request().url()).searchParams.get("metric") === "av.scans" ? scans : []));
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");
   await loaded;
@@ -82,10 +84,12 @@ async function openServices(page: Page, av: Record<string, unknown>, sparkline: 
 
 test("antivirus card shows no fabricated scan series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav", clamav_custom_defs: "/data/clamav/custom" }, []);
+  await expect(page.locator('[data-telemetry="AV scans per minute"]')).toContainText("No traffic recorded yet");
   await expect(page.locator('[title^="AV scans"]')).toHaveCount(0);
 });
 
 test("antivirus card shows a reported scan series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav" }, [1, 3, 2]);
   await expect(page.locator('[title="AV scans per minute"]')).toHaveCount(1);
+  await expect(page.locator('[data-telemetry="AV scans per minute"]')).toContainText("Rate: 12.0 /min");
 });

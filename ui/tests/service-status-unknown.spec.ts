@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
+import { fulfillSeries } from "./fixtures/telemetry";
 
-const meter = { sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0 };
+const meter = { count: 0, errors_count: 0 };
 
 for (const [path, heading, entry] of [
   ["/system/services/dns/", "Live runtime status", "dns"],
@@ -13,9 +14,15 @@ for (const [path, heading, entry] of [
 ] as const) {
   test(`${heading} on ${path} keeps unavailable telemetry unknown and refresh recovers`, async ({ page }) => {
     let available = false;
+    let historyAvailable = false;
+    await page.clock.install();
     await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
     await page.route("**/api/v1/**", async (route) => {
       const p = new URL(route.request().url()).pathname.replace("/api/v1", "");
+      if (p === "/telemetry/series") {
+        if (!historyAvailable) return route.fulfill({ status: 503, json: { error: "telemetry store offline" } });
+        return fulfillSeries(route);
+      }
       const user = { id: "admin", username: "containd", role: "admin" };
       let body: unknown = {};
       if (["/auth/me", "/auth/session"].includes(p)) body = user;
@@ -61,8 +68,12 @@ for (const [path, heading, entry] of [
     await expect(panel).toContainText("Unknown");
     await expect(panel).not.toContainText(/(?:Running|Enabled|Live running):\s*no|(?:Rate|Errors|Pools|Reservations|Listen ifaces):\s*0/);
     available = true;
+    historyAvailable = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
+    // Runtime refresh and retained history are independent reads; history polls every 10 s.
+    await page.clock.fastForward(10_000);
     await expect(panel).toContainText(/(?:Rate|Errors):\s*0.0/);
+    await expect(panel).not.toContainText("Telemetry unavailable");
     await expect(panel).not.toContainText("status unavailable");
     if (entry !== "dhcp") {
       await expect(panel.getByText("Process ID: 123", { exact: true })).not.toBeVisible();
@@ -72,6 +83,12 @@ for (const [path, heading, entry] of [
         await expect(panel.getByText(`Software: ${heading === "Forward proxy" ? "Envoy" : "Nginx"}`, { exact: true })).toBeVisible();
       }
     }
+    // A successful runtime read cannot turn a failed history read into a quiet rate.
+    historyAvailable = false;
+    await page.clock.fastForward(10_000);
+    await expect(panel).toContainText("Telemetry unavailable: telemetry store offline");
+    await expect(panel).not.toContainText(/(?:Rate|Errors):\s*0.0/);
+    await expect(panel).not.toContainText("status unavailable");
     available = false;
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
     await expect(panel).toContainText("Unknown");
