@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The interfaces page no longer names another product in its management
   access notice.
 - Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- The antivirus page shows automatic definition updates as off when the
+  setting is not saved, and saving no longer turns them on.
 - A packet capture that never started shows "Not started" instead of a
   start date of 12/31/1.
 - Reordering rules shows as one order change in the configuration review,
