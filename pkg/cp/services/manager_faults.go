@@ -3,11 +3,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"reflect"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,8 +26,7 @@ type ServiceFault = config.ServiceFault
 func ConfigFaults(in []config.ServiceConfigError) []ServiceFault {
 	out := make([]ServiceFault, 0, len(in))
 	for _, f := range in {
-		message := strconv.QuoteToASCII(f.Err.Error())
-		out = append(out, ServiceFault{Service: f.Service, Kind: "config", Message: message[1 : len(message)-1]})
+		out = append(out, ServiceFault{Service: f.Service, Kind: "config", Message: "service configuration rejected"})
 	}
 	return out
 }
@@ -108,64 +105,6 @@ func (m *Manager) publishFaults(faults []ServiceFault) {
 			}
 		}
 	}
-}
-
-// ApplyEffective quarantines typed material/render rejections and ordinary
-// runtime failures independently. A failed service never aborts firewall replay.
-// The returned services are also the authority for engine apply and compilation.
-func (m *Manager) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, initial []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	m.applyMu.Lock()
-	defer m.applyMu.Unlock()
-	faults := ConfigFaults(initial)
-	var warnings []string
-	apply := func(service string, fn func() error) {
-		if err := fn(); err != nil {
-			slog.Error("service apply failed", "service", service, "error", err)
-			fault := ServiceFault{Service: service, Kind: "runtime", Message: "runtime apply failed"}
-			var typed *config.ServiceConfigError
-			if errors.As(err, &typed) {
-				service = typed.Service
-				fault = ConfigFaults([]config.ServiceConfigError{*typed})[0]
-			}
-			// One identity per service, even if stopping the projection also
-			// fails. Keep the originating diagnostic, never claim convergence.
-			found := false
-			for _, f := range faults {
-				found = found || f.Service == service
-			}
-			if !found {
-				faults = append(faults, fault)
-			}
-			warnings = append(warnings, service+": "+fault.Message)
-			config.QuarantineService(&cfg, service)
-			// Best-effort stop of any previous runtime, not a retry of the
-			// invalid desired content.
-			if stopErr := fn(); stopErr != nil {
-				warnings = append(warnings, service+": quarantine stop not confirmed")
-			}
-		}
-	}
-	if m.Syslog != nil {
-		apply(config.ServiceSyslog, func() error { return m.Syslog.Apply(ctx, cfg.Syslog) })
-	}
-	if m.DNS != nil {
-		apply(config.ServiceDNS, func() error { return m.DNS.Apply(ctx, cfg.DNS) })
-	}
-	if m.NTP != nil {
-		apply(config.ServiceNTP, func() error { return m.NTP.Apply(ctx, cfg.NTP) })
-	}
-	if m.Proxy != nil {
-		apply(config.ServiceProxy, func() error { return m.Proxy.Apply(ctx, cfg.Proxy) })
-	}
-	if m.DHCP != nil {
-		apply(config.ServiceDHCP, func() error { return m.DHCP.Apply(ctx, cfg.DHCP) })
-	}
-	if m.VPN != nil {
-		apply(config.ServiceOpenVPN, func() error { return m.VPN.Apply(ctx, cfg.VPN) })
-	}
-	m.localFaults = faults
-	m.publishCombinedFaults()
-	return cfg, warnings
 }
 
 func faultStatus(service string, base any, faults []ServiceFault) any {

@@ -79,6 +79,9 @@ func newSyslogLogger() *zap.SugaredLogger {
 // loop. The loop outlives ctx, which may belong to the request that applied
 // the configuration; Stop ends it.
 func (m *SyslogManager) Apply(ctx context.Context, cfg config.SyslogConfig) error {
+	if err := validateDaemonService(config.ServicesConfig{Syslog: cfg}); err != nil {
+		return err
+	}
 	for _, f := range cfg.Forwarders {
 		if err := ValidateSyslogForwarder(f); err != nil {
 			return err

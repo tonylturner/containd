@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
@@ -153,6 +152,7 @@ func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string, server
 
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(m.OpenVPNPath, "--config", configPath, "--verb", "3")
+	cmd.Env = append(os.Environ(), trafficOwnerTag(m.BaseDir, "openvpn"))
 	cmd.Dir = filepath.Dir(configPath)
 	ready := newOpenVPNReadyWriter(os.Stdout)
 	cmd.Stdout = ready
@@ -479,17 +479,16 @@ func (m *VPNManager) stopOpenVPN() error {
 	pid := cmd.Process.Pid
 	m.mu.Unlock()
 
-	_ = cmd.Process.Signal(syscall.SIGTERM)
-	m.log.Infow("stopping openvpn", "pid", pid)
-	select {
-	case <-waitCh:
-	case <-time.After(5 * time.Second):
-		_ = cmd.Process.Kill()
-		<-waitCh
+	if err := stopManagedProcess(cmd.Process, waitCh); err != nil {
+		return err
 	}
 
 	m.mu.Lock()
-	if m.ovpnCmd == nil {
+	if m.ovpnCmd == nil || m.ovpnCmd == cmd {
+		m.ovpnCmd = nil
+		m.ovpnWaitCh = nil
+		m.ovpnRunning = false
+		m.ovpnCRLNumber = 0
 		m.ovpnLastExit = "stopped"
 	}
 	m.mu.Unlock()
