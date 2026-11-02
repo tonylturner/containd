@@ -22,6 +22,48 @@ so these variables do not override their levels. CLI queries include
 `show audit` and `show events`; see
 [API Reference](api-reference.md) for wire contracts.
 
+## Collect and review learner evidence
+
+**PCAP Analysis** (`/pcap/`) offers **Import capture** and **Watch live** tabs.
+Import capture contains Upload & Analyze PCAP and Existing PCAP Files; Watch live
+contains duration, Start watch, watch status, Stop watch and pagination. An active
+watch or unavailable watch status remains indicated when viewing Import capture.
+Abnormal stops (including restart, budget and policy change) also show their
+cause there, with an **Inspect watch** link that opens and focuses the affected
+watch. Ordinary operator and deadline stops remain in watch history without an
+extra warning.
+Switching tabs does not start, stop or discard a collection.
+The selected collection tab is underlined as well as highlighted.
+
+The learner steps are explicit: **1 Collect → 2 Generate → 3 Review → 4 Stage**.
+Steps explain action prerequisites. Once a dataset is open, all step navigation
+remains available, including for viewers and expired evidence; only the actions
+are permission- and eligibility-gated. Opening a step only navigates to its
+controls: it does not generate, approve, select or stage anything. Expired datasets
+cannot generate new suggestions; collect new evidence instead.
+
+The selected Dataset review stays above the retained Evidence datasets list.
+Collection details retains its full ID, checksums and reader/configuration
+versions. Review leads with service descriptions, proposed rule scopes and
+**Checks passed**, **Needs review** or **Not eligible**; these are bounded checks,
+not proof that traffic is safe. Checks on saved evidence retains replay and
+boundary results, limitations, raw versions, digests and counterexamples.
+Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
+visible. Import statistics and content identifications remain available below.
+Missing, invalid or zero-value evidence timestamps display **Unknown**; this
+does not change expiration checks or staging eligibility.
+**Inspect service authority** and its pagination remain available during staging;
+reading authority does not unlock mutation controls or dismiss a staging failure.
+
+**Stage N selected** stays separate from approval and selection. IEC 104 review,
+address/NAT approval where required, the 128-suggestion/128-rule cap, destination
+diff review and atomic monitor-only staging remain required. A failed or
+uncertain staging attempt retains its receipt when retry is permitted:
+**Retry same staging request** sends the identical request. **Discard receipt**
+does not undo any rules already saved. Staged rules are not activated until
+Configuration review and commit. Store-wide counts and saved evidence limits
+remain in their disclosures; they are not per-dataset completeness guarantees.
+
 ## Account and credential audit records
 
 Account and credential changes attempt to persist an audit record with their actor
@@ -204,6 +246,33 @@ context: narrow by session and use a sufficiently large page. Retrieve and
 preserve evidence off-box before eviction or restart; the built-in cache and best-effort syslog forwarding cannot promise a complete, durable
 session history.
 
+
+## Triage in the web UI
+
+The dashboard leads with attention items and the next setup task. The First-Run
+Checklist collapses once all four tasks are complete, and you can reopen it.
+Traffic and System Health stay visible; Dashboard details holds Network Pulse,
+Zone Status, Service Health and Event Stream. Open Monitoring for live
+investigation. Tools holds SIM and CLI Console. Simulation controls act
+immediately, not on commit, and an active simulation stays indicated while Tools
+is closed.
+
+Events keeps timestamps, endpoints, activity and protection evidence visible.
+Advanced event filters holds exact IDs, protocol, decision, outcome, time and
+cursor bounds, and opens when a deep link fills them. Inspect event keeps
+Message and session details, Event attributes (JSON), and the Event ID lookup
+with Download event JSON. Retention warnings and failure causes always show.
+
+The Alerts Protection outcome separates detection from would-block, deny
+decisions, reported packet drops and reset failures. A deny decision alone does
+not prove that a packet was dropped. Select a message with the pointer or
+keyboard to open its full protocol, packet and reference detail; Close returns
+to that message.
+
+Flows are observed conversations; Sessions lists kernel connections. Inspect
+flow shows exact IDs, Tags and First Seen. Inspect connection shows Mark, Tags,
+Assured, TTL and Reply tuple (NAT). Session Kill stays immediate and keeps its
+exact-connection or client-service scope, revocation interval and confirmation.
 
 ## Search a session before applying the page limit
 

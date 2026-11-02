@@ -20,10 +20,11 @@ import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { chipClass, InterfaceRow } from "./interface-row";
+import { NetworkSetup } from "./network-setup";
 import { BootFaultStatus } from "./boot-fault-notice";
 import type { ManagementReservation } from "../../lib/api-console";
 import { runtimeFor } from "../../lib/interface-addresses";
-import { zoneLabel } from "../../lib/zones";
+import { zoneLabel, zoneName } from "../../lib/zones";
 
 export default function InterfacesPage() {
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
@@ -87,13 +88,13 @@ export default function InterfacesPage() {
     const [iSnapshot, zSnapshot, s, r] = await Promise.all([api.listInterfaces(), api.listZones(), api.listInterfaceState(), api.getManagementReservation()]);
     const i = iSnapshot?.data ?? null;
     const z = zSnapshot?.data ?? null;
-    if (!checkLoaded(i)) return;
-    refreshForm({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
     setReservation(r);
-    adoptRows({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
-    setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
+    if (!checkLoaded(i)) return;
+    refreshForm({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
+    adoptRows({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
+    setZones(z ?? []);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
@@ -271,6 +272,10 @@ export default function InterfacesPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      <NetworkSetup current="/interfaces/">
+        Logical interfaces: {rowsDraft.editor.baseRevision ? ifaces.length : "Unknown"} · Live devices: {runtimeStatus === "ready" ? state.filter(device => device.name !== "lo").length : "Unknown"}
+      </NetworkSetup>
+      <p className="mb-4 text-xs text-(--text-muted)">Auto-assign and interface edits stage candidate settings. Reconcile live is immediate and replaces live static addresses with running settings.</p>
       {reservation?.active && (
         <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">
           <p className="font-semibold">Management access is reserved</p>
@@ -313,7 +318,6 @@ export default function InterfacesPage() {
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -341,7 +345,50 @@ export default function InterfacesPage() {
           </div>
         </div>
       )}
-      <Card padding="lg">
+      <div className="mt-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
+        <table className="w-full text-sm">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
+            <tr>
+              <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Alias</th>
+              <th className="px-4 py-3">Device</th>
+              <th className="px-4 py-3">Link</th>
+              <th className="px-4 py-3">Zone</th>
+              <th className="px-4 py-3">Addresses</th>
+              <th className="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ifaces.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-6">
+                  <EmptyState
+                    title="No interfaces configured"
+                    description="Create an interface below to bind a network port to a zone."
+                  />
+                </td>
+              </tr>
+            )}
+            {ifaces.map((i) => (
+              <InterfaceRow
+                draft={rowsDraft}
+                key={i.name}
+                iface={i}
+                runtime={runtimeFor(i, state)}
+                zones={zones}
+                allIfaces={ifaces}
+                osState={state}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+                canEdit={isAdmin() && canSave}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <fieldset disabled={!canSave} className="min-w-0">
+      <Card padding="lg" className="mt-6">
         <h2 className="text-sm font-semibold text-(--text)">Create interface</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-6">
           <input
@@ -458,64 +505,19 @@ export default function InterfacesPage() {
         </div>
       </Card>
 
-      <div className="mt-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card">
-        <table className="w-full text-sm">
-          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Alias</th>
-              <th className="px-4 py-3">Type</th>
-              <th className="px-4 py-3">Device</th>
-              <th className="px-4 py-3">Link</th>
-              <th className="px-4 py-3">Zone</th>
-              <th className="px-4 py-3">Mode</th>
-              <th className="px-4 py-3">Addresses</th>
-              <th className="px-4 py-3">Network</th>
-              <th className="px-4 py-3">Access</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ifaces.length === 0 && (
-              <tr>
-                <td colSpan={11} className="px-4 py-6">
-                  <EmptyState
-                    title="No interfaces configured"
-                    description="Create an interface above to bind a network port to a zone."
-                  />
-                </td>
-              </tr>
-            )}
-            {ifaces.map((i) => (
-              <InterfaceRow
-                draft={rowsDraft}
-                key={i.name}
-                iface={i}
-                runtime={runtimeFor(i, state)}
-                zones={zones}
-                allIfaces={ifaces}
-                osState={state}
-                onDelete={onDelete}
-                onUpdate={onUpdate}
-                canEdit={isAdmin()}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-
       {state.length > 0 && (
         <Card padding="lg" className="mt-6">
           <h2 className="text-sm font-semibold text-(--text)">Detected network devices</h2>
           <div className="mt-1 text-xs text-(--text-muted)">
             Live devices available to the appliance, with their current link state and addresses.
           </div>
-          <div className="mt-3 overflow-hidden rounded-xs border">
+          <div className="mt-3 overflow-x-auto rounded-xs border">
             <table className="w-full text-sm">
               <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Link</th>
+                  <th className="px-4 py-3">Logical interface / Zone</th>
                   <th className="px-4 py-3">MAC</th>
                   <th className="px-4 py-3">MTU</th>
                   <th className="px-4 py-3">Addrs</th>
@@ -532,6 +534,7 @@ export default function InterfacesPage() {
                       <td className="px-4 py-3">
                         <span className={chipClass(s.up)}>{s.up ? "up" : "down"}</span>
                       </td>
+                      <td className="px-4 py-3 text-(--text)">{ifaces.filter(iface => runtimeFor(iface, state)?.name === s.name).map(iface => `${iface.name} / ${iface.zone ? zoneName(zones, iface.zone) : "—"}`).join(", ") || "Unbound"}</td>
                       <td className="px-4 py-3 text-(--text)">{s.mac || "—"}</td>
                       <td className="px-4 py-3 text-(--text)">{s.mtu || "—"}</td>
                       <td className="px-4 py-3 text-(--text)">{(s.addrs ?? []).join(", ") || "—"}</td>

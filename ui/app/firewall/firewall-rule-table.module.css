@@ -1,0 +1,71 @@
+/* Keep the desktop table intact; stack the same rows and controls on phones. */
+@media (width < 40rem) {
+  .table,
+  .table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ruleRow {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ruleRow > td,
+  .ruleRow > th {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ruleRow > :first-child,
+  .ruleRow > :nth-child(2),
+  .ruleRow > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .ruleRow > [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .ruleRow > :nth-child(2) > :first-child {
+    max-width: none;
+  }
+
+  .ruleRow > :last-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: left;
+  }
+
+  .ruleRow > :last-child > div {
+    margin-bottom: 0;
+    justify-content: flex-start;
+  }
+
+  .ruleRow > :last-child::before {
+    flex-basis: 100%;
+  }
+
+  .table tbody > tr:not(.ruleRow):not([hidden]),
+  .table tbody > tr:not(.ruleRow) > td {
+    display: block;
+    min-width: 0;
+  }
+}

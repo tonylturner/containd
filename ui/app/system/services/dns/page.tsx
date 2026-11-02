@@ -17,6 +17,8 @@ import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { InfoTip } from "../../../../components/InfoTip";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 
 export default function DNSPage() {
@@ -105,7 +107,9 @@ export default function DNSPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["dns"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.running}
+        attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
+        updated={status?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -127,8 +131,85 @@ export default function DNSPage() {
         </Link>
       </div>
 
+      <Card>
+        <h2 className="text-lg font-semibold text-(--text)">Resolver</h2>
+        <p className="mt-1 text-sm text-(--text)">
+          Configure DNS resolution.
+        </p>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input
+              type="checkbox"
+              checked={cfg.enabled ?? false}
+              disabled={!canEdit || !canSave}
+              onChange={(e) =>
+                setCfg((c) => ({ ...c, enabled: e.target.checked }))
+              }
+              className="h-4 w-4"
+            />
+            Enable DNS resolver
+            <InfoTip label="Run DNS on the selected interfaces." />
+          </label>
+
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+              Upstream Servers (one per line)
+              <InfoTip label="Upstream DNS servers used for resolution." />
+            </label>
+            <textarea
+              rows={5}
+              value={upstreamText}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setText("upstreamServers", e.target.value)}
+              placeholder="1.1.1.1\n8.8.8.8"
+              className="mt-1 w-full input-industrial"
+            />
+          </div>
+
+          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3" open={(cfg.listenPort ?? 53) !== 53 || (cfg.cacheSizeMB ?? 0) !== 0}>
+            <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced options</span>{((cfg.listenPort ?? 53) !== 53 || (cfg.cacheSizeMB ?? 0) !== 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  Listen Port
+                  <InfoTip label="Local port for the DNS resolver (default 53)." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.listenPort ?? 53}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) =>
+                    setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full input-industrial"
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  Cache Size (MB)
+                  <InfoTip label="In-memory cache size for DNS responses." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.cacheSizeMB ?? 0}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) =>
+                    setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full input-industrial"
+                />
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
+      </Card>
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
@@ -156,17 +237,7 @@ export default function DNSPage() {
             <div>
               Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
-            <details className="md:col-span-2 rounded-xs border p-3">
-              <summary className="cursor-pointer text-sm">Service details</summary>
-              <p>Software: Unbound</p>
-              <p>Process ID: {status.pid ?? "Unknown"}</p>
-              <div className="md:col-span-2">
-                Generated settings file:{" "}
-                <span className="text-(--text)">
-                  {status?.config_path ?? "(unknown)"}
-                </span>
-              </div>
-            </details>
+
             {status?.last_error ? (
               <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
@@ -182,87 +253,22 @@ export default function DNSPage() {
                 />
               </div>
             ) : null}
+            <div className="md:col-span-2">
+              <h3 className="text-sm">Troubleshooting</h3>
+              <Disclosure title="Service details" indicator={status.pid === undefined || !status.config_path ? "Some details unknown" : undefined}>
+              <p>Software: Unbound</p>
+              <p>Process ID: {status.pid ?? "Unknown"}</p>
+              <div className="md:col-span-2">
+                Generated settings file:{" "}
+                <span className="text-(--text)">
+                  {status?.config_path ?? "(unknown)"}
+                </span>
+              </div>
+            </Disclosure>
+            </div>
           </div>
         )}
       </Card>
-
-      <Card>
-        <h2 className="text-lg font-semibold text-(--text)">Resolver</h2>
-        <p className="mt-1 text-sm text-(--text)">
-          Configure DNS resolution.
-        </p>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input
-              type="checkbox"
-              checked={cfg.enabled ?? false}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({ ...c, enabled: e.target.checked }))
-              }
-              className="h-4 w-4"
-            />
-            Enable DNS resolver
-            <InfoTip label="Run DNS on the selected interfaces." />
-          </label>
-
-          <div className="md:col-span-2">
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-              Upstream Servers (one per line)
-              <InfoTip label="Upstream DNS servers used for resolution." />
-            </label>
-            <textarea
-              rows={5}
-              value={upstreamText}
-              disabled={!canEdit}
-              onChange={(e) => setText("upstreamServers", e.target.value)}
-              placeholder="1.1.1.1\n8.8.8.8"
-              className="mt-1 w-full input-industrial"
-            />
-          </div>
-
-          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3">
-            <summary className="cursor-pointer text-sm text-(--text)">Advanced options</summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Listen Port
-                  <InfoTip label="Local port for the DNS resolver (default 53)." />
-                </label>
-                <input
-                  type="number"
-                  value={cfg.listenPort ?? 53}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
-                  }
-                  className="mt-1 w-full input-industrial"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Cache Size (MB)
-                  <InfoTip label="In-memory cache size for DNS responses." />
-                </label>
-                <input
-                  type="number"
-                  value={cfg.cacheSizeMB ?? 0}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
-                  }
-                  className="mt-1 w-full input-industrial"
-                />
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <SaveStateLine state={save.state} saved="staged — commit to apply." />
-      </Card>
-      </fieldset>
     </Shell>
   );
 }

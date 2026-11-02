@@ -12,6 +12,29 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+The Services overview groups the existing routes by **Connectivity**, **Access**,
+**Inspection** and **Logs**. DNS, NTP and proxy software identities are available
+under **Troubleshooting** / **Service details**, not in their primary summaries.
+Overview trend charts require at least two reported samples with some activity;
+empty, single-sample and all-zero series keep the reported rate and error text
+without an empty chart. Individual pages lead with a compact **Configured** /
+**Running** / **Attention** / **Updated time** strip, then settings, then
+**Activity**. Configured describes the candidate editor, not live protection;
+Running uses a separate runtime observation. DHCP and Syslog do not report a
+separate running flag, so their strip leaves Running **Unknown**. WireGuard
+link state and remote ICAP readiness are shown separately in Activity, not
+reinterpreted as a process-running flag. Updated time
+is the service's reported render/check time, not a guarantee of freshness.
+
+**Troubleshooting** contains the **Service details** button for process IDs,
+paths and software metadata. The button works with Enter or Space and leaves
+focus on the button when closed. Fault causes remain outside disclosures.
+Inspection stays available when the configuration read fails: editing and
+**Save** are disabled, not troubleshooting or live-status refresh.
+Antivirus keeps **Scanned traffic** beside its enable and fail-policy settings;
+definition updates and VPN credential revocations remain immediate operations,
+separate from staging settings with **Save**.
+
 Service panels show **Unknown** when live status is unavailable; missing readings
 are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
 to request a new observation. **Service details** keeps process IDs, generated
@@ -20,11 +43,24 @@ Antivirus **Scan-path details** retains listener counts and admission metadata;
 fault causes, the scanning outcome and fail policy remain visible. Syslog
 **Delivery details** and per-stream **Technical details** expose batching and exact
 stream positions.
+DHCP reports configuration-render counts, notes and errors inline in **Activity**,
+with issued addresses in **Active Leases**. Its status does not report process IDs,
+configuration-file or lease-file paths, so it has no separate troubleshooting
+expander.
+The antivirus status strip also summarizes the scan-path state and its traffic
+effect before settings. Syslog summarizes known telemetry loss, continuity gaps
+and audit forwarding failures/backlog there; per-stream totals are summed across
+destinations and sources, not unique lost records. Audit forwarding does not
+report a loss count, and missing progress remains **Unknown**. The collector
+acknowledgement caveat is a neutral note, not itself a delivery fault.
 **Advanced local scanner settings** and **Advanced remote scanner settings**
 retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
 peer JSON and profile import under **Advanced peer settings** and
 **Advanced profile import**; opening a disclosure does not change saved settings.
-Saved peers and customized scanner settings open automatically. Remote scanner
+Saved peers and customized scanner settings open automatically. DNS and proxy
+advanced options open for non-default values. DHCP keeps listen interfaces,
+gateway and pools beside enablement; its advanced options open for saved
+non-default lease, DNS, domain or reservation settings. Remote scanner
 settings also open whenever ICAP mode requires them. **Advanced profile path**
 opens for a saved OpenVPN path or when an enabled path-based client needs one.
 
@@ -450,9 +486,10 @@ ClamAV mode:
   `clamav.socketPath` (default `/run/clamav/clamd.sock`, which the images
   prepare) and loads every database in `/var/lib/clamav`. clamd restarts only
   when that rendered configuration changes.
-- clamd needs at least one signature database before it starts. With
-  `freshclamEnabled`, FreshClam runs once when enabled and then every
-  `updateSchedule` (a positive Go duration such as `4h`; default `6h`).
+- clamd needs at least one signature database before it starts. Automatic
+  updates are off unless `clamav.freshclamEnabled` is true. When enabled,
+  FreshClam runs once and then every `updateSchedule` (a positive Go duration
+  such as `4h`; default `6h`).
   While AV is enabled, staging rejects any other value, including cron syntax.
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.

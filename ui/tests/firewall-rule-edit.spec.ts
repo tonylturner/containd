@@ -52,6 +52,7 @@ async function openFirewall(page: Page, rules: unknown[], dataplane: Record<stri
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/firewall/");
   await loaded;
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
   return seen;
 }
 
@@ -310,15 +311,18 @@ test("the rule list tells deciding actions from effects and states precedence", 
     { id: "pps-cap", action: "RATE_LIMIT", rateLimit: { packetsPerSecond: 100, burst: 20 } },
     { id: "label-eng", action: "TAG", tag: "eng-access", identities: ["engineering", "vendor"] },
   ]);
+  await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
   await expect(page.getByText(/Among enforcing rules, the first matching rule that allows or blocks traffic decides/)).toBeVisible();
   await expect(page.getByText(/Monitor ICS rules never decide/)).toBeVisible();
-  const row = (id: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
+  const row = (id: string) => page.getByRole("row").filter({ has: page.getByText(id, { exact: true }) });
   await expect(row("reset-ssh").getByText("RESET", { exact: true })).toHaveClass(/badge-critical/);
   await expect(row("reset-ssh").getByText("effect", { exact: true })).toHaveCount(0);
   await expect(row("pps-cap").getByText("RATE_LIMIT", { exact: true })).toHaveClass(/badge-warning/);
   await expect(row("pps-cap")).toContainText("effect");
   await expect(row("pps-cap")).toContainText("100 pps, burst 20");
   await expect(row("label-eng")).toContainText("eng-access");
-  await expect(row("label-eng")).toContainText("identity engineering, vendor");
-  await expect(row("plc-write")).toContainText("schedule Mon,Fri 08:00-17:00 Europe/Berlin");
+  await page.getByRole("button", { name: "Inspect rule label-eng", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect rule plc-write", exact: true }).click();
+  await expect(page.getByLabel("Details of label-eng", { exact: true })).toContainText("identity engineering, vendor");
+  await expect(page.getByLabel("Details of plc-write", { exact: true })).toContainText("schedule Mon,Fri 08:00-17:00 Europe/Berlin");
 });

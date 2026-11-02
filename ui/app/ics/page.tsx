@@ -31,19 +31,17 @@ import { EditICSModal } from "./ics-edit-modal";
 import { RulePrecedenceNote } from "../firewall/firewall-rule-table";
 import {
   formatICSMode,
-  summarizeGenericICS,
   PROTOCOL_KEYS,
   PROTOCOLS,
   isSupportedICSProtocol,
   protoMeta,
 } from "./ics-shared";
-import { summarizeIEC104 } from "./iec104";
-import { IEC104HealthIndicator } from "./iec104-health";
+import { ICSRuleDetails } from "./ics-rule-details";
 import { useHealth } from "../../hooks/useHealth";
 import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
-import { InstalledRulesetUnavailable, RulesetFaults } from "../firewall/firewall-ruleset-status";
-import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
-import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
+import { ICSCoverageCell } from "./ics-coverage";
+import { Disclosure } from "../../components/Disclosure";
+import { ICSInspectionStatus } from "./ics-inspection-status";
 import { ShadowCountersCell, ShadowCountersNote, useShadowCounters } from "./ics-shadow-counters";
 import { useICSCoverage } from "./use-ics-coverage";
 
@@ -139,97 +137,33 @@ export default function ICSPolicyPage() {
         </div>
       )}
 
-      {/* -- DPI status --------------------------------------------------- */}
-      <Card title="Candidate DPI Settings" className="mb-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-(--text)">
-            Industrial protocol filters need traffic inspection enabled. Blocking also requires
-            inline inspection of routed traffic and needs no capture interface; capture interfaces only observe.
-          </div>
-          <StatusBadge variant={canSave && dpiConfig.dpiEnabled ? "success" : "neutral"} dot>
-            {!canSave ? "DPI status unknown" : dpiConfig.dpiEnabled ? "DPI Enabled" : "DPI Disabled"}
-          </StatusBadge>
-        </div>
-        <div className="mt-2 text-xs text-(--text-muted)">
-          {!canSave ? "Inline inspection status unknown" : queueGroup > 0
-            ? "Inline inspection configured"
-            : "Monitor only \u2014 inline inspection is not configured"}
-        </div>
-        {canSave && <details
-          open={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0}
-          className="mt-2 text-xs text-(--text-muted)"
-        >
-          <summary className="cursor-pointer">Technical details</summary>
-          <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
-          {(dpiConfig.captureInterfaces ?? []).length > 0 && (
-            <div>
-              Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
-            </div>
-          )}
-        </details>}
-        <div className="mt-3 space-y-2">
-          <EnforcementHealthIndicator health={health?.enforcement} />
-          <ICSEnforcementIndicator health={health?.icsEnforcement} />
-          <IEC104HealthIndicator health={health?.iec104Enforcement} />
-          {installed.state === "loaded" && <RulesetFaults status={installed.status} />}
-          <InstalledRulesetUnavailable view={installed} />
-        </div>
-        <div className="mt-2">
-          <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
-            Configure DPI in Firewall Rules &rarr;
-          </Link>
-        </div>
-      </Card>
+      <ICSInspectionStatus coverage={coverage.view} health={health} installed={installed} />
 
-      {/* -- Protocol summary cards -------------------------------------- */}
-      <div className="mb-4 grid gap-4 md:grid-cols-3">
-        <Card title="Supported Protocols">
-          <div className="flex flex-wrap gap-2">
-            {PROTOCOL_KEYS.map((k) => (
-              <StatusBadge key={k} variant="neutral">
-                {PROTOCOLS[k].label}
-              </StatusBadge>
+      <section aria-label="Candidate Filters" className="mb-3 text-xs text-(--text-muted)">
+        <h2 className="font-medium">Candidate Filters</h2>
+        {Object.keys(protoCounts).length === 0 ? (
+          <div className="text-xs text-(--text-muted)">
+            No ICS filters configured yet.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {Object.entries(protoCounts).map(([p, n]) => (
+              <div
+                key={p}
+                className="flex items-center gap-2 text-xs text-(--text)"
+              >
+                <span className="flex items-center gap-2">
+                  {protoMeta(p).label}
+                  {!isSupportedICSProtocol(p) && (
+                    <StatusBadge variant="warning">unsupported</StatusBadge>
+                  )}
+                </span>
+                <StatusBadge variant="neutral">{n}</StatusBadge>
+              </div>
             ))}
           </div>
-        </Card>
-        <Card title="Quick Start">
-          <ol className="space-y-1 text-xs text-(--text-muted)">
-            <li>1. Create a firewall rule matching your PLC/RTU zone.</li>
-            <li>2. Select the protocol and define criteria here.</li>
-            <li>3. Optionally monitor matches, or select Enforce directly.</li>
-          </ol>
-          <Link
-            href="/firewall/"
-            className="mt-3 inline-block text-xs text-(--amber) hover:text-(--amber)"
-          >
-            Go to Firewall Rules &rarr;
-          </Link>
-        </Card>
-        <Card title="Candidate Filters">
-          {Object.keys(protoCounts).length === 0 ? (
-            <div className="text-xs text-(--text-muted)">
-              No ICS filters configured yet.
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {Object.entries(protoCounts).map(([p, n]) => (
-                <div
-                  key={p}
-                  className="flex items-center justify-between text-sm text-(--text)"
-                >
-                  <span className="flex items-center gap-2">
-                    {protoMeta(p).label}
-                    {!isSupportedICSProtocol(p) && (
-                      <StatusBadge variant="warning">unsupported</StatusBadge>
-                    )}
-                  </span>
-                  <StatusBadge variant="neutral">{n}</StatusBadge>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
+        )}
+      </section>
 
       {/* -- Protocol filter tabs ---------------------------------------- */}
       <div className="mb-3 flex gap-2 overflow-x-auto">
@@ -252,7 +186,6 @@ export default function ICSPolicyPage() {
       </div>
 
       {/* -- Rules table ------------------------------------------------- */}
-      {Object.keys(protoCounts).length > 0 && <ICSCoverageNotice view={coverage.view} />}
       <RulePrecedenceNote />
       <ShadowCountersNote counters={shadow.counters} />
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
@@ -262,17 +195,6 @@ export default function ICSPolicyPage() {
               <th className="px-4 py-3">Rule</th>
               <th className="px-4 py-3">Zones</th>
               <th className="px-4 py-3">Protocol</th>
-              <th className="px-4 py-3">
-                {filterProto !== "all"
-                  ? protoMeta(filterProto).fcLabel
-                  : "Codes"}
-              </th>
-              <th className="px-4 py-3">
-                {filterProto !== "all"
-                  ? protoMeta(filterProto).addrLabel
-                  : "Addresses"}
-              </th>
-              <th className="px-4 py-3">R/W</th>
               <th className="px-4 py-3">Mode</th>
               <th className="px-4 py-3">Coverage</th>
               <th className="px-4 py-3">Shadow matches</th>
@@ -282,7 +204,7 @@ export default function ICSPolicyPage() {
           <tbody>
             {icsRules.length === 0 && (
               <tr>
-                <td className="px-4 py-8" colSpan={10}>
+                <td className="px-4 py-8" colSpan={7}>
                   <EmptyState
                     title={`No ICS filters${filterProto !== "all" ? ` for ${protoMeta(filterProto).label}` : ""} configured`}
                     description="Create firewall rules with ICS protocol filters to monitor and control industrial traffic."
@@ -300,8 +222,9 @@ export default function ICSPolicyPage() {
             )}
             {icsRules.map((r) => (
               <tr key={r.id} className="border-t table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-(--text)">
+                <td aria-label={r.id} className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.id}
+                  {r.ics && <ICSRuleDetails ics={r.ics} filterProto={filterProto} />}
                 </td>
                 <td className="px-4 py-3 text-(--text)">
                   {(r.sourceZones ?? []).join(", ") || "any"} &rarr;{" "}
@@ -317,30 +240,16 @@ export default function ICSPolicyPage() {
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                  {r.ics?.protocol === "iec104"
-                    ? summarizeIEC104(r.ics).types
-                    : r.ics ? summarizeGenericICS(r.ics) : "*"}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                  {r.ics?.protocol === "iec104"
-                    ? summarizeIEC104(r.ics).addresses
-                    : (r.ics?.addresses ?? []).join(", ") || "*"}
-                </td>
-                <td className="px-4 py-3 text-xs text-(--text)">
-                  {r.ics?.readOnly
-                    ? "R"
-                    : r.ics?.writeOnly
-                      ? "W"
-                      : "R/W"}
-                </td>
                 <td className="px-4 py-3 text-(--text)">
                   <StatusBadge variant="neutral">
                     {formatICSMode(r.ics?.mode, dpiConfig.dpiMode).label}
                   </StatusBadge>
+                  {formatICSMode(r.ics?.mode, dpiConfig.dpiMode).effectiveMode === "monitor" && (
+                    <p className="mt-1 text-xs text-(--text-muted)">Observation only</p>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-(--text)">
-                  <ICSCoverageCell view={coverage.view} ruleId={r.id} />
+                  <ICSCoverageCell view={coverage.view} ruleId={r.id} compact />
                 </td>
                 <td className="px-4 py-3"><ShadowCountersCell rule={r} globalMode={dpiConfig.dpiMode} counters={shadow.counters} /></td>
                 <td className="px-4 py-3 text-right">
@@ -367,6 +276,69 @@ export default function ICSPolicyPage() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* -- Candidate settings, separate from active inspection ---------- */}
+      <Card title="Candidate DPI Settings" className="my-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm text-(--text)">
+            Industrial protocol filters need traffic inspection enabled. Blocking also requires
+            inline inspection of routed traffic and needs no capture interface; capture interfaces only observe.
+          </div>
+          <StatusBadge variant={canSave && dpiConfig.dpiEnabled ? "success" : "neutral"} dot>
+            {!canSave ? "DPI status unknown" : dpiConfig.dpiEnabled ? "DPI Enabled" : "DPI Disabled"}
+          </StatusBadge>
+        </div>
+        <div className="mt-2 text-xs text-(--text-muted)">
+          {!canSave ? "Inline inspection status unknown" : queueGroup > 0
+            ? "Inline inspection configured"
+            : "Monitor only \u2014 inline inspection is not configured"}
+        </div>
+        {canSave && <div className="mt-2">
+          <Disclosure title="Technical details"
+            defaultOpen={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0}
+            indicator={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0 ? "Inline queue or capture interfaces configured" : undefined}>
+            <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
+            {(dpiConfig.captureInterfaces ?? []).length > 0 && (
+              <div>
+                Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
+              </div>
+            )}
+          </Disclosure>
+        </div>}
+        <div className="mt-2">
+          <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
+            Configure DPI in Firewall Rules &rarr;
+          </Link>
+        </div>
+      </Card>
+
+      <div className="mt-4 rounded-xs border bg-(--surface) p-4">
+        <Disclosure title="Inspection setup" defaultOpen={canSave && Object.keys(protoCounts).length === 0}>
+          <section aria-label="Supported Protocols"><h2 className="mb-2 text-sm font-medium text-(--text)">Supported Protocols</h2>
+            <div className="flex flex-wrap gap-2">
+              {PROTOCOL_KEYS.map((k) => (
+                <StatusBadge key={k} variant="neutral">
+                  {PROTOCOLS[k].label}
+                </StatusBadge>
+              ))}
+            </div>
+          </section>
+          <section aria-label="Quick Start"><h2 className="mb-2 text-sm font-medium text-(--text)">Quick Start</h2>
+            <ol className="space-y-1 text-xs text-(--text-muted)">
+              <li>1. Create a firewall rule matching your PLC/RTU zone.</li>
+              <li>2. Select the protocol and define criteria here.</li>
+              <li>3. Optionally monitor matches, or select Enforce directly.</li>
+            </ol>
+            <Link
+              href="/firewall/"
+              className="mt-3 inline-block text-xs text-(--amber) hover:text-(--amber)"
+            >
+              Go to Firewall Rules &rarr;
+            </Link>
+          </section>
+
+        </Disclosure>
       </div>
 
       {editing && canEdit && (

@@ -2,7 +2,8 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   api,
   SystemStats,
@@ -42,6 +43,7 @@ interface SecurityFlag {
   title: string;
   summary: string;
   desc: string;
+  reference?: string;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -84,14 +86,10 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
 
   // CRIT flags
   if (insp.container.privileged) {
-    flags.push({ level: "crit", title: "Running --privileged", summary: "Container has broad host access", desc: "Full host capability access. Required for packet filtering but increases blast radius if compromised." });
+    flags.push({ level: "crit", title: "Running --privileged", summary: "Container has broad host access", desc: "Privileged mode is reported by deployment inspection. Review deployment requirements before changing privileges." });
   }
   if (insp.security.dockerSocketMounted) {
     flags.push({ level: "crit", title: "Docker socket mounted", summary: "Container can control the host runtime", desc: "/var/run/docker.sock is accessible. Container can control host Docker daemon." });
-  }
-  const authEnv = insp.container.envVars.find((e) => e.key === "CONTAIND_AUTH");
-  if (authEnv?.value === "relaxed") {
-    flags.push({ level: "crit", title: "CONTAIND_AUTH=relaxed", summary: "Relaxed authentication setting detected", desc: "Authentication is in relaxed mode. All API calls bypass credential checks." });
   }
   if (insp.container.seccompProfile === "unconfined") {
     flags.push({ level: "crit", title: "Seccomp unconfined", summary: "System-call restrictions are off", desc: "No syscall filtering. Container has unrestricted kernel surface." });
@@ -105,11 +103,11 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
     flags.push({ level: "warn", title: "CPU quota unlimited", summary: "No CPU limit", desc: "No CPU cgroup limit set. Container can saturate all cores." });
   }
   if (insp.container.networkMode === "host") {
-    flags.push({ level: "warn", title: "Host network namespace", summary: "Host network is shared", desc: "--net=host expected for a firewall, but container sees all host interfaces." });
+    flags.push({ level: "warn", title: "Host network namespace", summary: "Host network is shared", desc: "The container shares the host's interfaces and loopback. Loopback listeners are host-wide, not container-private.", reference: "/docs/threat-model/#management-plane-to-dataplane" });
   }
   const configMount = insp.container.mounts.find((m) => m.containerPath.includes("/config"));
   if (configMount?.mode?.toLowerCase().includes("rw")) {
-    flags.push({ level: "warn", title: "Config volume is writable", summary: "Configuration storage is writable", desc: `${configMount.containerPath} mounted RW. Consider RO + config reload via signal.` });
+    flags.push({ level: "warn", title: "Config volume is writable", summary: "Configuration storage is writable", desc: `${configMount.containerPath} mounted RW. Review write requirements before changing mount mode.` });
   }
   if (insp.container.restartCount > 0) {
     flags.push({ level: "warn", title: `${insp.container.restartCount} container restart(s)`, summary: "Container restarts recorded", desc: "Container has restarted since host boot. Check logs for crash cause." });
@@ -142,7 +140,7 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
 
   // OK flags
   if (!insp.security.dockerSocketMounted) {
-    flags.push({ level: "ok", title: "Docker socket not mounted", summary: "Host runtime control socket is not mounted", desc: "No /var/run/docker.sock bind mount. Container cannot escape to host Docker daemon." });
+    flags.push({ level: "ok", title: "Docker socket not mounted", summary: "Host runtime control socket is not mounted", desc: "No /var/run/docker.sock mount reported. This does not establish container isolation." });
   }
   const certsMount = insp.container.mounts.find((m) => m.containerPath.includes("/certs"));
   if (certsMount?.mode?.toLowerCase().includes("ro")) {
@@ -192,6 +190,7 @@ function ResBar({ name, val, pct, color }: { name: string; val: string; pct: num
 export default function PhysicalView() {
   const [snapshot, setData] = useState<Omit<PhysicalData, "health"> | null>(null);
   const health = useHealth();
+  const layerButton = useRef<HTMLButtonElement | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -312,7 +311,7 @@ export default function PhysicalView() {
   const goVersion = insp?.process.goVersion || "\u2014";
   const buildVersion = data.health?.build || "\u2014";
 
-  const selectLayer = (id: LayerId) => { setSelectedLayer(id); setPanelOpen(true); };
+  const selectLayer = (id: LayerId, button: HTMLButtonElement) => { layerButton.current = button; setSelectedLayer(id); setPanelOpen(true); };
   const zoomIn = () => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(1)));
   const zoomOut = () => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)));
   const zoomReset = () => setZoom(1);
@@ -328,486 +327,393 @@ export default function PhysicalView() {
   const critCount = flags.filter((f) => f.level === "crit").length;
   const warnCount = flags.filter((f) => f.level === "warn").length;
 
-  return (
-    <div className={ts.workspace} style={{ gridTemplateColumns: panelOpen ? "1fr 300px" : "1fr" }}>
-      <div className={s.stackView}>
-        <div style={{ transform: `scale(${zoom})`, transformOrigin: "top center", transition: "transform .15s" }}>
-
-        {/* ── LAYER 1: HOST ── */}
-        <div className={layerCls("host")} onClick={() => selectLayer("host")}>
-          <div className={s.layerConnector}>
-            <div className={s.layerNode}>H</div>
-            <div className={s.layerWire} />
-          </div>
-          <div className={s.layerCard}>
-            <div className={s.layerHeader}>
-              <div className={s.layerTitleGroup}>
-                <span className={s.layerTitle}>HOST MACHINE</span>
-                <span className={s.layerSubtitle}>{hostOS} &middot; {hostKernel} &middot; {hostArch}</span>
-              </div>
-              <div className={s.layerBadges}>
-                <span className={`${s.badge} ${s.badgeInfo}`}>{hostArch}</span>
-                <span className={`${s.badge} ${s.badgeOk}`}>ONLINE</span>
-              </div>
-            </div>
-            <div className={s.layerBody}>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>System</div>
-                <KVc k="OS" v={hostOS} />
-                <KVc k="Kernel" v={hostKernel} color="#06b6d4" />
-                <KVc k="Architecture" v={hostArch} />
-                <KVc k="Host uptime" v={hostUptime} color="#22c55e" />
-              </div>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Resources</div>
-                <ResBar name="CPU" val={`${numCPU} vCPU \u00b7 ${cpuPct.toFixed(0)}%`} pct={cpuPct} color={cpuPct > 80 ? "#ef4444" : cpuPct > 50 ? "#f59e0b" : "#22c55e"} />
-                <ResBar name="RAM" val={`${fmtBytes(memTotal)} total \u00b7 ${fmtBytes(memUsed)} used`} pct={memPct} color="#06b6d4" />
-                <ResBar name="DISK" val={`${fmtBytes(diskTotal)} \u00b7 ${fmtBytes(diskUsed)} used`} pct={diskPct} color={diskPct > 80 ? "#ef4444" : "#f59e0b"} />
-              </div>
-              <div className={s.layerSectionFull}>
-                <div className={s.layerSectionLabel}>Host Interfaces</div>
-                <div className={s.ifacePills}>
-                  {data.ifaceState.map((ifc) => (
-                    <div key={ifc.name} className={s.ifacePill}>
-                      <span className={s.ifacePillName}>{ifc.name}</span>
-                      <span className={s.ifacePillIp}>{ifc.addrs?.[0] || "\u2014"}</span>
-                      <span className={s.ifacePillType}>{ifc.up ? "up" : "down"} &middot; mtu {ifc.mtu}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* gap */}
-        <div className={s.layerGap}>
-          <div className={s.arrowCol}>
-            <div className={s.arrowLine} style={{ background: "linear-gradient(#164e63, #3b0764)" }} />
-          </div>
-          <div className={s.arrowLabelCol}>
-            <span className={s.arrowChip}>--net={networkMode}</span>
-            {networkMode === "host" && <span style={{ color: "#f59e0b", fontSize: 8 }}>host network namespace shared</span>}
-          </div>
-        </div>
-
-        {/* ── LAYER 2: CONTAINER RUNTIME ── */}
-        <div className={layerCls("runtime")} onClick={() => selectLayer("runtime")}>
-          <div className={s.layerConnector}>
-            <div className={s.layerNode}>R</div>
-            <div className={s.layerWire} />
-          </div>
-          <div className={s.layerCard}>
-            <div className={s.layerHeader}>
-              <div className={s.layerTitleGroup}>
-                <span className={s.layerTitle}>CONTAINER RUNTIME</span>
-                <span className={s.layerSubtitle}>Docker {dockerVer} &middot; containerd {containerdVer}</span>
-              </div>
-              <div className={s.layerBadges}>
-                <span className={`${s.badge} ${s.badgeOk}`}>ENGINE UP</span>
-                {memLimit === 0 && <span className={`${s.badge} ${s.badgeWarn}`}>NO MEM LIMIT</span>}
-              </div>
-            </div>
-            <details>
-              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Container runtime details</summary>
-              <div className={s.layerBody}>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Engine</div>
-                <KVc k="Docker version" v={dockerVer} color="#a855f7" />
-                <KVc k="containerd" v={containerdVer} />
-                <KVc k="Cgroup driver" v={cgroupDriver} color="#06b6d4" />
-                <KVc k="Storage driver" v={storageDriver} />
-                <KVc k="Docker socket" v={dockerSock ? "MOUNTED" : "NOT mounted"} color={dockerSock ? "#ef4444" : "#22c55e"} />
-              </div>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>cgroup Limits</div>
-                <div className={s.resRow}>
-                  <div className={s.resHeader}>
-                    <span className={s.resName}>CPU quota</span>
-                    <span className={s.resVal} style={{ color: cpuQuota === "max" || cpuQuota === "unlimited" ? "#f59e0b" : "#22c55e" }}>{cpuQuota}</span>
-                  </div>
-                  <p className="text-xs text-(--text-muted)">Configured limit, not CPU usage</p>
-                </div>
-                <div className={s.resRow}>
-                  <div className={s.resHeader}>
-                    <span className={s.resName}>Memory limit</span>
-                    <span className={s.resVal} style={{ color: memLimit > 0 ? "#22c55e" : "#ef4444" }}>{memLimit > 0 ? fmtBytes(memLimit) : "NOT SET"}</span>
-                  </div>
-                  {memLimit > 0 ? (
-                    <div className={s.resBarWrap}><div className={s.resBar} style={{ width: `${st?.container.memPercent ?? 0}%`, background: "#22c55e" }} /></div>
-                  ) : (
-                    <div className={s.resBarDashed}><div className={s.resBar} style={{ width: "100%", background: "rgba(239,68,68,0.12)" }} /></div>
-                  )}
-                </div>
-                <div className={s.resRow}>
-                  <div className={s.resHeader}>
-                    <span className={s.resName}>PIDs limit</span>
-                    <span className={s.resVal} style={{ color: pidsLimit !== "max" && pidsLimit !== "\u2014" ? "#22c55e" : "#f59e0b" }}>{pidsLimit}</span>
-                  </div>
-                  <div className={s.resBarWrap}><div className={s.resBar} style={{ width: pidsLimit !== "max" && pidsLimit !== "\u2014" ? "8%" : "100%", background: pidsLimit !== "max" ? "#22c55e" : "rgba(245,158,11,0.15)" }} /></div>
-                </div>
-              </div>
-            </div>
-            </details>
-          </div>
-        </div>
-
-        {/* gap */}
-        <div className={s.layerGap}>
-          <div className={s.arrowCol}>
-            <div className={s.arrowLine} style={{ background: "linear-gradient(#3b0764, #7c2d12)" }} />
-          </div>
-          <div className={s.arrowLabelCol}>
-            <span className={s.arrowChip}>docker run</span>
-            <span style={{ color: "var(--text-dim)", fontSize: 8 }}>image: {containerImage} &middot; restart: {restartPolicy}</span>
-          </div>
-        </div>
-
-        {/* ── LAYER 3: CONTAINER ── */}
-        <div className={layerCls("container")} onClick={() => selectLayer("container")}>
-          <div className={s.layerConnector}>
-            <div className={s.layerNode}>C</div>
-            <div className={s.layerWire} />
-          </div>
-          <div className={s.layerCard}>
-            <div className={s.layerHeader}>
-              <div className={s.layerTitleGroup}>
-                <span className={s.layerTitle}>CONTAINER</span>
-                <span className={s.layerSubtitle}>{containerId} &middot; {containerImage}</span>
-              </div>
-              <div className={s.layerBadges}>
-                {privileged && <span className={`${s.badge} ${s.badgeOrange}`}>PRIVILEGED</span>}
-                <span className={`${s.badge} ${s.badgeOk}`}>RUNNING</span>
-                {hasLabEnv(envVars) && <span className={`${s.badge} ${s.badgeWarn}`}>LAB MODE</span>}
-              </div>
-            </div>
-            <details>
-              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Container deployment details</summary>
-              <div className={s.layerBody}>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Identity</div>
-                <KVc k="Container ID" v={containerId} color="#f97316" />
-                <KVc k="Image" v={containerImage} />
-                <KVc k="Restart policy" v={restartPolicy} color="#06b6d4" />
-                <KVc k="Container uptime" v={containerUptime} color="#22c55e" />
-                <KVc k="Restart count" v={restartCount > 0 ? `${restartCount}` : "0"} color={restartCount > 0 ? "#f59e0b" : "#22c55e"} />
-              </div>
-
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Uptime vs Host</div>
-                <div className={s.uptimeCompare}>
-                  <div className={s.uptimeBarLabel}><span>HOST</span><span>{hostUptime}</span></div>
-                  <div className={s.uptimeTrack}>
-                    <div className={s.uptimeFill} style={{ width: "100%", background: "rgba(6,182,212,0.3)", flex: 1 }} />
-                  </div>
-                </div>
-                <div className={s.uptimeCompare} style={{ marginTop: 4 }}>
-                  <div className={s.uptimeBarLabel}><span>CONTAINER</span><span>{containerUptime}</span></div>
-                  <div className={s.uptimeTrack}>
-                    <div className={s.uptimeFill} style={{ width: `${uptimeRatio}%`, background: "rgba(249,115,22,0.5)" }} />
-                    {restartCount > 0 && (
-                      <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "#f59e0b" }}>{restartCount} restart(s) since host boot</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {capabilities.length > 0 && (
-                <div className={s.layerSectionFull}>
-                  <div className={s.layerSectionLabel}>Linux Capabilities</div>
-                  <div className={s.capsGrid}>
-                    {capabilities.map((cap) => (
-                      <span key={cap} className={`${s.capTag} ${DANGER_CAPS.has(cap) ? s.capDanger : WARN_CAPS.has(cap) ? s.capWarn : s.capNormal}`}>{cap.replace("CAP_", "")}</span>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)" }}>
-                    {privileged && <><span style={{ color: "#f97316" }}>--privileged</span> &middot; </>}
-                    seccomp: <span style={{ color: insp?.container.seccompProfile === "unconfined" ? "#f59e0b" : "#22c55e" }}>{insp?.container.seccompProfile || "\u2014"}</span>
-                    {" "}&middot; AppArmor: <span style={{ color: insp?.container.apparmorProfile === "unconfined" ? "#f59e0b" : "#22c55e" }}>{insp?.container.apparmorProfile || "\u2014"}</span>
-                  </div>
-                </div>
-              )}
-
-              {mounts.length > 0 && (
-                <div className={s.layerSectionFull}>
-                  <div className={s.layerSectionLabel}>Volume Mounts</div>
-                  <table className={s.mountTable}>
-                    <thead><tr><th>Host path</th><th>Container path</th><th style={{ textAlign: "right" }}>Mode</th></tr></thead>
-                    <tbody>
-                      {mounts.map((m, i) => (
-                        <tr key={i}>
-                          <td>{m.hostPath}</td>
-                          <td>{m.containerPath}</td>
-                          <td style={{ textAlign: "right" }}>
-                            <span className={m.mode.toLowerCase().includes("ro") ? s.mountRo : s.mountRw}>{m.mode.toUpperCase()}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            </details>
-          </div>
-        </div>
-
-        {/* gap */}
-        <div className={s.layerGap}>
-          <div className={s.arrowCol}>
-            <div className={s.arrowLine} style={{ background: "linear-gradient(#7c2d12, #78490a)" }} />
-          </div>
-          <div className={s.arrowLabelCol}>
-            <span className={s.arrowChip}>exec</span>
-            <span style={{ color: "var(--text-dim)", fontSize: 8 }}>pid 1 &middot; /usr/bin/containd</span>
-          </div>
-        </div>
-
-        {/* ── LAYER 4: PROCESS ── */}
-        <div className={layerCls("process")} onClick={() => selectLayer("process")}>
-          <div className={s.layerConnector}>
-            <div className={s.layerNode}>P</div>
-          </div>
-          <div className={s.layerCard}>
-            <div className={s.layerHeader}>
-              <div className={s.layerTitleGroup}>
-                <span className={s.layerTitle}>CONTAIND PROCESS</span>
-                <span className={s.layerSubtitle}>pid 1 &middot; {buildVersion} &middot; {goroutines} goroutines</span>
-              </div>
-              <div className={s.layerBadges}>
-                <span className={`${s.badge} ${s.badgeOk}`}>ACTIVE</span>
-                <span className={`${s.badge} ${s.badgePurple}`}>{sessionCount} SESSIONS</span>
-              </div>
-            </div>
-            <details>
-              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Application runtime details</summary>
-              <div className={s.layerBody}>
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Runtime</div>
-                <KVc k="PID" v="1" color="#f59e0b" />
-                <KVc k="Go version" v={goVersion} />
-                <KVc k="Goroutines" v={String(goroutines)} />
-                <KVc k="Heap alloc" v={`${heapAlloc.toFixed(1)} MB`} />
-                <KVc k="Heap sys" v={`${heapSys.toFixed(1)} MB`} />
-                <KVc k="Process uptime" v={processUptime} color="#22c55e" />
-              </div>
-
-              <div className={s.layerSection}>
-                <div className={s.layerSectionLabel}>Sessions &amp; FDs</div>
-                <KVc k="Total sessions" v={String(sessionCount)} color="#a855f7" />
-                <KVc k="Open FDs" v={String(fdCount)} />
-                <KVc k="FD limit (soft)" v={String(fdSoft)} color={fdSoft <= 1024 ? "#f59e0b" : undefined} />
-                <KVc k="FD limit (hard)" v={String(fdHard)} />
-              </div>
-
-              <div className={s.layerSectionFull}>
-                <div className={s.layerSectionLabel}>Bound Interfaces (in-process)</div>
-                <div className={s.ifacePills}>
-                  {data.interfaces.map((ifc) => {
-                    const address = interfaceAddresses(ifc, data.ifaceState);
-                    const fullAddrs = address.source === "config"
-                      ? ifc.addresses
-                      : runtimeFor(ifc, data.ifaceState)?.addrs;
-                    return (
-                      <div key={ifc.name} className={`${s.ifacePill} ${s.ifacePillAmber}`}>
-                        <span className={s.ifacePillName}>{ifc.device || ifc.name}</span>
-                        <span className={s.ifacePillIp}>
-                          <TopologyAddress address={address} fullAddrs={fullAddrs} />
-                        </span>
-                        <span className={s.ifacePillType} style={{ color: "#22c55e" }}>{ifc.zone || "\u2014"} &middot; up</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {envVars.length > 0 && (
-                <div className={s.layerSectionFull}>
-                  <div className={s.layerSectionLabel}>Environment</div>
-                  {envVars.map((e) => (
-                    <KVc key={e.key} k={e.key} v={e.value} color={/relaxed|lab|debug/i.test(e.value) ? "#ef4444" : undefined} />
-                  ))}
-                </div>
-              )}
-            </div>
-            </details>
-          </div>
-        </div>
-
-        <div style={{ height: 32 }} />
-        </div>{/* end zoom wrapper */}
-        {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
-        <div className={ts.zoomControls}>
-          <button className={ts.zoomBtn} onClick={zoomIn} title="Zoom in">+</button>
-          <div className={ts.zoomLevel} onClick={zoomReset} style={{ cursor: "pointer" }}>{Math.round(zoom * 100)}%</div>
-          <button className={ts.zoomBtn} onClick={zoomOut} title="Zoom out">&minus;</button>
-        </div>
+  const layerPanels = {
+    host: (<div className={s.layerBody}>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>System</div>
+        <KVc k="OS" v={hostOS} />
+        <KVc k="Kernel" v={hostKernel} color="#06b6d4" />
+        <KVc k="Architecture" v={hostArch} />
+        <KVc k="Host uptime" v={hostUptime} color="#22c55e" />
       </div>
-
-      {/* DETAIL PANEL */}
-      {panelOpen && (
-        <div className={ts.detailPanel}>
-          <div className={ts.panelHeader}>
-            <span className={ts.panelTitle}>{selectedLayer ? selectedLayer.toUpperCase() : "PHYSICAL VIEW"}</span>
-            <button className={ts.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
-          </div>
-          <div className={ts.panelBody}>
-            {/* Security flags summary */}
-            <div className={ts.panelSection}>
-              <div className={ts.panelSectionLabel}>Security Flags {critCount > 0 && <span style={{ color: "#ef4444" }}>({critCount} CRIT)</span>} {warnCount > 0 && <span style={{ color: "#f59e0b" }}>({warnCount} WARN)</span>}</div>
-              <div className={s.flagList}>
-                {flags.map((f, i) => (
-                  <div key={i} className={`${s.flag} ${f.level === "crit" ? s.flagCrit : f.level === "warn" ? s.flagWarn : s.flagOk}`}>
-                    <div className={s.flagDot} style={{ background: f.level === "crit" ? "#ef4444" : f.level === "warn" ? "#f59e0b" : "#22c55e" }} />
-                    <div className={s.flagBody}>
-                      <div className={s.flagTitle}>{f.summary}</div>
-                      <details className={s.flagDesc}>
-                        <summary className="cursor-pointer">Deployment security details</summary>
-                        <p>{f.title}</p><p>{f.desc}</p>
-                      </details>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {!selectedLayer && (
-              <div className={ts.panelSection}>
-                <div className={ts.panelSectionLabel}>Click a layer for details</div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", lineHeight: 1.6 }}>
-                  Select HOST, RUNTIME, CONTAINER, or PROCESS layer to inspect that level in depth.
-                </div>
-              </div>
-            )}
-
-            {selectedLayer && <LayerDetail layer={selectedLayer} data={data} />}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   LAYER DETAIL PANEL
-   ════════════════════════════════════════════════════════════════════ */
-
-function LayerDetail({ layer, data }: { layer: LayerId; data: PhysicalData }) {
-  const st = data.stats;
-  const insp = data.inspection;
-
-  const sections = LAYER_SECTIONS[layer]?.(st, insp, data) || [];
-
-  return (
-    <>
-      {sections.map((sec, si) => (
-        <div key={si} className={ts.panelSection}>
-          <div className={ts.panelSectionLabel}>{sec.label}</div>
-          {sec.rows.map((r, ri) => (
-            <div key={ri} className={ts.detailRow}>
-              <span className={ts.detailKey}>{r.k}</span>
-              <span className={ts.detailVal} style={r.color ? { color: r.color } : undefined}>{r.v}</span>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>CPU</div>
+        <KVc k="vCPU count" v={numCPU > 0 ? String(numCPU) : "Unknown"} />
+        {st ? <ResBar name="Current usage" val={`${cpuPct.toFixed(1)}%`} pct={cpuPct} color={cpuPct > 80 ? "#ef4444" : cpuPct > 50 ? "#f59e0b" : "#22c55e"} />
+          : <KVc k="Current usage" v="Unknown" />}
+        {!st && <p className="text-xs text-(--text-muted)">Resource statistics unavailable.</p>}
+      </div>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Memory</div>
+        <KVc k="Total RAM" v={st ? fmtBytes(memTotal) : "Unknown"} />
+        {st ? <ResBar name="Used" val={`${fmtBytes(memUsed)} (${memPct.toFixed(1)}%)`} pct={memPct} color="#06b6d4" />
+          : <KVc k="Used" v="Unknown" />}
+        <KVc k="Available" v={st ? fmtBytes(st.memory.availableBytes) : "Unknown"} />
+      </div>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Storage</div>
+        <KVc k="Total" v={st ? fmtBytes(diskTotal) : "Unknown"} />
+        {st ? <ResBar name="Used" val={`${fmtBytes(diskUsed)} (${diskPct.toFixed(1)}%)`} pct={diskPct} color={diskPct > 80 ? "#ef4444" : "#f59e0b"} />
+          : <KVc k="Used" v="Unknown" />}
+        <KVc k="Available" v={st ? fmtBytes(st.disk.availableBytes) : "Unknown"} />
+      </div>
+      <div className={s.layerSectionFull}>
+        <div className={s.layerSectionLabel}>Host Interfaces</div>
+        <div className={s.ifacePills}>
+          {data.ifaceState.map((ifc) => (
+            <div key={ifc.name} className={s.ifacePill}>
+              <span className={s.ifacePillName}>{ifc.name}</span>
+              <span className={s.ifacePillIp}>{ifc.addrs?.[0] || "\u2014"}</span>
+              <span className={s.ifacePillType}>{ifc.up ? "up" : "down"} &middot; mtu {ifc.mtu}</span>
             </div>
           ))}
         </div>
-      ))}
-    </>
+      </div>
+    </div>),
+    runtime: (<div className={s.layerBody}>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Engine</div>
+        <KVc k="Docker version" v={dockerVer} color="#a855f7" />
+        <KVc k="containerd" v={containerdVer} />
+        <KVc k="Cgroup driver" v={cgroupDriver} color="#06b6d4" />
+        <KVc k="Storage driver" v={storageDriver} />
+        <KVc k="Docker socket" v={insp ? dockerSock ? "MOUNTED" : "NOT mounted" : "Unknown"} color={dockerSock ? "#ef4444" : "#22c55e"} />
+      </div>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>cgroup Limits</div>
+        <div className={s.resRow}>
+          <div className={s.resHeader}>
+            <span className={s.resName}>CPU quota</span>
+            <span className={s.resVal} style={{ color: cpuQuota === "max" || cpuQuota === "unlimited" ? "#f59e0b" : "#22c55e" }}>{cpuQuota}</span>
+          </div>
+          <p className="text-xs text-(--text-muted)">Configured limit, not CPU usage</p>
+        </div>
+        <div className={s.resRow}>
+          <div className={s.resHeader}>
+            <span className={s.resName}>Memory limit</span>
+            <span className={s.resVal} style={{ color: memLimit > 0 ? "#22c55e" : "#ef4444" }}>{!st ? "Unknown" : memLimit > 0 ? fmtBytes(memLimit) : "NOT SET"}</span>
+          </div>
+          {!st ? null : memLimit > 0 ? (
+            <div className={s.resBarWrap}><div className={s.resBar} style={{ width: `${st?.container.memPercent ?? 0}%`, background: "#22c55e" }} /></div>
+          ) : (
+            <div className={s.resBarDashed}><div className={s.resBar} style={{ width: "100%", background: "rgba(239,68,68,0.12)" }} /></div>
+          )}
+        </div>
+        <div className={s.resRow}>
+          <div className={s.resHeader}>
+            <span className={s.resName}>PIDs limit</span>
+            <span className={s.resVal} style={{ color: pidsLimit !== "max" && pidsLimit !== "\u2014" ? "#22c55e" : "#f59e0b" }}>{pidsLimit}</span>
+          </div>
+        </div>
+      </div>
+    </div>),
+    container: (<div className={s.layerBody}>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Identity</div>
+        <KVc k="Container ID" v={containerId} color="#f97316" />
+        <KVc k="Image" v={containerImage} />
+        <KVc k="Network mode" v={networkMode} />
+        <KVc k="Privileged mode" v={insp ? privileged ? "YES" : "NO" : "Unknown"} />
+        <KVc k="Read-only rootfs" v={insp ? insp.container.readonlyRootfs ? "yes" : "no" : "Unknown"} />
+        <KVc k="No-new-privileges" v={insp ? insp.container.noNewPrivileges ? "true" : "false" : "Unknown"} />
+        <KVc k="Seccomp profile" v={insp?.container.seccompProfile || "Unknown"} />
+        <KVc k="AppArmor profile" v={insp?.container.apparmorProfile || "Unknown"} />
+        <KVc k="Restart policy" v={restartPolicy} color="#06b6d4" />
+        <KVc k="Container uptime" v={containerUptime} color="#22c55e" />
+        <KVc k="Restart count" v={restartCount > 0 ? `${restartCount}` : "0"} color={restartCount > 0 ? "#f59e0b" : "#22c55e"} />
+      </div>
+
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Uptime vs Host</div>
+        <div className={s.uptimeCompare}>
+          <div className={s.uptimeBarLabel}><span>HOST</span><span>{hostUptime}</span></div>
+          <div className={s.uptimeTrack}>
+            <div className={s.uptimeFill} style={{ width: "100%", background: "rgba(6,182,212,0.3)", flex: 1 }} />
+          </div>
+        </div>
+        <div className={s.uptimeCompare} style={{ marginTop: 4 }}>
+          <div className={s.uptimeBarLabel}><span>CONTAINER</span><span>{containerUptime}</span></div>
+          <div className={s.uptimeTrack}>
+            <div className={s.uptimeFill} style={{ width: `${uptimeRatio}%`, background: "rgba(249,115,22,0.5)" }} />
+            {restartCount > 0 && (
+              <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "#f59e0b" }}>{restartCount} restart(s) since host boot</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {capabilities.length > 0 && (
+        <div className={s.layerSectionFull}>
+          <div className={s.layerSectionLabel}>Linux Capabilities</div>
+          <div className={s.capsGrid}>
+            {capabilities.map((cap) => (
+              <span key={cap} className={`${s.capTag} ${DANGER_CAPS.has(cap) ? s.capDanger : WARN_CAPS.has(cap) ? s.capWarn : s.capNormal}`}>{cap.replace("CAP_", "")}</span>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)" }}>
+            {privileged && <><span style={{ color: "#f97316" }}>--privileged</span> &middot; </>}
+            seccomp: <span style={{ color: insp?.container.seccompProfile === "unconfined" ? "#f59e0b" : "#22c55e" }}>{insp?.container.seccompProfile || "\u2014"}</span>
+            {" "}&middot; AppArmor: <span style={{ color: insp?.container.apparmorProfile === "unconfined" ? "#f59e0b" : "#22c55e" }}>{insp?.container.apparmorProfile || "\u2014"}</span>
+          </div>
+        </div>
+      )}
+
+      {mounts.length > 0 && (
+        <div className={s.layerSectionFull}>
+          <div className={s.layerSectionLabel}>Volume Mounts</div>
+          <table className={s.mountTable}>
+            <thead><tr><th>Host path</th><th>Container path</th><th style={{ textAlign: "right" }}>Mode</th></tr></thead>
+            <tbody>
+              {mounts.map((m, i) => (
+                <tr key={i}>
+                  <td>{m.hostPath}</td>
+                  <td>{m.containerPath}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <span className={m.mode.toLowerCase().includes("ro") ? s.mountRo : s.mountRw}>{m.mode.toUpperCase()}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>),
+    process: (<div className={s.layerBody}>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Runtime</div>
+        <KVc k="Build" v={buildVersion} />
+        <KVc k="Node ID" v={containerId} />
+        <KVc k="GC pause avg" v={st ? `${(st.runtime.gcPauseMsAvg ?? 0).toFixed(2)} ms` : "Unknown"} />
+        <KVc k="PID" v="1" color="#f59e0b" />
+        <KVc k="Go version" v={goVersion} />
+        <KVc k="Goroutines" v={st ? String(goroutines) : "Unknown"} />
+        <KVc k="Heap alloc" v={st ? `${heapAlloc.toFixed(1)} MB` : "Unknown"} />
+        <KVc k="Heap sys" v={st ? `${heapSys.toFixed(1)} MB` : "Unknown"} />
+        <KVc k="Process uptime" v={processUptime} color="#22c55e" />
+      </div>
+
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Sessions &amp; FDs</div>
+        <KVc k="Total sessions" v={String(sessionCount)} color="#a855f7" />
+        <KVc k="Open FDs" v={insp ? String(fdCount) : "Unknown"} />
+        <KVc k="FD limit (soft)" v={insp ? String(fdSoft) : "Unknown"} color={fdSoft <= 1024 ? "#f59e0b" : undefined} />
+        <KVc k="FD limit (hard)" v={insp ? String(fdHard) : "Unknown"} />
+      </div>
+
+      <div className={s.layerSectionFull}>
+        <div className={s.layerSectionLabel}>Bound Interfaces (in-process)</div>
+        <div className={s.ifacePills}>
+          {data.interfaces.map((ifc) => {
+            const address = interfaceAddresses(ifc, data.ifaceState);
+            const fullAddrs = address.source === "config"
+              ? ifc.addresses
+              : runtimeFor(ifc, data.ifaceState)?.addrs;
+            return (
+              <div key={ifc.name} className={`${s.ifacePill} ${s.ifacePillAmber}`}>
+                <span className={s.ifacePillName}>{ifc.device || ifc.name}</span>
+                <span className={s.ifacePillIp}>
+                  <TopologyAddress address={address} fullAddrs={fullAddrs} />
+                </span>
+                <span className={s.ifacePillType} style={{ color: "#22c55e" }}>{ifc.zone || "\u2014"} &middot; {runtimeFor(ifc, data.ifaceState)?.up === true ? "up" : runtimeFor(ifc, data.ifaceState)?.up === false ? "down" : "unknown"}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {envVars.length > 0 && (
+        <div className={s.layerSectionFull}>
+          <div className={s.layerSectionLabel}>Environment</div>
+          {envVars.map((e) => (
+            <KVc key={e.key} k={e.key} v={e.value} color={/relaxed|lab|debug/i.test(e.value) ? "#ef4444" : undefined} />
+          ))}
+        </div>
+      )}
+    </div>)
+  };
+
+  return (
+    <div className={s.deploymentView}>
+      <div className={s.attention} role="region" aria-label="Deployment attention">
+        <p className="text-xs text-(--text-muted)">Live · Deployment details. Inspect a layer for OS, runtime, container and process information.</p>
+        {/* Security flags summary */}
+        <div className={ts.panelSection}>
+          <h2 className={ts.panelSectionLabel}>What needs attention? · Security Flags {critCount > 0 && <span style={{ color: "#ef4444" }}>({critCount} CRIT)</span>} {warnCount > 0 && <span style={{ color: "#f59e0b" }}>({warnCount} WARN)</span>}</h2>
+          <div className={s.flagList}>
+            {flags.map((f, i) => (
+              <div key={i} className={`${s.flag} ${f.level === "crit" ? s.flagCrit : f.level === "warn" ? s.flagWarn : s.flagOk}`}>
+                <div className={s.flagDot} style={{ background: f.level === "crit" ? "#ef4444" : f.level === "warn" ? "#f59e0b" : "#22c55e" }} />
+                <div className={s.flagBody}>
+                  <div className={s.flagTitle}>{f.summary}</div>
+                  <p className={s.flagDesc}>{f.title}</p>
+                  <p className={s.flagDesc}>{f.desc}{f.reference && <> <Link href={f.reference} className="text-(--amber) underline">Threat model</Link></>}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+
+      </div>
+      <div className={`${ts.workspace} ${s.deploymentWorkspace}`} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
+        <div className={s.stackView}>
+          <div style={{ transform: `scale(${zoom})`, transformOrigin: "top center", transition: "transform .15s" }}>
+
+            {/* ── LAYER 1: HOST ── */}
+            <div className={layerCls("host")}>
+              <div className={s.layerConnector}>
+                <div className={s.layerNode}>H</div>
+                <div className={s.layerWire} />
+              </div>
+              <div className={s.layerCard}>
+                <button type="button" className={s.layerHeader} style={{ width: "100%", textAlign: "left" }} aria-label="Inspect HOST MACHINE" onClick={event => selectLayer("host", event.currentTarget)} aria-expanded={panelOpen && selectedLayer === "host"} aria-controls="physical-inspector">
+                  <div className={s.layerTitleGroup}>
+                    <span className={s.layerTitle}>HOST MACHINE</span>
+                    <span className={s.layerSubtitle}>{hostOS} &middot; {hostKernel} &middot; {hostArch}</span>
+                  </div>
+                  <div className={s.layerBadges}>
+                    <span className={`${s.badge} ${s.badgeInfo}`}>{hostArch}</span>
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                  </div>
+                </button>
+
+              </div>
+            </div>
+
+            {/* gap */}
+            <div className={s.layerGap}>
+              <div className={s.arrowCol}>
+                <div className={s.arrowLine} style={{ background: "linear-gradient(#164e63, #3b0764)" }} />
+              </div>
+              <div className={s.arrowLabelCol}>
+                <span className={s.arrowChip}>--net={networkMode}</span>
+                {networkMode === "host" && <span style={{ color: "#f59e0b", fontSize: 8 }}>host network namespace shared</span>}
+              </div>
+            </div>
+
+            {/* ── LAYER 2: CONTAINER RUNTIME ── */}
+            <div className={layerCls("runtime")}>
+              <div className={s.layerConnector}>
+                <div className={s.layerNode}>R</div>
+                <div className={s.layerWire} />
+              </div>
+              <div className={s.layerCard}>
+                <button type="button" className={s.layerHeader} style={{ width: "100%", textAlign: "left" }} aria-label="Container runtime details" onClick={event => selectLayer("runtime", event.currentTarget)} aria-expanded={panelOpen && selectedLayer === "runtime"} aria-controls="physical-inspector">
+                  <div className={s.layerTitleGroup}>
+                    <span className={s.layerTitle}>CONTAINER RUNTIME</span>
+                    <span className={s.layerSubtitle}>Docker {dockerVer} &middot; containerd {containerdVer}</span>
+                  </div>
+                  <div className={s.layerBadges}>
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                    {st && memLimit === 0 && <span className={`${s.badge} ${s.badgeWarn}`}>NO MEM LIMIT</span>}
+                  </div>
+                </button>
+
+              </div>
+            </div>
+
+            {/* gap */}
+            <div className={s.layerGap}>
+              <div className={s.arrowCol}>
+                <div className={s.arrowLine} style={{ background: "linear-gradient(#3b0764, #7c2d12)" }} />
+              </div>
+              <div className={s.arrowLabelCol}>
+                <span className={s.arrowChip}>docker run</span>
+                <span style={{ color: "var(--text-dim)", fontSize: 8 }}>image: {containerImage} &middot; restart: {restartPolicy}</span>
+              </div>
+            </div>
+
+            {/* ── LAYER 3: CONTAINER ── */}
+            <div className={layerCls("container")}>
+              <div className={s.layerConnector}>
+                <div className={s.layerNode}>C</div>
+                <div className={s.layerWire} />
+              </div>
+              <div className={s.layerCard}>
+                <button type="button" className={s.layerHeader} style={{ width: "100%", textAlign: "left" }} aria-label="Container deployment details" onClick={event => selectLayer("container", event.currentTarget)} aria-expanded={panelOpen && selectedLayer === "container"} aria-controls="physical-inspector">
+                  <div className={s.layerTitleGroup}>
+                    <span className={s.layerTitle}>CONTAINER</span>
+                    <span className={s.layerSubtitle}>{containerId} &middot; {containerImage}</span>
+                  </div>
+                  <div className={s.layerBadges}>
+                    {privileged && <span className={`${s.badge} ${s.badgeOrange}`}>PRIVILEGED</span>}
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                    {hasLabEnv(envVars) && <span className={`${s.badge} ${s.badgeWarn}`}>LAB MODE</span>}
+                  </div>
+                </button>
+
+              </div>
+            </div>
+
+            {/* gap */}
+            <div className={s.layerGap}>
+              <div className={s.arrowCol}>
+                <div className={s.arrowLine} style={{ background: "linear-gradient(#7c2d12, #78490a)" }} />
+              </div>
+              <div className={s.arrowLabelCol}>
+                <span className={s.arrowChip}>exec</span>
+                <span style={{ color: "var(--text-dim)", fontSize: 8 }}>pid 1 &middot; /usr/bin/containd</span>
+              </div>
+            </div>
+
+            {/* ── LAYER 4: PROCESS ── */}
+            <div className={layerCls("process")}>
+              <div className={s.layerConnector}>
+                <div className={s.layerNode}>P</div>
+              </div>
+              <div className={s.layerCard}>
+                <button type="button" className={s.layerHeader} style={{ width: "100%", textAlign: "left" }} aria-label="Application runtime details" onClick={event => selectLayer("process", event.currentTarget)} aria-expanded={panelOpen && selectedLayer === "process"} aria-controls="physical-inspector">
+                  <div className={s.layerTitleGroup}>
+                    <span className={s.layerTitle}>CONTAIND PROCESS</span>
+                    <span className={s.layerSubtitle}>pid 1 &middot; {buildVersion} &middot; {st ? goroutines : "Unknown"} goroutines</span>
+                  </div>
+                  <div className={s.layerBadges}>
+                    <span className={`${s.badge} ${st ? s.badgeOk : s.badgeUnknown}`}>{st ? "REPORTED" : "UNKNOWN"}</span>
+                    <span className={`${s.badge} ${s.badgePurple}`}>{sessionCount} SESSIONS</span>
+                  </div>
+                </button>
+
+              </div>
+            </div>
+
+            <div style={{ height: 32 }} />
+          </div>{/* end zoom wrapper */}
+          {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel" aria-expanded={panelOpen} aria-controls="physical-inspector">&#x25C0;</button>}
+          <div className={ts.zoomControls}>
+            <button className={ts.zoomBtn} onClick={zoomIn} title="Zoom in">+</button>
+            <div className={ts.zoomLevel} onClick={zoomReset} style={{ cursor: "pointer" }}>{Math.round(zoom * 100)}%</div>
+            <button className={ts.zoomBtn} onClick={zoomOut} title="Zoom out">&minus;</button>
+          </div>
+        </div>
+
+        {/* DETAIL PANEL */}
+        {(
+          <div className={`${ts.detailPanel} ${s.inspector}`} id="physical-inspector" hidden={!panelOpen} style={panelOpen ? undefined : { display: "none" }} role="region" aria-label="Deployment inspector">
+            <div className={ts.panelHeader}>
+              <span className={ts.panelTitle}>{selectedLayer ? selectedLayer.toUpperCase() : "PHYSICAL VIEW"}</span>
+              <button className={ts.panelClose} aria-label="Hide detail panel" aria-expanded={panelOpen} aria-controls="physical-inspector" onClick={() => { setPanelOpen(false); layerButton.current?.focus(); }}>&#x25B6;</button>
+            </div>
+            <div className={ts.panelBody}>
+              {!selectedLayer && (
+                <div className={ts.panelSection}>
+                  <div className={ts.panelSectionLabel}>Click a layer for details</div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", lineHeight: 1.6 }}>
+                    Select HOST, RUNTIME, CONTAINER, or PROCESS layer to inspect that level in depth.
+                  </div>
+                </div>
+              )}
+
+              {selectedLayer && <>
+                <h3 className={ts.panelSectionLabel}>{{ host: "Host details", runtime: "Container runtime details", container: "Container deployment details", process: "Application runtime details" }[selectedLayer]}</h3>
+                {layerPanels[selectedLayer]}
+              </>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
-
-interface DetailSection {
-  label: string;
-  rows: { k: string; v: string; color?: string }[];
-}
-
-const LAYER_SECTIONS: Record<LayerId, (st: SystemStats | null, insp: SystemInspection | null, data: PhysicalData) => DetailSection[]> = {
-  host: (st, insp) => [
-    { label: "OS & Kernel", rows: [
-      { k: "OS", v: insp?.host.os || "\u2014" },
-      { k: "Kernel", v: insp?.host.kernel || "\u2014", color: "#06b6d4" },
-      { k: "Architecture", v: insp?.host.arch || "\u2014" },
-      { k: "Host uptime", v: insp?.host.hostUptime ? fmtUptime(insp.host.hostUptime) : "\u2014", color: "#22c55e" },
-    ]},
-    { label: "CPU", rows: [
-      { k: "vCPU count", v: String(st?.cpu.numCPU || insp?.host.numCPU || 0) },
-      { k: "Current usage", v: `${(st?.cpu.usagePercent ?? 0).toFixed(1)}%`, color: (st?.cpu.usagePercent ?? 0) > 50 ? "#f59e0b" : "#22c55e" },
-    ]},
-    { label: "Memory", rows: [
-      { k: "Total RAM", v: fmtBytes(st?.memory.totalBytes ?? 0) },
-      { k: "Used", v: `${fmtBytes(st?.memory.usedBytes ?? 0)} (${(st?.memory.usagePercent ?? 0).toFixed(1)}%)`, color: "#22c55e" },
-      { k: "Available", v: fmtBytes(st?.memory.availableBytes ?? 0), color: "#22c55e" },
-    ]},
-    { label: "Storage", rows: [
-      { k: "Total", v: fmtBytes(st?.disk.totalBytes ?? 0) },
-      { k: "Used", v: `${fmtBytes(st?.disk.usedBytes ?? 0)} (${(st?.disk.usagePercent ?? 0).toFixed(1)}%)`, color: "#f59e0b" },
-      { k: "Available", v: fmtBytes(st?.disk.availableBytes ?? 0) },
-    ]},
-  ],
-  runtime: (st, insp) => [
-    { label: "Docker Engine", rows: [
-      { k: "Version", v: insp?.runtime.dockerVersion || "\u2014", color: "#a855f7" },
-      { k: "containerd", v: insp?.runtime.containerdVersion || "\u2014" },
-    ]},
-    { label: "Runtime Config", rows: [
-      { k: "Storage driver", v: insp?.runtime.storageDriver || "\u2014" },
-      { k: "Cgroup driver", v: insp?.runtime.cgroupDriver || "\u2014", color: "#06b6d4" },
-    ]},
-    { label: "Security Profile", rows: [
-      { k: "Docker socket mount", v: insp?.security.dockerSocketMounted ? "PRESENT" : "NOT present", color: insp?.security.dockerSocketMounted ? "#ef4444" : "#22c55e" },
-    ]},
-    { label: "cgroup Limits", rows: [
-      { k: "CPU quota", v: insp?.security.cgroupCPUQuota || "\u2014", color: (insp?.security.cgroupCPUQuota === "max" || insp?.security.cgroupCPUQuota === "unlimited") ? "#f59e0b" : "#22c55e" },
-      { k: "Memory limit", v: (st?.container.memLimitBytes ?? 0) > 0 ? fmtBytes(st!.container.memLimitBytes) : "NOT SET", color: (st?.container.memLimitBytes ?? 0) > 0 ? "#22c55e" : "#ef4444" },
-      { k: "PIDs limit", v: insp?.security.cgroupPIDsLimit || "\u2014", color: (insp?.security.cgroupPIDsLimit && insp.security.cgroupPIDsLimit !== "max") ? "#22c55e" : "#f59e0b" },
-    ]},
-  ],
-  container: (st, insp, data) => [
-    { label: "Identity", rows: [
-      { k: "Container ID", v: insp?.container.id || st?.container.id || "\u2014", color: "#f97316" },
-      { k: "Image", v: insp?.container.image || data.health?.build || "\u2014" },
-      { k: "Restart policy", v: insp?.container.restartPolicy || "\u2014", color: "#06b6d4" },
-      { k: "Container uptime", v: st?.container.uptime ? fmtUptime(st.container.uptime) : "\u2014", color: "#22c55e" },
-      { k: "Restart count", v: String(insp?.container.restartCount ?? 0), color: (insp?.container.restartCount ?? 0) > 0 ? "#f59e0b" : "#22c55e" },
-    ]},
-    { label: "Privileges", rows: [
-      { k: "Privileged mode", v: insp?.container.privileged ? "YES" : "NO", color: insp?.container.privileged ? "#ef4444" : "#22c55e" },
-      { k: "Seccomp profile", v: insp?.container.seccompProfile || "\u2014", color: insp?.container.seccompProfile === "unconfined" ? "#f59e0b" : undefined },
-      { k: "AppArmor profile", v: insp?.container.apparmorProfile || "\u2014", color: insp?.container.apparmorProfile === "unconfined" ? "#f59e0b" : undefined },
-      { k: "Read-only rootfs", v: insp?.container.readonlyRootfs ? "yes" : "no", color: insp?.container.readonlyRootfs ? "#22c55e" : "#f59e0b" },
-      { k: "No-new-privileges", v: insp?.container.noNewPrivileges ? "true" : "false", color: insp?.container.noNewPrivileges ? "#22c55e" : "#f59e0b" },
-    ]},
-    { label: "Network", rows: [
-      { k: "Network mode", v: insp?.container.networkMode || "\u2014", color: insp?.container.networkMode === "host" ? "#f59e0b" : undefined },
-    ]},
-    ...(insp?.container.envVars?.length ? [{
-      label: "Environment", rows: insp.container.envVars.map((e) => ({
-        k: e.key, v: e.value, color: /relaxed|lab|debug/i.test(e.value) ? "#ef4444" : undefined,
-      })),
-    }] : []),
-  ],
-  process: (st, insp, data) => [
-    { label: "Process", rows: [
-      { k: "PID", v: "1", color: "#f59e0b" },
-      { k: "Go version", v: insp?.process.goVersion || "\u2014" },
-      { k: "Goroutines", v: String(st?.runtime.goroutines ?? 0) },
-      { k: "Heap alloc", v: `${(st?.runtime.heapAllocMB ?? 0).toFixed(1)} MB` },
-      { k: "Heap sys", v: `${(st?.runtime.heapSysMB ?? 0).toFixed(1)} MB` },
-      { k: "GC pause avg", v: `${(st?.runtime.gcPauseMsAvg ?? 0).toFixed(2)} ms` },
-    ]},
-    { label: "Configuration", rows: [
-      { k: "Build", v: data.health?.build || "\u2014", color: "#f59e0b" },
-      { k: "Node ID", v: insp?.container.id || st?.container.id || "\u2014" },
-    ]},
-    { label: "Active Sessions", rows: [
-      { k: "Total sessions", v: String(data.flows.length), color: "#a855f7" },
-    ]},
-    { label: "File Descriptors", rows: [
-      { k: "Open FDs", v: String(insp?.process.fdCount ?? 0) },
-      { k: "FD limit (soft)", v: String(insp?.process.fdSoftLimit ?? 0), color: (insp?.process.fdSoftLimit ?? 0) <= 1024 ? "#f59e0b" : undefined },
-      { k: "FD limit (hard)", v: String(insp?.process.fdHardLimit ?? 0) },
-    ]},
-  ],
-};
 
 function hasLabEnv(envVars: { key: string; value: string }[]): boolean {
   return envVars.some((e) => /lab|debug/i.test(e.value));

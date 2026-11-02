@@ -7,8 +7,8 @@ for (const [path, heading, entry] of [
   ["/system/services/dns/", "Live runtime status", "dns"],
   ["/system/services/ntp/", "Live runtime status", "ntp"],
   ["/dhcp/", "Live runtime status", "dhcp"],
-  ["/proxies/", "Forward proxy (Envoy)", "proxy"],
-  ["/proxies/", "Reverse proxy (Nginx)", "proxy"],
+  ["/proxies/", "Forward proxy", "proxy"],
+  ["/proxies/", "Reverse proxy", "proxy"],
   ["/vpn/", "Runtime status", "vpn"],
 ] as const) {
   test(`${heading} on ${path} keeps unavailable telemetry unknown and refresh recovers`, async ({ page }) => {
@@ -56,7 +56,8 @@ for (const [path, heading, entry] of [
       await page.getByText("Advanced profile import", { exact: true }).click();
       await expect(page.getByText("Choose file", { exact: true })).toBeVisible();
     }
-    const panel = page.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
+    // Proxy settings and Activity retain the same operator-facing headings.
+    const panel = page.getByRole("heading", { name: heading, exact: true }).last().locator("xpath=ancestor::section[1]");
     await expect(panel).toContainText("Unknown");
     await expect(panel).not.toContainText(/(?:Running|Enabled|Live running):\s*no|(?:Rate|Errors|Pools|Reservations|Listen ifaces):\s*0/);
     available = true;
@@ -67,6 +68,9 @@ for (const [path, heading, entry] of [
       await expect(panel.getByText("Process ID: 123", { exact: true })).not.toBeVisible();
       await panel.getByText("Service details", { exact: true }).click();
       await expect(panel.getByText("Process ID: 123", { exact: true })).toBeVisible();
+      if (entry === "proxy") {
+        await expect(panel.getByText(`Software: ${heading === "Forward proxy" ? "Envoy" : "Nginx"}`, { exact: true })).toBeVisible();
+      }
     }
     available = false;
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();

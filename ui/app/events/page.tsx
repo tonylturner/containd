@@ -11,6 +11,7 @@ import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { IdentificationBadge } from "../flows/identification-badge";
 import { describeICSEvidence } from "./iec104-evidence";
+import { EventInspection } from "./event-inspection";
 
 type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy" | "iec104";
 
@@ -38,48 +39,6 @@ function eventHeadline(ev: TelemetryEvent): string {
   return "Telemetry event";
 }
 
-function eventSubtitle(ev: TelemetryEvent): string {
-  const parts = [ev.kind];
-  if (ev.proto && ev.proto !== "firewall") parts.push(ev.proto.toUpperCase());
-  if (ev.transport) parts.push(ev.transport.toUpperCase());
-  return parts.join(" · ");
-}
-
-function EventDetails({ id }: { id: string }) {
-  const [detail, setDetail] = useState<TelemetryEvent | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState(false);
-  async function load() {
-    setPending(true);
-    setError(false);
-    try {
-      const event = await api.getEvent(id);
-      setDetail(event);
-      setError(!event);
-    } finally {
-      setPending(false);
-    }
-  }
-  const json = detail ? JSON.stringify(detail, null, 2) : "";
-  return (
-    <div className="mt-2 text-xs">
-      <button onClick={() => void load()} disabled={pending}
-        className="rounded-xs border px-2 py-1 font-mono disabled:opacity-50">
-        {pending ? "Loading" : "Event"} {id}
-      </button>
-      {error && <p role="status" className="mt-1 text-amber">Event detail unavailable; it may have left retention.</p>}
-      {detail && (
-        <details open className="mt-2">
-          <summary>Event JSON</summary>
-          <a className="mt-1 inline-block underline" download={`event-${id}.json`}
-            href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download event JSON</a>
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3">{json}</pre>
-        </details>
-      )}
-    </div>
-  );
-}
-
 function EventsInner() {
   const searchParams = useSearchParams();
   const [live, setLive] = useState(true);
@@ -100,7 +59,11 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
   const [decision, setDecision] = useState(searchParams.get("decision") || "");
   const [verdict, setVerdict] = useState(searchParams.get("verdict") || "");
   const [since, setSince] = useState(searchParams.get("since") || "");
+  const [detailErrors, setDetailErrors] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [advancedOpen, setAdvancedOpen] = useState<boolean | null>(null);
   const [cursor, setCursor] = useState(searchParams.get("cursor") || "");
+  const filtersOpen = advancedOpen ?? Boolean(sessionFilter || flowFilter || ruleId || mode || apdu || protocol || decision || verdict || since || cursor);
   const requestRef = useRef<AbortController | null>(null);
   const query = useMemo(() => ({
     session: sessionFilter, flow: flowFilter, ruleId, mode, apdu, protocol, decision, verdict, since, cursor,
@@ -282,9 +245,10 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           onChange={(e) => setKindPrefix(e.target.value)}
           className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) outline-hidden focus-visible:shadow-focus-ring"
         />
-        <details className="w-full rounded-xs border p-3" open={Boolean(sessionFilter || flowFilter || ruleId || mode || apdu || protocol || decision || verdict || since || cursor)}>
-          <summary className="cursor-pointer text-xs">Advanced event filters</summary>
-          <div className="mt-2 flex flex-wrap gap-2">
+        <div className="w-full rounded-xs border p-3">
+          <button type="button" className="text-xs" aria-expanded={filtersOpen} aria-controls="advanced-event-filters"
+            onClick={() => setAdvancedOpen(!filtersOpen)}>Advanced event filters</button>
+          <div id="advanced-event-filters" hidden={!(filtersOpen)} className={(filtersOpen) ? "mt-2 flex flex-wrap gap-2" : "hidden"}>
             {([
               ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
               ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
@@ -299,7 +263,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
               </label>
             ))}
           </div>
-        </details>
+        </div>
         <label className="flex items-center gap-2 text-xs text-(--text)">
           <input
             type="checkbox"
@@ -340,7 +304,8 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           Traffic records unavailable. Check filters and retry with Refresh.
-          <details className="mt-2"><summary className="cursor-pointer">Technical details</summary><p>{error}</p></details>
+          <p className="mt-2">{error}</p>
+          <details className="mt-2"><summary className="cursor-pointer">Technical details</summary><pre className="overflow-x-auto">{JSON.stringify(query, null, 2)}</pre></details>
         </div>
       )}
       <div className="mb-3 flex flex-wrap gap-2 text-xs text-(--text)">
@@ -376,20 +341,17 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           return (
           <div
             key={ev.id}
-            className="table-row-hover rounded-xs border bg-(--surface) p-4"
+            className="table-row-hover min-w-0 wrap-anywhere rounded-xs border bg-(--surface) p-4"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-(--text)">
-                {eventHeadline(ev)}
+                <span>{eventHeadline(ev)}</span>
+                <span className="ml-2 text-xs font-normal text-(--text-muted)">{ev.kind}</span>
               </div>
               <div className="text-xs text-(--text-muted)">
                 {new Date(ev.timestamp).toLocaleString()}
               </div>
             </div>
-            <div className="mt-1 text-xs text-(--text-muted)">
-              {eventSubtitle(ev)}
-            </div>
-            <EventDetails id={ev.id} />
             <div className="mt-1 text-xs text-(--text)">
               {formatEndpoint(ev.srcIp, ev.srcPort)} → {formatEndpoint(ev.dstIp, ev.dstPort)}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
@@ -418,27 +380,15 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
                     </button>
                   )}
                 </div>
-                <details className="rounded-xs border p-3 text-xs">
-                  <summary className="cursor-pointer">Message and session details</summary>
-                  <div className="mt-2 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                  {evidence.rows.map((row) => (
-                    <div key={row.label} className="flex gap-2">
-                      <span className="shrink-0 text-(--text-dim)">{row.label}</span>
-                      <span className="break-all font-mono text-[11px] text-(--text)">{row.value}</span>
-                    </div>
-                  ))}
-                  </div>
-                </details>
               </div>
             )}
-            {ev.attributes && (
-              <details className="mt-2 rounded-xs border p-3 text-xs">
-                <summary className="cursor-pointer">Event attributes (JSON)</summary>
-                <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-(--text)">
-                  {JSON.stringify(ev.attributes, null, 2)}
-                </pre>
-              </details>
-            )}
+            {!evidence && typeof ev.attributes?.error === "string" && <p className="mt-2 text-xs text-amber">{ev.attributes.error}</p>}
+            {detailErrors[ev.id] && <p role="status" className="mt-2 text-xs text-amber">Event detail unavailable; it may have left retention. Open Inspect event to retry.</p>}
+            <button type="button" aria-expanded={!!expanded[ev.id]} aria-controls={`event-inspection-${ev.id}`}
+              onClick={() => setExpanded(old => ({ ...old, [ev.id]: !old[ev.id] }))}
+              className="mt-2 rounded-xs border px-2 py-1 text-xs">Inspect event</button>
+            <EventInspection event={ev} open={!!expanded[ev.id]}
+              onError={failed => setDetailErrors(old => ({ ...old, [ev.id]: failed }))} />
           </div>
           );
         })}

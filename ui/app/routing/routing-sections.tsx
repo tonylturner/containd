@@ -212,7 +212,7 @@ export function GatewaysCard(props: GatewaysCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xs border">
+      <div className="mt-4 overflow-x-auto rounded-xs border">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
@@ -380,7 +380,7 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xs border">
+      <div className="mt-4 overflow-x-auto rounded-xs border">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
@@ -504,7 +504,7 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-xs border">
+      <div className="mt-4 overflow-x-auto rounded-xs border">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>

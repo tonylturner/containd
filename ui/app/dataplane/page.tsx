@@ -303,13 +303,6 @@ export default function PcapPage() {
       .filter((t) => t.enabled && t.host)
       .map((t) => `${t.interface} → ${formatEndpoint(t.host, t.port)}`.trim());
   }, [settings.forwardTargets]);
-  const runningSince = useMemo(() => {
-    if (!status?.startedAt) return "—";
-    const started = new Date(status.startedAt);
-    if (Number.isNaN(started.getTime())) return "—";
-    return started.toLocaleString();
-  }, [status?.startedAt]);
-
   async function addTag(pcapName: string) {
     const tag = pcapTag.trim();
     if (!tag) return;
@@ -435,7 +428,7 @@ export default function PcapPage() {
     <Shell
       title="PCAP"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canEdit ? (
             <>
               <button
@@ -486,28 +479,31 @@ export default function PcapPage() {
           {notice}
         </div>
       )}
-      <CaptureStatusCard
-        isRunning={isRunning}
-        captureSummary={captureSummary}
-        runningSince={runningSince}
-        status={status}
-      />
-      <CaptureSetupCard
-        canEdit={canEdit}
-        settings={{ ...settings, forwardTargets }}
-        setSettings={setSettings}
-        configIssues={configIssues}
-        captureIfaceOptions={captureIfaceOptions}
-        zoneOptions={zoneOptions}
-        toggleIface={toggleIface}
-        toggleZone={toggleZone}
-        setAllInterfaces={setAllInterfaces}
-        bpfPreview={bpfPreview}
-        updateForwardTarget={updateForwardTarget}
-        enabledForwarding={enabledForwarding}
-      />
+      <section aria-label="Capture now" className="min-w-0">
+        <h2 className="mb-3 text-lg font-semibold">Capture now</h2>
+        <CaptureStatusCard
+          isRunning={isRunning}
+          captureSummary={captureSummary}
+          status={status}
+        />
+        <CaptureSetupCard
+          canEdit={canEdit}
+          settings={{ ...settings, forwardTargets }}
+          setSettings={setSettings}
+          configIssues={configIssues}
+          captureIfaceOptions={captureIfaceOptions}
+          zoneOptions={zoneOptions}
+          toggleIface={toggleIface}
+          toggleZone={toggleZone}
+          setAllInterfaces={setAllInterfaces}
+          bpfPreview={bpfPreview}
+          updateForwardTarget={updateForwardTarget}
+          enabledForwarding={enabledForwarding}
+        />
+      </section>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <section aria-label="Saved captures" className="mt-6 min-w-0">
+        <h2 className="mb-3 text-lg font-semibold">Saved captures</h2>
         <SavedPcapsCard
           canEdit={canEdit}
           pcapQuery={pcapQuery}
@@ -558,7 +554,9 @@ export default function PcapPage() {
             });
           }}
         />
-
+      </section>
+      <section aria-label="Replay to a network" className="mt-6 min-w-0">
+        <h2 className="mb-3 text-lg font-semibold">Replay to a network</h2>
         <ReplayCard
           canEdit={canEdit}
           replayName={replayName}
@@ -592,7 +590,7 @@ export default function PcapPage() {
             );
           }}
         />
-      </div>
+      </section>
     </Shell>
   );
 }

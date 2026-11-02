@@ -33,8 +33,9 @@ export function ConfigStatusBar() {
   }, [check, invalidate]);
   if (status === "clean" && !deadline) return null;
   return (
-    <div role="status" className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${deadline ? "border-amber/30 bg-amber/10 text-amber" : ""}`}>
+    <div role="status" aria-label="Pending settings" className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${deadline ? "border-amber/30 bg-amber/10 text-amber" : ""}`}>
       <div className="min-w-0">
+        <p className="mb-1 font-semibold">Pending settings</p>
         {status !== "clean" && <p>{status === "unknown" ? "Configuration status unknown — unable to check pending changes." : "Saved changes are not active yet."}</p>}
         {deadline && <Link href="/config/?tab=diff" className="underline underline-offset-2">
           Commit-confirmed pending: confirm before <time dateTime={deadline} title={new Date(deadline).toLocaleString()}>

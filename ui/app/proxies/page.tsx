@@ -27,6 +27,8 @@ import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
+import { Disclosure } from "../../components/Disclosure";
 import { Card } from "../../components/Card";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -215,122 +217,13 @@ export default function ProxiesPage() {
       <ConfirmDialog {...confirm.props} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip label="Forward proxy status" configured={canSave ? forward.enabled : undefined} running={proxy?.envoy_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.envoy_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
+      <ServiceStatusStrip label="Reverse proxy status" configured={canSave ? reverse.enabled : undefined} running={proxy?.nginx_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.nginx_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      <div className="mb-4 grid gap-4 md:grid-cols-2">
-        <Card padding="lg" className="backdrop-blur-sm">
-          <div className="flex items-center gap-3">
-            <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-(--text)">Forward proxy (Envoy)</h2>
-            <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to report request counts." />
-          </div>
-          {loading ? (
-            <div className="mt-3 space-y-2">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-6 w-1/2" />
-            </div>
-          ) : !proxy ? (
-            <div role="status" className="mt-3 text-sm text-(--text-muted)">
-              Unknown — live proxy status unavailable.
-              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
-            </div>
-          ) : (
-            <>
-              <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {typeof proxy?.envoy_running === "boolean" ? (proxy.envoy_running ? "yes" : "no") : "Unknown"}{" "}
-              </p>
-              <p className="text-xs text-(--text-muted)">
-                Rate: {typeof envoy?.rate_per_min === "number" ? envoy.rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs">
-                Errors: {typeof envoy?.errors_rate_per_min === "number" ? envoy.errors_rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs text-(--text-dim)">
-                Activity source: access logs when enabled.
-              </p>
-              {proxy?.envoy_last_error ? (
-                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {proxy.envoy_last_error}
-                </div>
-              ) : null}
-              <details className="mt-2 rounded-xs border p-3 text-xs">
-                <summary className="cursor-pointer">Service details</summary>
-                <p>Software: Envoy</p>
-                <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
-                <p>Last start: {proxy?.envoy_last_start || "n/a"}</p>
-              </details>
-              {envoy?.sparkline.length ? (
-                <div className="mt-4">
-                  <Sparkline
-                    values={envoy.sparkline}
-                    color="var(--primary)"
-                    background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                    title="Envoy events per minute"
-                  />
-                </div>
-              ) : null}
-            </>
-          )}
-        </Card>
-        <Card padding="lg" className="backdrop-blur-sm">
-          <div className="flex items-center gap-3">
-            <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={20} height={20} className="h-5 w-5" />
-            <h2 className="text-sm font-semibold text-(--text)">Reverse proxy (Nginx)</h2>
-            <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
-          </div>
-          {loading ? (
-            <div className="mt-3 space-y-2">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-6 w-1/2" />
-            </div>
-          ) : !proxy ? (
-            <div role="status" className="mt-3 text-sm text-(--text-muted)">
-              Unknown — live proxy status unavailable.
-              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
-            </div>
-          ) : (
-            <>
-              <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {typeof proxy?.nginx_running === "boolean" ? (proxy.nginx_running ? "yes" : "no") : "Unknown"}{" "}
-              </p>
-              <p className="text-xs text-(--text-muted)">
-                Rate: {typeof nginx?.rate_per_min === "number" ? nginx.rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs">
-                Errors: {typeof nginx?.errors_rate_per_min === "number" ? nginx.errors_rate_per_min.toFixed(1) : "Unknown"} / min
-              </p>
-              <p className="text-xs text-(--text-dim)">
-                Activity source: access logs from published apps.
-              </p>
-              {proxy?.nginx_last_error ? (
-                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {proxy.nginx_last_error}
-                </div>
-              ) : null}
-              <details className="mt-2 rounded-xs border p-3 text-xs">
-                <summary className="cursor-pointer">Service details</summary>
-                <p>Software: Nginx</p>
-                <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>
-                <p>Last start: {proxy?.nginx_last_start || "n/a"}</p>
-              </details>
-              {nginx?.sparkline.length ? (
-                <div className="mt-4">
-                  <Sparkline
-                    values={nginx.sparkline}
-                    color="var(--purple)"
-                    background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
-                    title="Nginx events per minute"
-                  />
-                </div>
-              ) : null}
-            </>
-          )}
-        </Card>
-      </div>
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -352,7 +245,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, enabled: e.target.checked }))
                 }
@@ -368,7 +261,7 @@ export default function ProxiesPage() {
               <input
                 type="number"
                 value={forward.listenPort ?? 3128}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({
                     ...f,
@@ -379,10 +272,8 @@ export default function ProxiesPage() {
               />
             </div>
 
-            <details className="rounded-xs border bg-(--surface) px-4 py-3">
-              <summary className="cursor-pointer text-sm text-(--text)">
-                Advanced options
-              </summary>
+            <details className="rounded-xs border bg-(--surface) px-4 py-3" open={(forward.listenZones ?? []).join(",") !== "mgmt" || !!forward.allowedDomains?.length || !!forward.upstream}>
+              <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced options</span>{((forward.listenZones ?? []).join(",") !== "mgmt" || !!forward.allowedDomains?.length || !!forward.upstream) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
               <div className="mt-3 space-y-4">
                 <div>
                   <label className="flex items-center gap-2 text-sm font-medium text-(--text)">
@@ -392,7 +283,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={listenZonesCSV}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => forwardDraft.setText("listenZones", e.target.value)}
                     placeholder="mgmt, lan"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -407,7 +298,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={allowedDomainsCSV}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => forwardDraft.setText("allowedDomains", e.target.value)}
                     placeholder="*.example.com"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -422,7 +313,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={forward.upstream ?? ""}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setForward((f) => ({
                         ...f,
@@ -440,7 +331,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.logRequests ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, logRequests: e.target.checked }))
                 }
@@ -481,7 +372,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={reverse.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setReverse((r) => ({ ...r, enabled: e.target.checked }))
                 }
@@ -496,7 +387,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={newSite.name}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, name: e.target.value }))
                   }
@@ -506,7 +397,7 @@ export default function ProxiesPage() {
                 <input
                   type="number"
                   value={newSite.listenPort}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setNewSite((s) => ({
                       ...s,
@@ -519,7 +410,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={backendsCSV}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setBackendsCSV(e.target.value)}
                   placeholder="backends host:port, host:port"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -527,7 +418,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={hostnamesCSV}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setHostnamesCSV(e.target.value)}
                   placeholder="hostnames (optional)"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -536,6 +427,7 @@ export default function ProxiesPage() {
               <div className="mt-3 flex justify-end">
                 {canEdit && (
                   <button
+                    disabled={!canSave}
                     onClick={addSite}
                     className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
                   >
@@ -566,6 +458,7 @@ export default function ProxiesPage() {
                   </div>
                   {canEdit && (
                     <button
+                      disabled={!canSave}
                       onClick={() => deleteSite(site.name)}
                       className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                     >
@@ -596,7 +489,115 @@ export default function ProxiesPage() {
           </div>
         </section>
       </div>
-      </fieldset>
+      <h2 className="mt-6 text-lg font-semibold">Activity</h2>
+      <div className="mb-4 grid gap-4 md:grid-cols-2">
+        <Card padding="lg" className="backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={20} height={20} className="h-5 w-5" />
+            <h2 className="text-sm font-semibold text-(--text)">Forward proxy</h2>
+            <InfoTip label="Explicit forward proxy for outbound web traffic. Enable logging to report request counts." />
+          </div>
+          {loading ? (
+            <div className="mt-3 space-y-2">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-6 w-1/2" />
+            </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
+          ) : (
+            <>
+              <p className="mt-2 text-xs text-(--text-muted)">
+                Live running: {typeof proxy?.envoy_running === "boolean" ? (proxy.envoy_running ? "yes" : "no") : "Unknown"}{" "}
+              </p>
+              <p className="text-xs text-(--text-muted)">
+                Rate: {typeof envoy?.rate_per_min === "number" ? envoy.rate_per_min.toFixed(1) : "Unknown"} / min
+              </p>
+              <p className="text-xs">
+                Errors: {typeof envoy?.errors_rate_per_min === "number" ? envoy.errors_rate_per_min.toFixed(1) : "Unknown"} / min
+              </p>
+              <p className="text-xs text-(--text-dim)">
+                Activity source: access logs when enabled.
+              </p>
+              {proxy?.envoy_last_error ? (
+                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                  {proxy.envoy_last_error}
+                </div>
+              ) : null}
+              <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.envoy_pid === undefined || !proxy.envoy_last_start ? "Some details unknown" : undefined}>
+                <p>Software: Envoy</p>
+                <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
+                <p>Last start: {proxy?.envoy_last_start || "n/a"}</p>
+              </Disclosure>
+              {envoy?.sparkline.length ? (
+                <div className="mt-4">
+                  <Sparkline
+                    values={envoy.sparkline}
+                    color="var(--primary)"
+                    background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                    title="Envoy events per minute"
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+        </Card>
+        <Card padding="lg" className="backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={20} height={20} className="h-5 w-5" />
+            <h2 className="text-sm font-semibold text-(--text)">Reverse proxy</h2>
+            <InfoTip label="Publish internal apps with host/path routing and TLS termination." />
+          </div>
+          {loading ? (
+            <div className="mt-3 space-y-2">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-6 w-1/2" />
+            </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
+          ) : (
+            <>
+              <p className="mt-2 text-xs text-(--text-muted)">
+                Live running: {typeof proxy?.nginx_running === "boolean" ? (proxy.nginx_running ? "yes" : "no") : "Unknown"}{" "}
+              </p>
+              <p className="text-xs text-(--text-muted)">
+                Rate: {typeof nginx?.rate_per_min === "number" ? nginx.rate_per_min.toFixed(1) : "Unknown"} / min
+              </p>
+              <p className="text-xs">
+                Errors: {typeof nginx?.errors_rate_per_min === "number" ? nginx.errors_rate_per_min.toFixed(1) : "Unknown"} / min
+              </p>
+              <p className="text-xs text-(--text-dim)">
+                Activity source: access logs from published apps.
+              </p>
+              {proxy?.nginx_last_error ? (
+                <div className="mt-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                  {proxy.nginx_last_error}
+                </div>
+              ) : null}
+              <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.nginx_pid === undefined || !proxy.nginx_last_start ? "Some details unknown" : undefined}>
+                <p>Software: Nginx</p>
+                <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>
+                <p>Last start: {proxy?.nginx_last_start || "n/a"}</p>
+              </Disclosure>
+              {nginx?.sparkline.length ? (
+                <div className="mt-4">
+                  <Sparkline
+                    values={nginx.sparkline}
+                    color="var(--purple)"
+                    background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(6,182,212,0.05))"
+                    title="Nginx events per minute"
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+        </Card>
+      </div>
     </Shell>
   );
 }

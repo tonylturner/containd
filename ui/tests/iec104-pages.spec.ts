@@ -5,11 +5,9 @@ import type { FirewallRule } from "../lib/api";
 // Headless page tests for the IEC 104 UI against a mocked management API.
 
 async function showAdvancedSelectors(page: Page) {
-  const details = page.locator("details").filter({ has: page.getByText("Advanced selectors (saved values still apply)", { exact: true }) });
-  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) {
-    await details.locator("summary").click();
-  }
-  await expect(details).toHaveJSProperty("open", true);
+  const button = page.getByRole("button", { name: "Advanced protocol fields", exact: true });
+  if (await button.getAttribute("aria-expanded") !== "true") await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
 }
 
 const adminUser = { id: "admin-1", username: "containd", role: "admin" };
@@ -368,6 +366,7 @@ test("Events shows decision, verdict and reset evidence and filters by session",
   await expect(page.getByText("IEC 104 packets dropped")).toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
   await expect(page.getByText(`Session ${session} ×`)).toBeVisible();
+  await page.getByRole("button", { name: "Inspect event", exact: true }).first().click();
   const message = page.locator("details").filter({ has: page.getByText("Message and session details", { exact: true }) }).first();
   await message.locator("summary").click();
   await expect(message.getByText(session, { exact: true })).toBeVisible();
@@ -423,18 +422,24 @@ for (const command of [false, true]) {
     const writes: Array<{ method: string; path: string; body: unknown }> = [];
     await mockAPI(page, writes);
     await page.goto("/firewall");
-    await page.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
-    await page.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
-    await page.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
-    await expect(page.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
-    await page.getByPlaceholder("46, 100").fill(command ? "45" : "100");
-    await page.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
+    const disclosure = page.getByRole("button", { name: "Create rule", exact: true })
+      .and(page.locator('[aria-controls="create-rule-panel"]'));
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    const form = page.locator("#create-rule-panel");
+    await form.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
+    await form.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
+    await form.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
+    await expect(form.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
+    await form.getByPlaceholder("46, 100").fill(command ? "45" : "100");
+    await form.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
     if (command) {
       await showAdvancedSelectors(page);
-      await page.getByLabel("Command states", { exact: true }).fill("0");
-      await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
+      await form.getByLabel("Command states", { exact: true }).fill("0");
+      await form.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
     }
-    await page.getByRole("button", { name: "Create rule" }).click();
+    await form.getByRole("button", { name: "Create rule", exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0].method).toBe("POST");
     expect((writes[0].body as { ics: unknown }).ics).toEqual({

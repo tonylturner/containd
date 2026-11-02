@@ -18,6 +18,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NFQUEUE, nftables, conntrack, engine and daemon names. Exact values, IDs,
   paths and raw diagnostics stay available under technical details. Button,
   tab and column names are unchanged.
+- Pages lead with what needs attention and fold detail into expandable rows
+  and sections. No capability, field or control is removed, and every button,
+  tab and column keeps its name. Collapsed rows and sections still show
+  failures, warnings and non-default values.
+  - Firewall: the rules table comes first, with seven columns and an
+    expandable detail row per rule (conditions, ICS filter, shadow matches,
+    logging, full counters). Create rule opens on demand; DPI settings and
+    the generated configuration follow the table.
+  - ICS rules: the page leads with the active inspection state. Matching
+    details and setup help fold away, and protocol editors split basic and
+    advanced fields, opening the advanced ones when they are set.
+  - Configuration: the review leads with changed sections and old → new
+    values (secrets show only as changed), with the exact JSON under
+    Advanced. Protection, startup recovery, missing activity records and
+    pending settings share one attention area and stay independent.
+  - PCAP analysis follows Collect → Generate → Review → stage steps, each
+    with the reason it is unavailable. Capture separates capture now, saved
+    captures and replay to a network.
+  - Interfaces show the detected device, logical interface and zone
+    together, with an inspect view for addressing and link settings.
+    Topology labels live and saved-target data; the Physical tab keeps its
+    deployment detail.
+  - Service pages lead with status and essential settings and fold process
+    detail into Troubleshooting. IDS leads with the rules list and one
+    add/import flow; groups and export are secondary.
+  - Events, alerts, flows and sessions show triage columns first, with full
+    detail in a keyboard-accessible inspector. The dashboard leads with
+    attention and the next setup task; the completed checklist collapses,
+    and simulation and the CLI sit under Tools.
 
 ### Fixed
 
@@ -34,6 +63,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The interfaces page no longer names another product in its management
   access notice.
 - Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- The antivirus page shows automatic definition updates as off when the
+  setting is not saved, and saving no longer turns them on.
+- A packet capture that never started shows "Not started" instead of a
+  start date of 12/31/1.
+- Reordering rules shows as one order change in the configuration review,
+  and changes to rules, zones and interfaces are matched by ID or name
+  instead of list position.
+- The topology Physical view describes only what it observes. It no longer
+  flags an unused CONTAIND_AUTH setting, and it no longer claims host
+  networking is expected for a firewall; it notes that the container then
+  shares the host's interfaces and loopback.
 - Collapsed sections open automatically when they hold saved non-default
   values or settings the selected mode needs (ICS selectors, IEC 104 options,
   WireGuard peers, ICAP and local scanner settings, capture options). Fault

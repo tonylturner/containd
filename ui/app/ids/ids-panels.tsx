@@ -23,12 +23,14 @@ export function GroupsPanel({
   groups,
   rules,
   canEdit,
+  mutationDisabled = false,
   onUpdate,
 }: {
   form: PanelForm;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
+  mutationDisabled?: boolean;
   onUpdate: (g: RuleGroup[]) => boolean;
 }) {
   const [name, setName] = form.field("name");
@@ -87,6 +89,7 @@ export function GroupsPanel({
                 Name
               </label>
               <input
+                disabled={mutationDisabled}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. ICS/Modbus"
@@ -98,6 +101,7 @@ export function GroupsPanel({
                 Filter
               </label>
               <input
+                disabled={mutationDisabled}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="proto:modbus"
@@ -106,7 +110,7 @@ export function GroupsPanel({
             </div>
             <button
               onClick={onCreate}
-              disabled={!name.trim()}
+              disabled={mutationDisabled || !name.trim()}
               className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               Create
@@ -133,6 +137,7 @@ export function GroupsPanel({
             >
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onToggle(g.id)}
                   title={g.enabled ? "Disable group" : "Enable group"}
                   className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${g.enabled ? "bg-emerald-500/30" : "bg-white/10"}`}
@@ -164,6 +169,7 @@ export function GroupsPanel({
               </span>
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onRemove(g.id)}
                   className="text-xs text-red-400 transition-ui hover:text-red-300"
                 >
@@ -293,19 +299,18 @@ export function ImportPanel({
   );
 }
 
-export function ExportPanel({ ruleCount }: { ruleCount: number }) {
+export function ExportPanel({ ruleCount, onError }: { ruleCount: number; onError: (error: string | null) => void }) {
   const [exporting, setExporting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [refusedCount, setRefusedCount] = useState<number | null>(null);
 
   async function doExport(format: string) {
     setExporting(format);
-    setError(null);
+    onError(null);
     setRefusedCount(null);
     const result = await api.exportIDSRules(format);
     setExporting(null);
     if (!result.ok) {
-      setError(result.error || `Export failed for ${format}.`);
+      onError(result.error || `Export failed for ${format}.`);
     } else {
       setRefusedCount(result.data.refusedCount);
     }
@@ -314,7 +319,7 @@ export function ExportPanel({ ruleCount }: { ruleCount: number }) {
   return (
     <Card title="Export rules">
       <p className="mb-4 text-xs text-(--text-muted)">
-        Download running rules in your chosen format. All formats refuse
+        Export uses active committed rules. Download running rules in your chosen format. All formats refuse
         rules they cannot preserve; the file lists each refusal. Unsaved and
         staged changes are not included.
       </p>
@@ -323,11 +328,6 @@ export function ExportPanel({ ruleCount }: { ruleCount: number }) {
           Downloaded. {refusedCount} rule{refusedCount !== 1 ? "s" : ""} refused.
           {refusedCount > 0 && " Review the refusal comments in the downloaded file."}
         </p>
-      )}
-      {error && (
-        <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-          {error}
-        </div>
       )}
       {ruleCount === 0 && (
         <p className="mb-3 text-sm text-(--text-muted)">
@@ -359,7 +359,7 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
     <div className="space-y-3">
       <p className="text-xs text-(--text-muted)">
         Community rule repositories. Download externally, then import via the
-        Import tab. GPL sets are not shipped.
+        Import control under Add/import rules. GPL sets are not shipped.
       </p>
       {sources.length === 0 ? (
         <EmptyState title="No rule sources" description="Catalog is empty." />
@@ -416,12 +416,14 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
 }
 
 export function EditRuleModal({
+  mutationDisabled = false,
   rule,
   text,
   setText,
   onClose,
   onSave,
 }: {
+  mutationDisabled?: boolean;
   rule: IDSRule;
   text: string;
   setText: (text: string) => void;
@@ -464,6 +466,7 @@ export function EditRuleModal({
           </div>
         )}
         <textarea
+          disabled={mutationDisabled}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={16}
@@ -477,6 +480,7 @@ export function EditRuleModal({
             Cancel
           </button>
           <button
+            disabled={mutationDisabled}
             onClick={save}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >

@@ -1,6 +1,8 @@
 "use client";
 
 import type { RefObject, SetStateAction, Dispatch } from "react";
+import Link from "next/link";
+import { formatEvidenceTime } from "../pcap/evidence-time";
 
 import { downloadPcapURL, type PcapItem } from "../../lib/api";
 import { Card } from "../../components/Card";
@@ -60,6 +62,10 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
     <Card padding="lg">
       <h2 className="text-lg font-semibold text-(--text)">Saved PCAPs</h2>
       <p className="mt-1 text-sm text-(--text)">Download or replay captures from storage.</p>
+      <p className="mt-2 text-sm text-(--amber)">
+        Replay transmits traffic onto the selected network immediately. It is not offline analysis.
+      </p>
+      <Link href="/pcap/" className="mt-2 inline-block text-sm underline">Analyze captures offline</Link>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={pcapQuery}
@@ -128,7 +134,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
           ))}
         </div>
       ) : null}
-      <div className="mt-4 overflow-hidden rounded-xs border">
+      <div className="mt-4 overflow-x-auto rounded-xs border">
         <table className="w-full text-left text-sm text-(--text)">
           <thead className="bg-(--surface) text-xs uppercase tracking-wide text-(--text-muted)">
             <tr>
@@ -152,7 +158,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
                 <tr key={p.name} className="border-t table-row-hover transition-ui">
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs text-(--text)">{p.name}</div>
-                    <div className="text-[11px] text-(--text-muted)">{new Date(p.createdAt).toLocaleString()}</div>
+                    <div className="text-[11px] text-(--text-muted)">{formatEvidenceTime(p.createdAt)}</div>
                   </td>
                   <td className="px-3 py-2">{p.interface || "—"}</td>
                   <td className="px-3 py-2">{(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</td>
@@ -248,6 +254,10 @@ export function ReplayCard({
     <Card padding="lg">
       <h2 className="text-lg font-semibold text-(--text)">Replay</h2>
       <p className="mt-1 text-sm text-(--text)">Replay a saved PCAP back onto an interface.</p>
+      <p className="mt-2 text-sm text-(--amber)">
+        Replay transmits traffic onto the selected network immediately. It is not offline analysis.
+        Verify the destination interface and authorization before starting.
+      </p>
       <div className="mt-4 grid gap-3">
         <select
           disabled={!canEdit}

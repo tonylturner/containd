@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 import type {
   DashboardData,
@@ -22,6 +23,7 @@ export type InterfaceBindings = {
 
 export type ServiceInfo = {
   name: string;
+  state: "unknown" | "active" | "inactive" | "stopped" | "unavailable";
   active: boolean | null;
   detail: string;
   href: string;
@@ -46,7 +48,7 @@ export function SetupChecklist({
     {
       title: "Create zones",
       detail: counts && counts.zones > 0 ? `${counts.zones} configured` : "Start with WAN, DMZ, and LAN/OT zones.",
-      complete: !!counts && counts.zones > 0,
+      complete: counts ? counts.zones > 0 : null,
       href: "/zones/",
       cta: (counts?.zones ?? 0) > 0 ? "Review zones" : "Create zones",
     },
@@ -68,7 +70,7 @@ export function SetupChecklist({
       detail: counts && (counts.rules + counts.icsRules) > 0
         ? `${counts.rules + counts.icsRules} rules ready`
         : "Use the wizard for a first pass, then tighten with explicit rules.",
-      complete: !!counts && (counts.rules + counts.icsRules) > 0,
+      complete: counts ? (counts.rules + counts.icsRules) > 0 : null,
       href: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "/firewall/" : "/wizard/",
       cta: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "Review policy" : "Open wizard",
     },
@@ -79,19 +81,28 @@ export function SetupChecklist({
         : configDirty
           ? "Candidate config differs from running. Review and commit to apply."
           : "No pending candidate changes.",
-      complete: configDirty === false,
+      complete: configDirty === null ? null : configDirty === false,
       href: "/config/?tab=diff",
       cta: configDirty ? (isAdmin ? "Review & commit" : "Review diff") : "Open config",
     },
   ];
 
+  const complete = steps.every(step => step.complete === true);
+  const [disclosure, setDisclosure] = useState<{ complete: boolean; open: boolean } | null>(null);
+  const open = disclosure?.complete === complete ? disclosure.open : !complete;
+  const next = steps.find(step => step.complete !== true);
+
   return (
     <div className="mb-5 rounded-xl border border-white/8 bg-white/3 p-4 shadow-card">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            First-Run Checklist
+          <h3 className="text-xs font-semibold text-slate-400">
+            <button type="button" aria-expanded={open} aria-controls="setup-checklist"
+              onClick={() => setDisclosure({ complete, open: !open })}>
+              First-Run Checklist {complete ? "— complete" : "— setup needs attention"}
+            </button>
           </h3>
+          {next && <p className="mt-2 text-sm text-(--text)">Next: <Link href={next.href} className="underline">{next.title}</Link> — {next.detail}</p>}
           <p className="mt-1 text-sm text-slate-500">
             Use Dashboard for setup and config state. Use Monitoring for live telemetry.
           </p>
@@ -103,7 +114,7 @@ export function SetupChecklist({
           Open Monitoring
         </Link>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div id="setup-checklist" hidden={!open} className={open ? "grid gap-3 md:grid-cols-2 xl:grid-cols-4" : "hidden"}>
         {steps.map((step) => (
           <div
             key={step.title}
@@ -197,13 +208,13 @@ export function TrafficCounter({
   color,
 }: {
   label: string;
-  value: number;
+  value: number | null;
   color: string;
 }) {
   return (
     <div className="rounded-lg border border-white/6 bg-white/2 p-2.5">
       <div className={`text-lg font-bold tabular-nums leading-none ${color}`}>
-        {value.toLocaleString()}
+        {value !== null && Number.isFinite(value) ? value.toLocaleString() : "Unknown"}
       </div>
       <div className="text-2xs text-slate-500 mt-1 uppercase tracking-wider font-mono">
         {label}
@@ -222,7 +233,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
   }
 
   return (
-    <div className="max-h-[180px] overflow-y-auto space-y-0.5 font-mono text-2xs">
+    <div className="max-h-[180px] overflow-auto space-y-0.5 font-mono text-2xs">
       {events.slice(0, 20).map((event) => {
         const level = eventLevel(event);
         const time = event.timestamp
@@ -234,7 +245,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
         return (
           <div
             key={event.id}
-            className="grid grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded-sm hover:bg-white/2 transition-colors"
+            className="grid min-w-[480px] grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded-sm hover:bg-white/2 transition-colors"
           >
             <span className="text-slate-500">{time}</span>
             <span
@@ -367,7 +378,9 @@ export function SystemHealthPanel({
       {stats && (
         <div className="flex justify-between text-2xs font-mono text-slate-500">
           <span>Uptime: {stats.runtime.uptime}</span>
-          <span>{stats.runtime.goroutines} goroutines</span>
+          <span title="Go runtime goroutines">
+            {stats.runtime.goroutines} background task{stats.runtime.goroutines === 1 ? "" : "s"}
+          </span>
         </div>
       )}
 

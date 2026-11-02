@@ -78,6 +78,7 @@ test("simulation failure is unknown, not stopped, and Retry recovers", async ({ 
   await expect(page.getByTitle("Start traffic simulation")).toHaveCount(0);
   unavailable = false;
   await state.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
   await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
   unavailable = true;
   await page.getByTitle("Start traffic simulation").click();
@@ -229,6 +230,11 @@ for (const view of ["physical", "logical"] as const) {
       await (view === "physical" ? unavailable.locator("..") : unavailable).getByRole("button", { name: "Retry", exact: true }).click();
       await expect(unavailable).toHaveCount(0);
       await expect(content).toBeVisible();
+      if (view === "physical") {
+        const host = page.getByRole("button", { name: "Inspect HOST MACHINE", exact: true });
+        await host.click();
+        await expect(host).toHaveAttribute("aria-expanded", "true");
+      }
       await expect(sessions(0)).toBeVisible();
       await expect(page.getByText("eth9", { exact: true })).toHaveCount(0);
       phase = "populated";

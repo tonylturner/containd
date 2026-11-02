@@ -3,6 +3,23 @@
 Native IDS rules match normalized decoder `dpi.Event` values and produce alerts.
 They are not firewall `ALLOW`/`DENY` rules or automatic IPS actions.
 
+## Rule workspace
+
+The **Rules** list comes first and stays visible while using the other tools.
+Search, filters, sorting, pagination, selection, bulk actions and JSON editing
+remain in the list. **Add/import rules** has the **Import** control for both
+file import and **Convert & Add** of pasted Sigma YAML. Opening it performs no
+import, selection, save or commit.
+
+**Manage groups** contains the **Groups** disclosure. Saved groups open it by
+default; a count remains visible when closed. The **Filter** text field preserves
+the exact matching expression, with syntax help in **Advanced group matching**.
+**Export** and **Sources** are secondary tools below the list. At export the UI
+states **Export uses active committed rules**: candidate changes are not included.
+If a configuration refresh fails, retained rules, group details, filters,
+**Export** and **Sources** remain inspectable; configuration edits stay disabled
+until the configuration can be read again.
+
 ## Storage and staging
 
 Rules live in the main JSON configuration's `ids` block. Use

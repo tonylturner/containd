@@ -73,10 +73,36 @@ test("view-only users see the default but no reorder or mutation controls", asyn
   const region = page.getByRole("region", { name: "Firewall rules" });
   await expect(region.getByRole("row", { name: "Default policy" })).toContainText("ALLOW");
   await expect(region.locator("tbody tr[id]")).toHaveCount(3);
-  await expect(region.getByRole("button")).toHaveCount(0);
+  const controls = region.getByRole("table").getByRole("button");
+  await expect(controls.filter({ hasNotText: /^Inspect rule$/ })).toHaveCount(0);
+  await expect(controls).toHaveCount(3);
+  await region.getByRole("button", { name: "Inspect rule rule-0", exact: true }).click();
+  await expect(page.getByLabel("Details of rule-0", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Details of rule-0", { exact: true }).getByRole("button")).toHaveCount(0);
 });
 
 for (const count of [0, 3]) {
+  for (const action of ["ALLOW", "DENY", "unknown"]) {
+    test(`390px shows the ${action} Default action without scrolling with ${count} rules`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openFirewall(page, { count, action });
+      const region = page.getByRole("region", { name: "Firewall rules" });
+      const fallback = region.getByRole("row", { name: "Default policy", exact: true });
+      await expect(fallback.getByRole("status")).toHaveText(action);
+      await expect(region.locator("tbody tr").last()).toHaveAttribute("aria-label", "Default policy");
+      await expect(fallback.getByRole("button")).toHaveCount(0);
+      await expect(region.locator('[data-label="Action"]')).toHaveCount(count + 1);
+      for (const cell of await region.locator('[data-label="Action"]').all()) {
+        await expect(cell.getByRole("status")).toBeVisible();
+        expect(await cell.evaluate(el => {
+          const box = el.getBoundingClientRect();
+          return box.left >= 0 && box.right <= window.innerWidth;
+        })).toBe(true);
+      }
+      expect(await region.locator("div.overflow-x-auto").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    });
+  }
+
   test(`ALLOW default has one compact action badge and a readable warning at 1280px with ${count} rules`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openFirewall(page, { action: "ALLOW", count });

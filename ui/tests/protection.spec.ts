@@ -14,11 +14,13 @@ test("an engine awaiting its first configuration does not imply a commit", async
   await expect(notice.locator("p").first()).toHaveText("Waiting for configuration");
   await expect(notice).not.toContainText("Committed");
   await expect(notice).toContainText("awaiting configuration");
-  await expect(notice.getByText("nft: awaiting configuration", { exact: true })).not.toBeVisible();
-  await notice.getByText("Technical details", { exact: true }).click();
+  await expect(notice.getByText("nft: awaiting configuration", { exact: true })).toBeVisible();
+  await expect(notice.getByText(/Boot ID:/)).not.toBeVisible();
+  await notice.getByRole("button", { name: "Technical details", exact: true }).click();
+  await expect(notice.getByText(/Boot ID:/)).toBeVisible();
   await expect(notice.getByText("nft: awaiting configuration", { exact: true })).toBeVisible();
   await expect(notice).toContainText("Wait for protection to finish, then check status.");
-  await expect(notice.getByRole("button")).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
 });
 
 for (const bounded of [true, false]) {
@@ -35,7 +37,7 @@ for (const bounded of [true, false]) {
     await expect(notice).toContainText("IEC 104 commands is dropping (fail closed)");
     if (bounded) await expect(notice).toContainText("retry 2/8");
     else await expect(notice).not.toContainText("retry ");
-    await expect(notice.getByRole("button")).toHaveCount(0);
+    await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
   });
 }
 
@@ -149,7 +151,7 @@ for (const code of ["protection_superseded", "protection_not_retryable"]) {
     const notice = page.getByRole("status", { name: "Traffic protection" });
     await notice.getByRole("button", { name: "Retry protection" }).click();
     await expect(notice).toContainText(code === "protection_superseded" ? "Protection changed." : "no longer retryable");
-    await expect(notice.getByRole("button")).toHaveCount(0);
+    await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
     expect(mock.retries).toHaveLength(1);
     expect(mock.reads).toBeGreaterThan(1);
   });
@@ -166,7 +168,7 @@ test("read failure replaces protecting with unknown and removes all stale detail
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await expect(notice).toContainText("Protection unknown");
   await expect(notice).not.toContainText("Protecting");
-  await expect(notice.getByRole("button")).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
 });
 
 test("a new boot/apply replaces component detail rather than merging it", async ({ page }) => {

@@ -6,6 +6,7 @@ import { type LearnSuggestion, selectable } from "../../lib/api-learn";
 import { summarizeGenericICS } from "../ics/ics-shared";
 import { summarizeIEC104 } from "../ics/iec104";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
+import { formatEvidenceTime } from "./evidence-time";
 
 export const secondaryButton =
   "rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-30 disabled:cursor-not-allowed";
@@ -137,7 +138,15 @@ export function SuggestionReview({
       {changedSinceSelected && <p role="status" className="mb-2 text-sm text-(--amber)">Changed since selected — review this revision and select it again.</p>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="break-all font-mono text-sm">{s.id}</h3>
+          <h3 className="break-words text-sm font-semibold">
+            {s.content.rules[0]?.description || "Proposed service rules"}
+          </h3>
+          <p className="break-all font-mono text-xs">Suggestion ID: {s.id}</p>
+          <p className="text-sm">
+            {selectable(s, now) ? "Checks passed"
+              : reviewable && !failures ? "Needs review"
+              : "Not eligible"}
+          </p>
           <p className="text-xs text-(--text-muted)">
             Suggestion version {s.revision} · {expired ? "expired" : s.status} ·{" "}
             {s.status === "staged"
@@ -145,7 +154,7 @@ export function SuggestionReview({
               : "Not staged"}
           </p>
           <p className="text-xs text-(--text-muted)">
-            Expires {new Date(s.expiresAt).toLocaleString()}
+            Expires {formatEvidenceTime(s.expiresAt)}
           </p>
         </div>
         {canEdit && (
@@ -161,6 +170,16 @@ export function SuggestionReview({
           </label>
         )}
       </div>
+      {!selectable(s, now) && (
+        <p className="text-xs text-(--amber)">
+          Selection unavailable: {expired ? "evidence expired; collect new evidence."
+            : !s.proof ? "no certification available."
+            : failures || counterexamples ? "saved-evidence checks reported failures or counterexamples."
+            : s.status === "staged" ? "this version is already staged."
+            : s.status === "rejected" ? "this suggestion was rejected."
+            : "explicit review and any required address approval must be completed for this version."}
+        </p>
+      )}
       <p className="text-sm">
         Address basis:{" "}
         {s.content.requiresCoordinateReview
@@ -213,7 +232,7 @@ export function SuggestionReview({
             </p>
             <p>
               {s.proof.parentRefs?.length ?? 0} source evidence references · checked{" "}
-              {new Date(s.proof.certifiedAt).toLocaleString()}
+              {formatEvidenceTime(s.proof.certifiedAt)}
             </p>
             <p className="break-all">
               Evidence checksum: {s.proof.evidenceDigest}
@@ -246,7 +265,7 @@ export function SuggestionReview({
       {s.review && (
         <p className="text-xs">
           Reviewed by {s.review.actor} at{" "}
-          {new Date(s.review.at).toLocaleString()}; captured addresses{" "}
+          {formatEvidenceTime(s.review.at)}; captured addresses{" "}
           {s.review.coordinateApproved ? "approved" : "not approved"}.
         </p>
       )}

@@ -202,6 +202,7 @@ export function EditICSModal({
             <IEC104Fields draft={iec} onChange={setIec} disabled={!enabled} />
           ) : (
             <>
+            <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.fcLabel}

@@ -110,13 +110,13 @@ for (const user of [admin, viewer]) {
     const failedText = await page.evaluate((t) => new Date(t).toLocaleString(), failedAt);
     await expect(failed).toContainText(`Last apply failed at ${failedText}`);
     await expect(failed).toContainText("Failed configuration ID: v42");
-    await expect(failed).toContainText("nft: Error: Could not process rule");
+    await expect(failed.getByText("nft: Error: Could not process rule", { exact: true })).toBeVisible();
     await expect(failed).toContainText("stays in force");
     await expect(failed).toHaveClass(/text-amber/);
     const planner = applied.getByRole("status", { name: "Schedule planner" });
-    await expect(planner).toContainText("the schedule horizon ends within an hour");
+    await expect(planner.getByText("the schedule horizon ends within an hour", { exact: true })).toBeVisible();
     await expect(planner).toContainText(`ready until ${await page.evaluate((t) => new Date(t).toLocaleString(), horizonEnd)}`);
-    await expect(planner).toContainText("set refill: netlink busy");
+    await expect(planner.getByText(/Last update error.*set refill: netlink busy/)).toBeVisible();
     await expect(planner).toHaveClass(/text-amber/);
     expect(seen.previewRequests).toBe(0);
   });
@@ -154,6 +154,10 @@ test("a healthy installed ruleset reads quietly", async ({ page }) => {
 test("the ICS page shows nothing extra while the installed ruleset is healthy", async ({ page }) => {
   await mockAPI(page, { enforcement: { state: "enforcing", reason: "" } });
   await open(page, "/ics/");
+  const details = page.getByRole("button", { name: "Inspection details", exact: true });
+  await expect(details).toHaveAttribute("aria-expanded", "false");
+  await details.click();
+  await expect(details).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("status", { name: "Firewall enforcing: healthy" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Failed apply" })).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Installed ruleset status" })).toHaveCount(0);

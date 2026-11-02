@@ -17,6 +17,7 @@ import { useSaveAction } from "../../hooks/useSaveAction";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
 import { Card } from "../../components/Card";
 
 function normalize(cfg: DHCPConfig | null): DHCPConfig {
@@ -184,7 +185,7 @@ export default function DHCPPage() {
     >
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)} updated={status?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -204,8 +205,161 @@ export default function DHCPPage() {
           DNS resolver &rarr;
         </Link>
       </div>
+
+      <Card>
+        <h2 className="text-lg font-semibold text-(--text)">DHCPv4 Server</h2>
+        <p className="mt-1 text-sm text-(--text)">
+          Assign IPv4 addresses to LAN clients after saving and applying these settings.
+        </p>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input
+              type="checkbox"
+              checked={cfg.enabled ?? false}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))}
+              className="h-4 w-4"
+            />
+            Enable DHCP server
+            <InfoTip label="Provides IPv4 leases on LAN interfaces when enabled." />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input
+              type="checkbox"
+              checked={cfg.authoritative ?? false}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setCfg((c) => ({ ...c, authoritative: e.target.checked }))}
+              className="h-4 w-4"
+            />
+            Authoritative
+            <InfoTip label="Sends DHCPNAK for addresses this server cannot lease on served interfaces. Eligible addresses are adopted in either mode. Leave off when another DHCP server owns the subnet." />
+          </label>
+
+          <div>
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+              Listen Interfaces (CSV)
+              <InfoTip label="Comma-separated interfaces where DHCP listens (e.g., lan2, lan3)." />
+            </label>
+            <input
+              value={listenIfacesText}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setText("listenIfaces", e.target.value)}
+              placeholder="lan2, lan3"
+              className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+            />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+              Router (Gateway)
+              <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
+            </label>
+            <input
+              value={cfg.router ?? ""}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
+              placeholder="192.168.1.1"
+              className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+              Pools (one per line)
+              <InfoTip label="Format: iface,start,end (validated on save)." />
+            </label>
+            <textarea
+              rows={6}
+              value={poolsText}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setText("pools", e.target.value)}
+              placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
+              className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
+            />
+          </div>
+          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3" open={(cfg.leaseSeconds ?? 3600) !== 3600 || !!cfg.domain || !!cfg.dnsServers?.length || !!cfg.reservations?.length}>
+            <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced options</span>{((cfg.leaseSeconds ?? 3600) !== 3600 || !!cfg.domain || !!cfg.dnsServers?.length || !!cfg.reservations?.length) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  Lease Seconds
+                  <InfoTip label="How long clients keep their IPs before renewal (default 3600)." />
+                </label>
+                <input
+                  type="number"
+                  value={cfg.leaseSeconds ?? 3600}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  DNS Servers (CSV)
+                  <InfoTip label="DNS servers handed to clients (leave empty to use the firewall DNS)." />
+                </label>
+                <input
+                  value={dnsServersText}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) => setText("dnsServers", e.target.value)}
+                  placeholder="192.168.1.1, 1.1.1.1"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  Domain (optional)
+                  <InfoTip label="Optional search domain handed to clients." />
+                </label>
+                <input
+                  value={cfg.domain ?? ""}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
+                  placeholder="lab.local"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                  Reservations (one per line)
+                  <InfoTip label="Format: iface,mac,ip (must fall inside pool for that iface)." />
+                </label>
+                <textarea
+                  rows={6}
+                  value={reservationsText}
+                  disabled={!canEdit || !canSave}
+                  onChange={(e) => setText("reservations", e.target.value)}
+                  placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
+                  className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
+                />
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
+        {dirty && (
+          <p
+            role="status"
+            aria-label="Unsaved edits"
+            className={editor.superseded
+              ? "mt-3 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber"
+              : "mt-3 text-xs text-(--text-muted)"}
+          >
+            {editor.superseded
+              ? "Unsaved edits kept: the DHCP settings changed on the server while you were editing. Save replaces them with your edits; Refresh discards your edits."
+              : "Unsaved edits — Save stages them; Refresh discards them."}
+          </p>
+        )}
+      </Card>
+
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
         {loading ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-16 w-full" />
@@ -257,162 +411,6 @@ export default function DHCPPage() {
           </div>
         )}
       </Card>
-
-      <Card>
-        <h2 className="text-lg font-semibold text-(--text)">DHCPv4 Server</h2>
-        <p className="mt-1 text-sm text-(--text)">
-          Assign IPv4 addresses to LAN clients after saving and applying these settings.
-        </p>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input
-              type="checkbox"
-              checked={cfg.enabled ?? false}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))}
-              className="h-4 w-4"
-            />
-            Enable DHCP server
-            <InfoTip label="Provides IPv4 leases on LAN interfaces when enabled." />
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input
-              type="checkbox"
-              checked={cfg.authoritative ?? false}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, authoritative: e.target.checked }))}
-              className="h-4 w-4"
-            />
-            Authoritative
-            <InfoTip label="Sends DHCPNAK for addresses this server cannot lease on served interfaces. Eligible addresses are adopted in either mode. Leave off when another DHCP server owns the subnet." />
-          </label>
-
-          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3">
-            <summary className="cursor-pointer text-sm text-(--text)">
-              Advanced options
-            </summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Listen Interfaces (CSV)
-                  <InfoTip label="Comma-separated interfaces where DHCP listens (e.g., lan2, lan3)." />
-                </label>
-                <input
-                  value={listenIfacesText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("listenIfaces", e.target.value)}
-                  placeholder="lan2, lan3"
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Lease Seconds
-                  <InfoTip label="How long clients keep their IPs before renewal (default 3600)." />
-                </label>
-                <input
-                  type="number"
-                  value={cfg.leaseSeconds ?? 3600}
-                  disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Router (Gateway)
-                  <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
-                </label>
-                <input
-                  value={cfg.router ?? ""}
-                  disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
-                  placeholder="192.168.1.1"
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  DNS Servers (CSV)
-                  <InfoTip label="DNS servers handed to clients (leave empty to use the firewall DNS)." />
-                </label>
-                <input
-                  value={dnsServersText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("dnsServers", e.target.value)}
-                  placeholder="192.168.1.1, 1.1.1.1"
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Domain (optional)
-                  <InfoTip label="Optional search domain handed to clients." />
-                </label>
-                <input
-                  value={cfg.domain ?? ""}
-                  disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
-                  placeholder="lab.local"
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Pools (one per line)
-                  <InfoTip label="Format: iface,start,end (validated on save)." />
-                </label>
-                <textarea
-                  rows={6}
-                  value={poolsText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("pools", e.target.value)}
-                  placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
-                  className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Reservations (one per line)
-                  <InfoTip label="Format: iface,mac,ip (must fall inside pool for that iface)." />
-                </label>
-                <textarea
-                  rows={6}
-                  value={reservationsText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("reservations", e.target.value)}
-                  placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
-                  className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <SaveStateLine state={save.state} saved="staged — commit to apply." />
-        {dirty && (
-          <p
-            role="status"
-            aria-label="Unsaved edits"
-            className={editor.superseded
-              ? "mt-3 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber"
-              : "mt-3 text-xs text-(--text-muted)"}
-          >
-            {editor.superseded
-              ? "Unsaved edits kept: the DHCP settings changed on the server while you were editing. Save replaces them with your edits; Refresh discards your edits."
-              : "Unsaved edits — Save stages them; Refresh discards them."}
-          </p>
-        )}
-      </Card>
-
       <Card className="mt-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -441,7 +439,7 @@ export default function DHCPPage() {
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xs border">
+        <div className="mt-4 overflow-x-auto rounded-xs border">
           {leasesLoading ? (
             <div className="space-y-2 p-3">
               <Skeleton className="h-10 w-full" />
@@ -482,7 +480,6 @@ export default function DHCPPage() {
           )}
         </div>
       </Card>
-      </fieldset>
     </Shell>
   );
 }

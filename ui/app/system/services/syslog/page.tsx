@@ -17,9 +17,12 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 import { SyslogEventStatusPanel } from "./syslog-event-status";
 import { SyslogAuditStatusPanel } from "./syslog-audit-status";
+import { deliveryAttention, DeliverySummary } from "./delivery-summary";
 
 export default function SyslogPage() {
   const canEdit = isAdmin();
@@ -149,7 +152,10 @@ export default function SyslogPage() {
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || form.editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? `${fwdCount} forwarders` : undefined}
+        attention={deliveryAttention(status)} updated={status?.last_flush}
+        note="Delivery is not an acknowledgement by the collector"
+        summary={<DeliverySummary status={status} />} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -163,26 +169,6 @@ export default function SyslogPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      {status && (
-        <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">
-          <div>Forwarders: {status?.configured_forwarders ?? "Unknown"}</div>
-          <div>Sent: {status?.sent_total ?? "Unknown"}</div>
-          <div>Failed: {status?.failed_total ?? "Unknown"}</div>
-          <div>Last check: {status?.last_flush || "\u2014"}</div>
-          <details className="md:col-span-4 rounded-xs border p-3">
-            <summary className="cursor-pointer">Delivery details</summary>
-            <div>Last batch: {status?.last_batch ?? "Unknown"}</div>
-            <div>Batch limit: {status?.batch_limit ?? "Unknown"}</div>
-            <div>Hit limit: {typeof status?.hit_limit === "boolean" ? (status.hit_limit ? "yes" : "no") : "Unknown"}</div>
-            <div>Flush interval: {status?.flush_interval_sec ?? "Unknown"}s</div>
-          </details>
-          {status?.last_error ? (
-            <div className="md:col-span-4">Last error: {status.last_error}</div>
-          ) : null}
-        </div>
-      )}
-      <SyslogEventStatusPanel events={status?.events} />
-      {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
 
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Forwarders</h2>
@@ -190,14 +176,14 @@ export default function SyslogPage() {
           Send unified events to external syslog collectors.
         </p>
         <p className="mt-2 text-xs text-(--text-muted)">
-          Active forwarders: {status?.configured_forwarders ?? 0}
+          Active forwarders: {status?.configured_forwarders ?? "Unknown"}
         </p>
         <div className="mt-2 grid gap-3 text-xs text-(--text-muted) md:grid-cols-3">
           <div>
             Log format:
             <select
               value={cfg.format ?? "rfc5424"}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -217,7 +203,7 @@ export default function SyslogPage() {
               min={1}
               max={5000}
               value={cfg.batchSize ?? 500}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -234,7 +220,7 @@ export default function SyslogPage() {
               min={1}
               max={60}
               value={cfg.flushEvery ?? 2}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -246,37 +232,11 @@ export default function SyslogPage() {
           </div>
         </div>
 
-        <div className="mt-3">
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-            </div>
-          ) : status?.sparkline?.length ? (
-            <Sparkline
-              values={status.sparkline}
-              color="var(--primary)"
-              background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-              title="Syslog events per minute"
-            />
-          ) : null}
-          {!loading && typeof status?.rate_per_min === "number" ? (
-            <p className="mt-2 text-xs text-(--text-muted)">
-              Rate: {status?.rate_per_min.toFixed(1)} / min
-            </p>
-          ) : null}
-          {!loading && typeof status?.errors_rate_per_min === "number" ? (
-            <p className="mt-1 text-xs">
-              Errors: {status?.errors_rate_per_min.toFixed(1)} / min
-            </p>
-          ) : null}
-        </div>
-
         <div className="mt-4 grid gap-2 md:grid-cols-4">
           <input
             value={newFwd.address}
             onChange={(e) => setNewFwd((f) => ({ ...f, address: e.target.value }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             placeholder="address"
             className="input-industrial"
           />
@@ -284,14 +244,14 @@ export default function SyslogPage() {
             type="number"
             value={newFwd.port}
             onChange={(e) => setNewFwd((f) => ({ ...f, port: Number(e.target.value) }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             placeholder="port"
             className="input-industrial"
           />
           <select
             value={newFwd.proto ?? "udp"}
             onChange={(e) => setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             className="input-industrial"
           >
             <option value="udp">UDP</option>
@@ -299,6 +259,7 @@ export default function SyslogPage() {
           </select>
           {canEdit && (
             <button
+              disabled={!canSave}
               onClick={addForwarder}
               className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
@@ -307,7 +268,7 @@ export default function SyslogPage() {
           )}
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-xs border bg-(--surface)">
+        <div className="mt-4 overflow-x-auto rounded-xs border bg-(--surface)">
           <table className="w-full text-sm">
             <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
@@ -333,6 +294,7 @@ export default function SyslogPage() {
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button
+                        disabled={!canSave}
                         onClick={() => deleteForwarder(i)}
                         className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                       >
@@ -348,7 +310,52 @@ export default function SyslogPage() {
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
-      </fieldset>
+      <h2 className="mt-6 text-lg font-semibold">Activity</h2>
+        <div className="mt-3">
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : status?.sparkline?.length ? (
+            <Sparkline
+              values={status.sparkline}
+              color="var(--primary)"
+              background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
+              title="Syslog events per minute"
+            />
+          ) : null}
+          {!loading && typeof status?.rate_per_min === "number" ? (
+            <p className="mt-2 text-xs text-(--text-muted)">
+              Rate: {status?.rate_per_min.toFixed(1)} / min
+            </p>
+          ) : null}
+          {!loading && typeof status?.errors_rate_per_min === "number" ? (
+            <p className="mt-1 text-xs">
+              Errors: {status?.errors_rate_per_min.toFixed(1)} / min
+            </p>
+          ) : null}
+        </div>
+      {status && (
+        <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">
+          <div>Forwarders: {status?.configured_forwarders ?? "Unknown"}</div>
+          <div>Sent: {status?.sent_total ?? "Unknown"}</div>
+          <div>Failed: {status?.failed_total ?? "Unknown"}</div>
+          <div>Last check: {status?.last_flush || "\u2014"}</div>
+          <div className="md:col-span-4"><h3>Troubleshooting</h3><Disclosure title="Delivery details" indicator={status.hit_limit ? "Batch limit reached" : status.last_batch === undefined ? "Some details unknown" : undefined}>
+            <div>Last batch: {status?.last_batch ?? "Unknown"}</div>
+            <div>Batch limit: {status?.batch_limit ?? "Unknown"}</div>
+            <div>Hit limit: {typeof status?.hit_limit === "boolean" ? (status.hit_limit ? "yes" : "no") : "Unknown"}</div>
+            <div>Flush interval: {status?.flush_interval_sec ?? "Unknown"}s</div>
+          </Disclosure>
+            </div>
+          {status?.last_error ? (
+            <div className="md:col-span-4">Last error: {status.last_error}</div>
+          ) : null}
+        </div>
+      )}
+      <SyslogEventStatusPanel events={status?.events} />
+      {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
     </Shell>
   );
 }

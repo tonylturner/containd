@@ -285,7 +285,8 @@ for (const bank of [
       idsBank: { running: unchangedBank, candidate: bank },
     }));
     await page.goto("/config/?tab=diff");
-    const block = page.getByRole("region", { name: "IDS changes", exact: true });
+    await page.getByRole("button", { name: "Advanced", exact: true }).click();
+    const block = page.getByRole("region", { name: "IDS JSON changes", exact: true });
     await expect(block.getByText("IDS rule bank", { exact: true })).toBeVisible();
     await expect(block).toContainText("Running: 30,000 rules · SHA-256 aaaaaaaaaaaa");
     await expect(block).toContainText(`Staged: ${bank.count.toLocaleString("en-US")} rules · SHA-256 bbbbbbbbbbbb`);
@@ -308,15 +309,17 @@ test("Config review includes unknown sections and complete known top-level secti
     running, candidate,
   }));
   await page.goto("/config/?tab=diff");
-  const firewall = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await expect(page.getByRole("region", { name: "Firewall changes", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const firewall = page.getByRole("region", { name: "Firewall JSON changes", exact: true });
   await expect(firewall).toContainText('"defaultAction": "ALLOW"');
   await expect(firewall).toContainText('"defaultAction": "DENY"');
-  await expect(page.getByRole("region", { name: "Data plane changes", exact: true })).toContainText('"dpiMode": "enforce"');
-  const future = page.getByRole("region", { name: "futureSection changes", exact: true });
+  await expect(page.getByRole("region", { name: "Data plane JSON changes", exact: true })).toContainText('"dpiMode": "enforce"');
+  const future = page.getByRole("region", { name: "futureSection JSON changes", exact: true });
   await expect(future).toContainText('"mode": "before"');
   await expect(future).toContainText('"mode": "after"');
-  await expect(page.getByRole("region", { name: "hiddenFuture changes", exact: true })).toContainText("Secret values changed (hidden).");
-  await expect(page.getByRole("region", { name: / changes$/ })).toHaveCount(4);
+  await expect(page.getByRole("region", { name: "hiddenFuture JSON changes", exact: true })).toContainText("Secret values changed (hidden).");
+  await expect(page.getByRole("region", { name: / JSON changes$/ })).toHaveCount(4);
 });
 
 test("Config review combines IDS settings lines and bank summary", async ({ page }) => {
@@ -326,7 +329,8 @@ test("Config review combines IDS settings lines and bank summary", async ({ page
     idsBank: { running: unchangedBank, candidate: { count: 30001, sha256: "b".repeat(64) } },
   }));
   await page.goto("/config/?tab=diff");
-  const block = page.getByRole("region", { name: "IDS changes", exact: true });
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const block = page.getByRole("region", { name: "IDS JSON changes", exact: true });
   await expect(block).toContainText('"enabled": false');
   await expect(block).toContainText('"enabled": true');
   await expect(block).toContainText("IDS rule bank");
@@ -432,6 +436,7 @@ test("Config IDS explorer shows the selected bank count and a browse link withou
     }
   });
   await page.goto("/config/");
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("button", { name: "IDS", exact: true }).click();
   const bank = page.getByRole("region", { name: "IDS rule bank", exact: true });
   await expect(bank).toContainText("Running IDS bank: 30,000 rules.");

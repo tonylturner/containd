@@ -63,6 +63,11 @@ test("verified empty is a successful kernel snapshot", async ({ page }) => {
 test("exact kill preserves NAT tuple and reports each step", async ({ page }) => {
   const writes = await mockAPI(page);
   await open(page);
+  const inspect = page.getByRole("button", { name: "Inspect connection" });
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await expect(inspect).toBeFocused();
   await expect(page.getByText("[2001:db8:1::2]:8443 → [2001:db8:1::1]:51001")).toBeVisible();
   await page.getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("A fresh source port is allowed");
@@ -86,23 +91,36 @@ test("client-service warns about all connections and exposes partial failure", a
   expect(writes[0]).toMatchObject({ scope: "client-service", durationSecs: 30 });
 });
 
-test("view-only users cannot revoke connections", async ({ page }) => {
+test("view-only users can inspect connections but cannot revoke them", async ({ page }) => {
   await mockAPI(page, { role: "view" });
   await open(page);
   await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
   await expect(page.getByLabel("Kill scope")).toHaveCount(0);
+  const inspect = page.getByRole("button", { name: "Inspect connection" });
+  await expect(inspect).toBeEnabled();
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("[2001:db8:1::2]:8443 → [2001:db8:1::1]:51001", { exact: true })).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(inspect).toHaveAttribute("aria-expanded", "false");
+  await expect(inspect).toBeFocused();
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
 });
 
 test("connections show the TAG labels that match them and filter by tag", async ({ page }) => {
   const tagged = { ...entry, sport: "41002", tags: ["eng-access", "ot.vendor"] };
   await mockAPI(page, { entries: [entry, tagged] });
   await open(page);
-  const header = page.getByRole("columnheader", { name: "Tags" });
-  await expect(header).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Tags" })).toHaveCount(0);
   const row = (sport: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: sport, exact: true }) });
-  await expect(row("41002")).toContainText("eng-access");
-  await expect(row("41002")).toContainText("ot.vendor");
-  await expect(row("41001").getByRole("cell").nth(7)).toHaveText("—");
+  await expect(row("41002")).toContainText("Tags: 2");
+  await row("41002").getByRole("button", { name: "Inspect connection" }).click();
+  await expect(page.getByText("eng-access", { exact: true })).toBeVisible();
+  await expect(page.getByText("ot.vendor", { exact: true })).toBeVisible();
+  await row("41001").getByRole("button", { name: "Inspect connection" }).click();
+  const plainDetail = row("41001").locator("xpath=following-sibling::tr[1]");
+  await expect(plainDetail.getByText("Tags", { exact: true }).locator("..")).toHaveText("Tags—");
   await page.getByPlaceholder("Filter (ip, port, proto, state, tag)…").fill("ot.vendor");
   await expect(page.getByText("1 shown / 2 total")).toBeVisible();
   await expect(row("41001")).toHaveCount(0);
@@ -129,7 +147,8 @@ test("ICMP rows show identifier and type in place of ports and can be killed", a
   await open(page);
   const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "id 4660", exact: true }) });
   await expect(row.getByRole("cell", { name: "type 8 code 0", exact: true })).toBeVisible();
-  await expect(row.getByRole("cell", { name: "198.51.100.20 → 203.0.113.1 (id 7)", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Inspect connection" }).click();
+  await expect(page.getByText("198.51.100.20 → 203.0.113.1 (id 7)", { exact: true })).toBeVisible();
   await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "47", exact: true }) }).getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
   await row.getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("icmp 192.0.2.10 → 198.51.100.20 (id 4660)");
@@ -156,7 +175,33 @@ test("an ICMP row without identifier fields shows bare addresses and cannot be k
   // An engine that predates ICMP identifiers lists only the addresses.
   await mockAPI(page, { entries: [{ proto: "icmp", src: "192.0.2.10", dst: "192.0.2.20", replySrc: "192.0.2.20", replyDst: "192.0.2.10" }] });
   await open(page);
-  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "192.0.2.20 → 192.0.2.10", exact: true }) });
-  await expect(row.getByRole("cell")).toHaveText(["icmp", "—", "192.0.2.10", "—", "192.0.2.20", "—", "—", "—", "no", "—", "192.0.2.20 → 192.0.2.10", "Kill"]);
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "icmp", exact: true }) });
+  await expect(row.getByRole("cell").filter({ hasNot: page.getByRole("button") })).toHaveText(["icmp", "—", "192.0.2.10", "—", "192.0.2.20", "—"]);
+  await row.getByRole("button", { name: "Inspect connection" }).click();
+  const detail = row.locator("xpath=following-sibling::tr[1]");
+  for (const [label, value] of [["Mark", "—"], ["Tags", "—"], ["Assured", "no"], ["TTL", "—"], ["Reply tuple (NAT)", "192.0.2.20 → 192.0.2.10"]]) {
+    await expect(detail.getByText(label, { exact: true }).locator("..")).toHaveText(`${label}${value}`);
+  }
   await expect(row.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
+});
+
+
+test("connection inspection preserves every non-default diagnostic field and collapses by keyboard", async ({ page }) => {
+  await mockAPI(page, { entries: [{ ...entry, mark: "0x20", tags: ["plant"], assured: true, timeoutSecs: 90 }] });
+  await open(page);
+  const inspect = page.getByRole("button", { name: "Inspect connection" });
+  const detail = page.locator(`[id="${await inspect.getAttribute("aria-controls")}"]`);
+  await expect(detail).toBeHidden();
+  await expect(inspect.locator("..")).toContainText("Mark: 0x20");
+  await expect(inspect.locator("..")).toContainText("Tags: 1");
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  for (const [label, value] of [["Mark", "0x20"], ["Tags", "plant"], ["Assured", "yes"], ["TTL", "90s"], ["Reply tuple (NAT)", "[2001:db8:1::2]:8443 → [2001:db8:1::1]:51001"]]) {
+    const field = detail.getByText(label, { exact: true }).locator("..");
+    await expect(field).toBeVisible();
+    await expect(field).toHaveText(`${label}${value}`);
+  }
+  await page.keyboard.press("Space");
+  await expect(detail).toBeHidden();
+  await expect(inspect).toBeFocused();
 });

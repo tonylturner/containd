@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import { InfoTip } from "../../components/InfoTip";
+import { Disclosure } from "../../components/Disclosure";
 import type { IEC104Class } from "../../lib/api";
 import {
   IEC104_CLASSES,
@@ -35,6 +36,7 @@ export function IEC104Fields({
 }) {
   const parsedTypes = parseTypeIds(draft.typeIds);
   const stateHelpId = useId();
+  const advancedSet = [draft.cot, draft.originators, draft.negative, draft.test, draft.selectExecute, draft.commandStates, draft.commandQualifiers].some(value => value !== "");
 
   function set<K extends keyof IEC104Draft>(key: K, value: IEC104Draft[K]) {
     onChange({ ...draft, [key]: value });
@@ -51,6 +53,7 @@ export function IEC104Fields({
 
   return (
     <div className="space-y-3">
+      <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
           <label className={LABEL}>
@@ -147,8 +150,9 @@ export function IEC104Fields({
         </div>
       </div>
 
-      <details open={[draft.cot, draft.originators, draft.negative, draft.test, draft.selectExecute, draft.commandStates, draft.commandQualifiers].some(value => value !== "")}>
-        <summary className="cursor-pointer text-xs text-(--text-muted)">Advanced selectors (saved values still apply)</summary>
+      <Disclosure title="Advanced protocol fields"
+        defaultOpen={advancedSet}
+        indicator={advancedSet ? "Protocol fields set — values still apply" : undefined}>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (
             <label key={key} className={LABEL}>{label}
@@ -186,7 +190,7 @@ export function IEC104Fields({
           </label>
         </div>
         <p className="text-xs text-(--text-muted)">State and QU filters require explicit Type IDs: 45, 46, 47, 58, 59 or 60. Empty = any; a bound filter never matches an object without that field.</p>
-      </details>
+      </Disclosure>
 
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input

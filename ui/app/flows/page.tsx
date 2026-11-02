@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import Link from "next/link";
 
 import { api, type FlowSummary } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
@@ -11,7 +12,7 @@ import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { IdentificationBadge } from "./identification-badge";
-import { TagList } from "../../components/TagList";
+import { FlowInspection } from "./flow-inspection";
 
 const UNAVAILABLE = "Flows unavailable — live traffic monitoring could not be reached.";
 
@@ -27,6 +28,7 @@ function FlowsInner() {
 }
 
 function FlowsContent() {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
@@ -132,8 +134,9 @@ function FlowsContent() {
       {!error && (loading ? <SkeletonList rows={4} /> : <>
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
         <div className="w-full text-(--text-muted)">
-          Live flow summaries show active conversations, AV flags and the labels of the connection-label rules that matched them. Use Events for activity records and Alerts for IDS investigations.
+          Live flow summaries show active conversations, AV flags and the labels of the connection-label rules that matched them. These are observed conversations, not kernel connection state. Use Events for activity records and Alerts for IDS investigations.
         </div>
+        <Link href="/sessions/" className="underline">Sessions — inspect kernel connections and revoke immediately</Link>
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           Total flows: {flows.length}
         </div>
@@ -146,12 +149,12 @@ function FlowsContent() {
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           IEC 104 sessions: {iecSessionCount}
         </div>
-        <a
+        <Link
           href="/events/?av=1"
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text) transition-ui"
         >
           Open AV events
-        </a>
+        </Link>
       </div>
 
       {flows.length === 0 ? (
@@ -161,36 +164,39 @@ function FlowsContent() {
         />
       ) : (
         <div className="rounded-xs border bg-(--surface) overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-(--surface) text-xs font-medium uppercase tracking-wider text-(--text-dim)">
               <tr>
                 <th className="px-4 py-3">Flow</th>
                 <th className="px-4 py-3">Detected app</th>
                 <th className="px-4 py-3">Source → Destination</th>
-                <th className="px-4 py-3">Tags</th>
-                <th className="px-4 py-3">First Seen</th>
                 <th className="px-4 py-3">Last Seen</th>
                 <th className="px-4 py-3 text-right">Signals</th>
               </tr>
             </thead>
             <tbody>
               {visibleFlows.map((f) => (
+                <Fragment key={f.session_id ?? f.flowId}>
                 <tr
-                  key={f.session_id ?? f.flowId}
                   className={`table-row-hover transition-ui border-t ${
                     !f.avBlocked && f.avDetected ? "bg-amber/10" : ""
                   }`}
                 >
                   <td className="px-4 py-3 font-mono text-xs text-(--text)">
+                    <button type="button" aria-expanded={!!expanded[f.session_id ?? f.flowId]} aria-controls={`flow-detail-${f.session_id ?? f.flowId}`}
+                      onClick={() => setExpanded(old => ({ ...old, [f.session_id ?? f.flowId]: !old[f.session_id ?? f.flowId] }))}
+                      className="mb-1 block rounded-xs border px-2 py-1 font-sans">Inspect flow</button>
+                    {!!f.tags?.length && <span className="block font-sans text-xs">Tags: {f.tags.length}</span>}
                     {f.session_id ? (
                       <span title={f.session_id}>
                         IEC {shortSessionID(f.session_id)}
-                        <a
+                        <Link
                           href={`/events/?filter=iec104&session=${encodeURIComponent(f.session_id)}`}
                           className="ml-2 font-sans text-(--amber) hover:text-(--amber)"
                         >
                           Evidence
-                        </a>
+                        </Link>
                       </span>
                     ) : (
                       <>{f.flowId.slice(0, 10)}…</>
@@ -203,12 +209,6 @@ function FlowsContent() {
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     {formatEndpoint(f.srcIp, f.srcPort)} → {formatEndpoint(f.dstIp, f.dstPort)}
-                  </td>
-                  <td className="px-4 py-3 text-(--text)">
-                    <TagList tags={f.tags} />
-                  </td>
-                  <td className="px-4 py-3 text-(--text-muted)">
-                    {new Date(f.firstSeen).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-(--text-muted)">
                     {new Date(f.lastSeen).toLocaleString()}
@@ -227,9 +227,12 @@ function FlowsContent() {
                     )}
                   </td>
                 </tr>
+                <FlowInspection flow={f} open={!!expanded[f.session_id ?? f.flowId]} />
+                </Fragment>
               ))}
             </tbody>
           </table>
+          </div>
           {filteredFlows.length > 0 && (
             <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-(--text-muted)">
               <span>Showing {visibleFlows.length} of {filteredFlows.length} flows</span>
