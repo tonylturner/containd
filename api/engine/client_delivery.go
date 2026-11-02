@@ -112,7 +112,10 @@ func (c *HTTPClient) Observe(ctx context.Context) (convergence.Observation, erro
 	// Schedule degradation does not revoke packet installation, but gates ready.
 	status, err := c.RulesetStatus(ctx)
 	if err != nil {
-		return convergence.Observation{}, err
+		// The boot remains admissible. Missing ancillary telemetry must not
+		// turn a successful synchronous policy install into a rollback error,
+		// but it also cannot certify clean protection.
+		st.State = string(protection.StateUnknown)
 	}
 	if status.SchedulePlanner != nil && status.SchedulePlanner.State == dpengine.SchedulePlannerDegraded {
 		degraded = true

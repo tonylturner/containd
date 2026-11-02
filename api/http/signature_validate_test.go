@@ -41,7 +41,7 @@ func (m *signatureMockEngine) ListSignatureMatches(context.Context, int) ([]sign
 
 func TestAddSignatureValidatesThreshold(t *testing.T) {
 	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, "/api/v1/signatures", bytes.NewBufferString(body))
@@ -64,7 +64,7 @@ func TestAddSignatureValidatesThreshold(t *testing.T) {
 
 func TestAddSignatureDuplicateIDConflicts(t *testing.T) {
 	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 	const body = `{"id":"DUP","conditions":[{"field":"kind","op":"equals","value":"exception"}]}`
 	for i, want := range []int{http.StatusOK, http.StatusConflict} {
 		rec := httptest.NewRecorder()

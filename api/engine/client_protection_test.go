@@ -102,6 +102,25 @@ func TestObserveNeverInventsProof(t *testing.T) {
 	}
 }
 
+func TestMissingRulesTelemetryKeepsBootAdmissibleWithoutReadiness(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		a := testAdmission()
+		_ = json.NewEncoder(w).Encode(map[string]any{"bootId": "boot", "iec104Enforcement": map[string]bool{},
+			"protection": dpengine.ProtectionStatus{BootID: "boot", ApplyID: "apply", RunningRevision: a.RunningRevision,
+				Mode: a.Mode, State: "protecting", ObservedAt: time.Now(),
+				Installed: &protection.Acknowledgement{Metadata: a.Metadata, Operation: protection.OperationApply}}})
+	}))
+	defer server.Close()
+	o, err := NewHTTPClient(server.URL).Observe(context.Background())
+	if err != nil || o.BootID != "boot" || o.Engine.State != protection.StateUnknown || o.Engine.Installed == nil {
+		t.Fatalf("missing rules telemetry: %+v %v", o, err)
+	}
+}
+
 func TestRuntimeHealthProtectionBootIdentity(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"bootId": "new", "iec104Enforcement": map[string]bool{}, "protection": dpengine.ProtectionStatus{BootID: "old", ApplyID: "old-apply", State: "protecting", ObservedAt: time.Now()}})

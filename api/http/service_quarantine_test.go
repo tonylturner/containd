@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/services"
 )
@@ -57,12 +58,17 @@ func TestServiceQuarantineReplayAndStatus(t *testing.T) {
 			m.Syslog, m.DNS, m.NTP, m.DHCP, m.VPN = nil, nil, nil, nil, nil
 			m.Proxy.CertsDir = filepath.Join(t.TempDir(), "missing")
 			engine := &mockEngine{}
-			warnings, _, err := applyConfigSnapshot(context.Background(), &mockStore{cfg: cfg}, engine, m, nil, cfg)
-			if err != nil || !engine.applied || len(warnings) == 0 {
+			warnings, err := replayTestConfig(context.Background(), &mockStore{cfg: cfg}, engine, m)
+			if err != nil || !engine.applied || len(m.Faults()) == 0 {
 				t.Fatalf("quarantine blocked firewall: %v %v", err, warnings)
 			}
-			if engine.lastSvc.VPN.WireGuard.Enabled || engine.lastSvc.Proxy.Reverse.Enabled || !engine.lastSvc.AV.BackendDisabled {
+			if engine.lastSvc.VPN.WireGuard.Enabled || !engine.lastSvc.AV.BackendDisabled {
 				t.Fatalf("engine received desired, not effective, services: %+v", engine.lastSvc)
+			}
+			for _, outcome := range m.DeliveryOutcomes() {
+				if outcome.Name == protection.SubsystemReverseProxy && materialFault && (outcome.Fault == nil || outcome.Acknowledged != nil) {
+					t.Fatal("local material fault gained delivery proof")
+				}
 			}
 			// Desired state is retained for export and repair.
 			if cfg.Services.AV.Mode != "bad" || len(cfg.Services.VPN.WireGuard.ListenInterfaces) == 0 {

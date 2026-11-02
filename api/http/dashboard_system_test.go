@@ -21,10 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -32,8 +35,8 @@ type dashboardServices struct {
 	status any
 }
 
-func (m *dashboardServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (m *dashboardServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 
 func (m *dashboardServices) Status() any {
@@ -316,7 +319,7 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		c.Next()
 	})
 	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(cfgStore))
-	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, &mockEngine{}, nil))
+	router.POST("/system/factory-reset", testRuntimeHandler(t, cfgStore, &mockEngine{}, nil, factoryResetHandler(cfgStore, userStore, &mockEngine{}, nil)))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))
@@ -353,4 +356,7 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 	}
 }
 
-func (*dashboardServices) RecordEngineFaults([]config.ServiceFault) {}
+func (*dashboardServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (*dashboardServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

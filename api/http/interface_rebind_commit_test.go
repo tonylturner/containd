@@ -92,7 +92,7 @@ func TestCommitAppliesStagedInterfaceRebind(t *testing.T) {
 	want := devices(candidate.Interfaces)
 
 	engine := &mockEngine{}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	if rec := requestStage(t, server, "POST", "/config/candidate", candidate); rec.Code != http.StatusOK {
 		t.Fatalf("stage: %d %s", rec.Code, rec.Body)
 	}
@@ -107,7 +107,7 @@ func TestCommitAppliesStagedInterfaceRebind(t *testing.T) {
 	assertBindings(t, "commit apply", engine.lastIf, want)
 
 	replay := &mockEngine{}
-	if _, err := ApplyRunningConfig(ctx, store, replay, nil); err != nil {
+	if _, err := replayTestConfig(ctx, store, replay, nil); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	assertBindings(t, "replay apply", replay.lastIf, want)
@@ -126,7 +126,7 @@ func TestApplyFillsOnlyUnboundDefaultInterfaces(t *testing.T) {
 	}
 
 	engine := &mockEngine{}
-	if _, err := ApplyRunningConfig(ctx, store, engine, nil); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	// The default route is eth0, but lan2 owns it explicitly: wan stays unbound.

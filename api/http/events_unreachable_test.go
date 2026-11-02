@@ -16,7 +16,7 @@ import (
 func TestEventsReportsUnreachableEngineWithoutOtherEvents(t *testing.T) {
 	eng := newRuntimeMockEngine()
 	eng.eventsErr = errors.New("dial tcp 127.0.0.1:8081: connection refused")
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/events", nil))

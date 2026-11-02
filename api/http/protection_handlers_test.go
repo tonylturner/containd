@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/app/convergence"
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -28,37 +31,41 @@ type protectionEngine struct {
 	retryCalls          int
 }
 
-func (e *protectionEngine) ConfigureServices(ctx context.Context, _ config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
-	e.phases = append(e.phases, engineclient.ApplyID(ctx))
-	return engineclient.ServicesApplyResult{}, nil
-}
-func (e *protectionEngine) Configure(ctx context.Context, _ config.DataPlaneConfig) error {
-	e.phases = append(e.phases, engineclient.ApplyID(ctx))
+func (e *protectionEngine) ConfigureServices(ctx context.Context, admission protection.Admission, _ config.ServicesConfig) error {
+	e.phases = append(e.phases, string(admission.ApplyID))
 	return nil
 }
-func (e *protectionEngine) ApplyRules(ctx context.Context, _ rules.Snapshot) (dpengine.ProtectionStatus, error) {
-	id := engineclient.ApplyID(ctx)
+func (e *protectionEngine) Configure(ctx context.Context, admission protection.Admission, _ config.DataPlaneConfig) error {
+	e.phases = append(e.phases, string(admission.ApplyID))
+	return nil
+}
+func (e *protectionEngine) ApplyRules(ctx context.Context, admission protection.Admission, _ rules.Snapshot) error {
+	id := string(admission.ApplyID)
 	e.phases = append(e.phases, id)
 	e.ids = append(e.ids, id)
 	if e.failFirst && len(e.ids) == 1 {
-		return dpengine.ProtectionStatus{}, errors.New("apply_superseded: application was superseded")
+		return errors.New("apply_superseded: application was superseded")
 	}
 	if e.omit {
-		return dpengine.ProtectionStatus{}, nil
+		return nil
 	}
 	st := cannedProtection("pending")
 	st.ApplyID = id
-	return st, nil
+	st.RunningRevision = admission.RunningRevision
+	st.Mode = admission.Mode
+	e.observation = st
+	return nil
 }
 func (e *protectionEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
 	return engineclient.RuntimeHealth{BootID: "boot", Protection: e.observation}, e.healthErr
 }
-func (e *protectionEngine) RetryProtection(_ context.Context, bootID, applyID string) error {
+func (e *protectionEngine) Retry(_ context.Context, admission protection.Admission) error {
 	e.retryCalls++
-	if bootID != "boot" || applyID != "apply" {
-		return &engineclient.ProtectionConflict{Code: "protection_superseded"}
-	}
 	return e.retryErr
+}
+func (e *protectionEngine) Observe(ctx context.Context) (convergence.Observation, error) {
+	h, err := e.RuntimeHealth(ctx)
+	return convergence.Observation{BootID: protection.BootID(h.BootID), Engine: h.Protection.Observation(), Outcomes: h.Protection.Subsystems, Retryable: h.Protection.Retryable}, err
 }
 func cannedProtection(state string) dpengine.ProtectionStatus {
 	return dpengine.ProtectionStatus{BootID: "boot", ApplyID: "apply", InstalledApplyID: "apply", State: state, ObservedAt: time.Now().UTC(), Retryable: true,
@@ -72,8 +79,16 @@ func TestProtectionHealthMappingAndSanitization(t *testing.T) {
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			store := stageStore(t)
+			cfg, err := store.Load(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.DataPlane.Enforcement = true
+			if err := store.Save(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
 			engine := &protectionEngine{mockEngine: &mockEngine{}, observation: cannedProtection(tc.state)}
-			router := NewServerWithEngine(store, nil, engine)
+			router := newTestServerWithEngine(store, nil, engine)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/health", nil))
 			var body struct {
@@ -89,7 +104,7 @@ func TestProtectionHealthMappingAndSanitization(t *testing.T) {
 			if strings.Contains(rec.Body.String(), "nfqueue") || strings.Contains(rec.Body.String(), "private") {
 				t.Fatalf("diagnostics leaked: %s", rec.Body)
 			}
-			if err := store.SetRuntimeApplyFault(context.Background(), "private fault"); err != nil {
+			if err := store.SetRuntimeApplyFault(context.Background(), testRunningRevision(store), "private fault"); err != nil {
 				t.Fatal(err)
 			}
 			rec = httptest.NewRecorder()
@@ -118,84 +133,82 @@ func TestProtectionHealthMappingAndSanitization(t *testing.T) {
 }
 
 func TestProtectionRoutesAndRetryAudit(t *testing.T) {
-	for _, tc := range []struct {
-		name, body string
-		err        error
-		code       int
-		conflict   string
-	}{
-		{name: "accepted", body: `{"bootId":"boot","applyId":"apply"}`, code: 202},
-		{name: "superseded", body: `{"bootId":"old","applyId":"apply"}`, code: 409, conflict: "protection_superseded"},
-		{name: "not retryable", body: `{"bootId":"boot","applyId":"apply"}`, err: &engineclient.ProtectionConflict{Code: "protection_not_retryable"}, code: 409, conflict: "protection_not_retryable"},
-		{name: "unreachable", body: `{"bootId":"boot","applyId":"apply"}`, err: errors.New("unreachable"), code: 502},
-		{name: "invalid", body: `{}`, code: 400},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			auditStore := &mockAuditStore{}
-			engine := &protectionEngine{mockEngine: &mockEngine{}, observation: cannedProtection("failed"), retryErr: tc.err}
-			server := NewServerWithEngine(stageStore(t), auditStore, engine)
-			rec := requestStage(t, server, "POST", "/dataplane/protection/retry", json.RawMessage(tc.body))
-			if rec.Code != tc.code || tc.conflict != "" && !strings.Contains(rec.Body.String(), tc.conflict) {
-				t.Fatalf("retry: %d %s", rec.Code, rec.Body)
-			}
-			if tc.code != 400 {
-				if len(auditStore.records) != 1 || auditStore.records[0].Action != "dataplane.protection.retry" {
-					t.Fatalf("audit: %+v", auditStore.records)
-				}
-			}
-			rec = requestStage(t, server, "GET", "/dataplane/protection", nil)
-			if rec.Code != 200 || !strings.Contains(rec.Body.String(), "nfqueue:101") {
-				t.Fatalf("authenticated observation: %d %s", rec.Code, rec.Body)
-			}
-			engine.healthErr = errors.New("unreachable")
-			rec = requestStage(t, server, "GET", "/dataplane/protection", nil)
-			if rec.Code != 502 {
-				t.Fatalf("unreachable: %d %s", rec.Code, rec.Body)
-			}
-		})
+	auditStore := &mockAuditStore{}
+	engine := &protectionEngine{mockEngine: &mockEngine{}, observation: cannedProtection("failed")}
+	store := stageStore(t)
+	coordinator := testCoordinator(t, store, engine, nil)
+	result, err := coordinator.Replay(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
 	}
+	server := NewServerWithEngineAndServices(store, auditStore, engine, &stageServices{}, nil, coordinator)
+	body := map[string]string{"bootId": "boot", "applyId": string(result.ApplyID), "desiredRevision": string(result.RunningRevision)}
+	for range 2 {
+		rec := requestStage(t, server, "POST", "/dataplane/protection/retry", body)
+		if rec.Code != 202 {
+			t.Fatalf("coalesced retry: %d %s", rec.Code, rec.Body)
+		}
+	}
+	if engine.retryCalls != 0 {
+		t.Fatal("HTTP handler ran a second orchestration path")
+	}
+	body["desiredRevision"] += "_stale"
+	rec := requestStage(t, server, "POST", "/dataplane/protection/retry", body)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "protection_superseded") {
+		t.Fatalf("stale retry: %d %s", rec.Code, rec.Body)
+	}
+	for _, invalid := range []string{`{}`, `{"bootId":"boot","applyId":"apply"}`, `{"bootId":"boot","applyId":"apply","desiredRevision":"running","extra":true}`, `{} {}`} {
+		rec = httptest.NewRecorder()
+		server.ServeHTTP(rec, authedRequest("POST", "/api/v1/dataplane/protection/retry", strings.NewReader(invalid)))
+		if rec.Code != 400 {
+			t.Fatalf("invalid retry: %d %s", rec.Code, rec.Body)
+		}
+	}
+	if len(auditStore.records) != 3 {
+		t.Fatalf("retry audits: %+v", auditStore.records)
+	}
+	for _, record := range auditStore.records {
+		if record.Action != "dataplane.protection.retry" {
+			t.Fatal(record)
+		}
+	}
+	rec = requestStage(t, server, "GET", "/dataplane/protection", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "nfqueue:101") {
+		t.Fatalf("authenticated diagnostics: %d %s", rec.Code, rec.Body)
+	}
+	engine.healthErr = errors.New("unreachable")
+	rec = requestStage(t, server, "GET", "/dataplane/protection", nil)
+	if rec.Code != 502 || !strings.Contains(rec.Body.String(), `"ready":false`) {
+		t.Fatalf("unreachable: %d %s", rec.Code, rec.Body)
+	}
+	engine.healthErr = nil
 	t.Setenv("CONTAIND_AUDITOR_TOKEN", "reader")
-	engine := &protectionEngine{mockEngine: &mockEngine{}}
-	server := NewServerWithEngine(stageStore(t), nil, engine)
+	server = NewServerWithEngineAndServices(store, auditStore, engine, &stageServices{}, nil, coordinator)
 	for _, tc := range []struct {
 		token string
 		code  int
 	}{{"", 401}, {"reader", 403}} {
-		req := httptest.NewRequest("POST", "/api/v1/dataplane/protection/retry", strings.NewReader(`{"bootId":"boot","applyId":"apply"}`))
+		req := httptest.NewRequest("POST", "/api/v1/dataplane/protection/retry", strings.NewReader(`{}`))
 		if tc.token != "" {
 			req.Header.Set("Authorization", "Bearer "+tc.token)
 		}
-		rec := httptest.NewRecorder()
+		rec = httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
-		if rec.Code != tc.code || engine.retryCalls != 0 {
-			t.Fatalf("authorization: %d calls=%d", rec.Code, engine.retryCalls)
+		if rec.Code != tc.code {
+			t.Fatalf("authorization: %d", rec.Code)
 		}
 	}
-	for _, token := range []string{"", "reader"} {
-		req := httptest.NewRequest("GET", "/api/v1/dataplane/protection", nil)
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, req)
-		want := 200
-		if token == "" {
-			want = 401
-		}
-		if rec.Code != want {
-			t.Fatalf("read authorization: %d %s", rec.Code, rec.Body)
-		}
+	req := httptest.NewRequest("GET", "/api/v1/dataplane/protection", nil)
+	req.Header.Set("Authorization", "Bearer reader")
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("reader: %d %s", rec.Code, rec.Body)
 	}
-	for _, method := range []string{"GET", "POST"} {
-		path := "/dataplane/protection"
-		if method == "POST" {
-			path += "/retry"
-		}
-		server := NewServerWithEngine(stageStore(t), nil, nil)
-		rec := requestStage(t, server, method, path, json.RawMessage(`{"bootId":"boot","applyId":"apply"}`))
-		if rec.Code != 503 {
-			t.Fatalf("no engine: %d %s", rec.Code, rec.Body)
-		}
+	unavailable := newTestServerWithEngine(stageStore(t), nil, nil)
+	rec = requestStage(t, unavailable, "GET", "/dataplane/protection", nil)
+	if rec.Code != 502 || !strings.Contains(rec.Body.String(), `"ready":false`) {
+		t.Fatalf("missing engine: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -203,8 +216,16 @@ func TestProtectionApplyIdentitiesAndBodies(t *testing.T) {
 	for _, omit := range []bool{false, true} {
 		t.Run(map[bool]string{true: "missing observation", false: "observation"}[omit], func(t *testing.T) {
 			store := stageStore(t)
+			cfg, err := store.Load(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.DataPlane.Enforcement = true
+			if err := store.Save(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
 			engine := &protectionEngine{mockEngine: &mockEngine{}, omit: omit}
-			server := NewServerWithEngine(store, nil, engine)
+			server := newTestServerWithEngine(store, nil, engine)
 			seen := map[string]bool{}
 			for _, path := range []string{"/config/commit", "/config/commit_confirmed", "/config/rollback"} {
 				rec := requestStage(t, server, "POST", path, nil)
@@ -215,7 +236,7 @@ func TestProtectionApplyIdentitiesAndBodies(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if rec.Code != 200 || body.ApplyID == "" || seen[body.ApplyID] || body.Protection.ApplyID != body.ApplyID {
+				if rec.Code != 200 || body.ApplyID == "" || seen[body.ApplyID] || (!omit && body.Protection.ApplyID != body.ApplyID) {
 					t.Fatalf("body: %d %s", rec.Code, rec.Body)
 				}
 				seen[body.ApplyID] = true
@@ -237,7 +258,7 @@ func TestProtectionApplyIdentitiesAndBodies(t *testing.T) {
 				}
 			}
 			for i := 0; i < 2; i++ {
-				if _, err := ApplyBootConfig(context.Background(), store, engine, nil); err != nil {
+				if _, err := replayTestConfig(context.Background(), store, engine, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -250,17 +271,22 @@ func TestProtectionApplyIdentitiesAndBodies(t *testing.T) {
 
 func TestProtectionCompensationAndRecoveryIdentities(t *testing.T) {
 	store := stageStore(t)
+	before := testRunningRevision(store)
 	engine := &protectionEngine{mockEngine: &mockEngine{}, failFirst: true}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	rec := requestStage(t, server, "POST", "/config/commit", nil)
 	if rec.Code != 500 || !strings.Contains(rec.Body.String(), "apply_superseded") || len(engine.ids) != 2 || engine.ids[0] == engine.ids[1] {
 		t.Fatalf("compensation: %d %s ids=%v", rec.Code, rec.Body, engine.ids)
+	}
+	restored := testRunningRevision(store)
+	if restored == before || engine.observation.RunningRevision != protection.Revision(restored) {
+		t.Fatal("compensation reused an earlier running generation")
 	}
 	if err := store.SetManagementBootFault(context.Background(), "refused"); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if _, err := ApplyBootConfig(context.Background(), store, engine, nil); err != nil {
+		if _, err := replayTestConfig(context.Background(), store, engine, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -277,7 +303,7 @@ func TestProtectionFactoryResetBody(t *testing.T) {
 	}
 	defer us.Close()
 	engine := &protectionEngine{mockEngine: &mockEngine{}}
-	server := NewServerWithEngineAndServices(store, nil, engine, nil, us)
+	server := NewServerWithEngineAndServices(store, nil, engine, &stageServices{}, us)
 	rec := requestStage(t, server, "POST", "/system/factory-reset", json.RawMessage(`{"confirm":"NUCLEAR"}`))
 	var body struct {
 		Status, ApplyID string

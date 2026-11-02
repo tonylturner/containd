@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -302,19 +303,6 @@ func trustedCABundlePath(cfg *config.Config) string {
 	return common.FirstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
 }
 
-// pushTrustedCA sends the stored bundle's content and revision to the engine.
-// The engine never reads management's file.
-func pushTrustedCA(ctx context.Context, cfg *config.Config, engine EngineClient) error {
-	if engine == nil {
-		return errors.New("engine unavailable")
-	}
-	b, err := trust.LoadBundle(trustedCABundlePath(cfg))
-	if err != nil {
-		return err
-	}
-	return engine.ConfigureTrust(ctx, b)
-}
-
 // trustedCAUploadHandler keeps the storage boundary explicit and testable.
 // A stored bundle is pushed to the engine at once. When the engine cannot
 // apply it, the upload still succeeds with status "stored" and a warning,
@@ -345,28 +333,41 @@ func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir str
 			return
 		}
 
-		// Serialize with config applies so they push the same bundle.
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		cfg, err := readRunning(c, store)
-		if err != nil {
-			internalError(c, err)
+		coordinator, ok := requestCoordinator(c)
+		if !ok {
 			return
 		}
-		path := trustedCABundlePath(cfg)
-		if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), filepath.Clean(dataDir)+string(os.PathSeparator)) {
-			apiError(c, http.StatusBadRequest, "trustedCAFile must be under /data")
-			return
-		}
-		if err := trust.WriteBundle(path, []byte(bundle.PEM)); err != nil {
-			internalError(c, err)
+		stored := false
+		result, err := coordinator.TrustChanged(c.Request.Context(), func(_ context.Context, snapshot *config.RunningSnapshot) error {
+			path := trustedCABundlePath(snapshot.Config)
+			if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), filepath.Clean(dataDir)+string(os.PathSeparator)) {
+				return errors.New("trustedCAFile must be under /data")
+			}
+			if err := trust.WriteBundle(path, []byte(bundle.PEM)); err != nil {
+				return err
+			}
+			stored = true
+			return nil
+		})
+		if err != nil && !stored {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		status, warnings := "updated", []string{}
 		record := audit.Record{Action: "system.tls.trusted_ca.set", Target: bundle.Revision}
-		if err := pushTrustedCA(c.Request.Context(), cfg, engine); err != nil {
+		observation, observeErr := coordinator.Status(c.Request.Context())
+		acknowledged := false
+		for _, outcome := range observation.Subsystems {
+			ack := outcome.Acknowledged
+			if outcome.Name == protection.SubsystemTrust && outcome.Fault == nil && ack != nil &&
+				ack.ApplyID == result.ApplyID && ack.RunningRevision == protection.Revision(result.RunningRevision) &&
+				ack.TrustRevision == protection.TrustRevision(bundle.Revision) {
+				acknowledged = true
+			}
+		}
+		if err != nil || observeErr != nil || !acknowledged {
 			status = "stored"
-			warnings = append(warnings, fmt.Sprintf("trust: %v", err))
+			warnings = append(warnings, "trust: owner acknowledgement pending")
 			record.Result, record.Detail = "warning", warnings[0]
 		}
 		auditLog(c, record)

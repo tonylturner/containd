@@ -220,7 +220,7 @@ func TestConfigRevisionLearnUncertainPersistence(t *testing.T) {
 				stageEngine: &stageEngine{mockEngine: &mockEngine{}},
 				frozen:      []learn.Suggestion{suggestion},
 			}
-			server := NewServerWithEngine(store, nil, engine)
+			server := newTestServerWithEngine(store, nil, engine)
 			request := learn.ApplyRequest{RequestID: "reviewed-retry", Selections: []learn.Selection{{ID: suggestion.ID, Revision: suggestion.Revision}}}
 			base := testBaseRevision(store, ctx)
 			missing := casRequest(t, server, "POST", "/learn/apply", request, "")

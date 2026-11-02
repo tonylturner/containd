@@ -20,7 +20,7 @@ func TestConntrackUnavailableVersusEmpty(t *testing.T) {
 		body   string
 	}{{"missing", &mockEngine{}, 503, "conntrack backend unavailable"}, {"denied", unavailable, 502, "operation not permitted"}, {"empty", newRuntimeMockEngine(), 200, "[]"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServerWithEngine(&mockStore{}, nil, tc.engine)
+			s := newTestServerWithEngine(&mockStore{}, nil, tc.engine)
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/conntrack", nil))
 			if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.body) {
@@ -32,7 +32,7 @@ func TestConntrackUnavailableVersusEmpty(t *testing.T) {
 
 func TestConntrackKillContract(t *testing.T) {
 	engine := newRuntimeMockEngine()
-	s := NewServerWithEngine(&mockStore{}, nil, engine)
+	s := newTestServerWithEngine(&mockStore{}, nil, engine)
 	for _, tc := range []struct {
 		body   string
 		status int
@@ -53,7 +53,7 @@ func TestConntrackKillContract(t *testing.T) {
 func TestConntrackKillICMPContract(t *testing.T) {
 	engine := newRuntimeMockEngine()
 	audits := &mockAuditStore{}
-	s := NewServerWithEngine(&mockStore{}, audits, engine)
+	s := newTestServerWithEngine(&mockStore{}, audits, engine)
 	for _, tc := range []struct {
 		body, target string
 		status       int

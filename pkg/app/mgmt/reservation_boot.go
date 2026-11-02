@@ -79,7 +79,7 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 // recordBootDecision persists every boot's recovery decision. A refused
 // stored configuration never stops management: replay is gated and the engine
 // gets the fail-closed recovery ruleset until a valid commit, rollback or
-// factory reset (see api/http ApplyBootConfig).
+// factory reset. The runtime coordinator owns recovery delivery.
 func recordBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, []dpevents.Event, error) {
 	event, err := persistBootFault(logger, stores, bootConflict(cfg, r), r)
 	if err != nil {

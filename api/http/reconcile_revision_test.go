@@ -31,7 +31,7 @@ func TestReconcileDoesNotAcknowledgeConfigRevision(t *testing.T) {
 					t.Fatal(err)
 				}
 				engine := &mockEngine{}
-				server := NewServerWithEngine(store, nil, engine)
+				server := newTestServerWithEngine(store, nil, engine)
 				before := testBaseRevision(store, context.Background())
 				// Derive a guaranteed stale precondition from the actual store.
 				if err := testMutateCandidate(store, context.Background(), func(candidate *config.Config) error {

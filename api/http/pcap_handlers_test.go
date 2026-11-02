@@ -40,7 +40,7 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 		return nil, errors.New("unexpected config read")
 	}}
 	engine := newRuntimeMockEngine()
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
@@ -86,7 +86,7 @@ func TestPCAPStartWithoutBodyUsesStoredConfig(t *testing.T) {
 			}
 			store := &mockStore{cfg: cfg}
 			engine := newRuntimeMockEngine()
-			server := NewServerWithEngine(store, nil, engine)
+			server := newTestServerWithEngine(store, nil, engine)
 
 			rec := httptest.NewRecorder()
 			serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", test.body))
@@ -110,7 +110,7 @@ func TestPCAPStartBodyWithoutSelectionRejectsStoredFallback(t *testing.T) {
 	cfg.PCAP.Interfaces = []string{"stored"}
 	store := &mockStore{cfg: cfg}
 	engine := newRuntimeMockEngine()
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, server, rec, authedRequest(
@@ -142,7 +142,7 @@ func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 		runtimeMockEngine: newRuntimeMockEngine(),
 		err:               errors.New(`pcap zone "ghost" has no configured interfaces`),
 	}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
@@ -163,7 +163,7 @@ func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 
 func TestPCAPStartWithoutEngineDoesNotPersist(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
-	server := NewServerWithEngine(store, nil, nil)
+	server := newTestServerWithEngine(store, nil, nil)
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
 		`{"zones":["lan"],"filter":{"port":"502"}}`,
@@ -186,7 +186,7 @@ func TestPCAPConfigDoesNotCallEngine(t *testing.T) {
 	defer engineServer.Close()
 
 	store := &mockStore{cfg: config.DefaultConfig()}
-	server := NewServerWithEngine(store, nil, engineclient.NewHTTPClient(engineServer.URL))
+	server := newTestServerWithEngine(store, nil, engineclient.NewHTTPClient(engineServer.URL))
 	rec := httptest.NewRecorder()
 	req := authedRequest(
 		http.MethodPost,

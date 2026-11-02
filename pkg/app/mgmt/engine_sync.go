@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2025 containd Authors
-
 package mgmtapp
 
 import (
@@ -8,153 +6,42 @@ import (
 	"errors"
 	"time"
 
-	httpapi "github.com/tonylturner/containd/api/http"
-	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/app/convergence"
 	"go.uber.org/zap"
 )
 
-const (
-	engineSyncInterval      = time.Second
-	engineSyncMaxBackoff    = 10 * time.Second
-	engineSyncHealthTimeout = time.Second
-)
+const engineSyncHealthTimeout = time.Second
 
-type engineSync struct {
-	demo   *demoReconciler
-	store  config.Store
-	health httpapi.RuntimeHealthClient
-	apply  func(context.Context) ([]string, error)
-	logger *zap.SugaredLogger
-	replay <-chan struct{}
-
-	applied    bool
-	lastBootID string
-	recovery   bool
-	lastError  string
-}
-
-// startEngineSync returns a stop-and-join function so Run never closes its
-// stores while a replay is still using them, including on listener errors.
-func startEngineSync(ctx context.Context, logger *zap.SugaredLogger, store config.Store, engine httpapi.EngineClient, services httpapi.ServicesApplier, demo ...*demoReconciler) func() {
-	health, ok := engine.(httpapi.RuntimeHealthClient)
-	if !ok {
-		return func() {}
-	}
+// startConvergence runs the sole coordinator and joins it before callers close
+// stores. ErrDrain is returned to assembly: stores must remain open when an
+// uncooperative worker still owns them.
+func startConvergence(ctx context.Context, coordinator convergence.Coordinator, logger *zap.SugaredLogger, diagnostics <-chan error) func() error {
 	ctx, cancel := context.WithCancel(ctx)
-	syncer := &engineSync{
-		store:  store,
-		health: health,
-		apply: func(ctx context.Context) ([]string, error) {
-			return httpapi.ApplyBootConfig(ctx, store, engine, services)
-		},
-		logger: logger,
-	}
-	if len(demo) != 0 {
-		syncer.demo = demo[0]
-	}
-	// Register before the first poll: an earlier expiry is covered by boot
-	// replay; an expiry during that replay remains queued for another apply.
-	// A channel, rather than a callback, guarantees the store never blocks or
-	// calls back into itself while holding its mutex.
-	replay := make(chan struct{}, 1)
-	notifier, hasNotifier := store.(interface {
-		SetAutoRollbackNotify(chan<- struct{})
-	})
-	if hasNotifier {
-		notifier.SetAutoRollbackNotify(replay)
-		syncer.replay = replay
-	}
-	done := make(chan struct{})
+	done := make(chan error, 1)
+	diagnosticsDone := make(chan struct{})
 	go func() {
-		defer close(done)
-		syncer.run(ctx)
+		defer close(diagnosticsDone)
+		previous := ""
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-diagnostics:
+				if err != nil && err.Error() != previous {
+					logger.Warnf("runtime convergence: %v", err)
+					previous = err.Error()
+				}
+			}
+		}
 	}()
-	return func() {
-		if hasNotifier {
-			notifier.SetAutoRollbackNotify(nil)
-		}
+	go func() { done <- coordinator.Run(ctx) }()
+	return func() error {
 		cancel()
-		<-done
-	}
-}
-
-func (s *engineSync) run(ctx context.Context) {
-	delay := engineSyncInterval
-	for ctx.Err() == nil {
-		reachable := s.poll(ctx)
-		if reachable {
-			delay = engineSyncInterval
+		err := <-done
+		<-diagnosticsDone
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return err
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		case <-s.replay:
-			timer.Stop()
-			// Retain the invalidation across health/apply failures so an
-			// unchanged boot ID cannot suppress the retry.
-			s.applied = false
-		}
-		if !reachable {
-			delay = min(2*delay, engineSyncMaxBackoff)
-		}
-	}
-}
-
-// poll replays once per engine boot and mode transition. Failed attempts retry
-// with capped backoff and log only changed errors, not a warning every tick.
-func (s *engineSync) poll(ctx context.Context) bool {
-	err := config.CheckManagementBootFault(ctx, s.store)
-	recovery := errors.Is(err, config.ErrManagementBootFault)
-	if err != nil && !recovery {
-		s.logError(err)
-		return false
-	}
-	if recovery != s.recovery {
-		s.applied = false
-		s.recovery = recovery
-	}
-	healthCtx, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
-	health, err := s.health.RuntimeHealth(healthCtx)
-	cancel()
-	if err != nil {
-		// Older engines have no boot ID. Forget a successful unknown apply
-		// only when health becomes unreachable, not on every poll.
-		if s.lastBootID == "" {
-			s.applied = false
-		}
-		s.logger.Debugf("engine sync health unavailable: %v", err)
-		return false
-	}
-	if s.applied && health.BootID == s.lastBootID {
-		if s.demo != nil {
-			s.demo.Reconcile(ctx)
-		}
-		return true
-	}
-	warnings, err := s.apply(ctx)
-	for _, warning := range warnings {
-		s.logger.Warnf("engine sync: %s", warning)
-	}
-	if err != nil {
-		s.logError(err)
-		return false
-	}
-	s.lastError = ""
-	s.applied = true
-	s.lastBootID = health.BootID
-	if s.demo != nil {
-		s.demo.EngineSynced(ctx, health.BootID)
-	}
-	s.logger.Infof("replayed config to engine (bootId=%q recovery=%v)", health.BootID, recovery)
-	return true
-}
-
-func (s *engineSync) logError(err error) {
-	if s.lastError != err.Error() {
-		s.logger.Warnf("failed to replay config to engine: %v", err)
-		s.lastError = err.Error()
+		return nil
 	}
 }

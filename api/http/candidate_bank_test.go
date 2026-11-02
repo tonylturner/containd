@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 )
 
 type bankRoutingStore struct {
@@ -87,8 +90,8 @@ func TestCandidateBankRoutingAndResponse(t *testing.T) {
 
 type bankFreeValidationServices struct{}
 
-func (bankFreeValidationServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (bankFreeValidationServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 func (bankFreeValidationServices) Validate(context.Context, config.ServicesConfig) error { return nil }
 
@@ -106,4 +109,7 @@ func TestServiceValidationReadsBankFreeDocument(t *testing.T) {
 	}
 }
 
-func (bankFreeValidationServices) RecordEngineFaults([]config.ServiceFault) {}
+func (bankFreeValidationServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (bankFreeValidationServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

@@ -31,7 +31,7 @@ func failingLoadStore() *mockStore {
 func getInstalledRuleset(t *testing.T, engine EngineClient) (int, map[string]json.RawMessage, string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	NewServerWithEngine(failingLoadStore(), nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, installedRulesetPath, nil))
+	newTestServerWithEngine(failingLoadStore(), nil, engine).ServeHTTP(rec, authedRequest(http.MethodGet, installedRulesetPath, nil))
 	var body map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("status=%d body=%s: %v", rec.Code, rec.Body.String(), err)

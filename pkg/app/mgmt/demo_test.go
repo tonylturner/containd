@@ -13,10 +13,8 @@ import (
 
 	engineclient "github.com/tonylturner/containd/api/engine"
 	wire "github.com/tonylturner/containd/pkg/common/telemetry"
-	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/demo"
 	history "github.com/tonylturner/containd/pkg/cp/telemetry"
-	"go.uber.org/zap"
 )
 
 type demoEngine struct {
@@ -273,7 +271,7 @@ func TestDemoUnreadablePreferenceStatus(t *testing.T) {
 	}
 }
 
-func TestDemoEngineSyncRetriesWithoutConfigReplay(t *testing.T) {
+func TestDemoReconcileRetainsStoppedPreferenceAcrossReset(t *testing.T) {
 	ctx := context.Background()
 	e := &demoEngine{boot: "a"}
 	r := loadDemoReconciler(filepath.Join(t.TempDir(), "demo.json"), e)
@@ -281,16 +279,7 @@ func TestDemoEngineSyncRetriesWithoutConfigReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.preference = demo.On
-	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	applies := 0
-	syncer := &engineSync{store: store, health: e, apply: func(context.Context) ([]string, error) { applies++; return nil, nil }, logger: zap.NewNop().Sugar(), demo: r}
-	if !syncer.poll(ctx) {
-		t.Fatal("initial sync")
-	}
+	r.EngineSynced(ctx, "a")
 	e.mu.Lock()
 	e.err = errors.New("offline")
 	e.mu.Unlock()
@@ -300,11 +289,10 @@ func TestDemoEngineSyncRetriesWithoutConfigReplay(t *testing.T) {
 	e.mu.Lock()
 	e.err = nil
 	e.mu.Unlock()
-	if !syncer.poll(ctx) {
-		t.Fatal("retry")
-	}
+	r.Reconcile(ctx)
 	e.assertStopped(t)
-	if applies != 1 {
-		t.Fatal("unnecessary config apply", applies)
+	r.Reset(ctx)
+	if r.synced {
+		t.Fatal("reset retained stale demo eligibility")
 	}
 }

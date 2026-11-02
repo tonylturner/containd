@@ -260,7 +260,7 @@ func TestAssignInterfacesAuto(t *testing.T) {
 			{Name: "eth7", Index: 9, Up: true},
 		},
 	}
-	s := NewServerWithEngine(m, nil, eng)
+	s := newTestServerWithEngine(m, nil, eng)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -300,7 +300,7 @@ func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
 			{Name: "eth7", Index: 9, Up: true, Addrs: []string{"192.168.247.2/24"}},
 		},
 	}
-	s := NewServerWithEngine(m, nil, eng)
+	s := newTestServerWithEngine(m, nil, eng)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -341,7 +341,7 @@ func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
 			{Name: "eth7", Index: 9, Up: true},
 		},
 	}
-	s := NewServerWithEngine(m, nil, eng)
+	s := newTestServerWithEngine(m, nil, eng)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"explicit","mappings":{"wan":"eth0","dmz":"eth0"}}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -514,7 +514,7 @@ func TestSetDHCPDefersRuntimeApply(t *testing.T) {
 func TestCandidateCommitRollback(t *testing.T) {
 	m := &mockStore{}
 	eng := &mockEngine{}
-	s := NewServerWithEngine(m, nil, eng)
+	s := newTestServerWithEngine(m, nil, eng)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/candidate", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
@@ -635,7 +635,7 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 
 func TestCommitConfirmedTTLParsing(t *testing.T) {
 	m := &mockStore{}
-	s := NewServerWithEngine(m, nil, &mockEngine{})
+	s := newTestServerWithEngine(m, nil, &mockEngine{})
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", bytes.NewBufferString(`{"ttl_seconds":5}`))
 	req.Header.Set("Content-Type", "application/json")

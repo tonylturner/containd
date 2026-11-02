@@ -17,6 +17,7 @@ import (
 
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/app/convergence"
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
@@ -64,7 +65,7 @@ type mgmtListenerConfig struct {
 	reservedHTTPAddr    string
 }
 
-func Run(ctx context.Context, opts Options) error {
+func Run(ctx context.Context, opts Options) (runErr error) {
 	logger := logging.NewService("mgmt")
 	logging.InstallSlogBridge(logger.Desugar())
 	if err := validateJWTSecret(logger); err != nil {
@@ -92,9 +93,14 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	defer stores.store.Close()
-	defer stores.auditStore.Close()
-	defer stores.userStore.Close()
+	storesSafe := true
+	defer func() {
+		if storesSafe {
+			stores.userStore.Close()
+			stores.auditStore.Close()
+			stores.store.Close()
+		}
+	}()
 
 	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
 	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
@@ -146,7 +152,20 @@ func Run(ctx context.Context, opts Options) error {
 	if telemetryStore != nil {
 		historyStore = telemetryStore
 	}
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController)
+	diagnostics := make(chan error, 1)
+	runtimeStore, ok := stores.store.(config.RuntimeStore)
+	if !ok {
+		return fmt.Errorf("store %T does not support runtime convergence", stores.store)
+	}
+	environment := &httpapi.RuntimeEnvironment{Store: stores.store, Engine: engineClient,
+		RefreshMaterial: func(ctx context.Context, snapshot *config.RunningSnapshot) error {
+			return httpapi.RefreshLocalMaterial(ctx, stores.store, serviceManager.Manager, snapshot)
+		}}
+	coordinator, err := convergence.New(convergence.Options{Store: runtimeStore, Engine: engineClient, Services: serviceManager.Manager, Environment: environment, Demo: demoController, Errors: diagnostics})
+	if err != nil {
+		return err
+	}
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController, coordinator)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
@@ -173,26 +192,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 	installSyslogSources(serviceManager, engineClient, stores, logger)
-	// Management-run services must be available even while engine health is
-	// unreachable. Never render unprojected stored service content.
-	engineReachable := false
-	if health, ok := engineClient.(httpapi.RuntimeHealthClient); ok {
-		probe, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
-		_, err := health.RuntimeHealth(probe)
-		cancel()
-		engineReachable = err == nil
+	if err := bootstrapLocalServices(ctx, stores.store, engineClient, serviceManager.Manager); err != nil {
+		logger.Warnf("local service bootstrap: %v", err)
 	}
-	if cfg, err := stores.store.Load(ctx); err == nil && !engineReachable && config.CheckManagementBootFault(ctx, stores.store) == nil {
-		if effective, faults, err := config.EffectiveForStore(stores.store, cfg); err == nil {
-			_, warnings := serviceManager.ApplyEffective(ctx, effective.Services, faults)
-			for _, warning := range warnings {
-				logger.Warn(warning)
-			}
+	stopRuntime := startConvergence(ctx, coordinator, logger, diagnostics)
+	defer func() {
+		err := stopRuntime()
+		if errors.Is(err, convergence.ErrDrain) {
+			storesSafe = false
 		}
-	}
-	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager, demoController)
-	defer stopEngineSync()
-	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
+		runErr = errors.Join(runErr, err)
+	}()
+	stopReload := startConfigReload(ctx, logger, coordinator, stores.auditStore, opts.Reload)
 	defer stopReload()
 
 	// Start SSH server (admin-only) for interactive CLI.

@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -184,20 +185,12 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		cfg, err := readRunningOrDefault(c, store)
-		// This read drives a runtime action, not a configuration acknowledgement.
+		coordinator, ok := requestCoordinator(c)
+		if !ok {
+			return
+		}
 		c.Header(revisionHeader, "")
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if _, _, err := config.EffectiveForStore(store, cfg); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := engine.ConfigureInterfacesReplace(c.Request.Context(), cfg.Interfaces); err != nil {
+		if err := coordinator.Reconcile(c.Request.Context(), protection.SubsystemInterfaces); err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
@@ -360,16 +353,12 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 			apiError(c, http.StatusBadRequest, "confirm required: set {\"confirm\":\"REPLACE\"}")
 			return
 		}
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		cfg, err := readRunningOrDefault(c, store)
-		// This read drives a runtime action, not a configuration acknowledgement.
-		c.Header(revisionHeader, "")
-		if err != nil {
-			internalError(c, err)
+		coordinator, ok := requestCoordinator(c)
+		if !ok {
 			return
 		}
-		if err := engine.ConfigureRoutingReplace(c.Request.Context(), cfg.Routing); err != nil {
+		c.Header(revisionHeader, "")
+		if err := coordinator.Reconcile(c.Request.Context(), protection.SubsystemRouting); err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}

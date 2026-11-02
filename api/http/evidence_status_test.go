@@ -10,9 +10,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/common/evidence"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 )
 
 type evidenceFailingStore struct {
@@ -41,11 +44,10 @@ func newEvidenceStore(t *testing.T) (*audit.ObservedStore, *evidenceFailingStore
 
 type evidenceServices struct{ statuses []evidence.ForwardStatus }
 
-func (s evidenceServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (s evidenceServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
-func (s evidenceServices) RecordEngineFaults([]config.ServiceFault) {}
-func (s evidenceServices) ForwardStatus() []evidence.ForwardStatus  { return s.statuses }
+func (s evidenceServices) ForwardStatus() []evidence.ForwardStatus { return s.statuses }
 
 func TestEvidenceStatusAuthenticationAndNoCollector(t *testing.T) {
 	t.Setenv("CONTAIND_LAB_MODE", "0")
@@ -142,4 +144,9 @@ func TestEvidenceForwardingAndHealthStates(t *testing.T) {
 			t.Fatalf("%s/%s=%s", tc.a, tc.b, got)
 		}
 	}
+}
+
+func (evidenceServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (evidenceServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
 }

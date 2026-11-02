@@ -17,6 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/app/convergence"
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/gin-gonic/gin"
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/common/trust"
@@ -211,16 +214,13 @@ type mockEngine struct {
 	snap    rules.Snapshot
 	err     error
 	svcErr  error
-	// svcWarnings are the warnings the engine applied the services with.
-	svcWarnings []string
-	svcFaults   []config.ServiceFault
-	lastDP      config.DataPlaneConfig
-	lastIf      []config.Interface
-	lastRT      config.RoutingConfig
-	lastRTR     config.RoutingConfig
-	lastSvc     config.ServicesConfig
-	state       []config.InterfaceState
-	ruleset     dpengine.RulesetStatus
+	lastDP  config.DataPlaneConfig
+	lastIf  []config.Interface
+	lastRT  config.RoutingConfig
+	lastRTR config.RoutingConfig
+	lastSvc config.ServicesConfig
+	state   []config.InterfaceState
+	ruleset dpengine.RulesetStatus
 
 	avErr        error
 	avUpdates    int
@@ -229,38 +229,33 @@ type mockEngine struct {
 	avDeleted    string
 	trustErr     error
 	trustPushes  []trust.Bundle
+	trustOutcome *protection.OwnerOutcome
 	clearErr     error
 	blockClears  int
 }
 
-func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
+func (m *mockEngine) Configure(ctx context.Context, admission protection.Admission, cfg config.DataPlaneConfig) error {
 	m.lastDP = cfg
 	return nil
 }
 
-func (m *mockEngine) ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error {
+func (m *mockEngine) ConfigureInterfaces(ctx context.Context, admission protection.Admission, ifaces []config.Interface, replace bool) error {
 	m.lastIf = append([]config.Interface(nil), ifaces...)
 	return nil
 }
 
-func (m *mockEngine) ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
-	m.lastIf = append([]config.Interface(nil), ifaces...)
+func (m *mockEngine) ConfigureRouting(ctx context.Context, admission protection.Admission, routing config.RoutingConfig, replace bool) error {
+	if replace {
+		m.lastRTR = routing
+	} else {
+		m.lastRT = routing
+	}
 	return nil
 }
 
-func (m *mockEngine) ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error {
-	m.lastRT = routing
-	return nil
-}
-
-func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error {
-	m.lastRTR = routing
-	return nil
-}
-
-func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
+func (m *mockEngine) ConfigureServices(ctx context.Context, admission protection.Admission, services config.ServicesConfig) error {
 	m.lastSvc = services
-	return engineclient.ServicesApplyResult{Warnings: m.svcWarnings, Faults: m.svcFaults}, m.svcErr
+	return m.svcErr
 }
 
 func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {
@@ -270,10 +265,10 @@ func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.Interface
 	return []config.InterfaceState{{Name: "eth0", Index: 1, Up: true, Addrs: []string{"192.0.2.1/24"}}}, nil
 }
 
-func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (m *mockEngine) ApplyRules(ctx context.Context, admission protection.Admission, snap rules.Snapshot) error {
 	m.applied = true
 	m.snap = snap
-	return dpengine.ProtectionStatus{}, m.err
+	return m.err
 }
 
 func (m *mockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
@@ -374,11 +369,16 @@ func (m *mockEngine) UploadAVDef(ctx context.Context, name string, r io.Reader) 
 	return cpservices.AVDefinition{Name: name, Size: int64(len(data)), Active: true}, nil
 }
 
-func (m *mockEngine) ConfigureTrust(ctx context.Context, b trust.Bundle) error {
+func (m *mockEngine) ConfigureTrust(ctx context.Context, admission protection.Admission, b trust.Bundle) error {
+	m.trustOutcome = nil
 	if m.trustErr != nil {
 		return m.trustErr
 	}
 	m.trustPushes = append(m.trustPushes, b)
+	m.trustOutcome = &protection.OwnerOutcome{Name: protection.SubsystemTrust, Owner: protection.OwnerEngine,
+		DesiredRevision: admission.RunningRevision, Operation: protection.OperationApply,
+		State: protection.DeliveryReady, ObservedAt: time.Now(),
+		Acknowledged: &protection.Acknowledgement{Metadata: admission.Metadata, Operation: protection.OperationApply, TrustRevision: protection.TrustRevision(b.Revision)}}
 	return nil
 }
 
@@ -567,14 +567,16 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 	}
 }
 
-func (m *mockStore) ApplyChange(ctx context.Context, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
+func (m *mockStore) ApplyChange(ctx context.Context, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.RunningSnapshot, *config.RunningSnapshot) error) (config.Revision, error) {
 	m.mutations++
 	return mockApplyChange(ctx, m, expected, change, ttl, apply)
 }
-func (m *mockStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
-func (m *mockStore) SetRuntimeApplyFault(context.Context, string) error { return nil }
+func (m *mockStore) RuntimeApplyFault(context.Context) (string, error) { return "", nil }
+func (m *mockStore) SetRuntimeApplyFault(context.Context, config.RunningRevision, string) error {
+	return nil
+}
 
-func mockApplyChange(ctx context.Context, store config.Store, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
+func mockApplyChange(ctx context.Context, store config.Store, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.RunningSnapshot, *config.RunningSnapshot) error) (config.Revision, error) {
 	before, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
 	previous := before.Running
 	if previous == nil {
@@ -603,9 +605,40 @@ func mockApplyChange(ctx context.Context, store config.Store, expected config.Re
 	if err != nil {
 		return "", err
 	}
-	if err := apply(ctx, previous, next); err != nil {
+	if err := apply(ctx, &config.RunningSnapshot{Config: previous, RunningRevision: "previous"}, &config.RunningSnapshot{Config: next, RunningRevision: config.RunningRevision(fmt.Sprintf("running-%d", len(after.Revision)))}); err != nil {
 		restoreErr := store.Save(context.WithoutCancel(ctx), previous)
-		return "", &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), next, previous)}
+		return "", &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), &config.RunningSnapshot{Config: next, RunningRevision: "rejected"}, &config.RunningSnapshot{Config: previous, RunningRevision: "restored"})}
 	}
 	return revision, nil
 }
+
+func (m *mockStore) ReadRunning(ctx context.Context) (config.RunningState, error) {
+	cfg, err := m.Load(ctx)
+	if err == config.ErrNotFound {
+		return config.RunningState{Revision: m.currentRevision()}, nil
+	}
+	return config.RunningState{Revision: m.currentRevision(), Running: &config.RunningSnapshot{Config: cfg, RunningRevision: config.RunningRevision(fmt.Sprintf("running-%d", m.revision))}}, err
+}
+func (*mockStore) SetStoreNotify(chan<- struct{}) {}
+func (*mockStore) CompleteRuntimeApply(context.Context, config.RunningRevision, string) error {
+	return nil
+}
+func (m *mockStore) ApplyReset(ctx context.Context, expected config.Revision, cfg *config.Config, apply func(context.Context, *config.RunningSnapshot, *config.RunningSnapshot) error) (config.Revision, error) {
+	if err := m.compareRevision(expected); err != nil {
+		return "", err
+	}
+	before, _ := m.ReadRunning(ctx)
+	if err := m.Save(ctx, cfg); err != nil {
+		return "", err
+	}
+	after, _ := m.ReadRunning(ctx)
+	return m.currentRevision(), apply(ctx, before.Running, after.Running)
+}
+func (m *mockEngine) Observe(ctx context.Context) (convergence.Observation, error) {
+	h, err := m.RuntimeHealth(ctx)
+	if m.trustOutcome != nil {
+		h.Protection.Subsystems = append(h.Protection.Subsystems, *m.trustOutcome)
+	}
+	return convergence.Observation{BootID: protection.BootID(h.BootID), Engine: h.Protection.Observation(), Outcomes: h.Protection.Subsystems, Retryable: h.Protection.Retryable}, err
+}
+func (*mockEngine) Retry(context.Context, protection.Admission) error { return nil }
