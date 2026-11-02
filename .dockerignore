@@ -5,6 +5,7 @@
 build/*
 !build/Dockerfile.mgmt
 !build/Dockerfile.engine
+!build/containd-os-shell.sh
 
 # Go build artifacts
 **/bin
