@@ -3261,8 +3261,8 @@ components:
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
         traffic: {$ref: '#/components/schemas/ConduitTraffic'}
         rules: {type: array, items: {type: string}}
-        gaps: {type: array, items: {type: string}}
-        mitre: {type: array, items: {type: string}}
+        gaps: {type: array, items: {type: string}, description: 'Policy gaps and hints. Plaintext-mixing hints carry a Heuristic (service ports) prefix; port membership is not observed plaintext evidence.'}
+        mitre: {type: array, items: {type: string}, description: 'MITRE hints. T1190 and T1595 inferred from the source zone name carry a Heuristic (source zone name) prefix; they are not observed attack evidence.'}
         defaultDeny: {type: boolean}
         tlsEnforced: {type: boolean, description: Always false; conventional service ports do not enforce or verify TLS.}
         protoWhitelist: {type: boolean, description: Conservative proof of a refusing fallback and explicit transport restrictions on every zone-matching enforcing ALLOW including conditional grants. TCP and UDP entries must specify ports; ICMP does not require a port. Unproved cases are false with unknown provenance.}

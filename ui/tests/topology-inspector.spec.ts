@@ -6,14 +6,16 @@ test.beforeEach(async ({ page }) => {
     const path = new URL(route.request().url()).pathname;
     const data: Record<string, unknown> = {
       "/api/v1/config/running": { interfaces: [] },
-      "/api/v1/config": { zones: [{ name: "it" }, { name: "ot" }], interfaces: [], firewall: { rules: [] } },
+      "/api/v1/config": { zones: [{ name: "wan" }, { name: "ot" }], interfaces: [], firewall: { rules: [] } },
       "/api/v1/config/diff": { changed: false, changedSections: [] },
       "/api/v1/interfaces/state": [],
       "/api/v1/flows": [],
-      "/api/v1/zones": [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }],
+      "/api/v1/zones": [{ name: "wan", slTarget: 1 }, { name: "ot", slTarget: 2 }],
       "/api/v1/security/conduits": [{
-        from: "it", to: "ot", state: "allow", ids: "disabled", checks: securityChecks, proto: [{ n: "tcp", t: "allowed" }],
-        traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: ["allow-test"], gaps: ["No IDS coverage"], mitre: ["T0001"],
+        from: "wan", to: "ot", state: "allow", ids: "disabled", checks: securityChecks, proto: [{ n: "tcp", t: "allowed" }],
+        traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: ["allow-test"],
+        gaps: ["Heuristic (service ports): ICS traffic mixed with plaintext IT protocols"],
+        mitre: ["Heuristic (source zone name): T1190 Exploit Public App", "Heuristic (source zone name): T1595 Active Scanning"],
       }],
       "/api/v1/system/inspection": {
         host: { os: "Linux", kernel: "6.1", arch: "arm64", numCPU: 2 }, runtime: { dockerVersion: "27" },
@@ -58,19 +60,20 @@ test("Physical inspector supports keyboard selection and retains foreground flag
 test("security gaps and conduit inspector are keyboard reachable with distinct sources", async ({ page }) => {
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
-  const cell = page.getByRole("button", { name: "Inspect IT to OT", exact: true });
+  const cell = page.getByRole("button", { name: "Inspect WAN to OT", exact: true });
   await cell.focus();
   await page.keyboard.press("Enter");
   await expect(cell).toHaveAttribute("aria-expanded", "true");
   const inspector = page.getByRole("region", { name: "Conduit details", exact: true });
-  await expect(inspector.getByText("No IDS coverage", { exact: true })).toBeVisible();
-  await expect(inspector.getByText("T0001", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (service ports): ICS traffic mixed with plaintext IT protocols", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (source zone name): T1190 Exploit Public App", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Heuristic (source zone name): T1595 Active Scanning", { exact: true })).toBeVisible();
   await expect(inspector.getByText("Saved target", { exact: true })).toHaveCount(2);
   await expect(inspector.getByText("routed traffic that passed policy, last hour", { exact: true })).toBeVisible();
   await expect(page.getByText("Conduits summarize running policy, not live verification.", { exact: false })).toBeVisible();
   await inspector.getByRole("button", { name: "Hide detail panel" }).click();
   await expect(cell).toBeFocused();
-  await expect(page.getByRole("button", { name: "IT → OT: 1 gap", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "WAN → OT: 1 gap", exact: true })).toBeVisible();
 });
 
 test("logical graph node opens its inspector with Enter", async ({ page }) => {

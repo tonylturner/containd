@@ -110,6 +110,10 @@ zone-matching enforcing ALLOW, including conditional grants. TCP and UDP entries
 must specify ports; ICMP does not require a port. An unrestricted
 host grant cannot be cancelled by a separate TCP/443 grant. Unproved cases
 (including ICS-only grants) remain unknown and never pass automatically.
+The plaintext-mixing entry in `gaps` is prefixed **Heuristic (service ports)**.
+The T1190 and T1595 entries inferred from a source zone named `internet` or `wan`
+are prefixed **Heuristic (source zone name)** in `mitre`. These are presentation
+hints, not observed plaintext or attack evidence; both fields remain string arrays.
 `traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).
 Measured and recorded demo counts, coverage, and unavailable reasons follow the
 [telemetry contract](#retained-counter-history); there is no percent-of-baseline value.

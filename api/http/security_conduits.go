@@ -455,7 +455,7 @@ func computeGaps(state string, defaultDeny, protoWhitelist, auditLogged, avEnabl
 			}
 		}
 		if hasPlaintext {
-			gaps = append(gaps, "ICS traffic mixed with plaintext IT protocols")
+			gaps = append(gaps, "Heuristic (service ports): ICS traffic mixed with plaintext IT protocols")
 		}
 	}
 	if state == "unmodeled" {
@@ -485,7 +485,7 @@ func computeMitre(state string, protoWhitelist bool, fromZone string, protos []p
 
 	fromLower := strings.ToLower(fromZone)
 	if fromLower == "internet" || fromLower == "wan" {
-		mitre = append(mitre, "T1190 Exploit Public App", "T1595 Active Scanning")
+		mitre = append(mitre, "Heuristic (source zone name): T1190 Exploit Public App", "Heuristic (source zone name): T1595 Active Scanning")
 	}
 
 	for _, p := range protos {
