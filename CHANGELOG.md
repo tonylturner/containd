@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bind runtime convergence to committed running generations, with authenticated
+  desired/applied/protecting revisions, per-owner outcomes and `ready`. Retry
+  outstanding owners without replaying healthy services; adopt unchanged live
+  runtime only after owner confirmation. VPN/proxy apply or teardown gates ready;
+  DNS/NTP/syslog/DHCP faults remain visible and retryable without gating it.
+  Degraded logging/scheduling is not ready. Commit/rollback/reset results add
+  `runningRevision`; protection retry requires `{bootId, applyId, desiredRevision}`
+  (CLI: `retry protection <boot-id> <apply-id> <desired-revision> CONFIRM`).
+  SIGHUP reloads referenced material through its owners, and trust uploads report
+  `updated` only with matching owner proof (`stored` means durable but pending).
+
 - Keep large IDS import results compact with evaluability and conversion-note
   counts, at most 20 attention rows, and a dismiss action.
 - Require protocol restrictions on every matching enforcing ALLOW and a refusing

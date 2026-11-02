@@ -97,6 +97,23 @@ configuration and startup guidance. There is no enforcement switch on PCAP.
 
 ## Service faults
 
+Service delivery retries only outstanding owners. A fresh apply attempt retains
+an unchanged service without restarting it only after its owner confirms the
+same runtime input is still active. Failed or unprovable owners remain
+outstanding until delivery succeeds. Engine-owned runtime can be adopted after
+positive owner confirmation; after management restarts, management-owned traffic
+services with unprovable inherited state are safely reconciled by their owners.
+Interfaces and routing use normal reconciliation, not an assumed no-op readback.
+
+The authenticated [protection aggregate](api-reference.md#protection-observations)
+keeps original desired obligations even when runtime is quarantined. VPNs and
+forward/reverse proxies require verified apply or teardown before `ready`.
+DNS, NTP, syslog and DHCP faults stay visible and retryable but never gate ready.
+Config/render faults require input repair; runtime delivery faults retry.
+Degraded rule-hit logging or scheduling is not clean readiness, even if packet
+policy still enforces. Saved PCAP application is one-shot, outside this retry
+ledger; capture faults do not certify or gate traffic protection.
+
 An older stored service configuration that no longer passes validation is
 quarantined independently. Management, firewall replay and other services keep
 running. Missing or expired proxy TLS material is also checked at apply time:
@@ -121,12 +138,14 @@ that service. Commit checks this again against the current running document.
 Ruleset and coverage previews use the effective configuration and disclose
 `serviceFaults`.
 
-A quarantined service gets no automatic firewall admission rule. VPN CIDR tokens
-for a quarantined tunnel match nothing; OpenVPN is stopped, and a quarantined
-DHCP server is stopped without its UDP/67 input rule. WireGuard quarantine or
+A quarantined service gets no automatic firewall admission rule. Quarantine
+never removes its original delivery or verified-teardown obligation. VPN CIDR
+tokens for a quarantined tunnel match nothing. Quarantine requests OpenVPN
+shutdown; DHCP shutdown removes its UDP/67 input rule. Missing teardown proof
+remains outstanding rather than certifying the runtime as stopped. WireGuard quarantine or
 explicit disable removes containd-created links regardless of their names;
 changing the enabled interface name removes the previous owned link. Delete
-failures are reported as WireGuard runtime faults and retried on the next apply.
+failures are reported as WireGuard runtime faults and retried automatically.
 WireGuard link ownership is persisted in `/data/wireguard-links.json` (override
 with `CONTAIND_WIREGUARD_STATE_PATH`) and scoped to the kernel boot and network
 namespace. A kernel identity recorded only after exclusive creation prevents
@@ -816,5 +835,10 @@ error if exit cannot be confirmed within another two seconds.
 
 `SIGHUP` in management or combined mode reapplies the stored running service
 configuration; it does not promote candidate edits or reload environment
-variables. See [reload and reset outcomes](api-reference.md#factory-reset) for
+variables. It starts a fresh runtime attempt without changing the persisted
+running generation. Explicit refresh reloads referenced material through the
+proxy, OpenVPN, DNS, NTP, syslog and DHCP owners; failed reload is safely
+quarantined rather than adopting an old process from matching JSON alone.
+There is no continuous file watcher or general process-adoption facility.
+See [reload and reset outcomes](api-reference.md#factory-reset) for
 warnings, session revocation and restart-only settings.
