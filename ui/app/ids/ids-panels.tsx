@@ -15,7 +15,7 @@ import {
   groupFilterMatch,
 } from "./ids-shared";
 
-export type IDSPanelFields = { name: string; filter: string; format: string; sigmaText: string };
+export type IDSPanelFields = { description: string; name: string; filter: string; format: string; sigmaText: string };
 type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field" | "editor">;
 
 export function GroupsPanel({
@@ -35,6 +35,7 @@ export function GroupsPanel({
 }) {
   const [name, setName] = form.field("name");
   const [filter, setFilter] = form.field("filter");
+  const [description, setDescription] = form.field("description");
 
   const groupStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -58,11 +59,12 @@ export function GroupsPanel({
     }
     const accepted = onUpdate([
       ...groups,
-      { id, name: name.trim(), filter: filter.trim(), enabled: true },
+      { id, name: name.trim(), description: description.trim(), filter: filter.trim(), enabled: true },
     ]);
     if (!accepted) return;
     setName("");
     setFilter("");
+    setDescription("");
   }
 
   function onToggle(id: string) {
@@ -84,11 +86,12 @@ export function GroupsPanel({
       {canEdit && (
         <Card title="Create group">
           <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-[150px] flex-1">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="ids-group-name" className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
                 Name
               </label>
               <input
+                id="ids-group-name"
                 disabled={mutationDisabled}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -96,11 +99,12 @@ export function GroupsPanel({
                 className="input-industrial w-full text-sm"
               />
             </div>
-            <div className="min-w-[200px] flex-1">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="ids-group-filter" className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
                 Filter
               </label>
               <input
+                id="ids-group-filter"
                 disabled={mutationDisabled}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -108,6 +112,10 @@ export function GroupsPanel({
                 className="input-industrial w-full font-mono text-sm"
               />
             </div>
+            <label className="min-w-0 flex-1 text-xs">
+              Description
+              <input disabled={mutationDisabled} value={description} onChange={e => setDescription(e.target.value)} className="input-industrial mt-1 w-full" />
+            </label>
             <button
               onClick={onCreate}
               disabled={mutationDisabled || !name.trim()}
@@ -241,7 +249,7 @@ export function ImportPanel({
           (.yml). Format is auto-detected.
         </p>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[200px] flex-1">
+          <div className="min-w-0 flex-1">
             <label className="mb-1 block text-xs text-(--text-muted)">
               Rule file
             </label>
@@ -411,83 +419,6 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-export function EditRuleModal({
-  mutationDisabled = false,
-  rule,
-  text,
-  setText,
-  onClose,
-  onSave,
-}: {
-  mutationDisabled?: boolean;
-  rule: IDSRule;
-  text: string;
-  setText: (text: string) => void;
-  onClose: () => void;
-  onSave: (r: IDSRule) => void;
-}) {
-  const [err, setErr] = useState<string | null>(null);
-
-  function save() {
-    setErr(null);
-    try {
-      const parsed = JSON.parse(text) as IDSRule;
-      if (!parsed.id) {
-        setErr("Rule must have an id.");
-        return;
-      }
-      onSave(parsed);
-    } catch {
-      setErr("Invalid JSON.");
-    }
-  }
-
-  return (
-    <div className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="animate-fade-in w-full max-w-3xl rounded-xs border bg-(--surface) p-5 shadow-card-lg">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-(--text)">
-            Edit: {rule.id}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-          >
-            Close
-          </button>
-        </div>
-        {err && (
-          <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-            {err}
-          </div>
-        )}
-        <textarea
-          disabled={mutationDisabled}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={16}
-          className="input-industrial w-full font-mono text-xs"
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
-          >
-            Cancel
-          </button>
-          <button
-            disabled={mutationDisabled}
-            onClick={save}
-            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
-          >
-            Save rule
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

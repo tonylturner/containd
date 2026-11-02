@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DHCP uses interface pickers and validated pool/reservation rows; IDS offers
+  common rule fields, advanced JSON editing, one staged rule save and group descriptions.
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
   focus retained after moves. A read-only Default row always shows the
   candidate policy's fallback action for traffic no allow, deny or reject rule
@@ -65,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Antivirus default-local mode exposes confirmed definition updates beside missing
+  databases, links enforcement refusals to Firewall, and adds a cache-duration control.
 - Editing a firewall rule with several zones or protocols no longer keeps only
   the first of each.
 - DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown
