@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { certUploadNotice, tlsPolicyRows, tlsView, type TLSRow } from "../app/system/settings/tls-view";
 import type { ProfileValueSource } from "../lib/api";
+import { parseTLSInfo } from "../lib/api-policy";
 
 // Model tests: no page, no server.
 
@@ -31,6 +32,13 @@ const rows = (list: TLSRow[]) => Object.fromEntries(list.map((r) => [r.label, r.
 
 test("cookie policy stays unknown until TLS status is loaded", () => {
   expect(rows(tlsPolicyRows(null))["Secure cookies"]).toBe("—");
+});
+
+test("TLS response accepts an optional certificate warning and rejects malformed warning values", () => {
+  const warning = "/etc/tls/server.pem: management TLS certificate has no DNS or IP subject alternative name; add one with -addext 'subjectAltName=DNS:<name>,IP:<addr>'";
+  expect(parseTLSInfo({ ...saved, certificateWarning: warning })?.certificateWarning).toBe(warning);
+  expect(parseTLSInfo(saved)?.certificateWarning).toBeUndefined();
+  expect(parseTLSInfo({ ...saved, certificateWarning: 42 })).toBeNull();
 });
 
 test("listeners and files served now equal to the next start show once", () => {
@@ -219,6 +227,22 @@ test("settings page marks saved files that differ from the served ones", async (
   await expect(card.getByText("they are served from the next management start")).toBeVisible();
   await expect(card.getByText("[::]:8080")).toBeVisible();
   await expect(card.getByText(/listen \(next start\)/)).toHaveCount(0);
+});
+
+test("settings page shows the API certificate warning verbatim and clears it when absent", async ({ page }) => {
+  const warning = "/etc/tls/server.pem: management TLS certificate has no DNS or IP subject alternative name; add one with -addext 'subjectAltName=DNS:<name>,IP:<addr>'";
+  const identity = { ...managedSaved, ...bound, ...served, servedCertFile: managedSaved.certFile, servedKeyFile: managedSaved.keyFile };
+  await mockAPI(page, { "/api/v1/system/tls": { json: { ...identity, certificateWarning: warning } } });
+  const card = await openSettings(page);
+  const notice = card.getByRole("status", { name: "Certificate warning" });
+  await expect(notice).toHaveText(warning);
+  await expect(notice).toHaveClass(/border-amber\/30/);
+  await expect(notice).toHaveClass(/bg-amber\/10/);
+  await expect(notice).toHaveClass(/text-amber/);
+
+  await page.route("**/api/v1/system/tls", (route) => route.fulfill({ json: identity }));
+  await card.getByRole("button", { name: "Refresh" }).click();
+  await expect(notice).toHaveCount(0);
 });
 
 for (const width of [1280, 390]) {

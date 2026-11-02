@@ -12,19 +12,25 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func testPair(t *testing.T) ([]byte, []byte) {
+	return testPairWithDNS(t, []string{"localhost"})
+}
+
+func testPairWithDNS(t *testing.T, dnsNames []string) ([]byte, []byte) {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test"}, DNSNames: []string{"localhost"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	c := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test"}, DNSNames: dnsNames, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, c, c, &k.PublicKey, k)
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +40,59 @@ func testPair(t *testing.T) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: key})
+}
+
+func TestValidateSubjectAltName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		leaf *x509.Certificate
+		want bool
+	}{
+		{name: "DNS", leaf: &x509.Certificate{DNSNames: []string{"management.example"}}, want: true},
+		{name: "IP", leaf: &x509.Certificate{IPAddresses: []net.IP{net.ParseIP("192.0.2.1")}}, want: true},
+		{name: "CN only", leaf: &x509.Certificate{Subject: pkix.Name{CommonName: "management.example"}}},
+		{name: "missing leaf"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSubjectAltName(tc.leaf)
+			if (err == nil) != tc.want {
+				t.Fatalf("ValidateSubjectAltName() = %v, want success %v", err, tc.want)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "subject alternative name") || !strings.Contains(err.Error(), "-addext")) {
+				t.Fatalf("error lacks reason and fix: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoaderAllowsLegacyInitialIdentityButRejectsSANlessRotation(t *testing.T) {
+	legacyCert, legacyKey := testPairWithDNS(t, nil)
+	legacyPath := filepath.Join(t.TempDir(), "legacy.pem")
+	if err := Publish(legacyPath, legacyCert, legacyKey); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := NewLoader(legacyPath, legacyPath).GetCertificate(nil)
+	if err != nil || legacy == nil {
+		t.Fatalf("initial legacy identity was rejected: %v", err)
+	}
+
+	firstCert, firstKey := testPair(t)
+	firstPath := filepath.Join(t.TempDir(), "server.pem")
+	if err := Publish(firstPath, firstCert, firstKey); err != nil {
+		t.Fatal(err)
+	}
+	loader := NewLoader(firstPath, firstPath)
+	first, err := loader.GetCertificate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Publish(firstPath, legacyCert, legacyKey); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loader.Reload()
+	if err == nil || !strings.Contains(err.Error(), "subject alternative name") || got != first {
+		t.Fatalf("SAN-less rotation did not retain last-good identity: pair=%p first=%p err=%v", got, first, err)
+	}
 }
 
 type failingTemp struct {

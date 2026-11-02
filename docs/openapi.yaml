@@ -3148,6 +3148,7 @@ components:
         certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
         certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
         reloadError: {type: string, description: 'Latest bound identity reload error; last-good certificate remains served'}
+        certificateWarning: {type: string, description: 'Warning naming a served or configured management certificate without a DNS or IP subject alternative name, with replacement guidance'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
@@ -7828,12 +7829,15 @@ paths:
       summary: Atomically replace the managed TLS bundle (admin)
       tags: [System]
       description: >-
-        Validates the certificate chain and matching key, then atomically publishes
-        /data/tls/server.pem (0600) with one durable rename. Both resolved paths
-        must select the legacy defaults; nondefault external paths are read-only.
-        Does not change saved listener paths. The bound listener reads the bundle
-        once on reload. A pre-rename failure preserves the old bundle; a parent
-        directory sync failure returns 500 with commit uncertain, without rollback.
+        Validates the certificate chain and matching key, and requires the leaf
+        certificate to include a DNS or IP subject alternative name. A certificate
+        without a DNS or IP SAN returns 400 without writing. Then atomically
+        publishes /data/tls/server.pem (0600) with one durable rename. Both
+        resolved paths must select the legacy defaults; nondefault external paths
+        are read-only. Does not change saved listener paths. The bound listener
+        reads the bundle once on reload. A pre-rename failure preserves the old
+        bundle; a parent directory sync failure returns 500 with commit uncertain,
+        without rollback.
       requestBody:
         required: true
         content:
@@ -7858,6 +7862,14 @@ paths:
             read-only external mode, including paths under /data. The error names
             the paths and their selecting overrides, and explains how to return
             to the managed bundle.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '400':
+          description: >-
+            Nothing written. The certificate/key pair is invalid or the leaf
+            certificate has no DNS or IP subject alternative name. The error
+            explains how to add a DNS or IP SAN.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

@@ -559,7 +559,7 @@ start
 pin
 claim "$(password_from_log)"
 old_fp=$(openssl x509 -in "$scratch/identity.pem" -noout -fingerprint -sha256)
-openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=strict-smoke -keyout "$scratch/new.key" -out "$scratch/new.crt" >"$scratch/openssl.log" 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=strict-smoke -addext 'subjectAltName=DNS:strict-smoke,IP:127.0.0.1' -keyout "$scratch/new.key" -out "$scratch/new.crt" >"$scratch/openssl.log" 2>&1
 jq -n --rawfile cert "$scratch/new.crt" --rawfile key "$scratch/new.key" '{certPEM:$cert,keyPEM:$key}' >"$scratch/upload.json"
 expect 200 system/tls/cert -H 'Content-Type: application/json' --data-binary @"$scratch/upload.json"
 # The next TLS handshake reloads the uploaded bundle; pin it from trusted storage.
@@ -570,6 +570,12 @@ new_fp=$(openssl x509 -in "$scratch/identity.pem" -noout -fingerprint -sha256)
 jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp' "$scratch/body" >/dev/null
 logs >"$scratch/rotation.log"
 grep -F "management TLS certificate sha256=${new_fp#*=}" "$scratch/rotation.log" >/dev/null
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=strict-cn-only -keyout "$scratch/cn-only.key" -out "$scratch/cn-only.crt" >"$scratch/cn-only-openssl.log" 2>&1
+jq -n --rawfile cert "$scratch/cn-only.crt" --rawfile key "$scratch/cn-only.key" '{certPEM:$cert,keyPEM:$key}' >"$scratch/cn-only-upload.json"
+expect 400 system/tls/cert -H 'Content-Type: application/json' --data-binary @"$scratch/cn-only-upload.json"
+jq -e '.error | contains("subject alternative name") and contains("-addext")' "$scratch/body" >/dev/null || fail 'CN-only upload error did not explain the SAN requirement and fix'
+expect 200 system/tls
+jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp' "$scratch/body" >/dev/null || fail 'CN-only upload changed the served identity'
 expect 400 system/tls/cert -H 'Content-Type: application/json' -d '{"certPEM":"invalid","keyPEM":"invalid"}'
 expect 200 system/tls
 jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp' "$scratch/body" >/dev/null

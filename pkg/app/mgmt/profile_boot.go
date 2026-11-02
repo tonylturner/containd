@@ -4,6 +4,7 @@ package mgmtapp
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +21,17 @@ func strictHTTPSError(err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %w", profile.Refusal("to start without HTTPS", ""), err)
+}
+
+func checkManagementTLSSubjectAltName(
+	logger *zap.SugaredLogger, certFile string, leaf *x509.Certificate, strict bool,
+) error {
+	err := mgmttls.ValidateSubjectAltName(leaf)
+	if err == nil || strict {
+		return err
+	}
+	logger.Warnf("management TLS certificate %q: %v", certFile, err)
+	return nil
 }
 
 func recordProfileBoot(logger *zap.SugaredLogger, store audit.Store, overrides []config.ProfileOverride) error {

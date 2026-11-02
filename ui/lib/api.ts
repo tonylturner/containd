@@ -507,6 +507,8 @@ export type TLSInfo = {
   servedCertFingerprintSHA256?: string;
   /** Latest identity reload failure; the listener retains its last valid certificate. */
   reloadError?: string;
+  /** Warning for a served or configured management certificate without a DNS or IP SAN. */
+  certificateWarning?: string;
 };
 
 /** Result of a management certificate upload: status "updated" when the

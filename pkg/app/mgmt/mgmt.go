@@ -385,7 +385,11 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	listenerCfg.tlsCert = tlsCert
 	listenerCfg.tlsKey = tlsKey
 	listenerCfg.tlsLoader = newCertReloader(tlsCert, tlsKey)
-	if _, err := listenerCfg.tlsLoader.GetCertificate(nil); err != nil {
+	pair, err := listenerCfg.tlsLoader.GetCertificate(nil)
+	if err != nil {
+		return listenerCfg, strictHTTPSError(err)
+	}
+	if err := checkManagementTLSSubjectAltName(logger, tlsCert, pair.Leaf, profile.IsStrict()); err != nil {
 		return listenerCfg, strictHTTPSError(err)
 	}
 	return listenerCfg, nil

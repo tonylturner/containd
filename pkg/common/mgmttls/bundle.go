@@ -37,6 +37,18 @@ func ParsePublicLeaf(data []byte) (*x509.Certificate, error) {
 	return pair.Leaf, nil
 }
 
+// ValidateSubjectAltName requires the management certificate identity to
+// include at least one DNS or IP subject alternative name.
+func ValidateSubjectAltName(leaf *x509.Certificate) error {
+	if leaf == nil || (len(leaf.DNSNames) == 0 && len(leaf.IPAddresses) == 0) {
+		return errors.New(
+			"management TLS certificate has no DNS or IP subject alternative name; " +
+				"add one with -addext 'subjectAltName=DNS:<name>,IP:<addr>'",
+		)
+	}
+	return nil
+}
+
 func parseIdentity(data []byte, requireKey bool) (*tls.Certificate, error) {
 	var certs, key []byte
 	var leaf *x509.Certificate

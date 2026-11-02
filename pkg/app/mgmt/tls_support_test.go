@@ -6,6 +6,9 @@ package mgmtapp
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
@@ -37,6 +41,39 @@ func TestResolveTLSFiles(t *testing.T) {
 	cert, key = resolveTLSFiles(cfg)
 	if cert != "/env/server.crt" || key != "/env/server.key" {
 		t.Fatalf("env tls files = %q %q", cert, key)
+	}
+}
+
+func TestGeneratedManagementIdentityHasDNSAndIPSANs(t *testing.T) {
+	certPEM, _, err := selfSignedTLS(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("generated certificate is not PEM")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgmttls.ValidateSubjectAltName(leaf); err != nil {
+		t.Fatalf("generated management identity has no SAN: %v", err)
+	}
+	hasLocalhost := false
+	for _, name := range leaf.DNSNames {
+		if name == "localhost" {
+			hasLocalhost = true
+		}
+	}
+	hasLoopback := false
+	for _, ip := range leaf.IPAddresses {
+		if ip.Equal(net.ParseIP("127.0.0.1")) {
+			hasLoopback = true
+		}
+	}
+	if !hasLocalhost || !hasLoopback {
+		t.Fatalf("generated SANs do not cover local use: DNS=%v IP=%v", leaf.DNSNames, leaf.IPAddresses)
 	}
 }
 
