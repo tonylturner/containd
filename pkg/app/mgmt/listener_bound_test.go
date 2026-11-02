@@ -215,4 +215,7 @@ func TestHTTPRedirectFollowsHTTPSBind(t *testing.T) {
 	if !served.HTTPRedirects || served.CertFile != lc.tlsCert || served.KeyFile != lc.tlsKey {
 		t.Fatalf("served = %+v", served)
 	}
+	t.Run("strict HTTPS only without a redirect listener", func(t *testing.T) {
+		runStrictManagementTest(t, "ProjectionAndHTTPSOnly")
+	})
 }

@@ -7,6 +7,7 @@ import (
 
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"go.uber.org/zap"
@@ -37,17 +38,20 @@ func bindManagement(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Co
 		return boundManagement{cfg: cfg, listener: listener, binds: binds}, nil
 	}
 	if r != nil {
-		return boundManagement{}, err
+		return boundManagement{}, strictHTTPSError(err)
 	}
-	fallback := httpapi.WithApplianceListeners(cfg, nil)
+	fallback, _ := config.ProjectProfile(httpapi.WithApplianceListeners(cfg, nil), profile.IsStrict())
 	fallbackListener, ferr := resolveMgmtListenerConfig(logger, fallback, nil)
-	if ferr != nil || sameBinds(listener, fallbackListener) {
-		return boundManagement{}, err
+	if ferr != nil {
+		return boundManagement{}, strictHTTPSError(errors.Join(err, ferr))
+	}
+	if sameBinds(listener, fallbackListener) {
+		return boundManagement{}, strictHTTPSError(err)
 	}
 	bindErr := fmt.Errorf("management listener: %w", err)
 	logger.Errorw("stored management listeners cannot be bound; serving the default listeners", "error", err)
 	if binds, ferr = build(fallbackListener); ferr != nil {
-		return boundManagement{}, errors.Join(bindErr, fmt.Errorf("default management listeners: %w", ferr))
+		return boundManagement{}, strictHTTPSError(errors.Join(bindErr, fmt.Errorf("default management listeners: %w", ferr)))
 	}
 	event, perr := persistBootFault(logger, stores, errors.Join(bootConflict(cfg, nil), bindErr), nil)
 	if perr != nil {

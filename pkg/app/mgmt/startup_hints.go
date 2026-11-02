@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"go.uber.org/zap"
 )
 
@@ -16,7 +17,7 @@ func printStartupHints(logger *zap.SugaredLogger, httpAddr string, httpLoopbackA
 	sshPort := portOf(sshAddr)
 
 	logger.Info("------------------------------------------------------------")
-	logger.Info("containd access")
+	logger.Infof("containd access (profile=%s)", profile.Current())
 
 	if enableHTTP && httpPort != "" {
 		logger.Infof("UI/API (HTTP):  http://localhost:%s", httpPort)
@@ -45,7 +46,11 @@ func printStartupHints(logger *zap.SugaredLogger, httpAddr string, httpLoopbackA
 		}
 	}
 
-	logger.Info("Initial login: username=containd password=containd (change immediately)")
+	if profile.IsStrict() {
+		logger.Infof("First admin login: see the ONE-TIME PASSWORD lines above and %s", bootstrapPasswordPath(usersDBPath()))
+	} else {
+		logger.Info("Initial login: username=containd password=containd (change immediately)")
+	}
 	logger.Info("Production note: add SSH key and disable password auth after provisioning.")
 	logger.Info("  - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=\"ssh-ed25519 AAAA...\"")
 	logger.Info("Tip: docker compose logs -f containd")

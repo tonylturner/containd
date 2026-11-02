@@ -81,12 +81,12 @@ func usersDBPath() string {
 	return common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))
 }
 
-func initUsersStore() (users.Store, error) {
+func initUsersStore() (*users.SQLiteStore, error) {
 	dbPath := usersDBPath()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create users dir: %w", err)
 	}
-	store, err := openStoreWithRetry("users", func() (users.Store, error) {
+	store, err := openStoreWithRetry("users", func() (*users.SQLiteStore, error) {
 		return users.NewSQLiteStore(dbPath)
 	})
 	if err != nil {

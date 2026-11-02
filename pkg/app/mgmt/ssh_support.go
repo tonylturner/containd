@@ -15,6 +15,7 @@ import (
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -200,6 +201,9 @@ func resolveSSHRuntimeConfig(cfg *config.Config) sshRuntimeConfig {
 		savedShellMode = cfg.System.SSH.ShellMode
 	}
 	rt.shellMode, rt.shellModeSource = config.ResolveSSHShellMode(savedShellMode, os.Getenv(config.EnvSSHShellMode))
+	if profile.IsStrict() {
+		rt.shellMode, rt.shellModeSource = config.SSHShellModeAppliance, config.SSHShellModeSourceProfile
+	}
 	rt.allowPassword, rt.passwordSource = resolveSSHPasswordPolicy(cfg, rt.authKeysDir)
 	return rt
 }
