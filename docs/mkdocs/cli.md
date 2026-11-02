@@ -177,6 +177,67 @@ confirmed`. Monitor rules do not authorize traffic: enforcement requires a later
 explicit candidate mode edit and commit. The old profile/bulk workflow is removed.
 See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
 
+## Account, backup and runtime operations
+
+These operations do **not** stage configuration or require `commit`. Every
+mutation below requires the final, case-sensitive `CONFIRM` argument and prints
+an immediate-operation notice. Inspect the response: a request being accepted
+is not proof that runtime protection, capture or revocation has converged.
+Errors retain the API's fault details, including durable OpenVPN revocation
+whose runtime installation is not confirmed.
+
+Account and credential commands (admin only):
+
+- `show users`
+- `delete user <id> CONFIRM` — subject to the API's last-admin protection.
+- `require mfa user <id> CONFIRM` — applies the API's enrollment grace period.
+- `show openvpn clients`
+- `issue openvpn client <name> CONFIRM` — returns credential metadata, not a profile.
+- `download openvpn client <id> <new-file>` — saves the private profile to a file.
+- `revoke openvpn client <id> CONFIRM`
+
+Passwords are not command arguments. Account creation and password reset remain
+available through System → Users; the SSH menu can change the current account's
+password. There is no account disable/enable API; MFA disable is not account disable.
+
+Appliance configuration backups:
+
+- `show backups`
+- `create backup <name> <redacted|full> CONFIRM` (admin)
+- `download backup <id> <new-file>`
+- `delete backup <id> CONFIRM` (admin)
+
+Downloads create a new file with mode `0600`, refuse to overwrite an existing
+file, and never print its contents. Views can only list/download redacted
+backups, as enforced by the API. Full backups and OpenVPN profiles contain
+secrets: keep the files private. Configuration backups do not include the users,
+audit or evidence databases.
+
+Runtime inspection and actions:
+
+- `show protection` — includes the current boot/apply IDs and fault causes.
+- `retry protection <boot-id> <apply-id> CONFIRM` (admin) — use IDs from the
+  inspected status; stale requests fail rather than silently retrying another apply.
+- `update av definitions CONFIRM` (admin) — starts an immediate definition update.
+- `show pcap status`
+- `start pcap CONFIRM` / `stop pcap CONFIRM` (admin) — use the committed collector
+  settings; these do not edit capture configuration.
+- `revoke connection <connection|client-service> <duration-seconds> <tcp|udp> <src> <dst> <sport> <dport> CONFIRM` (admin)
+- `revoke connection <connection|client-service> <duration-seconds> <icmp|icmpv6> <src> <dst> <id> <type> <code> CONFIRM` (admin)
+
+Connection revocation uses the original tuple shown by `show conntrack`.
+`client-service` covers the selected client/service rather than only that tuple.
+The API validates durations, protocols and addresses and reports connection
+removal separately from revocation installation.
+
+`export config [redacted|--redacted]` retains the default redacted export.
+`export config full` explicitly requests an **unredacted, admin-only** export.
+Its output is JSON and can contain secrets; do not paste it into logs or public
+support requests. `import config <path>` sends the file bytes unchanged to the
+API's strict import decoder, with the current candidate revision. Unknown,
+duplicate and incorrectly cased root keys are rejected without changing the
+candidate. A successful import is staged only; review the diff before committing.
+
 ## Authentication
 
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.

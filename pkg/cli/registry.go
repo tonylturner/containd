@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -42,6 +43,24 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("diag reach", RoleView, diagReach(store))
 	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
 	if api != nil {
+		r.RegisterRole("show users", RoleAdmin, opsRead(api, "/api/v1/users"))
+		r.RegisterRole("delete user", RoleAdmin, opsUser(api, "delete"))
+		r.RegisterRole("require mfa user", RoleAdmin, opsUser(api, "require mfa"))
+		r.RegisterRole("show backups", RoleView, opsRead(api, "/api/v1/config/backups"))
+		r.RegisterRole("create backup", RoleAdmin, opsBackup(api, "create"))
+		r.RegisterRole("delete backup", RoleAdmin, opsBackup(api, "delete"))
+		r.RegisterRole("download backup", RoleView, opsDownload(api, func(id string) string { return "/api/v1/config/backups/" + url.PathEscape(id) }, "download backup"))
+		r.RegisterRole("show openvpn clients", RoleAdmin, opsRead(api, "/api/v1/services/vpn/openvpn/clients"))
+		r.RegisterRole("issue openvpn client", RoleAdmin, opsOpenVPN(api, "issue"))
+		r.RegisterRole("revoke openvpn client", RoleAdmin, opsOpenVPN(api, "revoke"))
+		r.RegisterRole("download openvpn client", RoleAdmin, opsDownload(api, func(id string) string { return "/api/v1/services/vpn/openvpn/clients/" + url.PathEscape(id) }, "download openvpn client"))
+		r.RegisterRole("revoke connection", RoleAdmin, opsRevokeConnection(api))
+		r.RegisterRole("show protection", RoleView, opsRead(api, "/api/v1/dataplane/protection"))
+		r.RegisterRole("retry protection", RoleAdmin, opsRetryProtection(api))
+		r.RegisterRole("update av definitions", RoleAdmin, opsConfirmed(api, "update av definitions", "/api/v1/services/av/update"))
+		r.RegisterRole("show pcap status", RoleView, opsRead(api, "/api/v1/pcap/status"))
+		r.RegisterRole("start pcap", RoleAdmin, opsConfirmed(api, "start pcap", "/api/v1/pcap/start"))
+		r.RegisterRole("stop pcap", RoleAdmin, opsConfirmed(api, "stop pcap", "/api/v1/pcap/stop"))
 		r.RegisterRole("show health", RoleView, showHealth(api))
 		r.RegisterRole("show config", RoleView, showConfig(api))
 		r.RegisterRole("show running-config", RoleView, showRunningConfig(api))

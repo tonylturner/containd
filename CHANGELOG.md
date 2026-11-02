@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The CLI provides confirmed immediate backup, OpenVPN credential, connection
+  revocation, protection retry, antivirus update and managed capture operations,
+  plus account listing, deletion and MFA requirements. Full configuration export
+  is explicit and admin-only; imports preserve file bytes for strict API validation.
+
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
   links directly to enforcement status.
