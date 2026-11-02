@@ -70,6 +70,7 @@ type protectionState struct {
 	ruleInput        []byte
 	installedInput   []byte
 	outcomes         map[protection.SubsystemName]protection.OwnerOutcome
+	serviceOutcomes  func() []protection.OwnerOutcome
 	store            *events.Writer
 }
 
@@ -221,6 +222,13 @@ func (e *Engine) BeginProtection(bootID, applyID string) {
 func (e *Engine) Protection() ProtectionStatus {
 	p := e.protection
 	p.mu.Lock()
+	observe := p.serviceOutcomes
+	p.mu.Unlock()
+	var services []protection.OwnerOutcome
+	if observe != nil {
+		services = observe()
+	}
+	p.mu.Lock()
 	defer p.mu.Unlock()
 	st := p.status
 	st.ObservedAt = time.Now().UTC()
@@ -231,6 +239,30 @@ func (e *Engine) Protection() ProtectionStatus {
 		st.Installed = &ack
 	}
 	st.Subsystems = p.outcomeSnapshotLocked()
+	if observe != nil {
+		// These owners' live ledgers are authoritative even when an unlabelled
+		// mutation or Stop removed their identity. Never resurrect a copied ack.
+		st.Subsystems = slices.DeleteFunc(st.Subsystems, func(out protection.OwnerOutcome) bool {
+			return out.Name == protection.SubsystemAV || out.Name == protection.SubsystemWireGuard || out.Name == protection.SubsystemDHCP
+		})
+	}
+	for _, out := range services {
+		replaced := false
+		for i := range st.Subsystems {
+			if st.Subsystems[i].Name == out.Name {
+				st.Subsystems[i] = cloneProtectionOutcome(out)
+				replaced = true
+				break
+			}
+		}
+		if !replaced && out.Name != "" {
+			st.Subsystems = append(st.Subsystems, cloneProtectionOutcome(out))
+		}
+		if out.Retryable {
+			st.Retryable = true
+		}
+	}
+	slices.SortFunc(st.Subsystems, func(a, b protection.OwnerOutcome) int { return strings.Compare(string(a.Name), string(b.Name)) })
 
 	return st
 }
@@ -298,4 +330,13 @@ func (e *Engine) SetScanProtection(gateState, gateReason string, scannerReady bo
 // SetProtectionBootID sets process identity before admitting the first apply.
 func (e *Engine) SetProtectionBootID(id string) {
 	e.protection.update(func() { e.protection.status.BootID = id })
+}
+
+// ObserveServiceDelivery projects the AV, WireGuard and DHCP owner ledgers without retaining copied
+// apply-time proofs. The callback must not call back into the engine; it runs
+// outside the protection lock and must return detached owner observations.
+func (e *Engine) ObserveServiceDelivery(observe func() []protection.OwnerOutcome) {
+	e.protection.mu.Lock()
+	defer e.protection.mu.Unlock()
+	e.protection.serviceOutcomes = observe
 }

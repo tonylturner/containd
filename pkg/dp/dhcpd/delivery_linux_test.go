@@ -122,3 +122,37 @@ func TestDeliveryDHCPConfigFaultIsTerminal(t *testing.T) {
 		t.Fatalf("stop retained rejected pools: %+v %v", out, err)
 	}
 }
+
+func TestDeliveryDHCPFreshAttemptAdoptsConfirmedStop(t *testing.T) {
+	fakeDeliveryNFT(t)
+	m := NewManager()
+	meta := dhcpDeliveryMeta()
+	first, err := m.StopDelivery(context.Background(), meta)
+	if err != nil || first.Acknowledged == nil {
+		t.Fatalf("stop: %+v %v", first, err)
+	}
+	applied := m.lastApply
+	meta.ApplyID += "-fresh"
+	meta.RunningRevision += "-fresh"
+	adopted, err := m.StopDelivery(context.Background(), meta)
+	if err != nil || adopted.Acknowledged == nil || adopted.Acknowledged.Metadata != meta || adopted.Attempt != 1 || !m.lastApply.Equal(applied) {
+		t.Fatalf("stop was replayed instead of adopted: %+v %v", adopted, err)
+	}
+	// An outstanding join makes absence undecidable. It must be delivered, not
+	// silently re-labelled as a successful stop on another fresh attempt.
+	done := make(chan struct{})
+	m.stopping = append(m.stopping, done)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	meta.ApplyID += "-outstanding"
+	failed, err := m.StopDelivery(ctx, meta)
+	if err != nil || failed.Acknowledged != nil || !failed.Retryable || failed.Attempt != 2 {
+		t.Fatalf("unjoined runtime adopted: %+v %v", failed, err)
+	}
+	meta.ApplyID += "-again"
+	failed, err = m.StopDelivery(ctx, meta)
+	if err != nil || failed.Acknowledged != nil || !failed.Retryable || failed.Attempt != 3 {
+		t.Fatalf("failure lost across fresh attempt: %+v %v", failed, err)
+	}
+	close(done)
+}

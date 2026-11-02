@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -29,20 +30,38 @@ func (m *Manager) ApplyDelivery(ctx context.Context, meta protection.Metadata, c
 	if !meta.Valid() {
 		return protection.OwnerOutcome{}, errors.New("invalid DHCP delivery identity")
 	}
+	var detachedConfig config.DHCPConfig
+	data, _ := json.Marshal(cfg)
+	_ = json.Unmarshal(data, &detachedConfig)
+	var bindings []config.Interface
+	data, _ = json.Marshal(ifaces)
+	_ = json.Unmarshal(data, &bindings)
+	cfg, ifaces = detachedConfig, bindings
 	m.delivery.mu.Lock()
 	defer m.delivery.mu.Unlock()
 	d := &m.delivery
+	m.observeDeliveryLocked()
+	if d.meta.Valid() && reflect.DeepEqual(d.cfg, cfg) && reflect.DeepEqual(d.ifaces, ifaces) {
+		if d.outcome.Acknowledged != nil && ((cfg.Enabled && m.runtimeReady()) || (!cfg.Enabled && m.runtimeStopped())) {
+			if d.meta != meta {
+				d.outcome = m.makeOutcome(meta, cfg.Enabled, d.outcome.Attempt, nil)
+			}
+			d.meta = meta
+			return detached(d.outcome), nil
+		}
+		if d.outcome.Fault != nil && !d.outcome.Retryable && d.meta == meta {
+			d.meta = meta
+			d.outcome.DesiredRevision = meta.RunningRevision
+			return detached(d.outcome), nil
+		}
+	}
+	attempt := d.outcome.Attempt + 1
 	d.meta = meta
-	d.cfg = config.DHCPConfig{}
-	d.ifaces = nil
-	data, _ := json.Marshal(cfg)
-	_ = json.Unmarshal(data, &d.cfg)
-	data, _ = json.Marshal(ifaces)
-	_ = json.Unmarshal(data, &d.ifaces)
+	d.cfg, d.ifaces = cfg, ifaces
 	d.outcome = protection.OwnerOutcome{}
 	err := m.apply(ctx, d.cfg, d.ifaces)
 	d.applied = err == nil
-	d.outcome = m.makeOutcome(meta, cfg.Enabled, 1, err)
+	d.outcome = m.makeOutcome(meta, cfg.Enabled, attempt, err)
 	return detached(d.outcome), nil
 }
 

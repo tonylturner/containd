@@ -194,6 +194,8 @@ func TestProtectionTrustRetryKeepsInstallation(t *testing.T) {
 		trust.err = nil
 		if failed {
 			trust.err = errors.New("delivery failed")
+			// The owner no longer confirms its pool; an unchanged live pool is adopted.
+			trust.applied.Revision = ""
 		}
 		w := protocolPost(h, m, "", `{"revision":"none","pem":""}`)
 		if (w.Code >= 400) != failed {

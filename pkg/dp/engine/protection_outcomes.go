@@ -70,6 +70,11 @@ func (p *protectionState) outcomeSnapshotLocked() []protection.OwnerOutcome {
 	// Consumer/scanner proofs are live: an apply-time acknowledgement cannot
 	// hide subsequent loss. Keep the existing names and policy selection.
 	for _, c := range p.status.Components {
+		// Configured-but-unselected queues remain raw runtime telemetry, not
+		// unexpected names in the reducer's desired-policy owner ledger.
+		if strings.HasPrefix(c.Name, "nfqueue:") && !c.Required {
+			continue
+		}
 		if c.Name != "nft" && c.Name != "iec-envelope" && c.Name != "scan-gate" &&
 			c.Name != "scanner" && !strings.HasPrefix(c.Name, "nfqueue:") {
 			continue
@@ -78,7 +83,7 @@ func (p *protectionState) outcomeSnapshotLocked() []protection.OwnerOutcome {
 			DesiredRevision: p.status.RunningRevision, Operation: protection.OperationApply,
 			State: protection.DeliveryState(c.State), Reason: c.Reason, Attempt: c.Attempt,
 			ObservedAt: p.status.ObservedAt, Retryable: p.status.Retryable}
-		if c.State == "ready" && p.status.metadata().Valid() {
+		if c.State == "ready" && p.status.metadata().Valid() && (c.Name == "nft" || p.status.Installed != nil && p.status.Installed.Metadata == p.status.metadata()) {
 			o.Acknowledged = &protection.Acknowledgement{Metadata: p.status.metadata(), Operation: o.Operation}
 			if c.Name == "nft" {
 				o.Acknowledged = p.status.Installed

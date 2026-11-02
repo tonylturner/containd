@@ -32,20 +32,21 @@ type protectionPlane interface {
 // protectionCoordinator serializes admission and synchronous side effects, not
 // asynchronous readiness. A worker can finish without ending an adopted run.
 type protectionCoordinator struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	dp           protectionPlane
-	logger       *zap.SugaredLogger
-	seen         map[string]time.Time // superseded IDs only
-	now          func() time.Time
-	current      string
-	metadata     protection.Metadata
-	inputs       map[string]string
-	completed    map[string]bool
-	workerCancel context.CancelFunc
-	workerDone   chan struct{}
-	closed       bool
+	mu            sync.Mutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	dp            protectionPlane
+	logger        *zap.SugaredLogger
+	seen          map[string]time.Time // superseded IDs only
+	now           func() time.Time
+	current       string
+	metadata      protection.Metadata
+	inputs        map[string]string
+	completed     map[string]bool
+	workerCancel  context.CancelFunc
+	workerDone    chan struct{}
+	closed        bool
+	retryServices func(context.Context, protection.Metadata) ([]protection.OwnerOutcome, error)
 }
 
 func newProtectionCoordinator(ctx context.Context, dp protectionPlane, logger *zap.SugaredLogger) *protectionCoordinator {
@@ -126,13 +127,31 @@ func (c *protectionCoordinator) retryHandler(gate *gateManager) http.HandlerFunc
 			protectionError(w, http.StatusConflict, "protection_superseded", "protection observation was superseded")
 			return
 		}
-		if !st.Retryable {
+		serviceRetryable := false
+		for _, out := range st.Subsystems {
+			serviceRetryable = serviceRetryable || out.Retryable
+		}
+		if !st.Retryable && !serviceRetryable {
 			protectionError(w, http.StatusConflict, "protection_not_retryable", "protection is not retryable")
 			return
 		}
 		c.joinWorker()
 		defer c.start()
-		if err := c.dp.RetryProtection(c.ctx); err != nil {
+		retryCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		stop := context.AfterFunc(c.ctx, cancel)
+		defer stop()
+		defer cancel()
+		if c.retryServices != nil {
+			outcomes, err := c.retryServices(retryCtx, admission.Metadata)
+			for _, out := range outcomes {
+				c.dp.SetProtectionOutcome(admission.Metadata, out)
+			}
+			if err != nil {
+				protectionError(w, http.StatusConflict, "service_delivery_changed", "service owner requires a fresh delivery attempt")
+				return
+			}
+		}
+		if err := c.dp.RetryProtection(retryCtx); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

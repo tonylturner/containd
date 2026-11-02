@@ -202,3 +202,17 @@ func inventoryTraffic(base, name string) (result []trafficProcess, err error) {
 	}
 	return result, nil
 }
+
+func trafficAbsent(base, name string) bool {
+	processes, err := inventoryTraffic(base, name)
+	if err != nil {
+		return false
+	}
+	defer closeTrafficInventory(processes)
+	for _, p := range processes {
+		if p.owned {
+			return false
+		}
+	}
+	return true
+}
