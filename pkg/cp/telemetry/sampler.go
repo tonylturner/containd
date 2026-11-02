@@ -31,6 +31,7 @@ func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) 
 	defer s.mu.Unlock()
 	samples := []wire.CounterSample{}
 	invalid := []wire.CounterSample{}
+	var unavailable []wire.SourceUnavailable
 	for _, reader := range s.readers {
 		if reader == nil {
 			continue
@@ -38,13 +39,19 @@ func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) 
 		readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		snapshot, err := reader.TelemetryCounters(readCtx)
 		cancel()
+		unavailable = append(unavailable, snapshot.Unavailable...)
 		if err == nil {
 			samples = append(samples, snapshot.Samples...)
 			if local, ok := reader.(interface{ TelemetryBaselines() []wire.CounterSample }); ok {
 				invalid = append(invalid, local.TelemetryBaselines()...)
 			}
+		} else {
+			unavailable = append(unavailable, wire.SourceUnavailable{Source: "engine", Reason: err.Error()})
 		}
 	}
+	s.store.mu.Lock()
+	s.store.state.Unavailable = cloneUnavailable(unavailable)
+	s.store.mu.Unlock()
 	// A management signed correction invalidates the baseline, rather than
 	// masquerading as a source reset or a positive spanning delta.
 	for _, sample := range invalid {

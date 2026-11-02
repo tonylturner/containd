@@ -4,9 +4,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +16,15 @@ import (
 	wire "github.com/tonylturner/containd/pkg/common/telemetry"
 	history "github.com/tonylturner/containd/pkg/cp/telemetry"
 )
+
+type unavailableCounterReader struct{}
+
+func (unavailableCounterReader) TelemetryCounters(context.Context) (wire.CounterSnapshot, error) {
+	return wire.CounterSnapshot{Unavailable: []wire.SourceUnavailable{
+		{Source: "events", Dims: map[string]string{"source": "engine"}, Reason: "engine events unavailable"},
+		{Source: "service", Dims: map[string]string{"service": "dns"}, Reason: "DNS meter unavailable"},
+	}}, errors.New("engine offline")
+}
 
 type fakeHistory struct {
 	response wire.SeriesResponse
@@ -98,5 +109,74 @@ func TestTelemetryConduitUnavailableAndMeasured(t *testing.T) {
 	got := measureConduit(context.Background(), f, "a", "b")
 	if got.State != "measured" || got.Bytes != "23" || got.Packets != "23" || got.Complete == nil || *got.Complete || got.Coverage != "routed" {
 		t.Fatal(got)
+	}
+}
+
+func TestTelemetryConduitCurrentOutageOutranksHistory(t *testing.T) {
+	value := uint64(23)
+	for _, tc := range []struct {
+		source, reason string
+	}{
+		{"conduit", "enforcement disabled"},
+		{"engine", "engine offline"},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			f := &fakeHistory{response: wire.SeriesResponse{
+				Collector: wire.CollectorState{State: "running", Unavailable: []wire.SourceUnavailable{{Source: tc.source, Reason: tc.reason}}},
+				Series: []wire.Series{{Points: []wire.Point{
+					{V: &value, D: 10, Q: wire.QualityObserved}, {Q: wire.QualityGap},
+				}}},
+			}}
+			got := measureConduit(context.Background(), f, "lan", "wan")
+			if got.State != "unavailable" || got.Reason != tc.reason || got.Bytes != "" || got.Packets != "" {
+				t.Fatal("outage hidden by retained traffic", got)
+			}
+			f.response.Collector.Unavailable = nil
+			if got := measureConduit(context.Background(), f, "lan", "wan"); got.State != "measured" || got.Bytes != "23" {
+				t.Fatal("recovery failed", got)
+			}
+		})
+	}
+}
+
+func TestTelemetrySeriesHTTPCurrentUnavailableSelection(t *testing.T) {
+	store, err := history.Open(filepath.Join(t.TempDir(), "telemetry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := history.NewSampler(store, unavailableCounterReader{}).Tick(context.Background(), time.Now(), 0); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.GET("/", telemetrySeriesHandler(store))
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"metric=events.total", []string{"engine events unavailable", "engine offline"}},
+		{"metric=events.total&source=services", nil},
+		{"metric=service.events&service=dns", []string{"DNS meter unavailable"}},
+		{"metric=service.events&service=ntp", nil},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?range=1h&origin=real&"+tc.query, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatal(rec.Code, rec.Body.String())
+			}
+			var got wire.SeriesResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Collector.Unavailable) != len(tc.want) {
+				t.Fatal(got.Collector)
+			}
+			for i, reason := range tc.want {
+				if got.Collector.Unavailable[i].Reason != reason {
+					t.Fatal(got.Collector)
+				}
+			}
+		})
 	}
 }

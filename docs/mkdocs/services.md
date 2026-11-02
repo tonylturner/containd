@@ -155,8 +155,9 @@ uses interface throughput, while Top Protocols counts inspected packets over the
 last hour. Recent-event list counts are not retained traffic totals. Failed event
 reads are unavailable, not zero.
 
-While the collector is running, the latest real bucket has coverage and a metric
-has no real activity, available demo history is labelled **Demo data**. Once real
+While the collector is running with no current source failures, every real
+member's latest bucket has coverage and a metric has no real activity, demo
+history with a covered latest bucket is labelled **Demo data**. Once real
 activity exists, charts use real history. Demo events have a **Demo** badge in
 Event Stream, Recent Alerts, Events, and alert/event inspection. If neither
 history exists, charts say **No traffic recorded yet**. A real-source gap never
@@ -166,7 +167,9 @@ to an individual service or interface filter.
 Security conduit traffic reports measured bytes and packets for routed traffic
 that passed policy in the last hour, with incomplete coverage labelled. Matrix
 heat is relative to the largest measured conduit, not a baseline percentage.
-Unavailable measurements include their reason. Logical interface RX/TX reports
+Current conduit or engine failures make measurements unavailable with their
+reason, even when measured history remains. Disabling enforcement reports
+**enforcement disabled** until accounting is available again. Logical interface RX/TX reports
 the latest retained packet rate, not event-count estimates.
 
 ## Runtime metrics

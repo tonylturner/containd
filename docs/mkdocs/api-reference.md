@@ -773,7 +773,13 @@ restart establishes new baselines, without deleting retained history.
 
 `realCovered` and `realActive` persist once real observed coverage or nonzero
 activity exists. `collector` reports running/stalled/unavailable, its last
-successful sample, an error and decimal-string `droppedSeries`. Admission is
+successful sample, an error and decimal-string `droppedSeries`.
+`collector.unavailable` lists current source or per-series failures and their
+reasons, replaced each tick and omitted when empty. Entries are scoped to the
+requested metric and dimension filters before grouping. An engine outage
+applies to all engine-sourced metrics, but not service counters or events
+filtered to `source=services`. Retained history does not imply current
+availability. Admission is
 capped at 320 active series; refusals increment `droppedSeries`. `retainedFrom` marks retained coverage;
 older points are gaps. HTTP 400 rejects unknown or repeated parameters, 503
 reports unavailable storage, and 500 reports aggregation overflow.
@@ -783,7 +789,9 @@ sources, with `windowSeconds: 86400` and `complete` only when every bucket was
 observed. Store failures return `eventStats: null` and `eventStatsError`.
 Conduit `traffic` is either measured packets/bytes (decimal strings), a
 3600-second window, `complete` and `coverage: routed`, or `state: unavailable`
-with a reason. Its scope is routed traffic that passed policy, not bridged L2
+with a reason. Current conduit or engine outages override retained measured
+history; disabling enforcement returns `unavailable` with reason
+`enforcement disabled`. Its scope is routed traffic that passed policy, not bridged L2
 or AV/ICAP input-output gating; it is not a percentage of a baseline.
 
 ## Binary Runtime Environment
