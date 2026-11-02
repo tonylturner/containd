@@ -1,3 +1,4 @@
+import { securityChecks } from "./fixtures/security";
 import { simulationStatus } from "./fixtures/simulation";
 import path from "node:path";
 import type { SimulationStatus } from "../lib/api-console";
@@ -12,7 +13,7 @@ type Scenario = { simulation?: Partial<SimulationStatus>; eventsFailed?: boolean
 async function open(page: Page, path: string, scenario: Scenario = {}) {
   const requests: URL[] = [];
   const config = { zones: [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }], interfaces: [{ name: "lan", device: "eth9", zone: "it", addresses: ["192.0.2.1/24"] }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } };
-  const conduit: Conduit = { from: "it", to: "ot", state: "allow", ids: "none", proto: [], rules: [], gaps: [], mitre: [], defaultDeny: true, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false,
+  const conduit: Conduit = { from: "it", to: "ot", state: "allow", ids: "disabled", checks: securityChecks, proto: [], rules: [], gaps: [], mitre: [], defaultDeny: true, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false,
     traffic: { state: "measured", windowSeconds: 3600, bytes: "9007199254740993", packets: "25", complete: false, coverage: "routed" } };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");

@@ -250,6 +250,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 		}
 
 		added, skipped := 0, 0
+		importedRules := make([]config.IDSRule, 0, len(rules))
 		cfg, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			existing := make(map[string]bool, len(cfg.IDS.Rules))
 			for _, r := range cfg.IDS.Rules {
@@ -263,6 +264,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 				cfg.IDS.Rules = append(cfg.IDS.Rules, r)
 				existing[r.ID] = true
 				added++
+				importedRules = append(importedRules, r)
 			}
 			return true
 		})
@@ -276,6 +278,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 			"skipped":  skipped,
 			"total":    len(cfg.IDS.Rules),
 			"format":   format,
+			"rules":    importedRules,
 		})
 	}
 }

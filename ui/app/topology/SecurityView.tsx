@@ -177,7 +177,7 @@ export default function SecurityView() {
               <span key={z.id} className={s.targetGap} style={{ color: slColor(z.sl_a, z.sl_t) }}>{z.name} SL{z.sl_a}/{z.sl_t}</span>
             ))}
           </div>
-          <div className={s.matrixSubtitle}>Saved target: zone targets are candidate settings; Traffic: measured observations or labelled recorded demo traffic. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>
+          <div className={s.matrixSubtitle}>Saved target: candidate settings. Traffic: measured or labelled Demo. Conduits summarize running policy, not live verification. Select a cell for checks and provenance. Heuristics and unknowns never pass. Not a standards assessment.</div>
 
         </div>
 
@@ -298,8 +298,8 @@ export default function SecurityView() {
                       );
                     }
                     const stateCls = cd.state === "allow" ? s.cellAllow : cd.state === "block" ? s.cellBlock : cd.state === "partial" ? s.cellPartial : s.cellUnmodeled;
-                    const idsClass = cd.ids === "full" ? s.idsFull : cd.ids === "partial" ? s.idsPartial : s.idsNone;
-                    const idsText = cd.ids === "full" ? "IDS" : cd.ids === "partial" ? "~IDS" : "NO IDS";
+                    const idsClass = cd.ids === "enabled" ? s.idsEnabled : s.idsDisabled;
+                    const idsText = cd.ids === "enabled" ? "IDS ON*" : "IDS OFF";
                     const volColor = cd.state === "allow" ? "#22c55e" : cd.state === "partial" ? "#f59e0b" : "#374151";
                     const proto = cd.proto || [];
                     const gaps = cd.gaps || [];
@@ -330,9 +330,8 @@ export default function SecurityView() {
           <div className={s.legendItem}><div className={s.lSwatch} style={{ background: "rgba(245,158,11,0.1)", borderColor: "rgba(245,158,11,0.4)" }} />Partial</div>
           <div className={s.legendItem}><div className={s.lSwatch} style={{ background: "rgba(107,114,128,0.08)", borderColor: "rgba(107,114,128,0.3)" }} />Unmodeled</div>
           <div style={{ width: 1, height: 12, background: "var(--topo-border)", margin: "0 4px" }} />
-          <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--topo-green)" }} />IDS full</div>
-          <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--amber)" }} />IDS partial</div>
-          <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--topo-red)" }} />No IDS</div>
+          <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--amber)" }} />IDS ON* = global setting, coverage unknown</div>
+          <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--topo-red)" }} />IDS OFF</div>
           <div style={{ width: 1, height: 12, background: "var(--topo-border)", margin: "0 4px" }} />
           <div className={s.legendItem}><span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--amber)" }}>SL/T</span> = check-based / target</div>
         </div>
@@ -367,7 +366,7 @@ export default function SecurityView() {
             ) : (
               <div className={s.empty}>
                 <div className={s.emptyIcon}>&#x2B21;</div>
-                <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS coverage, and IEC 62443 SR requirement checks.<br /><br />SL-T is editable per zone. SR checks are automated but can be manually overridden.</div>
+                <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS configuration, and IEC 62443 SR requirement checks.<br /><br />SL-T is editable per zone. Each check explains its provenance; manual overrides are operator assertions, not verification.</div>
               </div>
             )}
           </div>
@@ -389,9 +388,6 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
   setSLTarget: (zoneId: string, lvl: number) => void;
   toggleOverride: (zoneId: string, srId: string, newVal: boolean) => void;
 }) {
-  const idsLabel: Record<string, string> = { full: "Full coverage", partial: "Partial", none: "None" };
-  const idsColor: Record<string, string> = { full: "var(--topo-green)", partial: "var(--amber)", none: "var(--topo-red)" };
-
   return (
     <>
       {/* Conduit info */}
@@ -399,10 +395,13 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
         <div className={s.psLabel}>Conduit</div>
         <DR k="From" v={fromZ.name} vc={fromZ.color} />
         <DR k="To" v={toZ.name} vc={toZ.color} />
-        <DR k="IDS coverage" v={idsLabel[conduit.ids]} vc={idsColor[conduit.ids]} />
+        <DR k="IDS configuration" v={`${conduit.ids} globally; coverage unknown`} />
         {conduit.traffic.state === "demo" && <p className="text-xs text-(--text-muted)"><DemoBadge origin="demo" /> recorded demo traffic on an illustrative topology</p>}
         <DR k="Source" v={conduit.traffic.state === "demo" ? "recorded demo traffic, last hour" : conduit.traffic.state === "none" ? "No traffic recorded yet" : "routed traffic that passed policy, last hour"} />
         <DR k="Traffic" v={trafficDescription(conduit.traffic)} />
+        {Object.entries(conduit.checks).map(([key, evidence]) => (
+          <div key={key} className={s.evidenceItem}>{key} — {evidence.provenance}: {evidence.reason}</div>
+        ))}
       </div>
 
       {/* Source zone SL */}
@@ -512,11 +511,11 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
                     : <span style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)" }}>OPT SL-{c.sl}</span>}
                 </div>
                 <span className={s.srName}>{c.label}</span>
-                <span className={s.srSource}>{c.source} &middot; {c.overridden ? "manually overridden" : "automated check"}</span>
+                <span className={s.srSource}>{c.source} &middot; {c.provenance}: {c.reason}</span>
               </div>
               <div className={s.srRight}>
-                <span className={`${s.srStatus} ${c.overridden ? s.srManual : c.met ? s.srMet : s.srNotMet}`}>
-                  {c.overridden ? "OVERRIDE" : c.met ? "CHECK PASS" : "CHECK FAIL"}
+                <span className={`${s.srStatus} ${c.overridden ? s.srManual : c.provenance === "unknown" ? s.srUnknown : c.provenance === "heuristic" ? s.srHeuristic : c.met ? s.srMet : s.srNotMet}`}>
+                  {c.overridden ? "OVERRIDE" : c.provenance === "unknown" ? "UNKNOWN" : c.provenance === "heuristic" ? "HEURISTIC" : c.met ? "CONFIGURED PASS" : "CONFIGURED FAIL"}
                 </span>
                 <button className={`${s.srOverrideBtn} ${c.overridden ? s.srOverrideBtnActive : ""}`} onClick={() => toggleOverride(zone.id, c.id, !c.met)}>
                   {c.overridden ? "REVERT" : c.met ? "MARK FAIL" : "MARK PASS"}

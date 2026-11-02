@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures/topology-test";
 import type { ConfigDiff } from "../lib/api-config";
 import { mockLearner, openDataset, suggestion } from "./fixtures/learner";
+import { securityChecks } from "./fixtures/security";
 
 async function setup(page: Page) {
   const state = { dirty: false, offline: false, reject: false, reads: 0, writes: [] as { path: string; body: any }[], zones: [{ name: "lan" }], ids: { enabled: false, rules: [{ id: "keep-me", name: "Keep me", type: "suricata", enabled: true }] } };
@@ -155,7 +156,7 @@ test("topology surfaces failed zone patches without optimistic target changes", 
   const state = await setup(page);
   state.zones = [{ name: "MixedCase" }, { name: "wan" }];
   state.reject = true;
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "none", traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, proto: [], gaps: [] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "disabled", traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks, proto: [], gaps: [], rules: [], mitre: [], defaultDeny: false, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await page.getByText("ALLOW", { exact: true }).click();

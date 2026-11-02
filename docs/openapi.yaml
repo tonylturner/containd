@@ -2916,15 +2916,15 @@ components:
       description: ca, cert, key and password are never returned. Omitted or empty secrets in a VPN write preserve existing material while managed remains selected. Omitting managed removes the managed object.
     WGPeer:
       properties:
-        allowedIPs: {items: {type: string}, type: array}
-        endpoint: {type: string}
+        allowedIPs: {description: IPv4 CIDRs only, items: {type: string}, type: array}
+        endpoint: {description: 'IPv4 host:port or a hostname resolving to IPv4; IPv6 endpoints are unsupported.', type: string}
         name: {type: string}
         persistentKeepalive: {type: integer}
         publicKey: {type: string}
       type: object
     WireGuardConfig:
       properties:
-        addressCIDR: {type: string}
+        addressCIDR: {description: IPv4 tunnel CIDR only (also validated when disabled), type: string}
         enabled: {type: boolean}
         interface: {type: string}
         listenInterfaces: {items: {type: string}, type: array}
@@ -3252,23 +3252,41 @@ components:
               points: {type: array, items: {$ref: '#/components/schemas/TelemetryPoint'}}
     ConduitResult:
       type: object
-      required: [from, to]
+      required: [from, to, traffic, checks]
       properties:
         from: {type: string, description: Exact source zone name}
         to: {type: string, description: Exact destination zone name}
         state: {type: string}
-        ids: {type: string}
+        ids: {type: string, enum: [enabled, disabled], description: Global IDS setting only; per-conduit inspection and coverage are unknown.}
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
         traffic: {$ref: '#/components/schemas/ConduitTraffic'}
         rules: {type: array, items: {type: string}}
-        gaps: {type: array, items: {type: string}}
-        mitre: {type: array, items: {type: string}}
+        gaps: {type: array, items: {type: string}, description: 'Policy gaps and hints. Plaintext-mixing hints carry a Heuristic (service ports) prefix; port membership is not observed plaintext evidence.'}
+        mitre: {type: array, items: {type: string}, description: 'Inferred MITRE hints, each prefixed with its evidence basis: Heuristic (allowed service ports) for T0886, T0843 and T1021; Heuristic (policy state) for T1048; Heuristic (source zone name) for T1190 and T1595. These are not observed attack evidence.'}
         defaultDeny: {type: boolean}
-        tlsEnforced: {type: boolean}
-        protoWhitelist: {type: boolean}
+        tlsEnforced: {type: boolean, description: Always false; conventional service ports do not enforce or verify TLS.}
+        protoWhitelist: {type: boolean, description: Conservative proof of a refusing fallback and explicit transport restrictions on every zone-matching enforcing ALLOW including conditional grants. TCP and UDP entries must specify ports; ICMP does not require a port. Unproved cases are false with unknown provenance.}
         mfaRequired: {type: boolean}
         auditLogged: {type: boolean}
         avEnabled: {type: boolean}
+        checks:
+          type: object
+          description: Provenance and explanation for every control flag and the IDS setting. Configured is running configuration, not runtime verification; heuristic is an assumption and unknown lacks evidence.
+          required: [defaultDeny, tlsEnforced, protoWhitelist, mfaRequired, auditLogged, avEnabled, ids]
+          properties:
+            defaultDeny: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            tlsEnforced: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            protoWhitelist: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            mfaRequired: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            auditLogged: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            avEnabled: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            ids: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+    ConduitCheckEvidence:
+      type: object
+      required: [provenance, reason]
+      properties:
+        provenance: {type: string, enum: [configured, heuristic, unknown]}
+        reason: {type: string}
     ProtoEntry:
       type: object
       properties:
@@ -7873,7 +7891,7 @@ paths:
       - $ref: '#/components/parameters/IfRevision'
       summary: Import rules into candidate bank (admin)
       tags: [Ids]
-      description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply.
+      description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply evaluable rules. YARA is storage-only and is never executed. Rules with labels.evaluable=false are not evaluated even when enabled; inspect conversionNotes.
       responses:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
@@ -7893,6 +7911,10 @@ paths:
                   skipped: {type: integer}
                   total: {type: integer}
                   format: {type: string}
+                  rules:
+                    description: Newly added rules with evaluability labels and conversion notes; excludes skipped duplicates.
+                    type: array
+                    items: {$ref: '#/components/schemas/IDSRule'}
           headers:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}

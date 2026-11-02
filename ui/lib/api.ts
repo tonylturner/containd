@@ -177,11 +177,17 @@ export type ConduitProto = {
   t: "allowed" | "denied" | "inspect";
 };
 
+export type CheckEvidence = {
+  provenance: "configured" | "heuristic" | "unknown";
+  reason: string;
+};
+export type ConduitControl = "defaultDeny" | "tlsEnforced" | "protoWhitelist" | "mfaRequired" | "auditLogged" | "avEnabled" | "ids";
+
 export type Conduit = {
   from: string;
   to: string;
   state: "allow" | "block" | "partial" | "unmodeled";
-  ids: "full" | "partial" | "none";
+  ids: "enabled" | "disabled"; // Global setting, not per-conduit coverage.
   proto: ConduitProto[];
   traffic: { state: "measured"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "routed" }
     | { state: "demo"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "recorded" }
@@ -195,6 +201,7 @@ export type Conduit = {
   mfaRequired: boolean;
   auditLogged: boolean;
   avEnabled: boolean;
+  checks: Record<ConduitControl, CheckEvidence>;
 };
 
 export type Interface = {

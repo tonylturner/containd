@@ -167,3 +167,42 @@ func TestSecurityConduitsOrderedDecisions(t *testing.T) {
 		})
 	}
 }
+
+func TestSecurityConduitsEvidenceAndUnmeasuredTraffic(t *testing.T) {
+	for _, idsEnabled := range []bool{false, true} {
+		cfg := config.DefaultConfig()
+		cfg.Zones = []config.Zone{{Name: "ot"}, {Name: "dmz"}}
+		cfg.IDS.Enabled = idsEnabled
+		cfg.Firewall.Rules = []config.Rule{{
+			ID: "https", Action: config.ActionAllow,
+			SourceZones: []string{"ot"}, DestZones: []string{"dmz"},
+			Protocols: []config.Protocol{{Name: "tcp", Port: "443"}},
+		}}
+		rec := httptest.NewRecorder()
+		NewServer(&mockStore{cfg: cfg}, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/security/conduits", nil))
+		var got []conduitResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("status %d body=%s err=%v", rec.Code, rec.Body, err)
+		}
+		c := requireConduit(t, got, "ot", "dmz")
+		if c.Traffic.State != "unavailable" || c.Traffic.Reason == "" || c.TLSEnforced {
+			t.Fatalf("unmeasured or unverified control claimed: %+v", c)
+		}
+		wantIDS := "disabled"
+		if idsEnabled {
+			wantIDS = "enabled"
+		}
+		if c.IDS != wantIDS {
+			t.Fatalf("IDS %q, want global setting %q", c.IDS, wantIDS)
+		}
+		for key, want := range map[string]string{
+			"defaultDeny": "configured", "protoWhitelist": "configured",
+			"tlsEnforced": "heuristic", "ids": "heuristic",
+			"auditLogged": "heuristic", "avEnabled": "heuristic", "mfaRequired": "unknown",
+		} {
+			if e := c.Checks[key]; e.Provenance != want || e.Reason == "" {
+				t.Errorf("%s evidence = %+v, want %s and a reason", key, e, want)
+			}
+		}
+	}
+}

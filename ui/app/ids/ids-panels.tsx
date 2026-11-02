@@ -246,7 +246,9 @@ export function ImportPanel({
       <Card title="Import from file">
         <p className="mb-3 text-xs text-(--text-muted)">
           Upload Suricata (.rules), Snort (.rules), YARA (.yar), or Sigma
-          (.yml). Format is auto-detected.
+          (.yml). Format is auto-detected. YARA is stored for inspection and
+          export only; it does not run or detect threats. Review each rule&apos;s
+          evaluability and conversion notes before enabling detection.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-0 flex-1">

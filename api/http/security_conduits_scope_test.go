@@ -52,7 +52,7 @@ func TestProtocolScopeConduits(t *testing.T) {
 				t.Errorf("rule description=%q want=%q", got, want)
 			}
 			mitre := computeMitre("allow", true, "lan", entries)
-			for _, technique := range []string{"T0886 Remote Services OT", "T0843 Program Download"} {
+			for _, technique := range []string{"Heuristic (allowed service ports): T0886 Remote Services OT", "Heuristic (allowed service ports): T0843 Program Download"} {
 				if got := slices.Contains(mitre, technique); got != tc.industrial {
 					t.Errorf("%s classification=%t want=%t (%v)", technique, got, tc.industrial, mitre)
 				}
@@ -106,15 +106,48 @@ func TestConduitProtocolPortChecks(t *testing.T) {
 			cfg.Firewall.Rules[0].ICS.Protocol = "modbus"
 			cfg.Firewall.Rules[0].ICS.Mode = "enforce"
 			result := buildConduitResult(cfg, computeConduitGlobals(cfg), "lan", "wan")
-			if result.TLSEnforced != tc.encrypted {
-				t.Errorf("TLS enforced=%t want=%t", result.TLSEnforced, tc.encrypted)
+			if result.TLSEnforced {
+				t.Fatal("port membership must not claim TLS enforcement")
 			}
-			if got := slices.Contains(result.Gaps, "ICS traffic mixed with plaintext IT protocols"); got != tc.plaintext {
+			if got := conduitEncryptedPortHint(mapPorts(tc.protocols)); got != tc.encrypted {
+				t.Errorf("encrypted port hint=%t want=%t", got, tc.encrypted)
+			}
+			if result.Checks["tlsEnforced"].Provenance != "heuristic" {
+				t.Fatalf("missing TLS heuristic provenance: %+v", result.Checks)
+			}
+			if got := slices.Contains(result.Gaps, "Heuristic (service ports): ICS traffic mixed with plaintext IT protocols"); got != tc.plaintext {
 				t.Errorf("plaintext gap=%t want=%t (%v)", got, tc.plaintext, result.Gaps)
 			}
-			if got := slices.Contains(result.Mitre, "T0886 Remote Services OT"); got != tc.industrial {
+			if got := slices.Contains(result.Mitre, "Heuristic (allowed service ports): T0886 Remote Services OT"); got != tc.industrial {
 				t.Errorf("industrial classification=%t want=%t (%v)", got, tc.industrial, result.Mitre)
 			}
 		})
 	}
+}
+
+func TestConduitMitreZoneNameHeuristics(t *testing.T) {
+	for _, zone := range []string{"internet", "Internet", "wan", "WAN", "lan", "wan-edge"} {
+		t.Run(zone, func(t *testing.T) {
+			var want []string
+			if zone == "internet" || zone == "Internet" || zone == "wan" || zone == "WAN" {
+				want = []string{
+					"Heuristic (source zone name): T1190 Exploit Public App",
+					"Heuristic (source zone name): T1595 Active Scanning",
+				}
+			}
+			for _, state := range []string{"allow", "block"} {
+				if got := computeMitre(state, true, zone, nil); !slices.Equal(got, want) {
+					t.Errorf("%s: hints=%v want=%v", state, got, want)
+				}
+			}
+		})
+	}
+}
+
+func mapPorts(protocols []config.Protocol) map[int]bool {
+	ports := map[int]bool{}
+	for _, p := range protocols {
+		ports[parsePort(p.Port)] = true
+	}
+	return ports
 }
