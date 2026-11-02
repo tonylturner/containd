@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -18,6 +19,9 @@ func (e *Engine) bindProtection(newConfiguration bool) {
 		p.epoch = epoch
 		p.enabled = e.compiler != nil
 		p.configured = true
+		nft := p.components["nft"]
+		nft.Required = p.enabled
+		p.components["nft"] = nft
 		p.iecFault = ""
 		p.steeringFault = false
 		if newConfiguration {
@@ -98,8 +102,10 @@ func (e *Engine) protectionInstalled(err error, installed bool) {
 		state := "ready"
 		if e.compiler != nil {
 			p.status.InstalledApplyID = p.status.ApplyID
+			p.status.Installed = &protection.Acknowledgement{Metadata: p.status.metadata(), Operation: protection.OperationApply}
 		} else {
 			p.status.InstalledApplyID = ""
+			p.status.Installed = nil
 			state = "off"
 		}
 		p.setLocked("nft", state, reason, 0, 0)
@@ -248,6 +254,7 @@ func (e *Engine) ApplyRulesAndReconcile(ctx context.Context, snap rules.Snapshot
 func (p *protectionState) released() {
 	p.update(func() {
 		p.status.InstalledApplyID = ""
+		p.status.Installed = nil
 		p.enabled = false
 		p.envelope, p.direct, p.queue = false, false, ""
 		p.setLocked("nft", "off", "", 0, 0)

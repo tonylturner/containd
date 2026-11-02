@@ -3,14 +3,20 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+// ErrResolvedPolicyChanged requires a new admitted attempt, not an owner retry.
+var ErrResolvedPolicyChanged = errors.New("changed resolved policy requires a new apply ID")
 
 // ApplyRules installs and publishes one policy under the verdict publication
 // fence. A failed install leaves the previous policy intact. A failed sweep
@@ -19,7 +25,12 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) (applyErr 
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	before := e.ruleSnap.Load()
-	defer func() { e.protectionInstalled(applyErr, e.ruleSnap.Load() != before) }()
+	observe := true
+	defer func() {
+		if observe {
+			e.protectionInstalled(applyErr, e.ruleSnap.Load() != before)
+		}
+	}()
 	if snap.DPIMode == "" {
 		snap.DPIMode = e.dpiMode
 	}
@@ -51,6 +62,33 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) (applyErr 
 	if err != nil {
 		return err
 	}
+	var discover func() ([]string, error)
+	if e.compiler != nil {
+		discover = mgmtpath.Devices
+	}
+	input, err := protectionPolicyInput(snap, signature, discover)
+	if err != nil {
+		return err
+	}
+	p := e.protection
+	p.mu.Lock()
+	// Only revision-bound protocol attempts enforce immutable resolved input.
+	// Operational refills retain the installed association outside this path.
+	bound := p.status.metadata().Valid()
+	if bound && p.ruleInputApply == p.status.ApplyID && !bytes.Equal(p.ruleInput, input) {
+		p.mu.Unlock()
+		observe = false
+		return ErrResolvedPolicyChanged
+	}
+	if bound {
+		p.ruleInputApply, p.ruleInput = p.status.ApplyID, bytes.Clone(input)
+	}
+	adopt := bound && !p.applying && !p.installFailed && p.status.Installed != nil && bytes.Equal(p.installedInput, input)
+	p.mu.Unlock()
+	if adopt {
+		return nil
+	}
+	e.BeginProtection(e.Protection().BootID, e.Protection().ApplyID)
 	oldParity := e.admission.parity
 	changed := e.admission.installed && signature != e.admission.signature
 	snap.AdmissionParity = oldParity
@@ -70,6 +108,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) (applyErr 
 			return err
 		}
 	}
+	p.update(func() { p.installedInput = bytes.Clone(input) })
 	return nil
 }
 

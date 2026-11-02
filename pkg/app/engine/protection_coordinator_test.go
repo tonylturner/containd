@@ -13,13 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"go.uber.org/zap"
 )
 
-func coordinatedPost(h http.Handler, id, body string) *httptest.ResponseRecorder {
+func coordinatedPost(c *protectionCoordinator, h http.Handler, id, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-	r.Header.Set(applyIDHeader, id)
+	setProtectionHeaders(r, id, "", "test-running")
+	c.mu.Lock()
+	r.Header.Set(protection.PreviousApplyIDHeader, c.current)
+	c.mu.Unlock()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
@@ -31,43 +35,42 @@ func TestProtectionCoordinatorServicesAndSupersession(t *testing.T) {
 	services := servicesHandler(zap.NewNop().Sugar(), dp.Engine, nil, nil, nil, nil, c)
 	conf := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	apply := applyRulesHandler(dp.Engine, nil, c, nil)
-	if w := coordinatedPost(services, "A", `{}`); w.Code != 200 {
+	if w := coordinatedPost(c, services, "A", `{}`); w.Code != 200 {
 		t.Fatalf("services: %d %s", w.Code, w.Body)
 	}
-	if st := dp.Protection(); st.ApplyID != "A" || st.State != "pending" {
+	if st := dp.Protection(); st.ApplyID != "A" || st.Installed != nil {
 		t.Fatalf("services did not begin: %+v", st)
 	}
-	if w := coordinatedPost(conf, "A", `{}`); w.Code != 200 {
+	if w := coordinatedPost(c, conf, "A", `{}`); w.Code != 200 {
 		t.Fatalf("config A: %d %s", w.Code, w.Body)
 	}
 	dp.waitStart(t)
-	if w := coordinatedPost(conf, "B", `{}`); w.Code != 200 {
+	if w := coordinatedPost(c, conf, "B", `{}`); w.Code != 200 {
 		t.Fatalf("config B: %d %s", w.Code, w.Body)
 	}
 	dp.waitStart(t)
-	if w := coordinatedPost(apply, "A", `{}`); w.Code != 409 || !strings.Contains(w.Body.String(), `"apply_superseded"`) {
+	if w := coordinatedPost(c, apply, "A", `{}`); w.Code != 409 || !strings.Contains(w.Body.String(), `"apply_superseded"`) {
 		t.Fatalf("stale: %d %s", w.Code, w.Body)
 	}
 	if dp.CurrentRules() != nil {
 		t.Fatal("superseded rules had side effects")
 	}
-	if w := coordinatedPost(apply, "B", `{}`); w.Code != 200 {
+	if w := coordinatedPost(c, apply, "B", `{}`); w.Code != 200 {
 		t.Fatalf("current: %d %s", w.Code, w.Body)
 	}
 	if st := dp.Protection(); st.State != "disabled" || st.ApplyID != "B" {
 		t.Fatalf("disabled: %+v", st)
 	}
-	if w := coordinatedPost(conf, "B", `{"dpiEnabled":true}`); w.Code != 200 {
+	if w := coordinatedPost(c, conf, "B", `{"dpiEnabled":true}`); w.Code != 409 {
 		t.Fatalf("repeated config: %d %s", w.Code, w.Body)
 	}
-	dp.waitStart(t)
-	if dp.Protection().State != "pending" {
-		t.Fatal("configuration reused an earlier rules acknowledgement")
+	if dp.Protection().State != "disabled" {
+		t.Fatal("rejected configuration changed installed observation")
 	}
 	// Missing and oversized identities are rejected on every apply route.
 	for _, h := range []http.Handler{services, conf, apply, c.retryHandler(nil)} {
 		for _, id := range []string{"", strings.Repeat("x", 65)} {
-			if w := coordinatedPost(h, id, `{}`); w.Code != 400 {
+			if w := coordinatedPost(c, h, id, `{}`); w.Code != 400 {
 				t.Fatalf("invalid identity: %d %s", w.Code, w.Body)
 			}
 		}
@@ -100,6 +103,13 @@ func (f *coordinatorFake) BeginProtection(boot, id string) {
 	f.st.ApplyID = id
 	f.st.State = "pending"
 }
+func (f *coordinatorFake) BindProtection(m protection.Metadata) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.st.BootID, f.st.ApplyID = string(m.BootID), string(m.ApplyID)
+	f.st.RunningRevision, f.st.Mode = m.RunningRevision, m.Mode
+}
+func (f *coordinatorFake) SetProtectionOutcome(protection.Metadata, protection.OwnerOutcome) {}
 func (f *coordinatorFake) Protection() engine.ProtectionStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -133,10 +143,10 @@ func waitCoordinatorStart(t *testing.T, f *coordinatorFake) context.Context {
 func TestProtectionCoordinatorReplacementAndShutdownJoin(t *testing.T) {
 	f := &coordinatorFake{starts: make(chan context.Context, 2)}
 	c := testProtectionCoordinator(t, f)
-	h := c.admit(func(w http.ResponseWriter, r *http.Request) { c.start(); w.WriteHeader(200) })
-	coordinatedPost(h, "A", `{}`)
+	h := c.admit("config", func(w http.ResponseWriter, r *http.Request) { c.start(); w.WriteHeader(200) })
+	coordinatedPost(c, h, "A", `{}`)
 	lifetime := waitCoordinatorStart(t, f)
-	coordinatedPost(h, "B", `{}`)
+	coordinatedPost(c, h, "B", `{}`)
 	waitCoordinatorStart(t, f)
 	if f.exits.Load() != 1 {
 		t.Fatal("replacement did not join old worker")
@@ -153,15 +163,15 @@ func TestProtectionCoordinatorReplacementAndShutdownJoin(t *testing.T) {
 func TestProtectionCoordinatorRetryCASAndJoin(t *testing.T) {
 	f := &coordinatorFake{starts: make(chan context.Context, 2), retired: make(chan struct{}), release: make(chan struct{})}
 	c := testProtectionCoordinator(t, f)
-	h := c.admit(func(w http.ResponseWriter, r *http.Request) { c.start() })
-	coordinatedPost(h, "A", `{}`)
+	h := c.admit("config", func(w http.ResponseWriter, r *http.Request) { c.start() })
+	coordinatedPost(c, h, "A", `{}`)
 	waitCoordinatorStart(t, f)
 	retry := c.retryHandler(nil)
-	if w := coordinatedPost(retry, "B", `{"bootId":"wrong"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "protection_superseded") {
+	if w := coordinatedPost(c, retry, "B", `{"bootId":"wrong"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "protection_superseded") {
 		t.Fatalf("CAS: %d %s", w.Code, w.Body)
 	}
 	body, _ := json.Marshal(map[string]string{"bootId": engineBootID})
-	if w := coordinatedPost(retry, "A", string(body)); w.Code != 409 || !strings.Contains(w.Body.String(), "protection_not_retryable") {
+	if w := coordinatedPost(c, retry, "A", string(body)); w.Code != 409 || !strings.Contains(w.Body.String(), "protection_not_retryable") {
 		t.Fatalf("not retryable: %d %s", w.Code, w.Body)
 	}
 	f.mu.Lock()
@@ -169,7 +179,7 @@ func TestProtectionCoordinatorRetryCASAndJoin(t *testing.T) {
 	f.st.Retryable = true
 	f.mu.Unlock()
 	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() { done <- coordinatedPost(retry, "A", string(body)) }()
+	go func() { done <- coordinatedPost(c, retry, "A", string(body)) }()
 	select {
 	case <-f.retired:
 	case <-time.After(2 * time.Second):
@@ -201,13 +211,13 @@ func TestProtectionCoordinatorRetryCASAndJoin(t *testing.T) {
 func TestProtectionCoordinatorAbortedApplyKeepsBindWorker(t *testing.T) {
 	f := &coordinatorFake{starts: make(chan context.Context, 2)}
 	c := testProtectionCoordinator(t, f)
-	start := c.admit(func(http.ResponseWriter, *http.Request) { c.start() })
-	coordinatedPost(start, "A", `{}`)
+	start := c.admit("config", func(http.ResponseWriter, *http.Request) { c.start() })
+	coordinatedPost(c, start, "A", `{}`)
 	waitCoordinatorStart(t, f)
 	// Services may precede a rejected or never-arriving configuration. They
 	// must adopt the retrying run, not silently terminate its bind budget.
-	services := c.admit(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-	coordinatedPost(services, "B", `{}`)
+	services := c.admit("config", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+	coordinatedPost(c, services, "B", `{}`)
 	if f.exits.Load() != 0 {
 		t.Fatal("services orphaned a pending initial-bind worker")
 	}
@@ -219,12 +229,12 @@ func TestProtectionCoordinatorFailedConfigureRestartsBindWorker(t *testing.T) {
 	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	entered := make(chan struct{})
 	dp.startFn = func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }
-	if w := coordinatedPost(h, "A", `{}`); w.Code != 200 {
+	if w := coordinatedPost(c, h, "A", `{}`); w.Code != 200 {
 		t.Fatalf("config A: %d %s", w.Code, w.Body)
 	}
 	<-entered
 	dp.reconfigErr = context.DeadlineExceeded
-	if w := coordinatedPost(h, "B", `{"dpiEnabled":true}`); w.Code != 500 {
+	if w := coordinatedPost(c, h, "B", `{"dpiEnabled":true}`); w.Code != 500 {
 		t.Fatalf("config B: %d %s", w.Code, w.Body)
 	}
 	dp.waitStart(t) // old worker must have joined

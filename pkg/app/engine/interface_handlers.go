@@ -6,6 +6,7 @@ package engineapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
@@ -25,6 +27,10 @@ type interfaceTelemetry interface {
 }
 
 func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager, observers ...interfaceTelemetry) http.HandlerFunc {
+	return interfaceApplyHandler(logger, ownership, netcfg.ApplyInterfacesWithOptions, observers...)
+}
+
+func interfaceApplyHandler(logger *zap.SugaredLogger, ownership *ownershipManager, apply func(context.Context, []config.Interface, netcfg.ApplyOptions) error, observers ...interfaceTelemetry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -56,21 +62,38 @@ func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager, o
 		if ownership != nil {
 			opts.Reservation = ownership.reservation
 		}
-		if err := netcfg.ApplyInterfacesWithOptions(ctx, ifaces, opts); err != nil {
+		if ownership != nil {
+			ownership.bindDelivery(r, protection.SubsystemInterfaces)
+			ownership.bindDelivery(r, protection.SubsystemForwarding)
+			ownership.interfacesApplied = func(ctx context.Context, ifaces []config.Interface) {
+				notifyInterfaceTelemetry(ctx, logger, ifaces, observers)
+			}
+			ownership.setInterfaces(ifaces)
+		}
+		if err := apply(ctx, ifaces, opts); err != nil {
 			logger.Errorf("apply interfaces (replace=%t) failed: %v", replace, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if ownership != nil {
-			ownership.setInterfaces(ifaces)
-		}
-		for _, observer := range observers {
-			if err := observer.SetTelemetryInterfaces(ctx, ifaces); err != nil {
-				logger.Warnf("interface accounting unavailable: %v", err)
-			}
-		}
+		ownerCompletion(r, protection.SubsystemForwarding, true, forwardingError())
+		notifyInterfaceTelemetry(ctx, logger, ifaces, observers)
 		writeJSON(w, map[string]any{"status": "applied"})
 	}
+}
+
+func notifyInterfaceTelemetry(ctx context.Context, logger *zap.SugaredLogger, ifaces []config.Interface, observers []interfaceTelemetry) {
+	for _, observer := range observers {
+		if err := observer.SetTelemetryInterfaces(ctx, ifaces); err != nil {
+			logger.Warnf("interface accounting unavailable: %v", err)
+		}
+	}
+}
+
+func forwardingError() error {
+	if netcfg.ReadIPv4ForwardingStatus() != netcfg.IPv4ForwardingEnabled {
+		return errors.New("IPv4 forwarding is not verified enabled")
+	}
+	return nil
 }
 
 func interfacesStateHandler() http.HandlerFunc {
@@ -138,6 +161,13 @@ func routingHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http
 		if ownership != nil {
 			resolved = resolveRoutingIfaces(routing, ownership.currentInterfaces())
 		}
+		if !resolvedPhaseInput(w, r, "routing", resolved) {
+			return
+		}
+		if ownership != nil {
+			ownership.bindDelivery(r, protection.SubsystemRouting)
+			ownership.setRouting(routing)
+		}
 		var applyErr error
 		if strings.EqualFold(mode, "replace") {
 			applyErr = netcfg.ApplyRoutingReplace(ctx, resolved)
@@ -148,9 +178,6 @@ func routingHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http
 			logger.Errorf("apply routing failed: %v", applyErr)
 			http.Error(w, applyErr.Error(), http.StatusBadRequest)
 			return
-		}
-		if ownership != nil {
-			ownership.setRouting(routing)
 		}
 		writeJSON(w, map[string]any{"status": "applied"})
 	}

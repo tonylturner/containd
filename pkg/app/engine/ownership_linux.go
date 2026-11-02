@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"golang.org/x/sys/unix"
@@ -30,6 +31,7 @@ type ownershipState struct {
 }
 
 type ownershipManager struct {
+	ownershipDelivery
 	reservation *mgmtpath.Reservation
 	guard       *netcfg.ManagementGuard
 	applyMu     sync.Mutex
@@ -108,6 +110,13 @@ func (m *ownershipManager) start(ctx context.Context) {
 }
 
 func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
+	if m.coordinator != nil {
+		m.coordinator.mu.Lock()
+		defer m.coordinator.mu.Unlock()
+		if m.coordinator.closed || ctx.Err() != nil {
+			return
+		}
+	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	if err := m.guard.Reconcile(ctx); err != nil {
@@ -115,6 +124,10 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 		return
 	}
 	st := m.state.Load().(ownershipState)
+	// An old owner may maintain installed work only while its attempt remains
+	// current. Delayed reconcile cannot mutate a recovered replacement target.
+	st.ifacesSet = st.ifacesSet && m.currentDelivery(protection.SubsystemInterfaces)
+	st.routingSet = st.routingSet && m.currentDelivery(protection.SubsystemRouting)
 	if !st.ifacesSet && !st.routingSet {
 		return
 	}
@@ -131,10 +144,21 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	}
 	// Interfaces: converge only owned addresses (REPLACE is admin-triggered only).
 	if st.ifacesSet {
+		m.publishDelivery(protection.SubsystemInterfaces, false, false)
+		m.publishDelivery(protection.SubsystemForwarding, false, false)
 		if err := netcfg.ApplyInterfacesWithOptions(applyCtx, st.ifaces, netcfg.ApplyOptions{Reservation: m.reservation}); err != nil {
+			m.publishDelivery(protection.SubsystemInterfaces, false, true)
 			m.setLastError(err)
 			m.logger.Errorf("ownership reconcile (%s) apply interfaces failed: %v", reason, err)
 			return
+		}
+	}
+
+	if st.ifacesSet {
+		m.publishDelivery(protection.SubsystemInterfaces, true, false)
+		m.publishDelivery(protection.SubsystemForwarding, true, forwardingError() != nil)
+		if m.interfacesApplied != nil {
+			m.interfacesApplied(applyCtx, st.ifaces)
 		}
 	}
 
@@ -142,13 +166,18 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	// using the current interface bindings before applying.
 	if st.routingSet {
 		resolved := resolveRoutingIfaces(st.routing, st.ifaces)
+		m.publishDelivery(protection.SubsystemRouting, false, false)
 		if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
+			m.publishDelivery(protection.SubsystemRouting, false, true)
 			m.setLastError(err)
 			m.logger.Errorf("ownership reconcile (%s) apply routing failed: %v", reason, err)
 			return
 		}
 	}
 
+	if st.routingSet {
+		m.publishDelivery(protection.SubsystemRouting, true, false)
+	}
 	m.setLastError(nil)
 }
 

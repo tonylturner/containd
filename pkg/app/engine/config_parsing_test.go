@@ -17,8 +17,9 @@ func TestConfigPushParsingDoesNotReconfigureSessions(t *testing.T) {
 	dp := newCountingDP(t)
 	// No live capture is needed; retain the handler's asynchronous start path.
 	dp.startFn = func(context.Context) error { return nil }
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
-	postConfig(t, h, `{"dpiIcsParsing":{"modbus":"strict"}}`)
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
+	postConfig(t, c, h, `{"dpiIcsParsing":{"modbus":"strict"}}`)
 	if err := dp.waitStart(t); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestConfigPushParsingDoesNotReconfigureSessions(t *testing.T) {
 		t.Fatal("initial config was not plumbed")
 	}
 	dp.startFn = func(context.Context) error { return nil }
-	postConfig(t, h, `{"dpiIcsParsing":{"modbus":"tolerant","cip":"strict"}}`)
+	postConfig(t, c, h, `{"dpiIcsParsing":{"modbus":"tolerant","cip":"strict"}}`)
 	if err := dp.waitStart(t); err != nil {
 		t.Fatal(err)
 	}

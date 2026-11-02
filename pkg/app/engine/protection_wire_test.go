@@ -13,7 +13,7 @@ import (
 func TestProtectionApplyAndHealthWireShape(t *testing.T) {
 	dp := newCountingDP(t)
 	c := testProtectionCoordinator(t, dp)
-	w := coordinatedPost(applyRulesHandler(dp.Engine, nil, c, nil), "wire-apply", `{}`)
+	w := coordinatedPost(c, applyRulesHandler(dp.Engine, nil, c, nil), "wire-apply", `{}`)
 	if w.Code != 200 {
 		t.Fatalf("apply: %d %s", w.Code, w.Body)
 	}
@@ -23,7 +23,7 @@ func TestProtectionApplyAndHealthWireShape(t *testing.T) {
 		if err := json.Unmarshal(body, &st); err != nil {
 			t.Fatal(err)
 		}
-		for _, field := range []string{"bootId", "applyId", "installedApplyId", "state", "retryable", "observedAt", "components", "effects"} {
+		for _, field := range []string{"bootId", "applyId", "installedApplyId", "state", "retryable", "observedAt", "components", "effects", "runningRevision", "mode", "installed", "subsystems"} {
 			if st[field] == nil {
 				t.Fatalf("missing frozen field %s: %s", field, body)
 			}
@@ -35,6 +35,9 @@ func TestProtectionApplyAndHealthWireShape(t *testing.T) {
 		json.Unmarshal(st["observedAt"], &at)
 		if boot != engineBootID || apply != "wire-apply" || state != "disabled" {
 			t.Fatalf("identity/state: %s", body)
+		}
+		if string(st["runningRevision"]) != `"test-running"` || string(st["mode"]) != `"normal"` || string(st["installed"]) != "null" || string(st["subsystems"]) == "null" {
+			t.Fatalf("revision-bound observation: %s", body)
 		}
 		if _, err := time.Parse(time.RFC3339Nano, at); err != nil {
 			t.Fatal(err)

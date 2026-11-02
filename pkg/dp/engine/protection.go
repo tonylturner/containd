@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -17,14 +18,18 @@ import (
 // ProtectionStatus is an engine-owned observation, not an apply acknowledgement.
 // It is shared with the engine API client; slices returned by Protection are copies.
 type ProtectionStatus struct {
-	BootID           string                `json:"bootId"`
-	ApplyID          string                `json:"applyId"`
-	InstalledApplyID string                `json:"installedApplyId"`
-	State            string                `json:"state"`
-	Retryable        bool                  `json:"retryable"`
-	ObservedAt       time.Time             `json:"observedAt"`
-	Components       []ProtectionComponent `json:"components"`
-	Effects          []ProtectionEffect    `json:"effects"`
+	RunningRevision  protection.Revision         `json:"runningRevision"`
+	Mode             protection.ApplyMode        `json:"mode"`
+	Installed        *protection.Acknowledgement `json:"installed"`
+	Subsystems       []protection.OwnerOutcome   `json:"subsystems"`
+	BootID           string                      `json:"bootId"`
+	ApplyID          string                      `json:"applyId"`
+	InstalledApplyID string                      `json:"installedApplyId"`
+	State            string                      `json:"state"`
+	Retryable        bool                        `json:"retryable"`
+	ObservedAt       time.Time                   `json:"observedAt"`
+	Components       []ProtectionComponent       `json:"components"`
+	Effects          []ProtectionEffect          `json:"effects"`
 }
 
 type ProtectionComponent struct {
@@ -61,11 +66,15 @@ type protectionState struct {
 	applying         bool
 	installFailed    bool
 	nflogLost        bool
+	ruleInputApply   string
+	ruleInput        []byte
+	installedInput   []byte
+	outcomes         map[protection.SubsystemName]protection.OwnerOutcome
 	store            *events.Writer
 }
 
 func newProtection(store *events.Writer) *protectionState {
-	p := &protectionState{store: store, components: map[string]ProtectionComponent{}}
+	p := &protectionState{store: store, components: map[string]ProtectionComponent{}, outcomes: map[protection.SubsystemName]protection.OwnerOutcome{}}
 	p.status = ProtectionStatus{BootID: rand.Text(), State: "pending", Components: []ProtectionComponent{}, Effects: []ProtectionEffect{}}
 	p.setLocked("nft", "pending", "awaiting configuration", 0, 0)
 	return p
@@ -195,7 +204,7 @@ func (p *protectionState) recomputeLocked() {
 	}
 }
 
-// BeginProtection publishes pending before an apply changes any runtime service.
+// BeginProtection publishes nft pending before configuration or policy changes.
 func (e *Engine) BeginProtection(bootID, applyID string) {
 	p := e.protection
 	p.update(func() {
@@ -217,6 +226,12 @@ func (e *Engine) Protection() ProtectionStatus {
 	st.ObservedAt = time.Now().UTC()
 	st.Components = slices.Clone(st.Components)
 	st.Effects = slices.Clone(st.Effects)
+	if st.Installed != nil {
+		ack := *st.Installed
+		st.Installed = &ack
+	}
+	st.Subsystems = p.outcomeSnapshotLocked()
+
 	return st
 }
 
