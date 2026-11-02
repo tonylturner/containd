@@ -84,7 +84,7 @@ test("one attention area keeps failed, unknown, healthy and unavailable domains 
   const attention = page.getByRole("region", { name: "Attention", exact: true });
   const protection = attention.getByRole("status", { name: "Traffic protection", exact: true });
   await expect(protection.getByText("nft: policy install refused", { exact: true })).toBeVisible();
-  await expect(protection.getByRole("button", { name: "Retry protection" })).toBeVisible();
+  await expect(protection.getByRole("button", { name: "Retry now" })).toBeVisible();
   await expect(attention.getByRole("status", { name: "Boot recovery" })).toContainText("Boot recovery state unknown");
   await expect(attention.getByText("startup observation unavailable", { exact: true })).toBeVisible();
   await expect(attention.getByRole("link", { name: "Interfaces", exact: true })).toHaveAttribute("href", "/interfaces/");

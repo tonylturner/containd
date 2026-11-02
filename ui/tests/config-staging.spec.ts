@@ -1,3 +1,4 @@
+import { runtimeResult } from "./fixtures/protection-api";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures/topology-test";
 import type { ConfigDiff } from "../lib/api-config";
@@ -26,7 +27,7 @@ async function setup(page: Page) {
       }
       else if (path === "/pcap/config") state.dirty = true;
       if (["/zones", "/ids/rules", "/pcap/config"].includes(path)) headers["X-Containd-Config"] = "staged";
-      return route.fulfill({ json: path === "/ids/rules" ? state.ids : body ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(headers) } });
+      return route.fulfill({ json: path.startsWith("/config/commit") ? runtimeResult() : path === "/ids/rules" ? state.ids : body ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(headers) } });
     }
     if (path === "/config/diff") {
       state.reads++;
@@ -67,6 +68,7 @@ test("successful zone mutation immediately refreshes global status; commit refre
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByText(pending, { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Configuration committed — running-a. Warning: test apply warning", { exact: true })).toBeVisible();
   expect(state.writes.map((w) => w.path)).toEqual(["/zones", "/config/commit"]);
 });
 
@@ -99,7 +101,7 @@ test("editors consume both events and status bar leads to reviewed commit-confir
   await page.getByRole("link", { name: "Review diff", exact: true }).click();
   await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Start timer", exact: true }).click();
-  await expect(page.getByText("Commit-confirmed started (60s). Warning: test apply warning", { exact: true })).toBeVisible();
+  await expect(page.getByText("Configuration committed — running-a. Auto-rollback in 60s unless confirmed. Warning: test apply warning", { exact: true })).toBeVisible();
   expect(state.writes.at(-1)).toEqual({ path: "/config/commit_confirmed", body: { ttl_seconds: 60 } });
 });
 

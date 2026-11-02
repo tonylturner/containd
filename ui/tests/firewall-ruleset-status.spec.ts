@@ -89,7 +89,7 @@ for (const [state, label, status] of [
   ["unavailable", "Firewall enforcement unavailable", "error"],
 ] as const) {
   test(`enforcement ${state} is labelled`, async ({ page }) => {
-    await mockAPI(page, { enforcement: { state, reason: "" } });
+    await mockAPI(page, { enforcement: { state, reason: "" }, protection: observation({ state: state === "enforcing" ? "protecting" : "disabled" }) });
     await open(page, "/firewall/");
     await expect(page.getByRole("status", { name: `${label}: ${status}` })).toBeVisible();
   });
@@ -152,7 +152,7 @@ test("a healthy installed ruleset reads quietly", async ({ page }) => {
 });
 
 test("the ICS page shows nothing extra while the installed ruleset is healthy", async ({ page }) => {
-  await mockAPI(page, { enforcement: { state: "enforcing", reason: "" } });
+  await mockAPI(page, { enforcement: { state: "enforcing", reason: "" }, protection: observation() });
   await open(page, "/ics/");
   const details = page.getByRole("button", { name: "Inspection details", exact: true });
   await expect(details).toHaveAttribute("aria-expanded", "false");

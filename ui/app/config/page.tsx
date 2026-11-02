@@ -15,6 +15,7 @@ import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/ap
 import { ConfigDiffBlocks } from "./config-diff-blocks";
 import { ConfigChangeSummary } from "./config-change-summary";
 import { ConfigActionBar } from "./config-action-bar";
+import { LiveProtectionSummary } from "../../components/ProtectionSummary";
 import { Disclosure } from "../../components/Disclosure";
 import type { ConfigDiff } from "../../lib/api-config";
 import { formatICSMode } from "../ics/ics-shared";
@@ -179,7 +180,7 @@ function ConfigPage() {
         if (!canSaveNow()) { setStatus("Commit failed: configuration diff unavailable. Refresh and review again."); return; }
         const result = await diffView.writeRefresh(base => api.commit(base), api.diffConfig);
         if (result.ok) {
-          setStatus(statusWithWarning("Committed.", result.warning));
+          setStatus(statusWithWarning(`Configuration committed — ${result.data.runningRevision}.`, result.warning));
         } else {
           setStatus(revisionError(result) !== null ? `Commit failed: ${result.error}` : null);
         }
@@ -202,7 +203,7 @@ function ConfigPage() {
         setStatus(null);
         if (!canSaveNow()) { setStatus("Commit failed: configuration diff unavailable. Refresh and review again."); return; }
         const result = await diffView.writeRefresh(base => api.commitConfirmed(base, secs), api.diffConfig);
-        setStatus(result.ok ? statusWithWarning(`Commit-confirmed started (${secs}s).`, result.warning) : revisionError(result) !== null ? `Commit-confirmed failed: ${result.error}` : null);
+        setStatus(result.ok ? statusWithWarning(`Configuration committed — ${result.data.runningRevision}. Auto-rollback in ${secs}s unless confirmed.`, result.warning) : revisionError(result) !== null ? `Commit-confirmed failed: ${result.error}` : null);
         refresh();
       },
     });
@@ -455,7 +456,7 @@ function ConfigPage() {
           className={`mb-4 rounded-xs px-4 py-3 text-sm ${
             status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
               ? "border border-red-500/30 bg-red-500/10 text-red-400"
-              : status.includes("staged") || status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
+              : status.includes("staged") || status.includes("saved") || status.includes("Configuration committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                 : "border bg-(--surface) text-(--text)"
           }`}
@@ -609,6 +610,7 @@ function ConfigPage() {
           <div className="mb-3 text-xs text-(--text-muted)">
             This is the last committed config, not proof of live enforcement.
           </div>
+          <LiveProtectionSummary />
           <pre className="max-w-full overflow-x-auto">{runningText}</pre>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { runtimeResult } from "./fixtures/protection-api";
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { mockLearner, openDataset } from "./fixtures/learner";
@@ -32,7 +33,7 @@ async function mockConfig(page: Page, state = { counter: 1, hostname: "initial",
     } });
     if (path === "/config/candidate") state.hostname = body.system.hostname;
     state.counter++;
-    return route.fulfill({ headers: { "X-Containd-Revision": token(state.counter), "X-Containd-Config": path.includes("commit") ? "committed" : "staged" }, json: { status: "ok" } });
+    return route.fulfill({ headers: { "X-Containd-Revision": token(state.counter), "X-Containd-Config": path.includes("commit") ? "committed" : "staged" }, json: ["/config/commit", "/config/commit_confirmed", "/config/rollback"].includes(path) ? runtimeResult(path === "/config/rollback" ? "rolled back" : "committed") : { status: "ok" } });
   });
   return { state, writes };
 }
