@@ -48,3 +48,7 @@ func (m *Manager) Status() map[string]any {
 }
 
 func (m *Manager) runtimeReady() bool { return false }
+
+func (m *Manager) runtimeStopped() bool {
+	return false
+}

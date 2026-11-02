@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/trust"
 )
@@ -58,8 +59,29 @@ func (m *AVManager) SetTrust(ctx context.Context, b trust.Bundle) error {
 		}
 	}
 	m.mu.Lock()
-	m.trust = avTrust{bundle: b, pool: pool}
+	cfg := m.lastCfg
+	changed := trustRevision(m.trust.bundle) != trustRevision(b) && avUsesTrust(cfg)
 	m.mu.Unlock()
+	if changed {
+		m.stopObserver()
+	}
+	m.mu.Lock()
+	m.trust = avTrust{bundle: b, pool: pool}
+	if changed {
+		// Retire in-flight observations made with the old TLS roots. A live
+		// process is not proof that the replacement trust still accepts its peer.
+		m.backendEpoch++
+		m.directions = nil
+		m.configureDirectionsLocked(cfg)
+		m.capabilityError = "trust changed; awaiting backend readiness"
+		m.nextOptions = time.Time{}
+		m.refreshBackendLocked()
+	}
+	epoch := m.backendEpoch
+	m.mu.Unlock()
+	if changed {
+		m.startObserver(cfg, epoch)
+	}
 	m.emit("service.av.trust_applied", map[string]any{"revision": b.Revision})
 	return nil
 }

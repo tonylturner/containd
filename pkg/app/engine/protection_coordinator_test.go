@@ -242,3 +242,52 @@ func TestProtectionCoordinatorFailedConfigureRestartsBindWorker(t *testing.T) {
 		t.Fatalf("failed replacement did not resume the existing run: %v", err)
 	}
 }
+
+type requestBoundPlane struct {
+	*coordinatorFake
+	retryContext chan context.Context
+}
+
+func (p *requestBoundPlane) RetryProtection(ctx context.Context) error {
+	p.retryContext <- ctx
+	<-ctx.Done()
+	return ctx.Err()
+}
+func TestProtectionRetryUsesRequestBoundContext(t *testing.T) {
+	p := &requestBoundPlane{coordinatorFake: &coordinatorFake{starts: make(chan context.Context, 2)}, retryContext: make(chan context.Context, 1)}
+	c := testProtectionCoordinator(t, p)
+	h := c.admit("config", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	if w := coordinatedPost(c, h, "request-bound", `{}`); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	p.mu.Lock()
+	p.st.Retryable = true
+	p.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := protectionRequest(http.MethodPost, "/retry", strings.NewReader(`{"bootId":"`+engineBootID+`"}`)).WithContext(ctx)
+	setProtectionHeaders(r, "request-bound", "", "test-running")
+	done := make(chan int, 1)
+	go func() { w := httptest.NewRecorder(); c.retryHandler(nil).ServeHTTP(w, r); done <- w.Code }()
+	select {
+	case retryCtx := <-p.retryContext:
+		deadline, ok := retryCtx.Deadline()
+		if !ok || time.Until(deadline) > 10*time.Second {
+			t.Error("retry context is not bounded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry did not enter owner")
+	}
+	cancel()
+	select {
+	case code := <-done:
+		if code != 500 {
+			t.Fatalf("cancelled retry: %d", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("request cancellation did not drain retry")
+	}
+	if c.ctx.Err() != nil {
+		t.Fatal("request cancellation cancelled the adopted run lifetime")
+	}
+}

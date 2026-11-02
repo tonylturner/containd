@@ -29,7 +29,10 @@ func outcomeFor(t *testing.T, result DeliveryResult, name protection.SubsystemNa
 func TestDeliveryRetryFailedOwnerOnly(t *testing.T) {
 	m := NewManager(ManagerOptions{BaseDir: t.TempDir()})
 	m.NTP, m.Proxy, m.VPN, m.DHCP = nil, nil, nil, nil
-	m.DNS.Supervise = false
+	m.DNS.Supervise = true
+	m.DNS.UnboundPath = managedDaemonScript(t)
+	m.DNS.CheckConfPath = ""
+	t.Cleanup(func() { _ = m.DNS.stopLocked() })
 	dir := m.DNS.BaseDir
 	m.DNS.BaseDir = filepath.Join(dir, "broken")
 	if err := os.WriteFile(m.DNS.BaseDir, nil, 0o600); err != nil {

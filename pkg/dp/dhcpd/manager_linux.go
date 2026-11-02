@@ -777,3 +777,9 @@ func (m *Manager) joinStoppingLocked(ctx context.Context) error {
 	}
 	return err
 }
+
+func (m *Manager) runtimeStopped() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.listeners) == 0 && len(m.stopping) == 0
+}

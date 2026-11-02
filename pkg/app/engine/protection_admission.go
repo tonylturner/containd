@@ -193,12 +193,8 @@ func (c *protectionCoordinator) admit(phase string, next http.HandlerFunc) http.
 		}
 		c.inputs[phase] = input
 		name := protection.SubsystemName(phase)
-		if phase != "services" && phase != "nft" {
+		if phase != "services" && phase != "nft" && phase != "config" && phase != "trust" {
 			c.outcome(a.Metadata, name, true, false, false, "")
-		}
-		if phase == "services" {
-			c.outcome(a.Metadata, protection.SubsystemWireGuard, true, false, false, "")
-			c.outcome(a.Metadata, protection.SubsystemDHCP, true, false, false, "")
 		}
 		if phase == "interfaces" {
 			c.outcome(a.Metadata, protection.SubsystemForwarding, true, false, false, "")

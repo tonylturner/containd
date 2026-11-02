@@ -15,6 +15,8 @@ import (
 )
 
 type runtimeDHCPApplier struct {
+	testServiceOwner
+
 	calls atomic.Int32
 	fail  *atomic.Bool
 }
@@ -27,7 +29,10 @@ func (a *runtimeDHCPApplier) Apply(context.Context, config.DHCPConfig, []config.
 	return nil
 }
 
-type runtimeAVApplier struct{ calls atomic.Int32 }
+type runtimeAVApplier struct {
+	testServiceOwner
+	calls atomic.Int32
+}
 
 func (a *runtimeAVApplier) Apply(context.Context, config.AVConfig) error {
 	a.calls.Add(1)
@@ -44,13 +49,13 @@ func TestServiceRuntimeWireGuardDisableVerified(t *testing.T) {
 	installed := dp.Protection().Installed
 	running, fail := true, true
 	h := c.admit("services", serviceApplyHandler(zap.NewNop().Sugar(), dp, nil, nil, nil, nil,
-		func(context.Context, config.WireGuardConfig) error {
+		fakeWireGuard(func(context.Context, config.WireGuardConfig) error {
 			if fail {
 				return errors.New("stop failed")
 			}
 			running = false
 			return nil
-		}))
+		})))
 	for _, failure := range []bool{true, false} {
 		fail = failure
 		if w := protocolPost(h, m, "", `{}`); w.Code != 200 {
@@ -90,7 +95,7 @@ func TestServiceRuntimeFaultReplay(t *testing.T) {
 				return nil
 			}
 			gate := &gateManager{}
-			handler := c.admit("services", serviceApplyHandler(zap.NewNop().Sugar(), dp.Engine, nil, dhcp, av, gate, applyWG))
+			handler := c.admit("services", serviceApplyHandler(zap.NewNop().Sugar(), dp.Engine, nil, dhcp, av, gate, fakeWireGuard(applyWG)))
 			apply := applyRulesHandler(dp.Engine, gate, c, nil)
 			svc := config.ServicesConfig{}
 			if err := json.Unmarshal([]byte(`{"av":{"scan":{"include":[{"destPorts":["80"]}]}}}`), &svc); err != nil {
@@ -145,7 +150,13 @@ func TestServiceRuntimeFaultReplay(t *testing.T) {
 					t.Fatalf("missing outcome for %s", service)
 				}
 			}
-			if wgCalls.Load() != 3 || dhcp.calls.Load() != 3 || av.calls.Load() != 3 {
+			wantWG, wantDHCP := int32(1), int32(1)
+			if service == config.ServiceWireGuard {
+				wantWG = 3
+			} else {
+				wantDHCP = 3
+			}
+			if wgCalls.Load() != wantWG || dhcp.calls.Load() != wantDHCP || av.calls.Load() != 1 {
 				t.Fatal("runtime fault prevented owner retry")
 			}
 			events, err := json.Marshal(dp.Events().List(100))
@@ -154,4 +165,15 @@ func TestServiceRuntimeFaultReplay(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (a *runtimeDHCPApplier) ApplyDelivery(ctx context.Context, meta protection.Metadata, cfg config.DHCPConfig, ifaces []config.Interface) (protection.OwnerOutcome, error) {
+	return a.testServiceOwner.apply(ctx, meta, protection.SubsystemDHCP, cfg.Enabled, struct {
+		Config     config.DHCPConfig
+		Interfaces []config.Interface
+	}{cfg, ifaces}, func(ctx context.Context) error { return a.Apply(ctx, cfg, ifaces) })
+}
+
+func (a *runtimeAVApplier) ApplyDelivery(ctx context.Context, meta protection.Metadata, cfg config.AVConfig) (protection.OwnerOutcome, error) {
+	return a.testServiceOwner.apply(ctx, meta, protection.SubsystemAV, cfg.Enabled, cfg, func(ctx context.Context) error { return a.Apply(ctx, cfg) })
 }

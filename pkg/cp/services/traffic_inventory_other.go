@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Non-Linux development hosts can prove absence, but cannot safely bind an
@@ -27,4 +28,10 @@ func stopPriorTraffic(ctx context.Context, base, name string) error {
 		}
 	}
 	return nil
+}
+
+func trafficAbsent(base, name string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return stopPriorTraffic(ctx, base, name) == nil
 }

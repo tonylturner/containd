@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/protection"
@@ -25,6 +26,8 @@ type deliveryState struct {
 	desired  config.ServicesConfig
 	initial  []config.ServiceConfigError
 	outcomes []protection.OwnerOutcome
+	inputs   map[protection.SubsystemName]any
+	runtime  map[protection.SubsystemName]string
 }
 
 var ErrDeliverySuperseded = errors.New("service delivery target is not current")
@@ -93,16 +96,24 @@ func cloneOutcomes(in []protection.OwnerOutcome) []protection.OwnerOutcome {
 	return out
 }
 
-// ApplyDelivery invalidates every prior proof before applying a detached desired
-// snapshot. initial must describe the original desired input, not its quarantine.
+// ApplyDelivery positively adopts unchanged live owners and delivers outstanding
+// owners from a detached snapshot. initial describes desired input, not quarantine.
 func (m *Manager) ApplyDelivery(ctx context.Context, meta protection.Metadata, desired config.ServicesConfig, initial []config.ServiceConfigError) (DeliveryResult, error) {
 	if !meta.Valid() {
 		return DeliveryResult{}, errors.New("invalid service delivery identity")
 	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
-	m.delivery = deliveryState{meta: meta, desired: cloneServices(desired), initial: append([]config.ServiceConfigError(nil), initial...)}
-	return m.deliverLocked(ctx, false), nil
+	fresh := m.delivery.meta != meta
+	m.refreshDeliveryLocked()
+	m.delivery.meta = meta
+	m.delivery.desired = cloneServices(desired)
+	m.delivery.initial = append([]config.ServiceConfigError(nil), initial...)
+	if m.delivery.inputs == nil {
+		m.delivery.inputs = map[protection.SubsystemName]any{}
+		m.delivery.runtime = map[protection.SubsystemName]string{}
+	}
+	return m.deliverLocked(ctx, false, fresh), nil
 }
 
 // RetryDelivery retries only retryable failed owners, preserving healthy owners
@@ -114,7 +125,7 @@ func (m *Manager) RetryDelivery(ctx context.Context, meta protection.Metadata) (
 		return DeliveryResult{}, ErrDeliverySuperseded
 	}
 	m.refreshDeliveryLocked()
-	return m.deliverLocked(ctx, true), nil
+	return m.deliverLocked(ctx, true, false), nil
 }
 
 // StopDelivery requests independently verified owner teardown, not shutdown of
@@ -131,69 +142,18 @@ func (m *Manager) DeliveryOutcomes() []protection.OwnerOutcome {
 	return cloneOutcomes(m.delivery.outcomes)
 }
 
-func (m *Manager) deliverLocked(ctx context.Context, retry bool) DeliveryResult {
+func (m *Manager) deliverLocked(ctx context.Context, retry, fresh bool) DeliveryResult {
 	s := &m.delivery
 	effective := cloneServices(s.desired)
 	faults := ConfigFaults(s.initial)
 	for _, fault := range s.initial {
 		config.QuarantineService(&effective, fault.Service)
 	}
-	old := s.outcomes
-	s.outcomes = nil // invalidate before ANY owner mutation
+
 	run := func(name protection.SubsystemName, service string, enabled bool, fn func() error, stop func() error) {
-		var previous *protection.OwnerOutcome
-		for i := range old {
-			if old[i].Name == name {
-				previous = &old[i]
-				break
-			}
-		}
-		var out protection.OwnerOutcome
-		if retry && previous != nil && !previous.Retryable {
-			out = *previous
-		} else {
-			attempt := 1
-			if previous != nil {
-				attempt = previous.Attempt + 1
-			}
-			var err error
-			for _, f := range s.initial {
-				if f.Service == service {
-					err = &config.ServiceConfigError{Service: service, Err: errors.New("invalid desired service")}
-					break
-				}
-			}
-			if err == nil {
-				err = ctx.Err()
-			}
-			if err == nil {
-				err = fn()
-			}
-			out = deliveryOutcome(s.meta, name, protection.OwnerManagement, enabled, attempt, err)
-			if err != nil && enabled && stop != nil {
-				// A successful quarantine stop is NOT proof of the desired enabled input.
-				// A failed stop likewise must never acquire a disabled acknowledgement.
-				if stopErr := stop(); stopErr != nil {
-					out.Reason += "; quarantine stop not confirmed"
-				}
-			}
-		}
-		if out.Fault != nil {
-			quarantineOutcome(&effective, name, service)
-			kind := "runtime"
-			if out.Fault.Kind != protection.FaultDelivery {
-				kind = "config"
-			}
-			found := false
-			for _, f := range faults {
-				found = found || f.Service == service
-			}
-			if !found {
-				faults = append(faults, ServiceFault{Service: service, Kind: kind, Message: out.Fault.Reason})
-			}
-		}
-		s.outcomes = append(s.outcomes, out)
+		m.deliverOwnerLocked(ctx, name, service, enabled, retry, fresh, fn, stop, &effective, &faults)
 	}
+
 	if m.Syslog != nil {
 		run(protection.SubsystemSyslog, config.ServiceSyslog, len(s.desired.Syslog.Forwarders) > 0, func() error { return m.Syslog.Apply(ctx, s.desired.Syslog) }, func() error { return m.Syslog.Apply(ctx, config.SyslogConfig{}) })
 	}
@@ -233,6 +193,108 @@ func (m *Manager) deliverLocked(ctx context.Context, retry bool) DeliveryResult 
 	return DeliveryResult{Effective: effective, Outcomes: cloneOutcomes(s.outcomes)}
 }
 
+// Caller holds applyMu. Only this owner's proof is revoked before its callback.
+func (m *Manager) deliverOwnerLocked(ctx context.Context, name protection.SubsystemName, service string, enabled, retry, fresh bool, fn func() error, stop func() error, effective *config.ServicesConfig, faults *[]ServiceFault) {
+	s := &m.delivery
+
+	var previous *protection.OwnerOutcome
+	for i := range s.outcomes {
+		if s.outcomes[i].Name == name {
+			prior := s.outcomes[i]
+			previous = &prior
+			break
+		}
+	}
+	invalid := false
+	for _, f := range s.initial {
+		invalid = invalid || f.Service == service
+	}
+	input := struct {
+		Config  any
+		Invalid bool
+	}{serviceOwnerInput(s.desired, name), invalid}
+	same := reflect.DeepEqual(s.inputs[name], input)
+	var out protection.OwnerOutcome
+	if previous != nil && same && !invalid && previous.Acknowledged != nil {
+		out = *previous
+		if previous.Acknowledged.Metadata != s.meta {
+			if runtime, live := m.ownerRuntime(name, enabled); live && runtime == s.runtime[name] {
+				out = deliveryOutcome(s.meta, name, previous.Owner, enabled, previous.Attempt, nil)
+			} else {
+				previous.Acknowledged = nil
+				previous.Retryable = true
+			}
+		}
+	}
+	if previous != nil && same && !invalid && previous.Acknowledged != nil {
+		// Adopted above, or retained on the same attempt.
+	} else if !fresh && (retry || same) && previous != nil && !previous.Retryable && previous.Acknowledged == nil {
+		out = *previous
+		out.DesiredRevision = s.meta.RunningRevision
+	} else {
+		attempt := 1
+		if previous != nil {
+			attempt = previous.Attempt + 1
+		}
+		for i := range s.outcomes {
+			if s.outcomes[i].Name == name {
+				s.outcomes[i].Acknowledged = nil
+				s.outcomes[i].State = protection.DeliveryPending
+			}
+		}
+		s.inputs[name] = input
+		var err error
+		for _, f := range s.initial {
+			if f.Service == service {
+				err = &config.ServiceConfigError{Service: service, Err: errors.New("invalid desired service")}
+				break
+			}
+		}
+		if err == nil {
+			err = ctx.Err()
+		}
+		if err == nil {
+			err = fn()
+		}
+		out = deliveryOutcome(s.meta, name, protection.OwnerManagement, enabled, attempt, err)
+		if err == nil {
+			s.runtime[name], _ = m.ownerRuntime(name, enabled)
+		}
+		if err != nil && enabled && stop != nil {
+			// A successful quarantine stop is NOT proof of the desired enabled input.
+			// A failed stop likewise must never acquire a disabled acknowledgement.
+			if stopErr := stop(); stopErr != nil {
+				out.Reason += "; quarantine stop not confirmed"
+			}
+		}
+	}
+	if out.Fault != nil {
+		quarantineOutcome(effective, name, service)
+		kind := "runtime"
+		if out.Fault.Kind != protection.FaultDelivery {
+			kind = "config"
+		}
+		found := false
+		for _, f := range *faults {
+			found = found || f.Service == service
+		}
+		if !found {
+			*faults = append(*faults, ServiceFault{Service: service, Kind: kind, Message: out.Fault.Reason})
+		}
+	}
+	replaced := false
+	for i := range s.outcomes {
+		if s.outcomes[i].Name == name {
+			s.outcomes[i] = out
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.outcomes = append(s.outcomes, out)
+	}
+}
+
 func quarantineOutcome(cfg *config.ServicesConfig, name protection.SubsystemName, service string) {
 	switch name {
 	case protection.SubsystemForwardProxy:
@@ -244,45 +306,16 @@ func quarantineOutcome(cfg *config.ServicesConfig, name protection.SubsystemName
 	}
 }
 
-// Runtime handles are existing owner observations, not new network probes. A
-// dead traffic daemon revokes its proof before a coordinator chooses retries.
+// Existing owner observations revoke success before retry/adoption decisions.
 func (m *Manager) refreshDeliveryLocked() {
 	for i := range m.delivery.outcomes {
 		out := &m.delivery.outcomes[i]
-		if out.Acknowledged == nil || out.Operation != protection.OperationApply {
+		if out.Acknowledged == nil {
 			continue
 		}
-		live := true
-		switch out.Name {
-		case protection.SubsystemOpenVPN:
-			m.VPN.mu.Lock()
-			live = m.VPN.ovpnRunning && m.VPN.ovpnCmd != nil
-			if live {
-				select {
-				case <-m.VPN.ovpnWaitCh:
-					live = false
-				default:
-				}
-			}
-			m.VPN.mu.Unlock()
-		case protection.SubsystemForwardProxy, protection.SubsystemReverseProxy:
-			m.Proxy.mu.Lock()
-			cmd, done := m.Proxy.envoyCmd, m.Proxy.envoyDone
-			if out.Name == protection.SubsystemReverseProxy {
-				cmd, done = m.Proxy.nginxCmd, m.Proxy.nginxDone
-			}
-			live = cmd != nil && done != nil
-			if live {
-				select {
-				case <-done:
-					live = false
-				default:
-				}
-			}
-			m.Proxy.mu.Unlock()
-		}
-		if !live {
-			*out = deliveryOutcome(m.delivery.meta, out.Name, out.Owner, true, out.Attempt, errors.New("traffic daemon exited"))
+		runtime, live := m.ownerRuntime(out.Name, out.Operation == protection.OperationApply)
+		if !live || runtime != m.delivery.runtime[out.Name] {
+			*out = deliveryOutcome(m.delivery.meta, out.Name, out.Owner, out.Operation == protection.OperationApply, out.Attempt, errors.New("owner runtime no longer matches"))
 		}
 	}
 }
