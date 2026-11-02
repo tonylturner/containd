@@ -757,9 +757,17 @@ by one key. `group=zone` on interface metrics excludes parent interfaces.
 Points are dense, oldest first, from `from` inclusive to `to` exclusive. The
 current open bucket is excluded. `v` is an exact decimal uint64 string and `d`
 is observation seconds: rates are `v/d`. `q` is `observed`, `partial`, `reset`
-or `gap`; gap omits `v` and `d`. A missed scrape never interpolates counts:
-intervals up to 15 minutes place their delta in one partial bucket with the full
-elapsed duration; longer intervals establish a new baseline. Counter generation
+or `gap`; gap omits `v` and `d`. Samples run every 10 seconds at a fixed
+200 ms offset from wall-clock boundaries. Samples within ±2 seconds of a
+scheduled tick belong to that tick's slot; late samples use the preceding slot.
+Consecutive slots are observed when both samples are on time and monotonic
+elapsed time is within 10 ±2 seconds; `d` is then exactly 10.
+Other intervals up to 15 minutes place their delta in the bucket immediately
+before the ending slot, leaving intervening buckets as gaps. Their `d` is
+monotonic elapsed seconds rounded to the nearest integer, minimum 1; counts are
+never interpolated. A second sample in the same slot, or a positive elapsed
+interval below one second, is skipped without replacing the baseline.
+Longer intervals establish a new baseline. Counter generation
 changes are resets; ambiguous decreases and clock steps are gaps. Collector
 restart establishes new baselines, without deleting retained history.
 

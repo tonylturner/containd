@@ -47,7 +47,7 @@ func query(t *testing.T, s *Store, now time.Time, q Query) wire.SeriesResponse {
 
 var protoQuery = Query{Metric: wire.ProtoPackets, Range: wire.Range1h, Origin: wire.OriginReal}
 
-func TestSamplerAbsenceRestartFailureAndDensePoints(t *testing.T) {
+func TestTelemetrySamplerAbsenceRestartFailureAndDensePoints(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 	engine := &fakeReader{samples: []wire.CounterSample{sample(10)}}
@@ -86,7 +86,7 @@ func TestSamplerAbsenceRestartFailureAndDensePoints(t *testing.T) {
 	engine.err = nil
 	engine.samples[0].Value = 30
 	tick(30)
-	out = query(t, s, base.Add(40*time.Second), protoQuery)
+	out = query(t, s, base.Add(30*time.Second), protoQuery)
 	p := out.Series[0].Points[359]
 	if p.Q != wire.QualityPartial || p.D != 20 || *p.V != 15 {
 		t.Fatal(p)
@@ -326,7 +326,7 @@ func TestPhysicalReservationBoundsEntireDatabaseWAL(t *testing.T) {
 	}
 }
 
-func TestOpenBucketExcludedAndOffsetPartial(t *testing.T) {
+func TestTelemetryOpenBucketExcludedAndOffsetObserved(t *testing.T) {
 	s := newStore(t)
 	reader := &fakeReader{samples: []wire.CounterSample{sample(10)}}
 	sampler := NewSampler(s, reader)
@@ -339,19 +339,34 @@ func TestOpenBucketExcludedAndOffsetPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := query(t, s, base.Add(Resolution+sampleOffset), protoQuery)
-	for _, p := range out.Series[0].Points {
-		if p.V != nil {
-			t.Fatal("open bucket leaked", p)
+	p := out.Series[0].Points[359]
+	if p.T != base || p.V == nil || *p.V != 5 || p.Q != wire.QualityObserved || p.D != 10 {
+		t.Fatal(p)
+	}
+	if !out.To.Equal(base.Add(Resolution)) {
+		t.Fatal("open bucket included", out.To)
+	}
+}
+
+func TestTelemetryOnTimeJitterRollsUpObserved(t *testing.T) {
+	s := newStore(t)
+	reader := &fakeReader{samples: []wire.CounterSample{sample(10)}}
+	sampler := NewSampler(s, reader)
+	for n := range 7 {
+		elapsed := time.Duration(n)*Resolution + time.Duration(n%3)*300*time.Millisecond
+		reader.samples[0].Value = uint64(10 + 2*n)
+		if err := sampler.Tick(context.Background(), base.Add(sampleOffset+elapsed), elapsed); err != nil {
+			t.Fatal(err)
 		}
 	}
-	out = query(t, s, base.Add(2*Resolution+sampleOffset), protoQuery)
-	p := out.Series[0].Points[359]
-	if p.T != base.Add(Resolution) || p.V == nil || *p.V != 5 || p.Q != wire.QualityPartial || p.D != 10 {
+	out := query(t, s, base.Add(time.Minute+sampleOffset), Query{Metric: wire.ProtoPackets, Range: wire.Range24h, Origin: wire.OriginReal})
+	p := out.Series[0].Points[1439]
+	if !p.T.Equal(base) || p.V == nil || *p.V != 12 || p.D != 60 || p.Q != wire.QualityObserved {
 		t.Fatal(p)
 	}
 }
 
-func TestSpanningThenAlignedPreservesBothDeltas(t *testing.T) {
+func TestTelemetrySpanningThenAlignedUsesDistinctBuckets(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	reader := &fakeReader{samples: []wire.CounterSample{sample(10)}}
@@ -367,8 +382,96 @@ func TestSpanningThenAlignedPreservesBothDeltas(t *testing.T) {
 	}
 	out := query(t, s, base.Add(40*time.Second), protoQuery)
 	p := out.Series[0].Points[359]
-	if p.V == nil || *p.V != 35 || p.D != 40 || p.Q != wire.QualityPartial || out.RealCovered {
+	if p.V == nil || *p.V != 5 || p.D != 10 || p.Q != wire.QualityObserved || !out.RealCovered {
 		t.Fatal(p, out.RealCovered)
+	}
+	p = out.Series[0].Points[358]
+	if p.V == nil || *p.V != 30 || p.D != 30 || p.Q != wire.QualityPartial {
+		t.Fatal(p)
+	}
+	for _, p := range out.Series[0].Points[356:358] {
+		if p.V != nil || p.Q != wire.QualityGap {
+			t.Fatal("missed ticks must remain gaps", p)
+		}
+	}
+}
+
+func TestTelemetrySkippedSamplesKeepBaselineAndCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		wall, mono, next time.Duration
+		q                wire.Quality
+		d                int
+	}{
+		{"same slot", 5 * time.Second, 5 * time.Second, Resolution, wire.QualityObserved, 10},
+		{"subsecond across slots", Resolution, 900 * time.Millisecond, 11 * time.Second, wire.QualityPartial, 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t)
+			reader := &fakeReader{samples: []wire.CounterSample{sample(10)}}
+			sampler := NewSampler(s, reader)
+			tick := func(wall, mono time.Duration) {
+				t.Helper()
+				if err := sampler.Tick(context.Background(), base.Add(sampleOffset+wall), mono); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tick(0, 0)
+			reader.samples[0].Value = 12
+			tick(tc.wall, tc.mono)
+			prev := sampler.previous[identity(sample(0))]
+			if prev.sample.Value != 10 || prev.mono != 0 {
+				t.Fatal("skipped sample replaced baseline", prev)
+			}
+			var count int
+			if err := s.db.QueryRow("SELECT count(*) FROM buckets").Scan(&count); err != nil || count != 0 {
+				t.Fatal("skipped sample wrote a bucket", count, err)
+			}
+			reader.samples[0].Value = 15
+			end := Resolution
+			if tc.wall == Resolution {
+				end = 2 * Resolution
+			}
+			tick(end, tc.next)
+			out := query(t, s, base.Add(sampleOffset+end), protoQuery)
+			p := out.Series[0].Points[359]
+			if p.V == nil || *p.V != 5 || p.Q != tc.q || p.D != tc.d {
+				t.Fatal("skipped sample lost counts", p)
+			}
+		})
+	}
+}
+
+func TestTelemetryMissedTickAndSpanningReset(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprint(reset), func(t *testing.T) {
+			s := newStore(t)
+			reader := &fakeReader{samples: []wire.CounterSample{sample(10)}}
+			sampler := NewSampler(s, reader)
+			ctx := context.Background()
+			if err := sampler.Tick(ctx, base.Add(sampleOffset), 0); err != nil {
+				t.Fatal(err)
+			}
+			value, quality := uint64(5), wire.QualityPartial
+			reader.samples[0].Value = 15
+			if reset {
+				reader.samples[0].Epoch = "new"
+				reader.samples[0].Value = 3
+				value, quality = 3, wire.QualityReset
+			}
+			elapsed := 20600 * time.Millisecond
+			if err := sampler.Tick(ctx, base.Add(sampleOffset+elapsed), elapsed); err != nil {
+				t.Fatal(err)
+			}
+			out := query(t, s, base.Add(sampleOffset+elapsed), protoQuery)
+			gap, p := out.Series[0].Points[358], out.Series[0].Points[359]
+			if gap.Q != wire.QualityGap || gap.V != nil || !gap.T.Equal(base) {
+				t.Fatal("missed tick was filled", gap)
+			}
+			if !p.T.Equal(base.Add(Resolution)) || p.V == nil || *p.V != value || p.D != 21 || p.Q != quality {
+				t.Fatal(p)
+			}
+		})
 	}
 }
 

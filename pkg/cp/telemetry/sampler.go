@@ -66,7 +66,11 @@ func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) 
 		seen[key] = true
 		p := wire.Point{}
 		if prev, ok := s.previous[key]; ok {
-			p = delta(prev, sample, wall, mono)
+			var accept bool
+			p, accept = delta(prev, sample, wall, mono)
+			if !accept {
+				continue
+			}
 		}
 		rows = append(rows, row{sample: sample, point: p})
 		next[key] = previous{sample: sample, wall: wall, mono: mono}
@@ -75,7 +79,8 @@ func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) 
 		if seen[key] {
 			continue
 		}
-		rows = append(rows, row{sample: prev.sample, point: wire.Point{T: wall.Truncate(Resolution), Q: wire.QualityGap}, missing: true})
+		slot, _ := sampleSlot(wall)
+		rows = append(rows, row{sample: prev.sample, point: wire.Point{T: slot.Add(-Resolution), Q: wire.QualityGap}, missing: true})
 		// Preserve the previous successful reading for a spanning delta, but
 		// bound stale in-memory state just like series metadata.
 		if wall.Sub(prev.wall) > 30*24*time.Hour {
@@ -92,8 +97,6 @@ func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) 
 	s.previous = next
 	return err
 }
-
-const sampleOffset = 200 * time.Millisecond
 
 func nextTick(now time.Time) time.Time {
 	next := now.Truncate(Resolution).Add(sampleOffset)

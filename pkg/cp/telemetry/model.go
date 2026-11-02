@@ -15,7 +15,11 @@ import (
 var ErrOverflow = errors.New("telemetry counter sum overflow")
 var ErrUnavailable = errors.New("telemetry store unavailable")
 
-const Resolution = 10 * time.Second
+const (
+	Resolution    = 10 * time.Second
+	sampleOffset  = 200 * time.Millisecond
+	tickTolerance = 2 * time.Second
+)
 
 var dimensions = map[wire.Metric][]string{
 	wire.IfaceRxBytes: {"interface", "zone", "role"}, wire.IfaceTxBytes: {"interface", "zone", "role"},
@@ -100,39 +104,51 @@ type previous struct {
 	mono   time.Duration
 }
 
-// delta never distributes counts across unobserved buckets. Exact aligned
-// intervals cover the preceding bucket. Other intervals are attributed to the
-// sample's bucket, which remains excluded from queries until it closes.
-func delta(prev previous, sample wire.CounterSample, wall time.Time, mono time.Duration) wire.Point {
-	end := wall.Truncate(Resolution)
-	p := wire.Point{T: end, Q: wire.QualityGap}
+// sampleSlot associates early/on-time samples with their scheduled boundary.
+// Outside the tolerance, a late sample belongs to the preceding scheduled tick.
+func sampleSlot(wall time.Time) (boundary time.Time, onTime bool) {
+	shifted := wall.Add(-sampleOffset)
+	boundary = shifted.Truncate(Resolution)
+	offset := shifted.Sub(boundary)
+	if offset >= Resolution-tickTolerance {
+		return boundary.Add(Resolution), true
+	}
+	return boundary, offset <= tickTolerance
+}
+
+// delta charges only the bucket preceding the ending slot; intervening buckets
+// remain gaps. A false result skips the sample without advancing its baseline.
+func delta(prev previous, sample wire.CounterSample, wall time.Time, mono time.Duration) (wire.Point, bool) {
+	start, startOnTime := sampleSlot(prev.wall)
+	end, endOnTime := sampleSlot(wall)
+	p := wire.Point{T: end.Add(-Resolution), Q: wire.QualityGap}
 	elapsed := mono - prev.mono
+	if end.Equal(start) || elapsed > 0 && elapsed < time.Second {
+		return p, false
+	}
 	wallElapsed := wall.Sub(prev.wall)
 	skew := wallElapsed - elapsed
-	if elapsed <= 0 || elapsed > 15*time.Minute || skew > Resolution || skew < -Resolution {
-		return p
+	if elapsed <= 0 || elapsed > 15*time.Minute || skew > Resolution || skew < -Resolution || !end.After(start) {
+		return p, true
 	}
 	if sample.Epoch == prev.sample.Epoch && sample.Value < prev.sample.Value {
-		return p
+		return p, true
 	}
 	value := sample.Value
 	if sample.Epoch == prev.sample.Epoch {
 		value -= prev.sample.Value
 	}
 	p.V = &value
-	p.D = int(elapsed / time.Second)
-	if p.D <= 0 {
-		p.V = nil
-		return p
-	}
+	p.D = max(1, int(elapsed.Round(time.Second)/time.Second))
 	switch {
 	case sample.Epoch != prev.sample.Epoch:
 		p.Q = wire.QualityReset
-	case elapsed == Resolution && wall.Equal(end) && prev.wall.Equal(end.Add(-Resolution)):
-		p.T = end.Add(-Resolution)
+	case end.Sub(start) == Resolution && startOnTime && endOnTime &&
+		elapsed >= Resolution-tickTolerance && elapsed <= Resolution+tickTolerance:
+		p.D = int(Resolution / time.Second)
 		p.Q = wire.QualityObserved
 	default:
 		p.Q = wire.QualityPartial
 	}
-	return p
+	return p, true
 }

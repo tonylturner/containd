@@ -19,7 +19,7 @@ func sample(n uint64) wire.CounterSample {
 	return wire.CounterSample{Metric: wire.ProtoPackets, Dims: map[string]string{"protocol": "modbus"}, Epoch: "a", Value: n}
 }
 
-func TestDeltaRules(t *testing.T) {
+func TestTelemetryDeltaRules(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		elapsed, wall time.Duration
@@ -28,27 +28,98 @@ func TestDeltaRules(t *testing.T) {
 		q             wire.Quality
 		v             *uint64
 		d             int
+		accept        bool
 	}{
-		{"observed", 10 * time.Second, 10 * time.Second, "a", 15, wire.QualityObserved, val(5), 10},
-		{"partial", 5 * time.Second, 5 * time.Second, "a", 15, wire.QualityPartial, val(5), 5},
-		{"reset", 10 * time.Second, 10 * time.Second, "b", 3, wire.QualityReset, val(3), 10},
-		{"decrease", 10 * time.Second, 10 * time.Second, "a", 9, wire.QualityGap, nil, 0},
-		{"spanning", 30 * time.Second, 30 * time.Second, "a", 40, wire.QualityPartial, val(30), 30},
-		{"fifteen minutes", 15 * time.Minute, 15 * time.Minute, "a", 40, wire.QualityPartial, val(30), 900},
-		{"long gap", 15*time.Minute + time.Second, 15*time.Minute + time.Second, "a", 40, wire.QualityGap, nil, 0},
-		{"wall step", 10 * time.Second, 21 * time.Second, "a", 15, wire.QualityGap, nil, 0},
-		{"backward wall step", 10 * time.Second, -time.Second, "a", 15, wire.QualityGap, nil, 0},
-		{"zero elapsed", 0, 0, "a", 15, wire.QualityGap, nil, 0},
-		{"negative elapsed", -time.Second, -time.Second, "a", 15, wire.QualityGap, nil, 0},
+		{"observed offset", 10 * time.Second, 10 * time.Second, "a", 15, wire.QualityObserved, val(5), 10, true},
+		{"observed positive jitter", 10400 * time.Millisecond, 10400 * time.Millisecond, "a", 15, wire.QualityObserved, val(5), 10, true},
+		{"observed early jitter", 8500 * time.Millisecond, 8500 * time.Millisecond, "a", 15, wire.QualityObserved, val(5), 10, true},
+		{"observed tolerance inclusive", 12 * time.Second, 12 * time.Second, "a", 15, wire.QualityObserved, val(5), 10, true},
+		{"late partial rounds down", 12300 * time.Millisecond, 12300 * time.Millisecond, "a", 15, wire.QualityPartial, val(5), 12, true},
+		{"late partial rounds up", 12500 * time.Millisecond, 12500 * time.Millisecond, "a", 15, wire.QualityPartial, val(5), 13, true},
+		{"monotonic outside tolerance", 12500 * time.Millisecond, 10 * time.Second, "a", 15, wire.QualityPartial, val(5), 13, true},
+		{"reset", 10 * time.Second, 10 * time.Second, "b", 3, wire.QualityReset, val(3), 10, true},
+		{"decrease", 10 * time.Second, 10 * time.Second, "a", 9, wire.QualityGap, nil, 0, true},
+		{"missed tick", 20600 * time.Millisecond, 20600 * time.Millisecond, "a", 40, wire.QualityPartial, val(30), 21, true},
+		{"spanning reset", 20600 * time.Millisecond, 20600 * time.Millisecond, "b", 3, wire.QualityReset, val(3), 21, true},
+		{"fifteen minutes", 15 * time.Minute, 15 * time.Minute, "a", 40, wire.QualityPartial, val(30), 900, true},
+		{"long gap", 15*time.Minute + time.Second, 15*time.Minute + time.Second, "a", 40, wire.QualityGap, nil, 0, true},
+		{"wall step", 10 * time.Second, 21 * time.Second, "a", 15, wire.QualityGap, nil, 0, true},
+		{"backward wall step", 10 * time.Second, -11 * time.Second, "a", 15, wire.QualityGap, nil, 0, true},
+		{"zero elapsed", 0, 10 * time.Second, "a", 15, wire.QualityGap, nil, 0, true},
+		{"negative elapsed", -time.Second, 10 * time.Second, "a", 15, wire.QualityGap, nil, 0, true},
+		{"same slot", 5 * time.Second, 5 * time.Second, "a", 15, wire.QualityGap, nil, 0, false},
+		{"subsecond across slots", 900 * time.Millisecond, 10 * time.Second, "a", 15, wire.QualityGap, nil, 0, false},
+		{"minimum duration", time.Second, 10 * time.Second, "a", 15, wire.QualityPartial, val(5), 1, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sample(tc.value)
 			s.Epoch = tc.epoch
-			p := delta(previous{sample: sample(10), wall: base}, s, base.Add(tc.wall), tc.elapsed)
-			if p.Q != tc.q || p.D != tc.d || (p.V == nil) != (tc.v == nil) || p.V != nil && *p.V != *tc.v {
-				t.Fatalf("got %+v want %s v=%v d=%d", p, tc.q, tc.v, tc.d)
+			start := base.Add(sampleOffset)
+			p, accept := delta(previous{sample: sample(10), wall: start}, s, start.Add(tc.wall), tc.elapsed)
+			slot, _ := sampleSlot(start.Add(tc.wall))
+			if accept != tc.accept || p.Q != tc.q || p.D != tc.d || (p.V == nil) != (tc.v == nil) || p.V != nil && *p.V != *tc.v || !p.T.Equal(slot.Add(-Resolution)) {
+				t.Fatalf("got %+v accepted=%v want %s v=%v d=%d accepted=%v", p, accept, tc.q, tc.v, tc.d, tc.accept)
 			}
 		})
+	}
+}
+
+func TestTelemetrySampleSlots(t *testing.T) {
+	for _, tc := range []struct {
+		offset time.Duration
+		slot   int
+		onTime bool
+	}{
+		{-2*time.Second - time.Nanosecond, -1, false},
+		{-2 * time.Second, 0, true},
+		{0, 0, true},
+		{2 * time.Second, 0, true},
+		{2*time.Second + time.Nanosecond, 0, false},
+		{8*time.Second - time.Nanosecond, 0, false},
+		{8 * time.Second, 1, true},
+		{10 * time.Second, 1, true},
+	} {
+		slot, onTime := sampleSlot(base.Add(sampleOffset + tc.offset))
+		if !slot.Equal(base.Add(time.Duration(tc.slot)*Resolution)) || onTime != tc.onTime {
+			t.Fatalf("offset %v: %v %v", tc.offset, slot, onTime)
+		}
+	}
+	late := base.Add(sampleOffset + 3*time.Second)
+	p, accept := delta(previous{sample: sample(10), wall: late}, sample(15), late.Add(Resolution), Resolution)
+	if !accept || p.Q != wire.QualityPartial {
+		t.Fatal("a late baseline cannot yield observed coverage", p, accept)
+	}
+}
+
+func TestTelemetryOnTimeDayHasCompleteRollups(t *testing.T) {
+	// Exercise a full dashboard window without 8,641 disk transactions. Storage
+	// roll-up and dashboard aggregation have independent integration tests.
+	prev := previous{sample: sample(10), wall: base.Add(sampleOffset)}
+	points := make([]wire.Point, 0, 1440)
+	minute := make([]wire.Point, 0, 6)
+	for n := 1; n <= 8640; n++ {
+		jitter := time.Duration(n%5-2) * 300 * time.Millisecond
+		mono := time.Duration(n)*Resolution + jitter
+		wall := base.Add(sampleOffset + mono)
+		current := sample(uint64(10 + n))
+		p, accept := delta(prev, current, wall, mono)
+		if !accept || p.Q != wire.QualityObserved || p.D != 10 || *p.V != 1 {
+			t.Fatalf("tick %d: %+v accepted=%v", n, p, accept)
+		}
+		prev = previous{sample: current, wall: wall, mono: mono}
+		minute = append(minute, p)
+		if len(minute) == 6 {
+			rolled, err := Combine(minute, true, minute[0].T)
+			if err != nil || rolled.Q != wire.QualityObserved || rolled.D != 60 {
+				t.Fatal(rolled, err)
+			}
+			points = append(points, rolled)
+			minute = minute[:0]
+		}
+	}
+	total, complete, err := Total(wire.SeriesResponse{Series: []wire.Series{{Points: points}}})
+	if err != nil || total != 8640 || !complete || len(points) != 1440 {
+		t.Fatal(total, complete, len(points), err)
 	}
 }
 

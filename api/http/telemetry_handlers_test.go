@@ -55,12 +55,17 @@ func TestTelemetrySeriesHTTPValidationAndUnavailable(t *testing.T) {
 
 func TestTelemetryDashboardRetainedCountsAndFailure(t *testing.T) {
 	value := uint64(5)
+	points := make([]wire.Point, 1440)
+	start := time.Now().UTC().Truncate(time.Minute).Add(-24 * time.Hour)
+	for i := range points {
+		points[i] = wire.Point{T: start.Add(time.Duration(i) * time.Minute), V: &value, D: 60, Q: wire.QualityObserved}
+	}
 	f := &fakeHistory{response: wire.SeriesResponse{Series: []wire.Series{
-		{Dims: map[string]string{"source": "engine"}, Points: []wire.Point{{V: &value, D: 60, Q: wire.QualityObserved}}},
-		{Dims: map[string]string{"source": "services"}, Points: []wire.Point{{V: &value, D: 60, Q: wire.QualityObserved}}},
+		{Dims: map[string]string{"source": "engine"}, Points: points},
+		{Dims: map[string]string{"source": "services"}, Points: append([]wire.Point(nil), points...)},
 	}}}
 	stats, err := collectDashboardEventStats(context.Background(), f)
-	if err != nil || stats.Total != 10 || !stats.Complete || stats.WindowSeconds != 86400 || len(f.queries) != 5 {
+	if err != nil || stats.Total != 14400 || !stats.Complete || stats.WindowSeconds != 86400 || len(f.queries) != 5 {
 		t.Fatal(stats, err)
 	}
 	for _, q := range f.queries {
@@ -70,7 +75,7 @@ func TestTelemetryDashboardRetainedCountsAndFailure(t *testing.T) {
 	}
 	f.response.Series[1].Points[0] = wire.Point{Q: wire.QualityGap}
 	stats, err = collectDashboardEventStats(context.Background(), f)
-	if err != nil || stats.Complete || stats.Total != 5 {
+	if err != nil || stats.Complete || stats.Total != 14395 {
 		t.Fatal(stats, err)
 	}
 	f.err = errors.New("disk failure")
