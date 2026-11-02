@@ -45,6 +45,47 @@ func TestCLIInterruptCancelsOnlyInput(t *testing.T) {
 	}
 }
 
+func TestCLILocalShellWordsDoNotExit(t *testing.T) {
+	lines := []string{"shell", "bash", "show version", "exit"}
+	index, calls := 0, 0
+	var stdout, stderr strings.Builder
+	reg := cli.NewRegistry(nil, nil)
+	err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+		if index == len(lines) {
+			return "", io.EOF
+		}
+		line := lines[index]
+		index++
+		return line, nil
+	}, func(string) {}, func(line string, out *strings.Builder) error {
+		calls++
+		return cli.SessionCommandError(line, reg.ParseAndExecute(context.Background(), line, out))
+	}, false, &stdout, &stderr)
+	if !errors.Is(err, errCLISessionCommandFailed) || calls != 3 || index != 4 ||
+		!strings.Contains(stdout.String(), "containd") ||
+		!strings.Contains(stderr.String(), "unknown command: shell") ||
+		!strings.Contains(stderr.String(), "unknown command: bash") {
+		t.Fatalf("shell word ended session: err=%v calls=%d lines=%d stdout=%q stderr=%q", err, calls, index, stdout.String(), stderr.String())
+	}
+}
+
+func TestCLIExitAliases(t *testing.T) {
+	for _, alias := range []string{"exit", "quit", "logout"} {
+		t.Run(alias, func(t *testing.T) {
+			var output strings.Builder
+			err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+				return alias, nil
+			}, func(string) {}, func(string, *strings.Builder) error {
+				t.Fatal("exit control executed as a command")
+				return nil
+			}, true, &output, &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCLILoopExitStatus(t *testing.T) {
 	tests := []struct {
 		name        string

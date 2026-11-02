@@ -240,13 +240,7 @@ func runCLILoop(
 		appendHistory(line)
 
 		switch strings.ToLower(line) {
-		// Both "exit"/"quit"/"logout" and "shell"/"bash" leave the
-		// containd CLI. The wrapper that launched `containd cli`
-		// (e.g., the SSH appliance shell or RangerDanger's in-app
-		// firewall terminal) drops the operator back into a Linux
-		// shell on return — so `shell` and `bash` are equivalent
-		// to `exit` here, not a separate sub-shell.
-		case "exit", "quit", "logout", "shell", "bash":
+		case "exit", "quit", "logout":
 			return sessionResult()
 		}
 		var buf strings.Builder

@@ -466,7 +466,7 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		switch strings.ToLower(line) {
 		case "exit", "quit", "logout":
 			return
-		case "shell", "bash":
+		case "shell":
 			if pr != nil {
 				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
 				continue

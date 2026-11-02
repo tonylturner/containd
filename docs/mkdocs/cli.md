@@ -54,7 +54,9 @@ its input, cursor, history and scrollback. Status is advisory, not a mutation
 revision or authorization decision.
 
 - Executable `exit` / `quit` / `logout` ends the CLI process and returns to its
-  caller. It does not create an OS shell. Ctrl-C cancels input; EOF ends the CLI.
+  caller. It does not create an OS shell. `shell` is unavailable here and
+  `bash` is an ordinary unknown command; neither exits. Ctrl-C cancels input;
+  EOF ends the CLI.
 - SSH appliance `exit` / `quit` / `logout` disconnects SSH. The menu's **Back to
   CLI** returns without logging out; **0 Logout** disconnects. Diagnostics
   **0 Back** returns to its caller.
@@ -294,11 +296,11 @@ Notes:
 
 The SSH shell mode selects what an interactive SSH login opens:
 
-- `appliance` (default): the containd CLI. Type `shell` or `bash` to open a
+- `appliance` (default): the containd CLI. Type `shell` to open a
   Linux shell. Type `exit` in that shell to return to the CLI.
 - `linux`: a Linux `bash` login shell with the image's tools, such as
   `tcpdump` and `nft`. Type `configure` or `containd cli` to open the containd
-  CLI. Type `exit`, `shell` or `bash` in that CLI to return to the shell.
+  CLI. Type `exit` in that CLI to return to the shell.
 
 A command on the `ssh` command line, such as
 `ssh -p 2222 containd@localhost show version`, runs as one CLI command in both
@@ -322,8 +324,9 @@ says whether the environment overrides it or it applies after a restart.
 
 The Linux shell needs a PTY. Interactive `ssh` requests one by default;
 `ssh -T` does not. Without a PTY, a `linux` mode login opens the appliance CLI
-with a warning. There, `shell` and `bash` say that the Linux shell needs an
-interactive session, and the CLI keeps running.
+with a warning. There, `shell` says that the Linux shell needs an
+interactive session, and the CLI keeps running. `bash` is an ordinary unknown
+CLI command, not a shell-entry or exit alias.
 
 In a Linux shell opened over SSH, `configure` and `containd cli` act as the
 SSH login: they ask for no password and have the login's role. The shell

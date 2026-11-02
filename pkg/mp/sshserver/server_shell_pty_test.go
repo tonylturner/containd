@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Without a client PTY, shell and bash in the appliance CLI refuse, start no
+// Without a client PTY, shell refuses and bash is unknown; neither starts a
 // Linux shell and leave the CLI running, in both shell modes.
 func TestShellCommandNeedsPTY(t *testing.T) {
 	for _, mode := range []string{"appliance", "linux"} {
@@ -30,8 +30,11 @@ func TestShellCommandNeedsPTY(t *testing.T) {
 			defer client.Close()
 
 			out := runShell(t, client, "shell\necho marker-$((6*7))\nbash\nexit\n")
-			if got := strings.Count(out, "The Linux shell needs a terminal"); got != 2 {
-				t.Fatalf("refusals = %d, want 2: %q", got, out)
+			if got := strings.Count(out, "The Linux shell needs a terminal"); got != 1 {
+				t.Fatalf("refusals = %d, want 1: %q", got, out)
+			}
+			if !strings.Contains(out, "unknown command: bash") {
+				t.Fatalf("bash is not an ordinary CLI command error: %q", out)
 			}
 			if strings.Contains(out, "marker-42") {
 				t.Fatalf("a Linux shell ran without a PTY: %q", out)
