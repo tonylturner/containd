@@ -11,7 +11,7 @@ import (
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
-func TestServiceTelemetrySignedCorrectionAndOrigins(t *testing.T) {
+func TestServiceTelemetrySignedCorrectionAndNoDemo(t *testing.T) {
 	m := NewManager(ManagerOptions{BaseDir: t.TempDir()})
 	reader := m.CounterReader("mgmt")
 	m.IncrementServiceMetric("dns", 10)
@@ -31,11 +31,11 @@ func TestServiceTelemetrySignedCorrectionAndOrigins(t *testing.T) {
 		if s.Metric == wire.ServiceEvents && s.Dims["service"] == "dns" {
 			t.Fatal("signed correction must not look monotonic")
 		}
-		if s.Metric == wire.EventsTotal && s.Origin == wire.OriginDemo && s.Value == 1 {
+		if s.Origin == wire.OriginDemo {
 			demo = true
 		}
 	}
-	if !signed || !demo {
+	if !signed || demo {
 		t.Fatal(snapshot)
 	}
 	snapshot, err = reader.TelemetryCounters(context.Background())

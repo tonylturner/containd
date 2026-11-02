@@ -62,6 +62,12 @@ func (r *serviceCounterReader) TelemetryCounters(context.Context) (wire.CounterS
 	}
 	m.sparkMu.Unlock()
 	for _, counts := range m.telemetry.TelemetryCounts() {
+		// Demo counters come only from a running engine replay, with its run
+		// epoch; publishing management's demo counts here would claim covered
+		// demo history while replay is stopped.
+		if counts.Origin == wire.OriginDemo {
+			continue
+		}
 		out.Samples = append(out.Samples, wire.CounterSample{Metric: wire.EventsTotal, Dims: map[string]string{"source": "services"}, Value: counts.Total, Epoch: r.bootID, Origin: counts.Origin})
 		for _, class := range []wire.EventClass{wire.ClassIDSAlert, wire.ClassAVDetection, wire.ClassAVBlock, wire.ClassModbusWrite} {
 			out.Samples = append(out.Samples, wire.CounterSample{Metric: wire.EventsClass, Dims: map[string]string{"source": "services", "class": string(class)}, Value: counts.Classes[class], Epoch: r.bootID, Origin: counts.Origin})
