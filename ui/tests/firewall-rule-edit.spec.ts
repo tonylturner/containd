@@ -311,6 +311,7 @@ test("the rule list tells deciding actions from effects and states precedence", 
     { id: "pps-cap", action: "RATE_LIMIT", rateLimit: { packetsPerSecond: 100, burst: 20 } },
     { id: "label-eng", action: "TAG", tag: "eng-access", identities: ["engineering", "vendor"] },
   ]);
+  await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
   await expect(page.getByText(/Among enforcing rules, the first matching rule that allows or blocks traffic decides/)).toBeVisible();
   await expect(page.getByText(/Monitor ICS rules never decide/)).toBeVisible();
   const row = (id: string) => page.getByRole("row").filter({ has: page.getByText(id, { exact: true }) });

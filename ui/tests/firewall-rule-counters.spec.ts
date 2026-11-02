@@ -55,7 +55,8 @@ test("the rule list shows hits, excess drops and when counting started", async (
   const errors = await openFirewall(page, { status: 200, json: counters });
   const sinceText = await page.evaluate((s) => new Date(s).toLocaleString(), since);
   await expect(page.getByRole("status", { name: "Rule counters" })).toContainText(`Hit counters since ${sinceText}`);
-  await expect(page.getByRole("status", { name: "Rule counters" })).toContainText("every apply restarts them at zero");
+  await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
+  await expect(page.getByText(/every apply restarts them at zero/)).toBeVisible();
 
   await expect(page.getByLabel("Hit summary of allow-hmi")).toContainText(`${await page.evaluate(v => v.toLocaleString(), 123456)} pkts`);
   await expect(page.getByLabel("Hit summary of pps-cap")).toContainText("42 over limit");
@@ -80,8 +81,12 @@ for (const status of [502, 503]) {
     await expect(note).toContainText("Hit counters unavailable.");
     await expect(note.getByText("Firewall enforcement is not active.", { exact: true })).toBeVisible();
     await expect(note.getByText(reason, { exact: true })).not.toBeVisible();
-    await note.getByText("Technical details", { exact: true }).click();
-    await expect(note.getByText(reason, { exact: true })).toBeVisible();
+    expect(await note.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "How rules are evaluated", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
+    const notes = page.getByRole("group", { name: "Rule table notes", exact: true });
+    await notes.getByText("Technical details", { exact: true }).click();
+    await expect(notes.getByText(reason, { exact: true })).toBeVisible();
     await expect(note).toHaveClass(/text-\(--text-dim\)/);
     await expect(page.getByRole("row").filter({ hasText: "allow-hmi" })).toBeVisible();
     await expect(page.getByLabel("Hits of allow-hmi")).toHaveCount(0);
