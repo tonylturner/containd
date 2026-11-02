@@ -733,6 +733,51 @@ In combined `all` mode, the management `/metrics` serves these dataplane series
 from the shared process registry. For split `engine`/`mgmt` processes, scrape the
 engine listener's `/metrics` instead.
 
+## Retained Counter History
+
+`GET /api/v1/telemetry/series?metric=iface.rx_bytes&range=1h&origin=real&role=leaf&group=role`
+is available to viewers. Required parameters are `metric`, `range` (`1h`, `24h`,
+`30d`) and `origin` (`real`, `demo`). Resolution is respectively 10, 60 or 900
+seconds. When grouped members have unequal observation durations, the grouped
+point is partial and omits `d`: its count is known but no aggregate rate is
+claimed. Members with values must share the same `d` to expose a grouped rate.
+Optional filters use the metric's dimension keys; `group` sums members
+by one key. `group=zone` on interface metrics excludes parent interfaces.
+
+| Metric family | Dimension keys |
+|---|---|
+| `iface.rx_bytes`, `iface.tx_bytes`, `iface.rx_packets`, `iface.tx_packets` | `interface`, `zone`, `role` |
+| `conduit.bytes`, `conduit.packets` | `from`, `to` |
+| `proto.bytes`, `proto.packets` | `protocol` |
+| `events.total` | `source` (`engine`, `services`) |
+| `events.class` | `source`, `class` (`ids_alert`, `modbus_write`, `av_detection`, `av_block`) |
+| `service.events`, `service.errors` | `service` |
+| `av.scans`, `av.scan_errors`, `av.detections` | none |
+
+Points are dense, oldest first, from `from` inclusive to `to` exclusive. The
+current open bucket is excluded. `v` is an exact decimal uint64 string and `d`
+is observation seconds: rates are `v/d`. `q` is `observed`, `partial`, `reset`
+or `gap`; gap omits `v` and `d`. A missed scrape never interpolates counts:
+intervals up to 15 minutes place their delta in one partial bucket with the full
+elapsed duration; longer intervals establish a new baseline. Counter generation
+changes are resets; ambiguous decreases and clock steps are gaps. Collector
+restart establishes new baselines, without deleting retained history.
+
+`realCovered` and `realActive` persist once real observed coverage or nonzero
+activity exists. `collector` reports running/stalled/unavailable, its last
+successful sample, an error and decimal-string `droppedSeries`. Admission is
+capped at 320 active series; refusals increment `droppedSeries`. `retainedFrom` marks retained coverage;
+older points are gaps. HTTP 400 rejects unknown or repeated parameters, 503
+reports unavailable storage, and 500 reports aggregation overflow.
+
+The dashboard's `eventStats` covers the last 24 hours of real events from both
+sources, with `windowSeconds: 86400` and `complete` only when every bucket was
+observed. Store failures return `eventStats: null` and `eventStatsError`.
+Conduit `traffic` is either measured packets/bytes (decimal strings), a
+3600-second window, `complete` and `coverage: routed`, or `state: unavailable`
+with a reason. Its scope is routed traffic that passed policy, not bridged L2
+or AV/ICAP input-output gating; it is not a percentage of a baseline.
+
 ## Binary Runtime Environment
 
 These are binary environment names, not Compose interpolation inputs.
@@ -753,6 +798,7 @@ listener setting supplies a value.
 | `CONTAIND_CONFIG_DB` | `data/config.db` | Configuration SQLite database |
 | `CONTAIND_AUDIT_DB` | `data/audit.db` | Audit SQLite database |
 | `CONTAIND_USERS_DB` | `data/users.db` | Users SQLite database |
+| `CONTAIND_TELEMETRY_DB` | `data/telemetry.db` | Management retained counter history SQLite database; Compose uses `/data/telemetry.db` |
 | `CONTAIND_LAB_MODE` | Disabled | Lab authentication described above |
 | `CONTAIND_JWT_SECRET` | Unset | Set a unique secret, e.g. `openssl rand -hex 32` |
 | `CONTAIND_COOKIE_SECURE` | Automatic | Unset: Secure on HTTPS requests. `1` forces Secure; `0` disables it. Set `1` behind a TLS-terminating proxy. |

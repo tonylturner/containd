@@ -21,6 +21,7 @@ services:
       - CONTAIND_CONFIG_DB=/data/config.db
       - CONTAIND_AUDIT_DB=/data/audit.db
       - CONTAIND_USERS_DB=/data/users.db
+      - CONTAIND_TELEMETRY_DB=/data/telemetry.db
     volumes:
       - ../test/data-smoke:/data
       - ../ui/out:/var/lib/ngfw/ui:ro

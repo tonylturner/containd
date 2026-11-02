@@ -26,12 +26,10 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
-	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
 type dashboardServices struct {
 	status any
-	events []dpevents.Event
 }
 
 func (m *dashboardServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
@@ -40,10 +38,6 @@ func (m *dashboardServices) ApplyEffective(ctx context.Context, cfg config.Servi
 
 func (m *dashboardServices) Status() any {
 	return m.status
-}
-
-func (m *dashboardServices) RecentEvents(limit int) []dpevents.Event {
-	return append([]dpevents.Event(nil), m.events...)
 }
 
 type mockAuditStore struct {
@@ -119,18 +113,7 @@ func TestDashboardHandlerAndHelpers(t *testing.T) {
 		t.Fatalf("Create(user): %v", err)
 	}
 
-	engine := newRuntimeMockEngine()
-	engine.eventsResp = []dpevents.Event{
-		{Proto: "ids", Kind: "alert"},
-		{Proto: "modbus", Kind: "request", Attributes: map[string]any{"is_write": true}},
-	}
-	services := &dashboardServices{
-		status: map[string]any{"proxy": map[string]any{"enabled": true}},
-		events: []dpevents.Event{
-			{Kind: "service.av.detected"},
-			{Kind: "service.av.block_flow"},
-		},
-	}
+	services := &dashboardServices{status: map[string]any{"proxy": map[string]any{"enabled": true}}}
 	auditStore := &mockAuditStore{records: []audit.Record{
 		{Actor: "system", Action: "ignored"},
 		{Actor: "alice", Action: "commit", Result: "success"},
@@ -141,7 +124,7 @@ func TestDashboardHandlerAndHelpers(t *testing.T) {
 		c.Set(ctxUserKey, created.ID)
 		c.Next()
 	})
-	router.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
+	router.GET("/dashboard", dashboardHandler(store, services, userStore, auditStore, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
@@ -160,9 +143,10 @@ func TestDashboardHandlerAndHelpers(t *testing.T) {
 	if resp.Counts.Assets != 1 || resp.Counts.Zones != 2 || resp.Counts.Interfaces != 2 || resp.Counts.Rules != 2 || resp.Counts.ICSRules != 1 {
 		t.Fatalf("unexpected counts: %#v", resp.Counts)
 	}
-	if resp.EventStats.Total != 4 || resp.EventStats.IDSAlerts != 1 || resp.EventStats.ModbusWrites != 1 || resp.EventStats.AVDetections != 1 || resp.EventStats.AVBlocks != 1 {
-		t.Fatalf("unexpected event stats: %#v", resp.EventStats)
+	if resp.EventStats != nil || resp.EventStatsError == "" {
+		t.Fatalf("missing store must be unavailable: %#v", resp)
 	}
+
 	if resp.LastActivity == nil || resp.LastActivity.Actor != "alice" {
 		t.Fatalf("unexpected last activity: %#v", resp.LastActivity)
 	}
@@ -174,12 +158,6 @@ func TestDashboardHandlerAndHelpers(t *testing.T) {
 		t.Fatalf("unexpected services payload: %#v", resp.Services)
 	}
 
-	if !modbusWriteEvent(dpevents.Event{Attributes: map[string]any{"is_write": true}}) {
-		t.Fatal("modbusWriteEvent(true) should be true")
-	}
-	if modbusWriteEvent(dpevents.Event{Attributes: map[string]any{"is_write": "nope"}}) {
-		t.Fatal("modbusWriteEvent(non-bool) should be false")
-	}
 }
 
 func TestSystemTLSHandlersAndHelpers(t *testing.T) {
