@@ -87,8 +87,9 @@ type Store interface {
 // SQLiteStore keeps accounts and sessions. SetPassword, SetTOTP and
 // DisableTOTP revoke the account's other sessions in the same transaction.
 type SQLiteStore struct {
-	db          *sql.DB
-	revocations revocationHub
+	db                *sql.DB
+	revocations       revocationHub
+	bootstrapObserver bootstrapObserver
 }
 
 // ResetToDefaultAdmin replaces users and sessions with the default admin atomically.

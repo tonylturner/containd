@@ -29,11 +29,17 @@ import (
 	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func main() {
 	logging.SetupGlobalLogger("containd")
+
+	if _, err := profile.Load(); err != nil {
+		slog.Error("fatal deployment profile error", "error", err)
+		os.Exit(1)
+	}
 
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("CONTAIND_MODE")))
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
@@ -51,6 +57,15 @@ func main() {
 
 	var reservation *mgmtpath.Reservation
 	if mode == "all" || mode == "mgmt" || mode == "engine" {
+		if profile.Defaulted() {
+			slog.Warn("profile=training (default: CONTAIND_PROFILE unset)")
+		}
+		if profile.IsStrict() {
+			if err := profile.StrictPreflight(mode, os.Getenv, os.Stat); err != nil {
+				slog.Error("fatal deployment profile error", "error", err)
+				os.Exit(1)
+			}
+		}
 		var err error
 		reservation, err = mgmtpath.Load()
 		if err != nil {
@@ -318,7 +333,7 @@ func cliLogin(ctx context.Context, baseURL string, client *http.Client) (string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("login returned %d", resp.StatusCode)
+		return "", cliLoginStatusError(resp.StatusCode, profile.IsStrict())
 	}
 	var result struct {
 		Token       string `json:"token"`
@@ -345,6 +360,13 @@ func cliLogin(ctx context.Context, baseURL string, client *http.Client) (string,
 		return "", fmt.Errorf("empty token in login response")
 	}
 	return result.Token, nil
+}
+
+func cliLoginStatusError(status int, strict bool) error {
+	if strict && status == http.StatusUnauthorized {
+		return errors.New("login returned 401 (strict profile: the first admin password is the one-time password printed to the container log; set CONTAIND_CLI_USER/CONTAIND_CLI_PASSWORD)")
+	}
+	return fmt.Errorf("login returned %d", status)
 }
 
 func runAll(ctx context.Context, reservation *mgmtpath.Reservation, reloads <-chan struct{}) error {
