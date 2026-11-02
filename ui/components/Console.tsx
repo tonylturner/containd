@@ -6,12 +6,19 @@ import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
 import { api } from "../lib/api";
+import type { CLIWebSocketResponse } from "../lib/api-console";
 import { cliWebSocketURL } from "../lib/api-core";
 import { getPersistCLIHistory } from "../lib/prefs";
 
-type CLIResponse = { output?: string; error?: string };
+function sessionCommands(commands: string[]) {
+  return [...commands.map((command) => command.toLowerCase()), "configure", "exit", "quit", "logout", "clear"];
+}
 
-export function Console({ prompt = "containd# " }: { prompt?: string }) {
+export function Console({ onClose }: { onClose: () => void }) {
+  const promptRef = useRef("containd(config?)# ");
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const [candidateStatus, setCandidateStatus] = useState("Candidate status unavailable · Shared candidate");
   const [connected, setConnected] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [termReady, setTermReady] = useState(false);
@@ -72,7 +79,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       setTermReady(true);
 
       function writePrompt() {
-        term?.write(`\r\n${prompt}`);
+        term?.write(`\r\n${promptRef.current}`);
         lineRef.current = "";
         cursorRef.current = 0;
       }
@@ -85,7 +92,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       function redrawLine() {
         if (!term) return;
         term.write("\x1b[2K\r");
-        term.write(prompt + lineRef.current);
+        term.write(promptRef.current + lineRef.current);
         const moveLeft = lineRef.current.length - cursorRef.current;
         if (moveLeft > 0) {
           term.write(`\x1b[${moveLeft}D`);
@@ -235,7 +242,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
           if (commandsRef.current.length === 0) {
             const cmds = await api.listCLICommands();
             if (cmds && cmds.length) {
-              commandsRef.current = cmds.map((cmd) => cmd.toLowerCase());
+              commandsRef.current = sessionCommands(cmds);
             }
           }
           if (commandsRef.current.length > 0) {
@@ -272,7 +279,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
             if (!commandsRef.current.length) {
               const cmds = await api.listCLICommands();
               if (cmds && cmds.length) {
-                commandsRef.current = cmds.map((cmd) => cmd.toLowerCase());
+                commandsRef.current = sessionCommands(cmds);
               }
             }
             completeLine();
@@ -404,7 +411,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       term?.dispose();
       setTermReady(false);
     };
-  }, [prompt]);
+  }, []);
 
   useEffect(() => {
     if (!termReady) return;
@@ -432,13 +439,26 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       };
 
       socket.onmessage = (ev) => {
-        busyRef.current = false;
-        let payload: CLIResponse | null = null;
+        let payload: CLIWebSocketResponse | null = null;
         try {
           payload = JSON.parse(ev.data);
         } catch {
           payload = { output: String(ev.data ?? "") };
         }
+        if (payload?.control === "close") {
+          closeRef.current();
+          return;
+        }
+        if (payload?.status) setCandidateStatus(payload.status);
+        if (payload?.prompt) promptRef.current = payload.prompt;
+        if (payload?.control === "status") {
+          // Refresh idle prompts only; never redraw a half-entered line.
+          if (!busyRef.current && !lineRef.current) {
+            term.write("\x1b[2K\r" + promptRef.current + lineRef.current);
+          }
+          return;
+        }
+        busyRef.current = false;
         if (payload?.output) {
           const normalized = payload.output.replace(/\r?\n/g, "\r\n");
           term.write(normalized);
@@ -449,12 +469,13 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         if (payload?.error) {
           term.write(`\x1b[33m${payload.error}\x1b[0m\r\n`);
         }
-        term.write(prompt);
+        term.write(promptRef.current);
       };
 
       socket.onclose = () => {
         setConnected(false);
         setStatusMsg("Disconnected. Refresh to reconnect.");
+        setCandidateStatus("Candidate status unavailable · Shared candidate · Disconnected");
       };
 
       socket.onerror = () => {
@@ -463,8 +484,14 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
     };
 
     void connect();
+    const timer = window.setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN && !busyRef.current) {
+        ws.send(JSON.stringify({ control: "status" }));
+      }
+    }, 5000);
 
     return () => {
+      window.clearInterval(timer);
       disposed = true;
       if (ws) {
         ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
@@ -473,7 +500,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       }
       setConnected(false);
     };
-  }, [prompt, termReady]);
+  }, [termReady]);
 
   useEffect(() => {
     let alive = true;
@@ -481,7 +508,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
       .listCLICommands()
       .then((cmds) => {
         if (!alive || !cmds) return;
-        commandsRef.current = cmds.map((cmd) => cmd.toLowerCase());
+        commandsRef.current = sessionCommands(cmds);
       })
       .catch((err) => console.warn("failed to list CLI commands", err));
     return () => {
@@ -502,18 +529,19 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/40 p-4 inset-shadow-sm backdrop-blur-sm">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
-            In-app console
-          </p>
-          <h2 className="text-xl font-semibold text-white">CLI</h2>
+          <h2 className="text-xl font-semibold text-white">Configuration CLI</h2>
         </div>
         <div className="text-xs text-slate-400">
-          Enter to run · ↑/↓ history · clear to reset
+          Enter to run · ↑/↓ history · clear clears terminal output
         </div>
       </div>
 
+      <p className="mb-2 text-sm text-slate-300">Not an OS shell. Edits are staged until commit; operational commands may act immediately.</p>
+      <p className="mb-3 break-words text-xs text-slate-300" role="status">Configuration CLI · {candidateStatus}</p>
+      <button type="button" onClick={onClose} className="mb-3 rounded border border-white/20 px-3 py-2 text-sm text-slate-200">Close console</button>
+      <p className="mb-3 text-xs text-slate-400">Close console leaves the web session signed in.</p>
       <div className="h-64 overflow-hidden rounded-lg border border-white/5 bg-black/60 px-2 py-2">
         <div ref={containerRef} className="h-full w-full" />
       </div>

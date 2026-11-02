@@ -102,7 +102,7 @@ func TestFactoryResetDisconnectsSSHAfterResult(t *testing.T) {
 				} else if !strings.Contains(text, "Factory reset complete.") {
 					t.Fatalf("result lost before disconnect: %q", text)
 				}
-				if strings.Count(text, "containd# ") != 1 {
+				if strings.Count(text, "containd(config") != 1 {
 					t.Fatalf("reset returned to REPL: %q", text)
 				}
 				otherExited := make(chan error, 1)

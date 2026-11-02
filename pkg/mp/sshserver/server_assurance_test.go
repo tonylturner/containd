@@ -236,7 +236,7 @@ func TestSSHBootstrapAdminMustChangePassword(t *testing.T) {
 		!strings.Contains(ki.prompts[2].instruction, "do not match") {
 		t.Fatalf("validation feedback missing: %+v", ki.prompts)
 	}
-	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd# ") {
+	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd(config") {
 		t.Fatalf("CLI did not open after the change: %q", out)
 	}
 
@@ -321,7 +321,7 @@ func TestSSHPasswordLoginRequiresTOTP(t *testing.T) {
 	if len(ki.prompts) != 1 || strings.Join(ki.prompts[0].questions, "") != "Authentication code: " || ki.prompts[0].echos[0] {
 		t.Fatalf("prompts = %+v", ki.prompts)
 	}
-	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd# ") {
+	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd(config") {
 		t.Fatalf("CLI did not open: %q", out)
 	}
 	_ = client.Close()
@@ -413,7 +413,7 @@ func TestSSHLabModeKeepsPasswordLogin(t *testing.T) {
 			t.Fatalf("lab password login: %v", err)
 		}
 		defer client.Close()
-		if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd# ") {
+		if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd(config") {
 			t.Fatalf("lab login did not land in the CLI: %q", out)
 		}
 	})

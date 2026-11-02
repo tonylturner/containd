@@ -50,6 +50,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   revocation, protection retry, antivirus update and managed capture operations,
   plus account listing, deletion and MFA requirements. Full configuration export
   is explicit and admin-only; imports preserve file bytes for strict API validation.
+- `configure` now consistently names the configuration CLI; use SSH `wizard`
+  for guided setup.
+
+- Configuration consoles identify configuration versus immediate Linux OS modes,
+  show authoritative shared-candidate status and commit-confirmation deadlines,
+  and close the web console without logging out of management. SSH setup shows
+  the shared diff before commit and offers an explicit Back to CLI menu choice.
+  Local `shell` / `bash` no longer silently exit; only SSH `shell` opens Linux,
+  while `bash` is an ordinary unknown CLI command.
 
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator

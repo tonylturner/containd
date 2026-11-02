@@ -103,6 +103,9 @@ COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 COPY --from=datadir --chown=65532:65532 /data /data
 RUN mkdir -p /usr/local/bin && ln -s /usr/bin/containd /usr/local/bin/configure
+COPY build/containd-os-shell.sh /etc/profile.d/containd-os-shell.sh
+# Bash invoked as sh reads ENV for non-login interactive shells.
+ENV ENV=/etc/profile.d/containd-os-shell.sh
 VOLUME /data
 
 EXPOSE 8080

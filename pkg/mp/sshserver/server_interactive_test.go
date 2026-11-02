@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -79,6 +80,19 @@ func (c *sshTestHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		Path:   req.URL.Path,
 		Body:   string(body),
 	})
+	// Read-only CLI facade calls do not carry config-write preconditions.
+	if req.Method == http.MethodPost && req.URL.Path == "/api/v1/cli/execute" {
+		var command struct {
+			Line string `json:"line"`
+		}
+		if err := json.Unmarshal(body, &command); err != nil {
+			return nil, err
+		}
+		if command.Line != "show system" {
+			return nil, fmt.Errorf("unexpected CLI facade command: %s", command.Line)
+		}
+		return jsonResponse(http.StatusOK, map[string]string{"output": "hostname: " + c.cfg.System.Hostname + "\n"}), nil
+	}
 	return c.revision.respond(req, func() *http.Response {
 		return c.respond(req.Method, req.URL.Path, body)
 	}), nil
@@ -461,12 +475,24 @@ func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
 		t.Fatalf("expected ssh key output, got %q", keyRW.String())
 	}
 
-	commitSession, _ := newTestSession(srv, reg, "yes\n")
+	commitSession, commitRW := newTestSession(srv, reg, "yes\n")
 	if ok := commitSession.wizardPromptCommit(); !ok {
 		t.Fatal("expected commit prompt to succeed")
 	}
 	if !httpClient.saw(http.MethodPost, "/api/v1/config/commit") {
 		t.Fatal("expected commit API call")
+	}
+	if !strings.Contains(commitRW.String(), "Review the shared candidate") || !httpClient.saw(http.MethodGet, "/api/v1/config/diff") {
+		t.Fatal(commitRW.String())
+	}
+	if strings.Count(wizardRW.String(), "hostname: lab-fw") != 1 {
+		t.Fatal("system state duplicated:", wizardRW.String())
+	}
+	for _, choice := range []string{"11", "back", "exit"} {
+		session, output := newTestSession(srv, reg, choice+"\n")
+		if srv.runMenu(session.ctx, session.username, output, session.reader, reg) {
+			t.Fatalf("%s logged out instead of Back", choice)
+		}
 	}
 
 	setSession, _ := newTestSession(srv, reg, "updated-host\n")
