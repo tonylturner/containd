@@ -31,6 +31,25 @@ test("service retries do not depend on raw engine retryable and poll quickly", (
   expect(canRetryProtection({ ...status, bootId: "" })).toBe(false);
 });
 
+test("only required pending work or an active retry keeps protection polling fast", () => {
+  const optionalPending = observation({ subsystems: [subsystem({
+    name: "scanner", required: false, state: "pending", reason: "disabled", retryable: false, nextRetryAt: null,
+  })] });
+  expect(protectionOutstanding(optionalPending)).toBe(false);
+  expect(protectionOutstanding({ ...optionalPending, subsystems: [subsystem({
+    name: "scanner", required: false, state: "pending", reason: "scanner starting", retryable: false, nextRetryAt: null,
+  })] })).toBe(false);
+  expect(protectionOutstanding({ ...optionalPending, components: [{
+    name: "nft", required: true, state: "pending", reason: "install pending", since: "",
+  }] })).toBe(true);
+  expect(protectionOutstanding({ ...optionalPending, subsystems: [subsystem({
+    name: "dhcp", required: false, state: "ready", retryable: false, nextRetryAt: "2026-11-02T12:00:00Z",
+  })] })).toBe(true);
+  expect(protectionOutstanding({ ...optionalPending, subsystems: [subsystem({
+    name: "scanner", required: false, state: "off", retryable: true, nextRetryAt: "2026-11-02T12:00:00Z",
+  })] })).toBe(false);
+});
+
 test("validators reject legacy aggregates, malformed owner proofs and transition responses", () => {
   const status = observation();
   expect(isProtectionStatus(status)).toBe(true);

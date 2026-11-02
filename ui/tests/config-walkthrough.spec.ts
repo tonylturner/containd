@@ -32,7 +32,16 @@ test("review actions remain visible after scrolling a long review at 390px", asy
   await page.goto("/config/?tab=diff");
   await expect(page.getByRole("region", { name: "Firewall changes", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Advanced", exact: true }).click();
-  await page.getByRole("region", { name: "Firewall field changes", exact: true }).scrollIntoViewIfNeeded();
+  const fields = page.getByRole("region", { name: "Firewall field changes", exact: true });
+  await fields.scrollIntoViewIfNeeded();
+  const finalChange = fields.locator("dd").last();
+  await finalChange.scrollIntoViewIfNeeded();
+  const detailBox = await finalChange.boundingBox();
+  const actionBar = page.getByRole("button", { name: "Commit", exact: true }).locator("xpath=../..");
+  const actionBox = await actionBar.boundingBox();
+  expect(detailBox).not.toBeNull();
+  expect(actionBox).not.toBeNull();
+  expect(detailBox!.y + detailBox!.height <= actionBox!.y || actionBox!.y + actionBox!.height <= detailBox!.y).toBe(true);
   for (const name of ["Commit", "Commit-confirmed"]) {
     const button = page.getByRole("button", { name, exact: true });
     const box = await button.boundingBox();

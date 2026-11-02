@@ -61,10 +61,12 @@ export function Shell({
   title,
   children,
   actions,
+  footer,
 }: {
   title: string;
   children: ReactNode;
   actions?: ReactNode;
+  footer?: ReactNode;
 }) {
   const pathname = usePathname() || "/";
   const routePath = uiRoutePath(pathname);
@@ -315,7 +317,7 @@ export function Shell({
         </button>
       </div>
 
-      <div className="relative flex min-h-[calc(100dvh-3.5rem)] flex-col md:min-h-screen md:flex-row">
+      <div className="relative flex h-[calc(100dvh-3.5rem)] flex-col md:h-dvh md:flex-row">
         {/* ── Sidebar ─────────────────────────────────────────── */}
         <aside
           id="shell-sidebar"
@@ -526,141 +528,148 @@ export function Shell({
         </aside>
 
         {/* ── Main content ────────────────────────────────────── */}
-        <main
-          id="main-content"
-          aria-label={title}
-          className="min-w-0 flex-1 overflow-auto bg-[#080a0f] px-4 py-6 md:px-6"
-        >
-          <div className="mx-auto max-w-6xl">
-            {!authChecked && (
-              <div className="rounded-xl border border-white/8 bg-white/3 p-4 text-sm text-slate-300">
-                {authError ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <div>{authError}</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (typeof window !== "undefined")
-                          window.location.reload();
-                      }}
-                      className="rounded-lg bg-white/8 px-3 py-1.5 text-xs text-white transition-ui hover:bg-white/12"
-                    >
-                      Reload
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
-                    <span>Checking session...</span>
-                  </div>
-                )}
-              </div>
-            )}
-            {authChecked && (
-              <>
-                {me?.labMode && (
-                  <div className="mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm">
-                    <svg
-                      viewBox="0 0 24 24"
-                      className="h-4 w-4 shrink-0"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                      <line x1="12" y1="9" x2="12" y2="13" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <span>
-                      <strong>Lab mode</strong> — Authentication is relaxed. Not
-                      suitable for production.
-                    </span>
-                  </div>
-                )}
-                {pendingMFA && !forceMFA && (
-                  <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm">
-                    <div>
-                      <div className="font-medium">
-                        MFA setup is required for this account
-                      </div>
-                      <div className="mt-1 text-xs">
-                        You can still sign in without MFA during the grace
-                        period, but you should complete setup soon.
-                        {mfaGraceDisplay
-                          ? ` Grace ends on ${mfaGraceDisplay}.`
-                          : ""}
-                      </div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <main
+            id="main-content"
+            aria-label={title}
+            className="min-h-0 min-w-0 flex-1 overflow-auto bg-[#080a0f] px-4 py-6 md:px-6"
+          >
+            <div className="mx-auto max-w-6xl">
+              {!authChecked && (
+                <div className="rounded-xl border border-white/8 bg-white/3 p-4 text-sm text-slate-300">
+                  {authError ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>{authError}</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined")
+                            window.location.reload();
+                        }}
+                        className="rounded-lg bg-white/8 px-3 py-1.5 text-xs text-white transition-ui hover:bg-white/12"
+                      >
+                        Reload
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileTab("mfa");
-                        setProfileOpen(true);
-                      }}
-                      className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-ui"
-                    >
-                      Set up MFA
-                    </button>
-                  </div>
-                )}
-                {forceMFA && (
-                  <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                    <div className="font-medium text-red-200">
-                      MFA setup required before continuing
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
+                      <span>Checking session...</span>
                     </div>
-                    <div className="mt-1 text-xs text-red-200/90">
-                      Your MFA grace period has expired. Complete authenticator
-                      app setup to regain full access.
-                    </div>
-                  </div>
-                )}
-                <ShellAttention isAdmin={isAdmin} />
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <h1 className="text-lg font-semibold tracking-wide text-white">
-                      {title}
-                    </h1>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {actions}
-                    <a
-                      href={docsHref}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Help & documentation"
-                      aria-label="Help & documentation"
-                      className="inline-flex items-center justify-center rounded-lg border border-white/8 bg-white/4 p-2 text-slate-400 transition-ui hover:bg-white/8 hover:text-slate-200"
-                    >
+                  )}
+                </div>
+              )}
+              {authChecked && (
+                <>
+                  {me?.labMode && (
+                    <div className="mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm">
                       <svg
                         viewBox="0 0 24 24"
-                        className="h-4 w-4"
+                        className="h-4 w-4 shrink-0"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
+                        strokeWidth={2}
                       >
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M9.09 9a3 3 0 115.83 1c0 2-3 2-3 4" />
-                        <path d="M12 18h.01" />
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
                       </svg>
-                    </a>
+                      <span>
+                        <strong>Lab mode</strong> — Authentication is relaxed. Not
+                        suitable for production.
+                      </span>
+                    </div>
+                  )}
+                  {pendingMFA && !forceMFA && (
+                    <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm">
+                      <div>
+                        <div className="font-medium">
+                          MFA setup is required for this account
+                        </div>
+                        <div className="mt-1 text-xs">
+                          You can still sign in without MFA during the grace
+                          period, but you should complete setup soon.
+                          {mfaGraceDisplay
+                            ? ` Grace ends on ${mfaGraceDisplay}.`
+                            : ""}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileTab("mfa");
+                          setProfileOpen(true);
+                        }}
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-ui"
+                      >
+                        Set up MFA
+                      </button>
+                    </div>
+                  )}
+                  {forceMFA && (
+                    <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                      <div className="font-medium text-red-200">
+                        MFA setup required before continuing
+                      </div>
+                      <div className="mt-1 text-xs text-red-200/90">
+                        Your MFA grace period has expired. Complete authenticator
+                        app setup to regain full access.
+                      </div>
+                    </div>
+                  )}
+                  <ShellAttention isAdmin={isAdmin} />
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <h1 className="text-lg font-semibold tracking-wide text-white">
+                        {title}
+                      </h1>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {actions}
+                      <a
+                        href={docsHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Help & documentation"
+                        aria-label="Help & documentation"
+                        className="inline-flex items-center justify-center rounded-lg border border-white/8 bg-white/4 p-2 text-slate-400 transition-ui hover:bg-white/8 hover:text-slate-200"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M9.09 9a3 3 0 115.83 1c0 2-3 2-3 4" />
+                          <path d="M12 18h.01" />
+                        </svg>
+                      </a>
+                    </div>
                   </div>
-                </div>
-                <Breadcrumbs />
-                {forceMFA ? (
-                  <div className="rounded-xl border border-white/8 bg-white/3 p-6 text-sm text-slate-300">
-                    Only account and MFA setup actions are available until MFA
-                    is enabled for this account.
-                  </div>
-                ) : (
-                  children
-                )}
-              </>
-            )}
-          </div>
-        </main>
+                  <Breadcrumbs />
+                  {forceMFA ? (
+                    <div className="rounded-xl border border-white/8 bg-white/3 p-6 text-sm text-slate-300">
+                      Only account and MFA setup actions are available until MFA
+                      is enabled for this account.
+                    </div>
+                  ) : (
+                    children
+                  )}
+                </>
+              )}
+            </div>
+          </main>
+          {authChecked && !forceMFA && footer && (
+            <footer className="max-h-[45vh] shrink-0 overflow-y-auto border-t bg-[#080a0f] px-4 pb-3 md:px-6">
+              <div className="mx-auto max-w-6xl">{footer}</div>
+            </footer>
+          )}
+        </div>
       </div>
 
       {profileOpen && me && (

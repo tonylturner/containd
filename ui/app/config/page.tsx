@@ -374,6 +374,22 @@ function ConfigPage() {
   const idsRuleCount = configDiff?.idsBank?.running.count ?? 0;
   const objectCount = running?.objects?.length ?? 0;
   const dpiMode = formatICSMode(running?.dataplane?.dpiMode, undefined).label;
+  const configActions = tab !== "overview" && (
+    <ConfigActionBar
+      showReview={tab === "diff"}
+      pendingConfirm={!!configDiff?.pendingConfirm}
+      canEdit={canEdit}
+      canMutate={canSave && !!diffRevision && !diffView.stale}
+      canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
+      ttlSeconds={ttlSeconds}
+      onTtlChange={setTtlSeconds}
+      onCommit={doCommit}
+      onCommitConfirmed={doCommitConfirmed}
+      onConfirmCommit={doConfirm}
+      onRollback={doRollback}
+      onFactoryReset={doFactoryReset}
+    />
+  );
   const tips: Tip[] = [
     {
       id: "config:backup",
@@ -412,6 +428,7 @@ function ConfigPage() {
           Refresh
         </button>
       }
+      footer={tab === "diff" ? configActions : undefined}
     >
       <ConfirmDialog {...confirm.props} onCancel={() => { dialogOpen.current = false; confirm.props.onCancel(); }} onConfirm={() => { dialogOpen.current = false; confirm.props.onConfirm(); }} />
       {diffView.revisionNotice(() => refresh({ keepEdits: false }))}
@@ -459,7 +476,7 @@ function ConfigPage() {
               : status.includes("staged") || status.includes("saved") || status.includes("Configuration committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                 : "border bg-(--surface) text-(--text)"
-          }`}
+          } break-words`}
         >
           {status}
         </div>
@@ -652,22 +669,7 @@ function ConfigPage() {
         </div>
       )}
 
-      {tab !== "overview" && (
-        <ConfigActionBar
-          showReview={tab === "diff"}
-          pendingConfirm={!!configDiff?.pendingConfirm}
-          canEdit={canEdit}
-          canMutate={canSave && !!diffRevision && !diffView.stale}
-          canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
-          ttlSeconds={ttlSeconds}
-          onTtlChange={setTtlSeconds}
-          onCommit={doCommit}
-          onCommitConfirmed={doCommitConfirmed}
-          onConfirmCommit={doConfirm}
-          onRollback={doRollback}
-          onFactoryReset={doFactoryReset}
-        />
-      )}
+      {tab !== "overview" && tab !== "diff" && configActions}
     </Shell>
   );
 }
