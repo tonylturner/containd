@@ -43,7 +43,7 @@ test("adding a port forward rejects ports outside 1-65535 and ports not in decim
   const listen = page.getByPlaceholder("listen port");
   const destIp = page.getByPlaceholder("dest ip");
   const destPort = page.getByPlaceholder("dest port (opt)");
-  const add = page.getByRole("button", { name: "Add", exact: true });
+  const add = page.getByRole("button", { name: "Stage port forward", exact: true });
   await destIp.fill("192.0.2.5");
 
   await add.click();
@@ -73,7 +73,7 @@ test("adding a port forward rejects ports outside 1-65535 and ports not in decim
 test("adding a port forward rejects a destination that is not IPv4", async ({ page }) => {
   await openNAT(page);
   const destIp = page.getByPlaceholder("dest ip");
-  const add = page.getByRole("button", { name: "Add", exact: true });
+  const add = page.getByRole("button", { name: "Stage port forward", exact: true });
   await page.getByPlaceholder("listen port").fill("8443");
 
   await add.click();
@@ -96,7 +96,7 @@ test("the ingress zone defaults to wan when that zone exists", async ({ page }) 
   await expect(page.getByLabel("Ingress zone")).toHaveValue("wan");
   await page.getByPlaceholder("listen port").fill("8443");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByRole("cell", { name: "wan", exact: true })).toBeVisible();
 });
 
@@ -107,7 +107,7 @@ test("without a wan zone, adding a port forward needs an ingress zone choice", a
   await expect(page.getByRole("option", { name: "ingress: choose a zone", exact: true })).toHaveCount(1);
   await page.getByPlaceholder("listen port").fill("8443");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
-  const add = page.getByRole("button", { name: "Add", exact: true });
+  const add = page.getByRole("button", { name: "Stage port forward", exact: true });
   await add.click();
   await expect(page.getByText("Ingress zone is required.", { exact: true })).toBeVisible();
   await expect(page.getByText("No port forwards configured.", { exact: false })).toBeVisible();
@@ -128,7 +128,7 @@ test("publish without an allow rule sends false and leaves policy untouched", as
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
   await expect(page.getByLabel("Create matching allow rule")).toBeChecked();
   await page.getByLabel("Create matching allow rule").uncheck();
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByText("Port forward staged without a matching allow rule", { exact: false })).toBeVisible();
   expect(staged).toHaveLength(1);
   expect(staged[0]).toMatchObject({ allowRule: false });
@@ -142,7 +142,7 @@ test("publish describes inside placement without claiming a generated permission
   }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByPlaceholder("listen port").fill("1502");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Enforcing ICS rule inspect-modbus governs this traffic; no allow rule created." })).toBeVisible();
   await expect(page.getByText(/inserted at position/)).toHaveCount(0);
 });
@@ -159,7 +159,7 @@ test("publish displays the fail-closed warning and its traffic, not a generated 
   await page.getByPlaceholder("listen port").fill("1502");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
   await page.getByPlaceholder("dest port (opt)").fill("502");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByText(/Partial overlap: no generated grant/)).toBeVisible();
   await expect(page.getByText(/Traffic: sources 198.51.100.0\/24, ingress wan, backend zones any routed egress \(unknown\), tcp ingress-local:1502 → 192.0.2.5:502/)).toBeVisible();
   await expect(page.getByText(/inserted at position/)).toHaveCount(0);
@@ -170,10 +170,10 @@ test("a rejected publish keeps the draft for correction", async ({ page }) => {
   await page.route("**/api/v1/firewall/port-forwards", (route) => route.fulfill({ status: 400, json: { error: "Overlapping forward" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByPlaceholder("listen port").fill("8443");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByText("Overlapping forward", { exact: true })).toBeVisible();
   await expect(page.getByPlaceholder("listen port")).toHaveValue("8443");
-  await expect(page.getByRole("button", { name: "Add", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Stage port forward", exact: true })).toBeEnabled();
 });
 
 test("delete confirmation lists rules to edit and delete, links them, and shows the server result", async ({ page }) => {
@@ -209,4 +209,26 @@ test("delete confirmation lists rules to edit and delete, links them, and shows 
   await expect(page.getByText("Port forward deleted — commit to apply. Deleted rules: allow-only-this, reset-only-this. Edited rules: deny-both.", { exact: true })).toBeVisible();
   await expect(page.getByText("No port forwards configured.", { exact: false })).toBeVisible();
   expect(deleted).toEqual(["pf-test"]);
+});
+
+test("mobile forwards keep actions visible and explain the three staging saves", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const staged = await openNAT(page);
+  await expect(page.getByText(/Save NAT stages only SNAT enablement/)).toBeVisible();
+  await expect(page.getByText(/Save stages only enabled\/disabled changes below/)).toBeVisible();
+  await page.getByPlaceholder("listen port").fill("8443");
+  await page.getByPlaceholder("dest ip").fill("192.0.2.5");
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
+  const table = page.getByRole("table", { name: "Port forwards", exact: true });
+  const remove = table.getByRole("button", { name: "Delete", exact: true });
+  await remove.scrollIntoViewIfNeeded();
+  const bounds = (await remove.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  expect(await table.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(staged).toHaveLength(1);
+  await table.getByRole("button", { name: "Disable", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Stage port forward", exact: true })).toBeDisabled();
 });

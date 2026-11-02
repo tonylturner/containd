@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { api, type FirewallRule, type RulePreview } from "../../lib/api";
 import { type LearnSuggestion, selectable } from "../../lib/api-learn";
 import { summarizeGenericICS } from "../ics/ics-shared";
 import { summarizeIEC104 } from "../ics/iec104";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
+import { withheldReason } from "./withheld-reasons";
 import { formatEvidenceTime } from "./evidence-time";
 
 export const secondaryButton =
@@ -106,6 +107,8 @@ export function SuggestionReview({
   onToggle: () => void;
   onReview: (approve: boolean, coordinates: boolean) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailId = useId();
   const [coordinates, setCoordinates] = useState(false);
   const iec = s.content.rules.some((r) => r.ics?.protocol === "iec104");
   const expired = Date.parse(s.expiresAt) <= now;
@@ -120,6 +123,14 @@ export function SuggestionReview({
     : [
         "Exact within supported selector relations, not byte-for-byte transaction equality. Finite replay is not universal protocol correctness.",
       ];
+  const eligibilityLabel = selectable(s, now) ? "Checks passed"
+    : reviewable && !failures ? "Needs review" : "Not eligible";
+  const selectionReason = expired ? "Evidence expired; collect new evidence."
+    : !s.proof ? "No certification; cannot stage."
+      : failures || counterexamples ? "Saved-evidence checks reported failures or counterexamples."
+        : s.status === "staged" ? "Already staged; activation not verified."
+          : s.status === "rejected" ? "Rejected."
+            : "Explicit review and any required address approval must be completed for this revision.";
   const warnings = [
     ...new Set([
       ...(!s.proof ? ["No certification; cannot stage."] : []),
@@ -127,186 +138,192 @@ export function SuggestionReview({
       ...(counterexamples ? [`${counterexamples} counterexample(s).`] : []),
       ...(expired ? ["Evidence expired."] : []),
       ...limitations,
-      ...(s.content.withheld ?? []),
+      ...(s.content.withheld ?? []).map(withheldReason),
     ]),
   ];
   return (
-    <article
-      aria-label={`Suggestion ${s.id}`}
-      className="min-w-0 space-y-3 border-t py-4"
-    >
-      {changedSinceSelected && <p role="status" className="mb-2 text-sm text-(--amber)">Changed since selected — review this revision and select it again.</p>}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="break-words text-sm font-semibold">
-            {s.content.rules[0]?.description || "Proposed service rules"}
-          </h3>
-          <p className="break-all font-mono text-xs">Suggestion ID: {s.id}</p>
-          <p className="text-sm">
-            {selectable(s, now) ? "Checks passed"
-              : reviewable && !failures ? "Needs review"
-              : "Not eligible"}
-          </p>
-          <p className="text-xs text-(--text-muted)">
-            Suggestion version {s.revision} · {expired ? "expired" : s.status} ·{" "}
-            {s.status === "staged"
-              ? "Saved—activation not verified"
-              : "Not staged"}
-          </p>
-          <p className="text-xs text-(--text-muted)">
-            Expires {formatEvidenceTime(s.expiresAt)}
-          </p>
-        </div>
-        {canEdit && (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              aria-label={`Select ${s.id}`}
-              checked={checked}
-              disabled={busy || !selectable(s, now)}
-              onChange={onToggle}
-            />
-            Select
-          </label>
-        )}
-      </div>
-      {!selectable(s, now) && (
-        <p className="text-xs text-(--amber)">
-          Selection unavailable: {expired ? "evidence expired; collect new evidence."
-            : !s.proof ? "no certification available."
-            : failures || counterexamples ? "saved-evidence checks reported failures or counterexamples."
-            : s.status === "staged" ? "this version is already staged."
-            : s.status === "rejected" ? "this suggestion was rejected."
-            : "explicit review and any required address approval must be completed for this version."}
-        </p>
-      )}
-      <p className="text-sm">
-        Address basis:{" "}
-        {s.content.requiresCoordinateReview
-          ? "verify captured addresses and service against NAT and deployment"
-          : "addresses used by the policy"}
-        .
-      </p>
-      {iec && (
-        <p className="text-sm text-(--amber)">
-          IEC 104 requires explicit admin Review before selection. Staged IEC
-          rules arrive as monitor, never enforce.
-        </p>
-      )}
-      <ul aria-label="Proposed rules">
-        {s.content.rules.map((r) => (
-          <RuleScope key={r.id} rule={r} canEdit={canEdit} />
-        ))}
-      </ul>
-      <details
-        aria-label="Frozen certification"
-        className="rounded-xs border bg-(--surface) p-3"
-      >
-        <summary className="cursor-pointer text-sm font-semibold">
-          Checks on saved evidence
-          {s.proof && (
-            <>
-              {" · replay "}
-              {s.proof.positive.passed}/{s.proof.positive.total}
-              {" · boundaries "}
-              {s.proof.negative.passed}/{s.proof.negative.total}
-            </>
-          )}
-          {" · "}
-          <span
-            aria-label="Certification warnings"
-            className="font-normal text-(--amber)"
-          >
-            {warnings.join(" ")}
-          </span>
-        </summary>
-        {s.proof ? (
-          <div className="mt-2 space-y-1 break-words text-xs">
-            <p>
-              Recorded-traffic tests: {s.proof.positive.passed}/
-              {s.proof.positive.total} passed, {s.proof.positive.failed} failed.
-            </p>
-            <p>
-              Boundary tests: {s.proof.negative.passed}/
-              {s.proof.negative.total} passed, {s.proof.negative.failed} failed.
-            </p>
-            <p>
-              {s.proof.parentRefs?.length ?? 0} source evidence references · checked{" "}
-              {formatEvidenceTime(s.proof.certifiedAt)}
-            </p>
-            <p className="break-all">
-              Evidence checksum: {s.proof.evidenceDigest}
-            </p>
-            <p className="break-all">Content: {s.proof.contentId}</p>
-            <p className="break-all">
-              Versions:{" "}
-              {Object.entries(s.proof.versions)
-                .map(([k, v]) => `${k}=${v}`)
-                .join(" · ")}
-            </p>
-            {(s.proof.counterexamples ?? []).map((c, i) => (
-              <p key={i}>
-                {c.mutation}: expected {c.expected}, got {c.actual}
-              </p>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-2 text-sm">
-            No certification available. Cannot stage.
-          </p>
-        )}
-      </details>
-      {(s.legacyOverlaps ?? []).map((o) => (
-        <p key={o.ruleId} className="break-words text-xs text-(--amber)">
-          Existing-rule overlap {o.ruleId}: {o.reason}. Warning only; no existing rule
-          is removed.
-        </p>
-      ))}
-      {s.review && (
-        <p className="text-xs">
-          Reviewed by {s.review.actor} at{" "}
-          {formatEvidenceTime(s.review.at)}; captured addresses{" "}
-          {s.review.coordinateApproved ? "approved" : "not approved"}.
-        </p>
-      )}
-      {canEdit && reviewable && (
-        <div className="space-y-2">
-          {s.content.requiresCoordinateReview && (
-            <label className="flex items-start gap-2 text-sm">
+    <>
+      <tr className="border-t align-top">
+        <td data-label="Service / scope" className="max-w-80 break-words p-2">
+          <p className="font-semibold">{s.content.rules[0]?.description || "Proposed service rules"}</p>
+          {s.content.rules.map(rule => <p key={rule.id} className="mt-1 text-xs">
+            {(rule.sources ?? []).join(", ") || "any"} → {(rule.destinations ?? []).join(", ") || "any"}
+            {" · "}{(rule.protocols ?? []).map(p => `${p.name}/${p.port || "any"}`).join(", ") || "any"}
+            {" · "}{rule.ics?.protocol || "L3"} · monitor staging
+          </p>)}
+        </td>
+        <td data-label="Review status" className="max-w-72 break-words p-2 text-xs">
+          <p>{eligibilityLabel} · {s.status}</p>
+          <p>Revision {s.revision} · expires {formatEvidenceTime(s.expiresAt)}</p>
+          {changedSinceSelected && <p className="text-(--amber)">Changed since selected — review this revision and select it again.</p>}
+          {(!s.proof || failures > 0 || counterexamples > 0 || expired) && <p className="text-(--amber)">{warnings.join(" ")}</p>}
+          {(s.content.withheld ?? []).map(reason => <p key={reason} className="text-(--amber)">{withheldReason(reason)}</p>)}
+          {(s.legacyOverlaps ?? []).map(o => <p key={o.ruleId} className="text-(--amber)">Existing-rule overlap {o.ruleId}: {o.reason}. No existing rule is removed.</p>)}
+          {!selectable(s, now) && <p className="text-(--amber)">{selectionReason}</p>}
+        </td>
+        <td data-label="Selection" className="p-2">
+          {canEdit && (
+            <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                className="mt-1"
-                checked={coordinates}
-                disabled={busy}
-                onChange={(e) => setCoordinates(e.target.checked)}
+                aria-label={`Select ${s.id}`}
+                checked={checked}
+                disabled={busy || !selectable(s, now)}
+                onChange={onToggle}
               />
-              I verified the captured addresses and service against the policy and NAT settings.
+              Select
             </label>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              className={secondaryButton}
-              disabled={
-                busy || (s.content.requiresCoordinateReview && !coordinates)
-              }
-              onClick={() => onReview(true, coordinates)}
+        </td>
+        <td data-label="Evidence" className="p-2">
+          <button
+            className={secondaryButton}
+            aria-expanded={expanded}
+            aria-controls={detailId}
+            onClick={() => setExpanded(!expanded)}
+          >
+            Inspect suggestion
+          </button>
+        </td>
+      </tr>
+      <tr hidden={!expanded} id={detailId}>
+        <td colSpan={4} className="p-2">
+            <article
+              aria-label={`Suggestion ${s.id}`}
+              className="min-w-0 space-y-3 border-t py-4"
             >
-              Review and approve
-            </button>
-            <button
-              className={secondaryButton}
-              disabled={busy}
-              onClick={() => onReview(false, false)}
-            >
-              Reject
-            </button>
-          </div>
-          <p className="text-xs text-(--text-muted)">
-            Review records approval of this revision. It does not select, stage
-            or activate rules.
-          </p>
-        </div>
-      )}
-    </article>
+              <p className="break-all font-mono text-xs">Suggestion ID: {s.id} · revision {s.revision}</p>
+              <p className="text-xs text-(--text-muted)">Expires {formatEvidenceTime(s.expiresAt)}</p>
+              <p className="text-sm">
+                Address basis:{" "}
+                {s.content.requiresCoordinateReview
+                  ? "verify captured addresses and service against NAT and deployment"
+                  : "addresses used by the policy"}
+                .
+              </p>
+              {iec && (
+                <p className="text-sm text-(--amber)">
+                  IEC 104 requires explicit admin Review before selection. Staged IEC
+                  rules arrive as monitor, never enforce.
+                </p>
+              )}
+              <ul aria-label="Proposed rules">
+                {s.content.rules.map((r) => (
+                  <RuleScope key={r.id} rule={r} canEdit={canEdit} />
+                ))}
+              </ul>
+              <details
+                aria-label="Frozen certification"
+                className="rounded-xs border bg-(--surface) p-3"
+              >
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Checks on saved evidence
+                  {s.proof && (
+                    <>
+                      {" · replay "}
+                      {s.proof.positive.passed}/{s.proof.positive.total}
+                      {" · boundaries "}
+                      {s.proof.negative.passed}/{s.proof.negative.total}
+                    </>
+                  )}
+                  {" · "}
+                  <span
+                    aria-label="Certification warnings"
+                    className="font-normal text-(--amber)"
+                  >
+                    {warnings.join(" ")}
+                  </span>
+                </summary>
+                {s.proof ? (
+                  <div className="mt-2 space-y-1 break-words text-xs">
+                    <p>
+                      Recorded-traffic tests: {s.proof.positive.passed}/
+                      {s.proof.positive.total} passed, {s.proof.positive.failed} failed.
+                    </p>
+                    <p>
+                      Boundary tests: {s.proof.negative.passed}/
+                      {s.proof.negative.total} passed, {s.proof.negative.failed} failed.
+                    </p>
+                    <p>
+                      {s.proof.parentRefs?.length ?? 0} source evidence references · checked{" "}
+                      {formatEvidenceTime(s.proof.certifiedAt)}
+                    </p>
+                    <p className="break-all">
+                      Evidence checksum: {s.proof.evidenceDigest}
+                    </p>
+                    <p className="break-all">Content: {s.proof.contentId}</p>
+                    <p className="break-all">
+                      Versions:{" "}
+                      {Object.entries(s.proof.versions)
+                        .map(([k, v]) => `${k}=${v}`)
+                        .join(" · ")}
+                    </p>
+                    {(s.proof.counterexamples ?? []).map((c, i) => (
+                      <p key={i}>
+                        {c.mutation}: expected {c.expected}, got {c.actual}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm">
+                    No certification available. Cannot stage.
+                  </p>
+                )}
+              </details>
+              {(s.legacyOverlaps ?? []).map((o) => (
+                <p key={o.ruleId} className="break-words text-xs text-(--amber)">
+                  Existing-rule overlap {o.ruleId}: {o.reason}. Warning only; no existing rule
+                  is removed.
+                </p>
+              ))}
+              {s.review && (
+                <p className="text-xs">
+                  Reviewed by {s.review.actor} at{" "}
+                  {formatEvidenceTime(s.review.at)}; captured addresses{" "}
+                  {s.review.coordinateApproved ? "approved" : "not approved"}.
+                </p>
+              )}
+              {canEdit && reviewable && (
+                <div className="space-y-2">
+                  {s.content.requiresCoordinateReview && (
+                    <label className="flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={coordinates}
+                        disabled={busy}
+                        onChange={(e) => setCoordinates(e.target.checked)}
+                      />
+                      I verified the captured addresses and service against the policy and NAT settings.
+                    </label>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className={secondaryButton}
+                      disabled={
+                        busy || (s.content.requiresCoordinateReview && !coordinates)
+                      }
+                      onClick={() => onReview(true, coordinates)}
+                    >
+                      Review and approve
+                    </button>
+                    <button
+                      className={secondaryButton}
+                      disabled={busy}
+                      onClick={() => onReview(false, false)}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                  <p className="text-xs text-(--text-muted)">
+                    Review records approval of this revision. It does not select, stage
+                    or activate rules.
+                  </p>
+                </div>
+              )}
+            </article>
+        </td>
+      </tr>
+    </>
   );
 }

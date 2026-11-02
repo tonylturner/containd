@@ -14,6 +14,7 @@ import {
 } from "../../lib/api-learn";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { Shell } from "../../components/Shell";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
 import { IdentificationTable } from "./identifications";
 import { DatasetList } from "./dataset-list";
@@ -25,6 +26,8 @@ import styles from "./collection-tabs.module.css";
 
 export default function PcapAnalysisPage() {
   const canEdit = isAdmin();
+  const confirm = useConfirm();
+  const [notice, setNotice] = useState("");
   const [datasets, setDatasets] = useState<LearnPage<LearnDataset> | null>(
     null,
   );
@@ -362,8 +365,10 @@ export default function PcapAnalysisPage() {
       {chosen && (
         <DatasetReview now={now} key={chosen.id} dataset={chosen} canEdit={canEdit} onChanged={refresh} />
       )}
+      <ConfirmDialog {...confirm.props} />
+      {notice && <p role="status" className="mb-3 text-sm">{notice}</p>}
       <Card title="Evidence datasets" className="mb-6">
-        <p className="mb-3 text-xs text-(--text-muted)">Evidence expires after 7 days. Removing evidence at capacity invalidates the checks that depend on it.</p>
+        <p className="mb-3 text-xs text-(--text-muted)">Evidence expires after 7 days. Removing evidence at capacity invalidates the checks that depend on it. Dataset deletion is immediate and cannot be undone; staged rules and original PCAP files remain.</p>
         <details className="mb-3 text-xs text-(--text-muted)">
           <summary className="cursor-pointer">Saved evidence limits</summary>
           <p>Store ceilings: 32 datasets, 100,000 records, 128 MiB normalized evidence; 256 KiB / 4,096 objects per parent. Evictions invalidate dependent proofs.</p>
@@ -383,6 +388,20 @@ export default function PcapAnalysisPage() {
             datasets={datasets.items}
             selectedId={chosen?.id}
             onOpen={setChosen}
+            busy={busy}
+            onDelete={canEdit ? dataset => confirm.open({
+              title: "Delete learner dataset?",
+              message: `Immediately delete dataset ${dataset.id}, its observations and dependent suggestions/proofs? This cannot be undone. Already staged rules and the original PCAP file are not deleted. Stop an active watch before deleting its dataset. No commit is required.`,
+              confirmLabel: "Delete dataset",
+              variant: "danger",
+              onConfirm: () => void run(async () => {
+                dataOf(await learner.deleteDataset(dataset.id));
+                setChosen(previous => previous?.id === dataset.id ? null : previous);
+                setImported(previous => previous?.dataset.id === dataset.id ? null : previous);
+                setNotice(`Dataset ${dataset.id} deleted immediately. Staged rules and original PCAP files are unchanged.`);
+                await refresh();
+              }),
+            }) : undefined}
           />
         )}
         {datasets?.nextCursor && (

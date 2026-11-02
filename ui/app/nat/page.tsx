@@ -13,6 +13,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
+import entityStyles from "../interfaces/entity-table.module.css";
 
 import {
   api,
@@ -275,7 +276,7 @@ function NATCard({
           <div className="text-sm font-semibold text-(--text)">Source NAT (SNAT)</div>
           <div className="text-xs text-(--text-muted)">
             Masquerade outbound traffic so internal hosts appear with the
-            firewall&apos;s egress address. Changes apply on{" "}
+            firewall&apos;s egress address. Save NAT stages only SNAT enablement, egress and source zones; it does not save port forwards. Changes apply on{" "}
             <span className="font-mono">commit</span>.
           </div>
         </div>
@@ -580,6 +581,7 @@ function PortForwardsCard({
             {error}
           </div>
         )}
+        <p className="mb-3 text-xs text-(--text-muted)">Stage port forward stages the new forward and optional matching allow rule immediately into the candidate. Save stages only enabled/disabled changes below. Commit is still required to apply either.</p>
         {dirty && <p className="mb-3 text-xs text-(--text-muted)">Save enabled/disabled changes before adding or deleting a forward.</p>}
         {rules === null && <p className="mb-3 text-xs text-(--text-muted)">Firewall rules unavailable; refresh before deleting a forward or viewing its rule links.</p>}
 
@@ -637,7 +639,7 @@ function PortForwardsCard({
               disabled={dirty}
               className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
             >
-              Add
+              Stage port forward
             </button>
 
             <input
@@ -660,7 +662,7 @@ function PortForwardsCard({
         )}
 
         <div className="mt-4 overflow-x-auto rounded-xs border">
-          <table className="w-full text-sm">
+          <table aria-label="Port forwards" className={`w-full text-sm ${entityStyles.entities}`}>
             <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
                 <th className="px-4 py-3">Ingress</th>
@@ -683,18 +685,18 @@ function PortForwardsCard({
               )}
               {items.map((pf) => (
                 <tr key={pf.id} className="border-t table-row-hover transition-ui">
-                  <td className="px-4 py-3 text-(--text)">{zoneName(zones, pf.ingressZone)}</td>
-                  <td className="px-4 py-3 text-(--text)">{pf.proto}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-(--text)">
+                  <td data-label="Ingress" className="px-4 py-3 text-(--text)">{zoneName(zones, pf.ingressZone)}</td>
+                  <td data-label="Proto" className="px-4 py-3 text-(--text)">{pf.proto}</td>
+                  <td data-label="Listen" className="px-4 py-3 font-mono text-xs text-(--text)">
                     {pf.listenPort}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-(--text)">
+                  <td data-label="Destination" className="px-4 py-3 font-mono text-xs text-(--text)">
                     {formatEndpoint(pf.destIp, pf.destPort || pf.listenPort)}
                   </td>
-                  <td className="px-4 py-3 text-(--text)">
+                  <td data-label="Sources" className="px-4 py-3 text-(--text)">
                     {(pf.allowedSources ?? []).join(", ") || "any"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Enabled" className="px-4 py-3">
                     <span
                       className={
                         pf.enabled
@@ -705,13 +707,13 @@ function PortForwardsCard({
                       {pf.enabled ? "on" : "off"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs">
+                  <td data-label="Rules" className="px-4 py-3 text-xs">
                     {rules === null ? "unavailable" : rules.filter((r) => r.viaForwards?.includes(pf.id)).map((r) => (
                       <Link key={r.id} href={`/firewall/#${encodeURIComponent(`rule-${r.id}`)}`} className="mr-2 text-(--amber) underline">{r.id}</Link>
                     ))}
                     {rules && !rules.some((r) => r.viaForwards?.includes(pf.id)) && "none"}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     {isAdmin() && (
                       <div className="flex items-center justify-end gap-2">
                         <button
