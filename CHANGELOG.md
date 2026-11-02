@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The interfaces page no longer names another product in its management
   access notice.
 - Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- A packet capture that never started shows "Not started" instead of a
+  start date of 12/31/1.
+- Reordering rules shows as one order change in the configuration review,
+  and changes to rules, zones and interfaces are matched by ID or name
+  instead of list position.
 - The topology Physical view describes only what it observes. It no longer
   flags an unused CONTAIND_AUTH setting, and it no longer claims host
   networking is expected for a firewall; it notes that the container then
