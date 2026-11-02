@@ -136,8 +136,9 @@ type CounterReader interface {
 type Quality string
 
 const (
-	// Observed: V is the exact count over exactly this bucket (D equals
-	// the resolution).
+	// Observed: V is the exact count between two consecutive on-time
+	// samples whose interval closes this bucket (D equals the resolution).
+	// Samples run a fixed offset after each boundary, within a small jitter.
 	QualityObserved Quality = "observed"
 	// Partial: V counts D seconds of observation that do not exactly match
 	// the bucket: less than the bucket, or an interval that also absorbed
