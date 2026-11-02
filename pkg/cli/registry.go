@@ -15,7 +15,8 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-// Command is a simple handler signature for CLI commands.
+// Command receives transport capabilities, such as WithSecretPrompt, through
+// its context. Secret input is never a command argument.
 type Command func(ctx context.Context, out io.Writer, args []string) error
 
 // Registry holds available commands.
@@ -49,6 +50,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		registerProxyServiceCommands(r, api)
 		registerIDSServiceCommands(r, api)
 		r.RegisterRole("show users", RoleAdmin, opsRead(api, "/api/v1/users"))
+		r.RegisterRole("create user", RoleAdmin, opsCreateUser(api))
+		r.RegisterRole("reset user password", RoleAdmin, opsResetUserPassword(api))
 		r.RegisterRole("delete user", RoleAdmin, opsUser(api, "delete"))
 		r.RegisterRole("require mfa user", RoleAdmin, opsUser(api, "require mfa"))
 		r.RegisterRole("show backups", RoleView, opsRead(api, "/api/v1/config/backups"))

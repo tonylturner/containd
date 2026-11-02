@@ -424,6 +424,7 @@ func (s *Server) isLinuxShellMode() bool {
 // client requested none; the shell command needs it.
 func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw *sessionIO, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
+	ctx = newInteractiveSession(s, ctx, username, rw, reader, reg).secretContext(pr != nil)
 	api := &cli.API{BaseURL: s.opts.BaseURL, Client: s.opts.APIClient}
 	if conn := connectionFromContext(ctx); conn != nil {
 		api.Client = s.connectionClient(conn)

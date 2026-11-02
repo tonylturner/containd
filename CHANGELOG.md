@@ -56,8 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are read from appliance-local files instead of command-line secret values.
 - The CLI provides confirmed immediate backup, OpenVPN credential, connection
   revocation, protection retry, antivirus update and managed capture operations,
-  plus account listing, deletion and MFA requirements. Full configuration export
-  is explicit and admin-only; imports preserve file bytes for strict API validation.
+  plus account listing, deletion and MFA requirements. Admins can create users
+  and reset passwords through confirmed, hidden prompts in the interactive local
+  or SSH appliance CLI; web and piped consoles refuse secret input. Full
+  configuration export is explicit and admin-only; imports preserve file bytes
+  for strict API validation.
 - `configure` now consistently names the configuration CLI; use SSH `wizard`
   for guided setup.
 - Configuration consoles identify configuration versus immediate Linux OS modes,

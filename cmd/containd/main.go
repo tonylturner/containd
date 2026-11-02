@@ -153,6 +153,7 @@ func runCLI(ctx context.Context) error {
 	state := liner.NewLiner()
 	defer state.Close()
 	state.SetCtrlCAborts(true)
+	cmdCtx = cliSecretContext(cmdCtx, interactive, state.PasswordPrompt)
 
 	// Completer: prefix-match against every registered command.
 	// Registry.Commands() returns the list (e.g., "show running-config",
