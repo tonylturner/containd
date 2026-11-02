@@ -95,10 +95,12 @@ type CounterSample struct {
 	Dims   map[string]string `json:"dims,omitempty"`
 	// Value is the cumulative count since the counter last started from zero.
 	Value uint64 `json:"value,string"`
-	// Epoch identifies one run of the counter from zero. It changes exactly
-	// when the counter restarts from zero (kernel boot, netns or link
-	// recreation, tracker rebuild, accounting table rebuild, process boot for
-	// process-owned counters) and never otherwise. Opaque; compare only.
+	// Epoch identifies one run of the counter from zero. It changes when the
+	// counter restarts from zero (kernel boot, netns or link recreation,
+	// tracker rebuild, accounting table rebuild, process boot for
+	// process-owned counters) and never otherwise. A recreated link that
+	// reuses its ifindex keeps the epoch; samplers catch that restart as a
+	// decrease. Opaque; compare only.
 	Epoch string `json:"epoch"`
 	// Origin is real unless the counter counts demo traffic.
 	Origin Origin `json:"origin,omitempty"`
