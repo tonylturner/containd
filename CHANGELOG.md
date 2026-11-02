@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (CLI: `retry protection <boot-id> <apply-id> <desired-revision> CONFIRM`).
   SIGHUP reloads referenced material through its owners, and trust uploads report
   `updated` only with matching owner proof (`stored` means durable but pending).
+  The UI shows desired, installed and protecting revisions, keeps non-gating
+  service faults visible, and separates "Configuration committed" from live
+  readiness. Smoke scripts change policy through revision-checked management
+  saves and explicit commits instead of direct engine applies.
 
 - Keep large IDS import results compact with evaluability and conversion-note
   counts, at most 20 attention rows, and a dismiss action.
