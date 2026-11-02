@@ -86,6 +86,23 @@ func (c *countingDP) waitStart(t *testing.T) error {
 	}
 }
 
+type countingCaptureRunner struct {
+	starts *atomic.Int32
+	source func(capture.SourceEvent)
+}
+
+func (c *countingCaptureRunner) Start(context.Context, capture.Handler) error {
+	c.starts.Add(1)
+	c.source(capture.SourceEvent{Ready: true})
+	return nil
+}
+func (c *countingCaptureRunner) Stop() {
+	c.source(capture.SourceEvent{Err: capture.ErrQueueClosed})
+}
+func (*countingCaptureRunner) Interfaces() []string     { return nil }
+func (*countingCaptureRunner) Settler() capture.Settler { return nil }
+func (*countingCaptureRunner) RetireFlushed()           {}
+
 func postConfig(t *testing.T, h http.Handler, body string) map[string]any {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -391,22 +408,47 @@ func TestConfigConcurrentGetAndPost(t *testing.T) {
 }
 
 func TestConfigFailedRebuildIsRetried(t *testing.T) {
-	dp := newCountingDP(t)
+	var captureStarts atomic.Int32
+	e, err := engine.New(engine.Config{
+		NewCapture: func(cfg capture.Config) (engine.CaptureRunner, error) {
+			return &countingCaptureRunner{starts: &captureStarts, source: cfg.OnSource}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dp := &countingDP{Engine: e, results: make(chan error, 64)}
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
+	coordinator := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, coordinator)
+	// The application starts the existing engine before it serves config
+	// requests. A failed replacement must preserve that run; the coordinator
+	// still resumes its bind worker asynchronously after the failed request.
+	coordinator.start()
+	if err := dp.waitStart(t); err != nil {
+		t.Fatalf("initial engine start: %v", err)
+	}
+	if got := captureStarts.Load(); got != 1 {
+		t.Fatalf("initial capture starts = %d, want 1", got)
+	}
 	dp.reconfigErr = errors.New("remove enforcement tables: nft: netlink busy")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false}`)))
 	if rec.Code != http.StatusInternalServerError || !bytes.Contains(rec.Body.Bytes(), []byte("remove enforcement tables")) {
 		t.Fatalf("failed rebuild = %d %s", rec.Code, rec.Body.String())
 	}
-	if dp.starts.Load() != 0 {
-		t.Fatal("a failed rebuild started the engine")
+	if err := dp.waitStart(t); err != nil {
+		t.Fatalf("failed rebuild did not resume protection: %v", err)
+	}
+	if got := captureStarts.Load(); got != 1 {
+		t.Fatalf("failed rebuild started a replacement capture: starts=%d, want existing capture only", got)
 	}
 	if out := postConfig(t, h, `{"enforcement":false}`); out["unchanged"] != false || dp.reconfigs.Load() != 2 {
 		t.Fatalf("retry after a failed rebuild = %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
-	dp.waitStart(t)
+	if err := dp.waitStart(t); err != nil {
+		t.Fatalf("successful rebuild start: %v", err)
+	}
 }
 
 // TestCompilerSettingsGatePorts: the scanning gate's listener ports follow
