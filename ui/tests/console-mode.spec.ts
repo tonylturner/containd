@@ -72,9 +72,20 @@ for (const width of [1280, 390]) {
     await expect(page.locator(".xterm-rows")).toContainText("containd(config?)#");
     await expect(page.locator("#dashboard-console")).toContainText("Confirmation pending until");
     expect(connections).toBe(1);
+    await page.evaluate(() => {
+      const recordBanner = () => {
+        if (document.querySelector(".xterm-rows")?.textContent?.includes("Leaving configuration CLI.")) {
+          document.documentElement.dataset.consoleExitBanner = "painted";
+          return;
+        }
+        requestAnimationFrame(recordBanner);
+      };
+      requestAnimationFrame(recordBanner);
+    });
     await page.keyboard.type("exit");
     await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "CLI Console", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("html")).toHaveAttribute("data-console-exit-banner", "painted");
     await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "CLI Console", exact: true }).click();
     await expect(page.getByRole("button", { name: "Close console", exact: true })).toBeVisible();

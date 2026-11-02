@@ -47,8 +47,11 @@ immediately. Leaving never commits or discards the shared candidate.
 Candidate status comes from `/config/diff`, including secret-only and IDS-bank
 changes, independently of runtime enforcement. Pending commit-confirmed deadlines
 are shown separately from the pending-edit marker. Status includes its refresh
-time or the failure cause. The executable refreshes before each prompt; SSH
-refreshes idle prompts every five seconds without redrawing partially entered
+time or the failure cause. Executable and SSH status refreshes run asynchronously
+every five seconds and after commands; each diff request has a 250 ms timeout.
+Outstanding or failed refreshes are unknown, never a cached clean-state claim.
+The executable samples this status before each prompt without interrupting line
+editing. SSH redraws idle prompts when results arrive, never partially entered
 input. The web console refreshes every five seconds and after commands, preserving
 its input, cursor, history and scrollback. Status is advisory, not a mutation
 revision or authorization decision.

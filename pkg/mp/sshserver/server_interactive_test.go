@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -51,6 +52,7 @@ type sshHTTPRequest struct {
 }
 
 type sshTestHTTPClient struct {
+	mu       sync.Mutex
 	cfg      config.Config
 	requests []sshHTTPRequest
 	revision sshTestRevision
@@ -71,6 +73,8 @@ func newSSHTestHTTPClient() *sshTestHTTPClient {
 }
 
 func (c *sshTestHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)

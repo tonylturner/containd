@@ -430,25 +430,25 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		api.Client = s.connectionClient(conn)
 	}
 	entry, role := api.SessionEntry(ctx)
+	statusPoller := cli.NewSessionStatusPoller(ctx, api)
+	defer statusPoller.Close()
 	writeTTY(rw, entry+"\nshell opens the Linux OS shell; exit disconnects SSH. menu and wizard are available here. Type help for commands.\n")
 	defer writeTTY(rw, cli.SessionExit+"\nSSH disconnecting.\n")
 	for {
-		status := api.SessionStatus(ctx)
+		status := statusPoller.Snapshot()
 		writeTTY(rw, status.String()+"\n")
 		_, _ = io.WriteString(rw, "\r"+status.Prompt(role))
-		timer := time.NewTicker(5 * time.Second)
 		typing := false
-		rw.idle = timer.C
+		rw.status = statusPoller.Updates()
 		rw.refresh = func() {
-			status = api.SessionStatus(ctx)
+			status = statusPoller.Snapshot()
 			// Never erase partially entered input. Its next prompt uses fresh status.
 			if !typing {
 				writeTTY(rw, "\r\x1b[2K"+status.String()+"\n"+status.Prompt(role))
 			}
 		}
 		line, ok := readTerminalLineProgress(reader, rw, true, func(nonempty bool) { typing = nonempty })
-		rw.idle, rw.refresh = nil, nil
-		timer.Stop()
+		rw.status, rw.refresh = nil, nil
 		if !ok {
 			return
 		}
@@ -470,6 +470,7 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		case "shell":
 			if pr != nil {
 				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
+				statusPoller.Refresh(api)
 				continue
 			}
 			writeTTY(rw, "The Linux shell needs a terminal: reconnect with an interactive ssh session (not ssh -T).\n")
@@ -478,16 +479,19 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 			if s.runMenu(ctx, username, rw, reader, reg) {
 				return
 			}
+			statusPoller.Refresh(api)
 			continue
 		case "diagnostics", "diag":
 			s.runDiagnosticsMenu(ctx, rw, reader, reg)
 			continue
 		case "wizard":
 			s.runWizard(ctx, username, rw, reader, reg)
+			statusPoller.Refresh(api)
 			continue
 		}
 		var buf strings.Builder
 		err := cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
+		statusPoller.Refresh(api)
 		if strings.EqualFold(line, "help") {
 			buf.WriteString("\nSSH controls: configure names this CLI; shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
 		}

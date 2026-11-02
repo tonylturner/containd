@@ -445,10 +445,6 @@ export function Console({ onClose }: { onClose: () => void }) {
         } catch {
           payload = { output: String(ev.data ?? "") };
         }
-        if (payload?.control === "close") {
-          closeRef.current();
-          return;
-        }
         if (payload?.status) setCandidateStatus(payload.status);
         if (payload?.prompt) promptRef.current = payload.prompt;
         if (payload?.control === "status") {
@@ -461,13 +457,22 @@ export function Console({ onClose }: { onClose: () => void }) {
         busyRef.current = false;
         if (payload?.output) {
           const normalized = payload.output.replace(/\r?\n/g, "\r\n");
-          term.write(normalized);
-          if (!normalized.endsWith("\r\n")) {
-            term.write("\r\n");
-          }
+          term.write(normalized.endsWith("\r\n") ? normalized : normalized + "\r\n", () => {
+            if (payload?.control === "close") {
+              // xterm writes asynchronously. Let the exit banner paint before
+              // the owner unmounts the terminal, without a timed closing delay.
+              requestAnimationFrame(() => requestAnimationFrame(() => {
+                if (!disposed) closeRef.current();
+              }));
+            }
+          });
         }
         if (payload?.error) {
           term.write(`\x1b[33m${payload.error}\x1b[0m\r\n`);
+        }
+        if (payload?.control === "close") {
+          if (!payload.output) closeRef.current();
+          return;
         }
         term.write(promptRef.current);
       };

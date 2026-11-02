@@ -11,6 +11,8 @@ import (
 
 const SessionExit = "Leaving configuration CLI. Shared candidate changes are unchanged; nothing has been committed or discarded."
 
+const sessionStatusTimeout = 250 * time.Millisecond
+
 // SessionConfigure names the existing configuration interpreter, never a wizard.
 func SessionConfigure(line string) (string, bool) {
 	if strings.EqualFold(strings.TrimSpace(line), "configure") {
@@ -64,7 +66,7 @@ func (s SessionStatus) String() string {
 }
 
 func (a *API) SessionStatus(ctx context.Context) SessionStatus {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, sessionStatusTimeout)
 	defer cancel()
 	var diff struct {
 		Changed *bool `json:"changed"`
