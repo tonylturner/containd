@@ -176,8 +176,8 @@ export function ManageUsersPanel({
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-xs border bg-(--surface)">
-        <table className="min-w-[980px] w-full text-sm">
-          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
+        <table className="w-full text-sm max-md:block max-md:[&_tbody]:block max-md:[&_tr]:block max-md:[&_td]:block max-md:[&_td]:break-words max-md:[&_td]:py-2">
+          <thead className="max-md:sr-only bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Username</th>
               <th className="px-4 py-3">Name</th>
@@ -214,8 +214,8 @@ export function ManageUsersPanel({
                 key={u.id}
                 className="border-t table-row-hover transition-ui"
               >
-                <td className="px-4 py-3 text-(--text)">{u.username}</td>
-                <td className="px-4 py-3 text-(--text)">
+                <td className="px-4 py-3 text-(--text)"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Username</span>{u.username}</td>
+                <td className="px-4 py-3 text-(--text)"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Name</span>
                   {editingUserId === u.id && editDraft ? (
                     <div className="grid gap-1">
                       <input
@@ -245,7 +245,7 @@ export function ManageUsersPanel({
                     (u.firstName || "") + " " + (u.lastName || "")
                   )}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td className="px-4 py-3 text-(--text)"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Email</span>
                   {editingUserId === u.id && editDraft ? (
                     <input
                       value={editDraft.email}
@@ -262,7 +262,7 @@ export function ManageUsersPanel({
                     u.email ?? ""
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Role</span>
                   {editingUserId === u.id && editDraft ? (
                     <select
                       value={editDraft.role}
@@ -283,7 +283,7 @@ export function ManageUsersPanel({
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">MFA Policy</span>
                   <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`rounded-full px-2 py-1 text-xs ${u.mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/6 text-(--text-muted)"}`}
@@ -302,10 +302,10 @@ export function ManageUsersPanel({
                     </div>
                   )}
                 </td>
-                <td className="px-4 py-3 text-xs text-(--text-muted)">
+                <td className="px-4 py-3 text-xs text-(--text-muted)"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Updated</span>
                   {formatTimestamp(u.updatedAt ?? u.createdAt)}
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right"><span className="mb-1 block text-xs text-(--text-muted) md:hidden">Actions</span>
                   {editingUserId === u.id ? (
                     <div className="flex flex-wrap justify-end gap-2">
                       <button

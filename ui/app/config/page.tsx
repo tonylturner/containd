@@ -124,6 +124,32 @@ function ConfigPage() {
     }
   }
 
+  async function validateCandidate() {
+    if (!canEdit) return;
+    try {
+      const submitted = candidateText;
+      const res = await api.validateConfig(JSON.parse(submitted) as ConfigBundle);
+      setStatus(res.ok ? "Configuration valid. Unsaved text has not been staged." : `Validation failed: ${res.error}`);
+    } catch {
+      setStatus("Invalid JSON.");
+    }
+  }
+
+  function doFactoryReset() {
+    if (!canEdit || !canSaveNow() || !diffRevision) return;
+    dialogOpen.current = true;
+    confirm.open({
+      title: "Factory reset appliance", variant: "danger", confirmLabel: "Reset now",
+      message: "This immediately wipes configuration, users and audit history and applies appliance defaults. It cannot be undone. Log in afterwards with the default credentials. Lab web/API tokens remain valid.",
+      onConfirm: async () => {
+        if (!canSaveNow()) { setStatus("Factory reset failed: configuration unavailable."); return; }
+        const result = await diffView.writeRefresh(base => api.factoryReset(base), api.diffConfig);
+        setStatus(result.ok ? statusWithWarning(result.data.message, result.warning) : `Factory reset failed: ${result.error}`);
+        if (result.ok) refresh();
+      },
+    });
+  }
+
   async function copyRunningToCandidate() {
     if (!canEdit || !canSave || !running) return;
     setStatus(null);
@@ -522,6 +548,7 @@ function ConfigPage() {
             onCommitConfirmed={doCommitConfirmed}
             onConfirmCommit={doConfirm}
             onRollback={doRollback}
+            onFactoryReset={doFactoryReset}
           />
         </div>
       )}
@@ -545,6 +572,9 @@ function ConfigPage() {
                   className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
                 >
                   Copy running → staged
+                </button>
+                <button onClick={validateCandidate} className="rounded-xs border px-3 py-1.5 text-sm">
+                  Validate
                 </button>
                 <button
                   onClick={saveCandidate}
@@ -612,6 +642,7 @@ function ConfigPage() {
               <ConfigChangeSummary diff={configDiff} blocks={diffBlocks} />
               <Disclosure title="Advanced">
                 <p className="mb-3 text-xs text-(--text-muted)">Exact redacted JSON changes by block.</p>
+                <div className="mb-4 grid min-w-0 gap-4"><ConfigChangeSummary diff={configDiff} blocks={diffBlocks} detailed /></div>
                 <div className="grid min-w-0 gap-4"><ConfigDiffBlocks blocks={diffBlocks} /></div>
               </Disclosure>
             </>
@@ -632,6 +663,7 @@ function ConfigPage() {
           onCommitConfirmed={doCommitConfirmed}
           onConfirmCommit={doConfirm}
           onRollback={doRollback}
+          onFactoryReset={doFactoryReset}
         />
       )}
     </Shell>

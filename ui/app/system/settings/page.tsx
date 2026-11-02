@@ -14,10 +14,13 @@ import {
   setShowTips,
   subscribePrefs,
 } from "../../../lib/prefs";
+import { ManagementAccess } from "./management-access";
+import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
 import { certUploadNotice, tlsView } from "./tls-view";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
+  const confirm = useConfirm();
   const [tlsInfo, setTLSInfo] = useState<TLSInfo | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -65,32 +68,32 @@ export default function SystemSettingsPage() {
     await refresh();
   }
 
-  async function uploadCA() {
+  async function uploadCA(clear = false) {
     if (!canEdit) return;
     setError(null);
     setWarning(null);
     setStatus(null);
     setTrustDetails(null);
-    if (!caFile) {
+    if (!clear && !caFile) {
       setError("Select a PEM bundle file.");
       return;
     }
-    const pem = await readFileText(caFile);
-    const res = await api.setTrustedCA(pem);
+    const res = await api.setTrustedCA(clear ? { clear: true } : await readFileText(caFile!));
     if (res.state === "failed") {
       setError(res.error || "Failed to upload trusted CA bundle.");
     } else if (res.state === "stored") {
       const reason = res.warnings.length > 0 ? `: ${res.warnings.join("; ")}` : "";
-      setWarning("Trust certificates saved but not active. Applying configuration retries activation.");
+      setWarning(`Trust certificates saved but not active. Applying configuration retries activation${reason || "."}`);
       setTrustDetails(`Revision: ${res.revision}${reason}`);
     } else {
-      setStatus("Trust certificates are active.");
+      setStatus(clear ? "Additional trust cleared. Outbound TLS now uses the OS trust store." : "Trust certificates are active.");
       setTrustDetails(`Revision: ${res.revision}`);
     }
   }
 
   return (
     <Shell title="System Settings">
+      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: admin access required to change system settings.
@@ -205,12 +208,18 @@ export default function SystemSettingsPage() {
               className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <button
-              onClick={uploadCA}
+              onClick={() => uploadCA()}
               disabled={!canEdit}
               className="mt-2 rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui disabled:opacity-60"
             >
               Upload CA bundle
             </button>
+            <button disabled={!canEdit} className="rounded-xs border px-3 py-2 text-sm disabled:opacity-60"
+              onClick={() => confirm.open({
+                title: "Clear trusted CAs",
+                message: "This immediately removes all additional trusted CAs. Outbound TLS to private ICAP servers or definition sources may fail. The OS trust store remains in use. This is not a staged configuration edit.",
+                confirmLabel: "Clear", variant: "warning", onConfirm: () => { void uploadCA(true); },
+              })}>Clear</button>
           </div>
         </Card>
       </div>
@@ -256,22 +265,7 @@ export default function SystemSettingsPage() {
         </div>
       </Card>
 
-      <Card className="mt-4" padding="lg">
-        <details>
-        <summary className="cursor-pointer text-sm text-(--text)">Advanced management access</summary>
-        <p className="mt-2 text-sm">CLI shortcuts:</p>
-        <pre className="mt-3 rounded-xs bg-(--surface) p-3 text-xs text-(--text)">
-show system{"\n"}
-set system mgmt listen &lt;addr&gt;{"\n"}
-set system mgmt http enable &lt;true|false&gt;{"\n"}
-set system mgmt https enable &lt;true|false&gt;{"\n"}
-set system mgmt redirect-http-to-https &lt;true|false&gt;{"\n"}
-set system mgmt hsts &lt;true|false&gt; [max_age_seconds]{"\n"}
-set system ssh allow-password &lt;true|false&gt;{"\n"}
-commit
-        </pre>
-        </details>
-      </Card>
+      <ManagementAccess canEdit={canEdit} />
     </Shell>
   );
 }

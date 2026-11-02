@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and inspection setup reachable without horizontal scrolling.
 - VPN peer rows, browser X25519 server-key generation and client configuration
   templates, with secret-presence indicators for WireGuard and managed OpenVPN.
+- System Settings now stages management and SSH access settings and TLS paths,
+  and confirms trusted-CA clearing. Configuration adds non-mutating Validate,
+  guarded factory reset, entity-first reviews and persistent commit actions.
+- User creation returns to the new account with Require MFA available, including
+  on narrow screens; template preview and staging retain their request semantics
+  through a dedicated API module.
 
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator

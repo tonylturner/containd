@@ -824,7 +824,30 @@ export type ConfigBundle = {
   schema_version?: string;
   version?: string;
   description?: string;
-  system?: { hostname?: string };
+  system?: {
+    hostname?: string;
+    mgmt?: {
+      listenAddr?: string;
+      enableHTTP?: boolean;
+      enableHTTPS?: boolean;
+      httpListenAddr?: string;
+      httpsListenAddr?: string;
+      tlsCertFile?: string;
+      tlsKeyFile?: string;
+      trustedCAFile?: string;
+      redirectHTTPToHTTPS?: boolean;
+      enableHSTS?: boolean;
+      hstsMaxAgeSeconds?: number;
+    };
+    ssh?: {
+      listenAddr?: string;
+      allowPassword?: boolean;
+      authorizedKeysDir?: string;
+      banner?: string;
+      hostKeyRotationDays?: number;
+      shellMode?: "linux" | "appliance" | "";
+    };
+  };
   zones?: Zone[];
   interfaces?: Interface[];
   assets?: Asset[];
