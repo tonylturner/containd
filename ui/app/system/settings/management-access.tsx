@@ -33,6 +33,13 @@ export function ManagementAccess({ canEdit }: { canEdit: boolean }) {
   }, [readConfig]));
   useConfigRefresh(refresh);
   const system = draft.cfg?.system ?? {};
+  const conflicted = !!draft.editor.conflictRevision;
+
+  async function reload() {
+    readConfig(await api.getCandidateConfig(), false);
+    setError(null);
+    setStatus(null);
+  }
 
   function update(group: Group | null, key: string, value: string | boolean | number | undefined) {
     draft.setCfg(cfg => {
@@ -49,7 +56,7 @@ export function ManagementAccess({ canEdit }: { canEdit: boolean }) {
   }
 
   async function save() {
-    if (!canEdit || !draft.cfg || saving) return;
+    if (!canEdit || !draft.cfg || saving || conflicted) return;
     setSaving(true);
     setError(null);
     setStatus(null);
@@ -96,13 +103,16 @@ export function ManagementAccess({ canEdit }: { canEdit: boolean }) {
     <p className="mt-2 text-sm">These edits stage into the candidate, not the active settings. Review and use Commit-confirmed to protect access.</p>
     <p className="mt-2 text-sm">Listener addresses and SSH shell mode require a management restart after commit. Environment overrides take precedence over saved settings. Paths refer to files inside the appliance, not your browser.</p>
     <p className="mt-2 text-sm">Disabling SSH passwords requires an enrolled administrator key accepted by the server. Reserved management paths cannot be disabled or redirected.</p>
-    <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps}
-      onReload={async () => readConfig(await api.getCandidateConfig(), false)} />
+    {conflicted ? <div role="alert" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+      <p>Configuration changed since you loaded it</p>
+      <p className="mt-1 text-xs">Reload discards your management edits and loads the latest complete candidate. Re-enter your changes before saving to preserve other operators&apos; staged settings.</p>
+      <button className="mt-2 rounded-xs border px-3 py-1.5" onClick={reload}>Reload</button>
+    </div> : <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={reload} />}
     {!draft.available && <p role="alert" className="mt-3 text-red-400">Management configuration unavailable. Refresh before editing.</p>}
     {error && <p role="alert" className="mt-3 break-words text-red-400">{error}</p>}
     {status && <p role="status" className="mt-3">{status} <Link href="/config/?tab=diff" className="underline">Review changes</Link></p>}
     <form onSubmit={e => { e.preventDefault(); void save(); }} className="mt-4">
-      <fieldset disabled={!canEdit || !draft.writable || saving} className="grid min-w-0 gap-4 disabled:opacity-60">
+      <fieldset disabled={!canEdit || !draft.writable || saving || conflicted} className="grid min-w-0 gap-4 disabled:opacity-60">
         <label className="grid gap-1 text-sm">Hostname
           <input className="w-full input-industrial" value={system.hostname ?? ""}
             onChange={e => update(null, "hostname", e.target.value)} />
@@ -134,7 +144,7 @@ export function ManagementAccess({ canEdit }: { canEdit: boolean }) {
           {saving ? "Saving…" : "Save management access"}
         </button>
       </fieldset>
-      <button type="button" onClick={refresh} className="mt-3 rounded-xs border px-3 py-2 text-sm">Refresh management access</button>
+      <button type="button" onClick={reload} className="mt-3 rounded-xs border px-3 py-2 text-sm">Refresh management access</button>
     </form>
   </Card>;
 }

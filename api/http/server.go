@@ -464,12 +464,15 @@ func validateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		baseline, err := store.Load(c.Request.Context())
+		snapshot, err := store.ReadSnapshot(c.Request.Context(), config.SnapshotPair, cfg.IDS.Rules != nil)
 		if err != nil && !errors.Is(err, config.ErrNotFound) {
 			internalError(c, err)
 			return
 		}
-		if err := config.CheckWrite(baseline, cfg, config.ReservationForStore(store)); err != nil {
+		// Match candidate staging without persisting or returning the restored
+		// secrets. Both documents come from one authoritative read snapshot.
+		cfg.RestoreRedactedSecrets(snapshot.Candidate)
+		if err := config.CheckWrite(snapshot.Running, cfg, config.ReservationForStore(store)); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
