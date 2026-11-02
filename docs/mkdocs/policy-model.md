@@ -46,7 +46,12 @@ together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
 The Firewall Rules page leads with enforcement and outbound status, then the
-rule table. On larger screens its seven columns are **Order**, **Description**,
+rule table. Administrators can **Enable enforcement** or **Disable enforcement**
+from its status card after confirmation. This only stages the change; review the
+diff and use **Commit-confirmed** to apply it. Disabling on commit removes the
+installed ruleset. A staged direction replaces the toggle when candidate settings
+and live enforcement differ.
+On larger screens its seven columns are **Order**, **Description**,
 **Zones**, **Protocols**, **Action**, **Hits**, and **Actions**. On phones the same
 rows stack with labelled values, so each action, including the **Default**
 action, is readable without horizontal scrolling. The exact **ID** appears

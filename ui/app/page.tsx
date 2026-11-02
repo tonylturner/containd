@@ -37,10 +37,12 @@ const Console = dynamic(
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
 import { Skeleton } from "../components/Skeleton";
+import { useHealth } from "../hooks/useHealth";
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
 
 export default function Home() {
+  const enforcement = useHealth()?.enforcement;
   const [data, setData] = useState<DashboardData | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
@@ -167,7 +169,16 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex items-center gap-4 text-2xs font-mono text-slate-500">
+        <div className="flex flex-wrap items-center gap-4 text-2xs font-mono text-slate-500">
+          <Link href="/firewall/#enforcement" title={`Firewall enforcement ${enforcement?.state ?? "unknown"}`}
+            className="flex items-center gap-1.5 hover:text-slate-300 transition-colors">
+            FW
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+              enforcement?.state === "enforcing" ? "bg-emerald-400"
+                : enforcement?.state === "degraded" ? "bg-amber-400"
+                  : enforcement?.state === "unavailable" ? "bg-red-400" : "bg-slate-600"
+            }`} />
+          </Link>
           {services.slice(0, 4).map((s) => (
             <Link
               key={s.name}

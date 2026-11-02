@@ -53,6 +53,7 @@ type Mocks = {
   simulation?: boolean;
   dashboardStatus?: number;
   protection?: ReturnType<typeof observation>;
+  enforcement?: string;
 };
 
 async function openDashboard(page: Page, mocks: Mocks) {
@@ -98,6 +99,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/simulation") body = { running: mocks.simulation ?? false };
     if (p === "/api/v1/config/diff") body = { changed: false, changedSections: [], pendingConfirm: null, running: {}, candidate: {} };
     if (p === "/api/v1/dataplane/protection") body = mocks.protection ?? observation();
+    if (p === "/api/v1/health") body = { status: "ok", enforcement: { state: mocks.enforcement ?? "unknown", reason: "" } };
     if (p === "/api/v1/services/status") body = mocks.services;
     await route.fulfill({ status, json: status === 200 ? body : { error: "telemetry read unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
@@ -122,6 +124,21 @@ const knownServices = {
   proxy: { forward_enabled: false, reverse_enabled: false, envoy_running: false, nginx_running: false },
   syslog: { configured_forwarders: 0, ...meter() },
 };
+
+for (const [state, color] of [
+  ["enforcing", "bg-emerald-400"], ["degraded", "bg-amber-400"],
+  ["unavailable", "bg-red-400"], ["disabled", "bg-slate-600"], ["unknown", "bg-slate-600"],
+] as const) {
+  test(`dashboard FW signal is ${state} and links to enforcement at 390px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openDashboard(page, { events: [], services: knownServices, enforcement: state });
+    const signal = page.getByRole("link", { name: "FW", exact: true });
+    await expect(signal).toHaveAttribute("href", "/firewall/#enforcement");
+    await expect(signal).toHaveAttribute("title", `Firewall enforcement ${state}`);
+    await expect(signal.locator("span")).toHaveClass(new RegExp(color));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
 
 for (const width of [1280, 390]) {
   for (const count of [0, 1, 60]) {

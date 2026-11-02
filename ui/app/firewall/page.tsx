@@ -38,6 +38,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
 import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 import { DPIConfigSection } from "./firewall-dpi-config";
+import { FirewallEnforcementControl } from "./firewall-enforcement-control";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
 import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ruleset-status";
@@ -363,18 +364,29 @@ export default function FirewallPage() {
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
-      <Card padding="md" className="mb-4">
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-          <EnforcementHealthIndicator health={health?.enforcement} />
-          {installed.state === "loaded" && (
-            <>
-              <AppliedRulesetStatus status={installed.status} />
-              <RuleWarningList scope="applied" warnings={installed.status.warnings} />
-            </>
-          )}
-          <InstalledRulesetUnavailable view={installed} />
-        </div>
-      </Card>
+      <div id="enforcement" className="scroll-mt-4">
+        <Card padding="md" className="mb-4">
+          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+            <EnforcementHealthIndicator health={health?.enforcement} />
+            {installed.state === "loaded" && (
+              <>
+                <AppliedRulesetStatus status={installed.status} />
+                <RuleWarningList scope="applied" warnings={installed.status.warnings} />
+              </>
+            )}
+            <InstalledRulesetUnavailable view={installed} />
+            <FirewallEnforcementControl config={dpiConfig} defaultAction={defaultAction}
+              health={health?.enforcement} available={canSave} revision={viewRevision}
+              onStage={(next, expectedRevision) => {
+                if (!isAdmin() || !canSaveNow()) return Promise.resolve({ ok: false, error: "Configuration unavailable. Refresh successfully before saving." });
+                return write((base, view) => base === expectedRevision
+                  ? setDataPlane(base, { ...view.dpiConfig, enforcement: next })
+                  : Promise.resolve({ ok: false as const, error: "Configuration changed since you loaded it. Refresh and review before saving." }),
+                { patch: (view, data) => ({ ...view, dpiConfig: data }) });
+              }} />
+          </div>
+        </Card>
+      </div>
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-(--text)">Outbound readiness</div>

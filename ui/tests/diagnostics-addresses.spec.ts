@@ -16,6 +16,7 @@ async function openDiagnostics(page: Page) {
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] }
         : path === "/api/v1/interfaces" ? [{ name: "lan", device: "eth0", zone: "lan" }]
+          : path === "/api/v1/dataplane" ? { enforcement: true }
           : path === "/api/v1/interfaces/state"
             ? [{ name: "eth0", up: true, addrs: ["fe80::1/64", "192.0.2.010/24", "192.0.2.10/24"] }]
             : {};

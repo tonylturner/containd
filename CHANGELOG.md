@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on. The UI now shows them as off. Turn them on explicitly if you want
   FreshClam updates.
 
+### Added
+
+- Administrators can stage firewall enforcement on or off from the Firewall
+  status card, with confirmation and a review link; the dashboard's FW indicator
+  links directly to enforcement status.
+
 ### Changed
 
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
