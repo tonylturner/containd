@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
+
 import { useState } from "react";
 import { api, type TelemetryEvent } from "../../lib/api";
 import { describeICSEvidence } from "./iec104-evidence";
@@ -33,7 +35,7 @@ function EventDetails({ id, onError }: { id: string; onError: (failed: boolean) 
       </button>
       {detail && (
         <details open className="mt-2">
-          <summary>Event JSON</summary>
+          <summary>Event JSON <DemoBadge origin={detail.origin} /></summary>
           <a className="mt-1 inline-block underline" download={`event-${id}.json`}
             href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download event JSON</a>
           <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3">{json}</pre>
@@ -51,7 +53,7 @@ export function EventInspection({ event: ev, open, onError }: {
   const evidence = describeICSEvidence(ev);
   return (
     <div id={`event-inspection-${ev.id}`} hidden={!open} className="min-w-0">
-      <div className="mt-1 text-xs text-(--text-muted)">{eventSubtitle(ev)}</div>
+      <div className="mt-1 text-xs text-(--text-muted)">{eventSubtitle(ev)} <DemoBadge origin={ev.origin} /></div>
       <EventDetails id={ev.id} onError={onError} />
       {evidence && (
         <details className="mt-2 rounded-xs border p-3 text-xs">

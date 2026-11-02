@@ -1,5 +1,7 @@
 "use client";
 
+import { decimalCounter } from "../../lib/api-telemetry";
+import { trafficDescription } from "../../lib/conduit-traffic";
 import { revisionError } from "../../lib/config-revision";
 
 import { useConfigView } from "../../lib/use-config-revision";
@@ -50,12 +52,17 @@ export default function SecurityView() {
       setConduits(conds);
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, INITIAL_ZONES).map((z) => z.id));
     } catch (e) {
+      setConduits([]);
       setError(String(e));
     }
   }, [readConfig]));
 
   useConfigRefresh(fetchData);
 
+  const maxTraffic = conduits.reduce((max, c) => {
+    const bytes = c.traffic.state === "measured" ? decimalCounter(c.traffic.bytes) : BigInt(0);
+    return bytes > max ? bytes : max;
+  }, BigInt(1));
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
   const targets = useMemo(() => summarizeTargets(allZones, conduits), [allZones, conduits]);
   const conduitIndex = useMemo(() => {
@@ -305,7 +312,7 @@ export default function SecurityView() {
                           <div className={s.cellProto}>{topProtos}</div>
                         </div>
                         <div className={`${s.cellIds} ${idsClass}`}>{idsText}</div>
-                        <div className={s.cellTraffic} style={{ background: volColor, opacity: 0.15 + cd.traffic * 0.5 }} />
+                        {cd.traffic.state === "measured" ? <div className={s.cellTraffic} title={trafficDescription(cd.traffic)} style={{ background: volColor, opacity: Number(decimalCounter(cd.traffic.bytes)) / Number(maxTraffic), borderTop: cd.traffic.complete ? undefined : "1px dashed var(--amber)" }} /> : <span className="text-[8px] text-amber" title={cd.traffic.reason}>Traffic unavailable</span>}
                       </button>
                     );
                   })}
@@ -392,8 +399,8 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
         <DR k="From" v={fromZ.name} vc={fromZ.color} />
         <DR k="To" v={toZ.name} vc={toZ.color} />
         <DR k="IDS coverage" v={idsLabel[conduit.ids]} vc={idsColor[conduit.ids]} />
-        <DR k="Source" v="Live" />
-        <DR k="Traffic" v={`${Math.round(conduit.traffic * 100)}% of baseline`} />
+        <DR k="Source" v="routed traffic that passed policy, last hour" />
+        <DR k="Traffic" v={trafficDescription(conduit.traffic)} />
       </div>
 
       {/* Source zone SL */}

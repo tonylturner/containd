@@ -10,6 +10,7 @@ import type {
   TelemetryEvent,
   Zone,
 } from "../lib/api";
+import { TelemetryChart } from "../components/TelemetryChart";
 import type { ServiceInfo } from "./dashboard-panels";
 
 export function NetworkPulseStats({
@@ -143,16 +144,15 @@ export function NetworkPulseCanvas({
 /** Zone-attributed IDS alerts among the recent events. */
 type ZoneThreat = { alerts: number; level: "critical" | "elevated" | "clear" };
 
-export function ZoneList({ zones, threatMap, sparklineMap }: {
+export function ZoneList({ zones, threatMap, threatsKnown = true }: {
   zones: Zone[];
   threatMap: Record<string, ZoneThreat>;
-  sparklineMap: Record<string, number[]>;
+  threatsKnown?: boolean;
 }) {
   return (
     <div className="space-y-2">
       {zones.map((z) => {
         const threat = threatMap[z.name] ?? { alerts: 0, level: "clear" as const };
-        const sparkline = sparklineMap[z.name] ?? [];
         const badgeInfo = zoneBadge(threat.level);
 
         return (
@@ -165,8 +165,8 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-200 font-mono">
                 {z.alias || z.name}
               </span>
-              <span className={`text-2xs font-mono px-1.5 py-0.5 rounded-sm ${badgeInfo.cls}`}>
-                {badgeInfo.label}
+              <span className={`text-2xs font-mono px-1.5 py-0.5 rounded-sm ${threatsKnown ? badgeInfo.cls : "text-slate-400"}`}>
+                {threatsKnown ? badgeInfo.label : "UNKNOWN"}
               </span>
             </div>
             {threat.alerts > 0 && (
@@ -179,125 +179,16 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
                 {z.description}
               </div>
             )}
-            {sparkline.length > 0 && (
-              <div className="mt-2 flex h-4 items-end gap-px">
-                {sparkline.map((v, i) => {
-                  const max = Math.max(...sparkline, 1);
-                  const h = Math.max(1, Math.round((v / max) * 16));
-                  return (
-                    <div
-                      key={i}
-                      className="flex-1 rounded-t-xs"
-                      style={{
-                        height: `${h}px`,
-                        background: threat.level === "critical"
-                          ? `rgba(239,68,68,${0.2 + (v / max) * 0.5})`
-                          : threat.level === "elevated"
-                            ? `rgba(245,158,11,${0.2 + (v / max) * 0.5})`
-                            : `rgba(34,197,94,${0.15 + (v / max) * 0.4})`,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            <p className="mt-2 text-[10px] text-(--text-muted)">in + out at this zone · bytes/s</p>
+            <TelemetryChart title={`${z.name} throughput`} compact queries={[
+              { metric: "iface.rx_bytes", group: "zone", zone: z.name },
+              { metric: "iface.tx_bytes", group: "zone", zone: z.name },
+            ]} />
           </Link>
         );
       })}
     </div>
   );
-}
-
-/**
- * Events per second over the last 60 seconds of the loaded events. A quiet
- * window draws a flat zero line rather than an invented baseline.
- */
-export function TrafficChart({ events }: { events: TelemetryEvent[] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const canvasEl = canvas;
-    const ctx2d = ctx;
-
-    const now = Date.now();
-    const data = new Array(60).fill(0);
-    for (const e of events) {
-      if (!e.timestamp) continue;
-      const age = now - new Date(e.timestamp).getTime();
-      const bucket = 59 - Math.floor(age / 1000);
-      if (bucket >= 0 && bucket < 60) data[bucket]++;
-    }
-    const idle = !data.some((v) => v > 0);
-
-    const draw = () => {
-      const ratio = window.devicePixelRatio || 1;
-      const w = canvasEl.offsetWidth;
-      const h = canvasEl.offsetHeight;
-      canvasEl.width = w * ratio;
-      canvasEl.height = h * ratio;
-      ctx2d.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx2d.clearRect(0, 0, w, h);
-
-      const max = Math.max(...data, 1);
-      const step = w / (data.length - 1);
-
-      ctx2d.strokeStyle = "rgba(245,158,11,0.06)";
-      ctx2d.lineWidth = 1;
-      for (let i = 0; i < 4; i++) {
-        const y = h * (i / 3);
-        ctx2d.beginPath();
-        ctx2d.moveTo(0, y);
-        ctx2d.lineTo(w, y);
-        ctx2d.stroke();
-      }
-
-      const trace = () => {
-        ctx2d.beginPath();
-        data.forEach((val, i) => {
-          const x = i * step;
-          const y = h - (val / max) * h * 0.85 - 4;
-          if (i === 0) ctx2d.moveTo(x, y);
-          else ctx2d.lineTo(x, y);
-        });
-      };
-
-      if (idle) {
-        trace();
-        ctx2d.strokeStyle = "rgba(245,158,11,0.3)";
-        ctx2d.lineWidth = 1;
-        ctx2d.stroke();
-        ctx2d.fillStyle = "rgba(148,163,184,0.5)";
-        ctx2d.font = "9px monospace";
-        ctx2d.textAlign = "right";
-        ctx2d.fillText("no events", w - 4, 12);
-        return;
-      }
-
-      trace();
-      ctx2d.lineTo((data.length - 1) * step, h);
-      ctx2d.lineTo(0, h);
-      ctx2d.closePath();
-      const grad = ctx2d.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, "rgba(245,158,11,0.2)");
-      grad.addColorStop(1, "rgba(245,158,11,0)");
-      ctx2d.fillStyle = grad;
-      ctx2d.fill();
-
-      trace();
-      ctx2d.strokeStyle = "#f59e0b";
-      ctx2d.lineWidth = 1.5;
-      ctx2d.stroke();
-    };
-    draw();
-    window.addEventListener("resize", draw);
-    return () => window.removeEventListener("resize", draw);
-  }, [events]);
-
-  return <canvas ref={canvasRef} className="w-full h-full" />;
 }
 
 function isIDSAlert(e: TelemetryEvent): boolean {
@@ -357,60 +248,14 @@ function zoneBadge(level: ZoneThreat["level"]): { label: string; cls: string } {
   }
 }
 
-function recentBin(e: TelemetryEvent, now: number, bins: number, windowMs: number): number | null {
-  if (!e.timestamp) return null;
-  const age = now - new Date(e.timestamp).getTime();
-  if (age < 0 || age > windowMs) return null;
-  const bin = bins - 1 - Math.floor((age / windowMs) * bins);
-  return bin >= 0 && bin < bins ? bin : null;
-}
-
-/** Per-zone event counts over the last 60 seconds, zone-attributed only. */
-export function buildZoneSparklines(events: TelemetryEvent[], zones: Zone[]): Record<string, number[]> {
-  const BINS = 20;
-  const map: Record<string, number[]> = {};
-  for (const z of zones) {
-    map[z.name] = new Array(BINS).fill(0);
-  }
-
-  const now = Date.now();
-  for (const e of events) {
-    const bin = recentBin(e, now, BINS, 60_000);
-    if (bin === null) continue;
-    for (const zn of new Set(eventZones(e))) {
-      if (map[zn]) map[zn][bin]++;
-    }
-  }
-
-  return map;
-}
-
-/** IDS alerts over the last 60 seconds of the loaded events. */
-function buildIDSSparkline(events: TelemetryEvent[]): number[] {
-  const BINS = 15;
-  const series = new Array(BINS).fill(0);
-  const now = Date.now();
-  for (const e of events) {
-    if (!isIDSAlert(e)) continue;
-    const bin = recentBin(e, now, BINS, 60_000);
-    if (bin !== null) series[bin]++;
-  }
-  return series;
-}
-
-/**
- * Service cards from the services status. Sparklines are each service's own
- * per-minute meter; IPS, which has no meter, counts IDS alert events.
- */
+/** Runtime state is independent of retained telemetry. */
 export function deriveServices(
   status: ServicesStatus | null,
-  events: TelemetryEvent[],
 ): ServiceInfo[] {
-  const ips = buildIDSSparkline(events);
 
   if (!status) {
     return [
-      { name: "IPS", state: "unknown", active: null, detail: "Unknown — protection not reported", href: "/ids/", sparkline: ips },
+      { name: "IPS", state: "unknown", active: null, detail: "Unknown — protection not reported", href: "/ids/" },
       { name: "AV", state: "unknown", active: null, detail: "Unknown", href: "/system/services/av/" },
       { name: "DNS", state: "unknown", active: null, detail: "Unknown", href: "/system/services/dns/" },
       { name: "VPN", state: "unknown", active: null, detail: "Unknown", href: "/vpn/" },
@@ -440,7 +285,6 @@ export function deriveServices(
       active: null,
       detail: "Unknown — protection not reported",
       href: "/ids/",
-      sparkline: ips,
     },
     {
       name: "AV",
@@ -448,7 +292,6 @@ export function deriveServices(
       active: avKnown ? avEnabled : null,
       detail: !av.available ? "Scanner unavailable" : !avKnown ? "Unknown" : avEnabled ? av.mode || "Enabled" : "Disabled",
       href: "/system/services/av/",
-      sparkline: av.available ? av.sparkline : undefined,
     },
     {
       name: "DNS",
@@ -456,7 +299,6 @@ export function deriveServices(
       active: dnsKnown ? dnsActive : null,
       detail: !dnsKnown ? "Unknown" : dnsActive ? "Resolving" : dns!.enabled ? "Stopped" : "Disabled",
       href: "/system/services/dns/",
-      sparkline: dns?.sparkline,
     },
     {
       name: "VPN",
@@ -464,18 +306,15 @@ export function deriveServices(
       active: vpnKnown ? vpnActive : null,
       detail: !vpnKnown ? "Unknown" : vpn!.openvpn_running ? "OpenVPN running" : vpn!.wireguard_enabled ? "WireGuard enabled" : "No tunnels",
       href: "/vpn/",
-      sparkline: vpn?.sparkline,
     },
     {
       name: "Syslog",
       state: !syslogKnown ? "unknown" : syslogConfigured ? "active" : "inactive",
       active: syslogKnown ? syslogConfigured : null,
       detail: !syslogKnown ? "Unknown" : syslogConfigured
-        ? `${syslog?.configured_forwarders} fwd · ${typeof syslog?.rate_per_min === "number" ? syslog.rate_per_min.toFixed(0) : "Unknown"}/min`
+        ? `${syslog?.configured_forwarders} fwd`
         : "No forwarders",
       href: "/system/services/syslog/",
-      sparkline: syslog?.sparkline,
-      errorRate: syslog?.errors_rate_per_min,
     },
     {
       name: "Proxy",
@@ -483,7 +322,6 @@ export function deriveServices(
       active: proxyKnown ? proxyActive : null,
       detail: !proxyKnown ? "Unknown" : proxyActive ? "Active" : proxy!.forward_enabled || proxy!.reverse_enabled ? "Stopped" : "Disabled",
       href: "/proxies/",
-      sparkline: proxy?.sparkline,
     },
   ];
 }

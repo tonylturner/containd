@@ -183,7 +183,7 @@ export type Conduit = {
   state: "allow" | "block" | "partial" | "unmodeled";
   ids: "full" | "partial" | "none";
   proto: ConduitProto[];
-  traffic: number;
+  traffic: { state: "measured"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "routed" } | { state: "unavailable"; reason: string };
   rules: string[];
   gaps: string[];
   mitre: string[];
@@ -308,12 +308,15 @@ export type DashboardData = {
     icsRules: number;
   };
   eventStats: {
+    windowSeconds: number;
+    complete: boolean;
     total: number;
     idsAlerts: number;
     modbusWrites: number;
     avDetections: number;
     avBlocks: number;
-  };
+  } | null;
+  eventStatsError?: string;
   services: Record<string, unknown> | null;
   user: User | null;
   lastActivity: AuditRecord | null;
@@ -610,6 +613,7 @@ export type PcapIdentification = {
 };
 
 export type TelemetryEvent = {
+  origin?: "real" | "demo";
   /** Exact decimal uint64; never convert event identity to a JavaScript number. */
   id: string;
   flowId: string;
