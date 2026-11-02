@@ -47,6 +47,7 @@ type CaptureRunner interface {
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
+	counters              counterState
 	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
@@ -252,6 +253,7 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
+	e.counters.tracker.Store(e.stats)
 	e.eventStore = cfg.Events
 	if e.eventStore == nil {
 		e.eventStore = events.NewStore(4096)
@@ -282,6 +284,9 @@ func New(cfg Config) (*Engine, error) {
 		} else {
 			e.updater = enforce.NewNftUpdater(comp.TableName)
 		}
+	}
+	if !cfg.Enforce.Enabled {
+		e.gate.accountingStatus.Store(&accountingView{reason: "enforcement disabled"})
 	}
 	e.bindProtection(true)
 	if err := e.initTransport(cfg); err != nil {
@@ -364,6 +369,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
 	e.stats = fresh.stats
+	e.counters.tracker.Store(e.stats)
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode

@@ -4,6 +4,7 @@
 package stats
 
 import (
+	"crypto/rand"
 	"net/netip"
 	"sort"
 	"strings"
@@ -37,9 +38,10 @@ type FlowStats struct {
 
 // Tracker keeps packet/byte accounting separate from DPI event counters.
 type Tracker struct {
-	mu    sync.RWMutex
-	proto map[string]*ProtoStats
-	flows map[hostPair]*FlowStats
+	generation string
+	mu         sync.RWMutex
+	proto      map[string]*ProtoStats
+	flows      map[hostPair]*FlowStats
 }
 
 // hostPair deliberately excludes transport ports: top talkers aggregate all
@@ -53,8 +55,9 @@ type hostPair struct {
 // New creates a new statistics tracker.
 func New() *Tracker {
 	return &Tracker{
-		proto: make(map[string]*ProtoStats),
-		flows: make(map[hostPair]*FlowStats),
+		generation: rand.Text(),
+		proto:      make(map[string]*ProtoStats),
+		flows:      make(map[hostPair]*FlowStats),
 	}
 }
 
@@ -175,3 +178,6 @@ func (t *Tracker) TopTalkers(n int) []FlowStats {
 	}
 	return out
 }
+
+// Generation identifies this tracker lifetime independently of process boot.
+func (t *Tracker) Generation() string { return t.generation }

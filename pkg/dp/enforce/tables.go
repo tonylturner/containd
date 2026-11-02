@@ -10,7 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// containd owns two nftables tables by name and never touches any other
+// containd owns three nftables tables by name and never touches any other
 // table in the namespace:
 //
 //   - the dynamic table, inet <TableName> (default inet containd), which
@@ -20,10 +20,13 @@ import (
 //     timeouts survive policy changes. Tools address its sets by this name.
 //   - the policy table, inet <TableName>_policy, which every apply replaces
 //     as a whole in one transaction.
+//   - the accounting table, inet <TableName>_acct, which counts routed
+//     forwarding after policy and survives policy applies. Only a changed
+//     device-to-zone map rebuilds it.
 
 const defaultTableName = "containd"
 
-// DHCPRedirectTable is the inet table the DHCP server owns. Neither table
+// DHCPRedirectTable is the inet table the DHCP server owns. No table
 // above may take its name.
 const DHCPRedirectTable = "containd_dhcp"
 
@@ -86,10 +89,10 @@ func (c *Compiler) policyTable() string {
 	return PolicyTable(c.DynamicTable())
 }
 
-// DeleteTables returns the script that removes both tables c owns, present
+// DeleteTables returns the script that removes all tables c owns, present
 // or not.
 func (c *Compiler) DeleteTables() string {
-	return DeleteTable(c.policyTable()) + DeleteTable(c.DynamicTable())
+	return DeleteTable(c.policyTable()) + DeleteTable(c.DynamicTable()) + DeleteTable(AccountingTable(c.DynamicTable()))
 }
 
 // RetireTables returns the script that removes the tables c installed when

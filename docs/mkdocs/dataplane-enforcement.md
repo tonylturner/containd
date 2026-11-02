@@ -27,7 +27,21 @@ false before the first successful apply and while enforcement is disabled.
 The engine owns only its own nftables tables, named after `dataplane.enforceTable`
 (default `containd`). Each apply replaces the policy table
 `inet <enforceTable>_policy` in one transaction and keeps the persistent table
-`inet <enforceTable>` (temporary blocks and revocations, below). Other tables in
+`inet <enforceTable>` (temporary blocks and revocations, below). A third table,
+`inet <enforceTable>_acct`, counts bytes and packets per directional cross-zone pair
+at forward priority 100, after policy. Its accounting-only rules have no packet
+verdicts. It measures routed forwarding that passed policy, including established
+traffic and accepted NFQUEUE continuations, for both IPv4 and IPv6. NAT does not
+change the ingress/egress device-to-zone membership. Only leaf config devices
+participate: bridge members and VLAN parents are excluded, and no same-zone
+counter exists. Local input/output (including AV/ICAP-gated connections) and
+bridged L2 traffic are outside this
+coverage. The accounting map uses the last successfully applied interface set;
+before one is applied these counters are unavailable, not zero. A policy apply
+keeps its counters and epoch. While enforcement stays enabled under the same
+table name, only a changed device-to-zone map rebuilds the accounting table,
+starting a new epoch. Disabling enforcement deletes all three tables; re-enabling
+it or changing the table name starts a new accounting epoch. Other tables in
 the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
 `inet containd_dhcp`, are left untouched. Everything else in
 `inet <enforceTable>`, such as the policy chains and sets an older containd
