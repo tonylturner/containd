@@ -228,6 +228,9 @@ authentication, authorized-key directory, banner, rotation and shell mode.
 it never commits automatically. Server refusals, including reservation and
 administrator-key lockout checks, appear inline and keep your edits. Disabling
 SSH passwords requires an enrolled administrator key accepted by the server.
+If another operator changes the candidate, saving stops until you **Reload**.
+Reload discards your management edits and loads the latest complete candidate;
+re-enter your changes before saving so other operators' staged settings survive.
 Use **Review changes**, then **Commit-confirmed** when changing access.
 Listener addresses and SSH shell mode take effect after a management restart.
 Environment overrides take precedence over saved values; the form shows saved

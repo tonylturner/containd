@@ -38,6 +38,9 @@ tab's **Advanced** section contains the block explorer. **Staged config**
 keeps the raw JSON editor and **Copy running → staged**, and **Running config**
 keeps the committed JSON viewer. **Validate**, next to **Save staged config**,
 checks the current text without staging it or discarding unsaved edits.
+Validation retains omitted or empty VPN secrets from the current candidate,
+just like saving it, so redacted reads can be validated without re-entering
+stored credentials. It does not return those secrets or change the revision.
 
 **Commit** and **Commit-confirmed**, with its seconds field, are together at
 the review in a persistent action bar. **Confirm** is prominent while a server-reported confirmation

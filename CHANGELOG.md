@@ -120,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful VPN saves clear submitted secrets even when unrelated edits arrive
   while saving, without discarding newer secret replacements or peer edits.
 
+- Configuration validation preserves redacted VPN credentials from the candidate.
+  Management-access conflict recovery reloads the complete candidate before
+  saving again, preserving other operators' staged changes.
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
   Unrelated saves preserve an omitted scanner mode rather than staging an explicit default.
