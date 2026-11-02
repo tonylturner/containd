@@ -520,7 +520,7 @@ for (const conflict of [true, false]) {
     });
     await open(page, "/ics/");
     await expect(page.getByLabel("Active inspection state", { exact: true }).getByText(conflict ? "Unknown" : "Enforcing", { exact: true })).toBeVisible();
-    await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "plc-learn", exact: true }) }).getByText("Observation only", { exact: true })).toBeVisible();
+    await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "plc-learn", exact: true }) }).getByText("Observation only — non-blocking", { exact: true })).toBeVisible();
   });
 }
 
