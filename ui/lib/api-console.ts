@@ -25,6 +25,16 @@ export type EventPage = {
   historyTruncated: boolean; engineError?: string;
 };
 
+export type SimulationStatus = {
+  preference: "auto" | "on" | "off";
+  running: boolean;
+  loops: number;
+  captureSet: string;
+  capture: string;
+  error: string;
+  reason: string;
+};
+
 export type ManagementReservation = {
   active: boolean;
   device?: string;
@@ -89,11 +99,11 @@ export const consoleAPI = {
   getEvent: (id: string) => getJSON<TelemetryEvent>(`/api/v1/events/${encodeURIComponent(id)}`),
 
   getSimulationStatus: (signal?: AbortSignal) =>
-    getJSON<{ running: boolean }>("/api/v1/simulation", signal),
+    getJSON<SimulationStatus>("/api/v1/simulation", signal),
   startSimulation: () =>
-    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "start" }),
+    postJSON<SimulationStatus>("/api/v1/simulation", { action: "start" }),
   stopSimulation: () =>
-    postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
+    postJSON<SimulationStatus>("/api/v1/simulation", { action: "stop" }),
 
   listConntrack: (limit = 200) => listConntrack(limit),
   killConntrack: (req: ConntrackKillRequest) =>

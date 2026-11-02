@@ -1,3 +1,4 @@
+import { simulationStatus } from "./fixtures/simulation";
 import { seriesResponse, fulfillSeries } from "./fixtures/telemetry";
 import { expect, test, type Page } from "@playwright/test";
 import { observation } from "./fixtures/protection-api";
@@ -103,7 +104,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/ids/rules") body = mocks.ids ?? { enabled: false, rules: [] };
     if (p === "/api/v1/events") body = mocks.events;
     if (p === "/api/v1/flows") body = flows;
-    if (p === "/api/v1/simulation") body = { running: mocks.simulation ?? false };
+    if (p === "/api/v1/simulation") body = simulationStatus({ running: mocks.simulation ?? false, preference: mocks.simulation ? "on" : "off", capture: mocks.simulation ? "modbus/operations.pcap" : "" });
     if (p === "/api/v1/config/diff") body = { changed: false, changedSections: [], pendingConfirm: null, running: {}, candidate: {} };
     if (p === "/api/v1/dataplane/protection") body = mocks.protection ?? observation();
     if (p === "/api/v1/health") body = { status: "ok", enforcement: { state: mocks.enforcement ?? "unknown", reason: "" } };
@@ -415,14 +416,16 @@ test("active simulation is visible in the header and Stop acts immediately", asy
   const stop = page.getByTitle("Stop traffic simulation");
   await expect(stop).toBeVisible();
   await expect(stop).toContainText("SIM");
+  await expect(page.locator("[data-simulation-status]")).toContainText("Replaying modbus/operations.pcap");
   await page.route("**/api/v1/simulation", async (route) => {
     expect(route.request().method()).toBe("POST");
     expect(route.request().postDataJSON()).toEqual({ action: "stop" });
-    await route.fulfill({ json: { running: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ json: simulationStatus(), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await stop.click();
   await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
   await expect(stop).toHaveCount(0);
+  await expect(page.locator("[data-simulation-status]")).toHaveText("Demo replay stopped · Stop persists across restarts");
   await expect(page.getByRole("button", { name: "CLI Console", exact: true })).toBeVisible();
 });
 

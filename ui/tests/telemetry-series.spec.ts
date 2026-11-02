@@ -208,7 +208,7 @@ test("without real or demo history, show the honest first-run empty state", asyn
   const requests = await open(page, { mutate: body => { body.realActive = false; body.realCovered = false; body.series = []; } });
   await expect(chart(page)).toContainText("No traffic recorded yet");
   await expect(chart(page).getByRole("img")).toHaveCount(0);
-  expect(requests.every(url => url.searchParams.get("origin") === "real")).toBe(true);
+  expect(requests.some(url => url.searchParams.get("origin") === "demo")).toBe(true);
 });
 
 test("a previously active metric with no coverage does not claim a fresh install or zero", async ({ page }) => {

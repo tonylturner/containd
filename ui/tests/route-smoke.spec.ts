@@ -1,3 +1,4 @@
+import { simulationStatus } from "./fixtures/simulation";
 import { expect, test } from "./fixtures/topology-test";
 import { routes } from "./fixtures/routes";
 import { snapshot } from "./fixtures/iec104-inventory";
@@ -409,7 +410,7 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/pcap/status") {
     return json({ running: false, interfaces: [] });
   }
-  if (pathname === "/api/v1/simulation") return json({ running: false });
+  if (pathname === "/api/v1/simulation") return json(simulationStatus());
   if (
     pathname === "/api/v1/stats/protocols" ||
     pathname === "/api/v1/stats/top-talkers"

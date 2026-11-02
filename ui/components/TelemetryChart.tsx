@@ -9,6 +9,10 @@ export function DemoBadge({ origin }: { origin?: string }) {
   return origin === "demo" ? <span className="ml-1 rounded-xs border border-amber-400/40 px-1 text-[10px] text-amber">Demo</span> : null;
 }
 
+function DemoChartNote() {
+  return <span className="text-[10px] text-(--text-muted)"><span className="rounded-xs border border-amber-400/40 px-1 text-amber">Demo data</span>{" "}Recorded captures on an illustrative topology</span>;
+}
+
 function TelemetryMessage({ text, reasons }: { text: string; reasons?: string[] }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -29,7 +33,7 @@ export function TelemetryNotice({ read, hideFault = false }: { read: TelemetryRe
   const fault = read.error ?? read.unavailable;
   return <>{fault && !hideFault && <TelemetryMessage text={fault} reasons={read.noticeReasons} />}
     {read.noCurrentData && <span role="status" className="text-xs text-(--text-muted)">No current data</span>}
-    {read.demo && <span className="rounded-xs border border-amber-400/40 px-1 text-[10px] text-amber">Demo data</span>}
+    {read.demo && <DemoChartNote />}
     {read.data.some(r => r.collector.droppedSeries > BigInt(0)) && <span className="ml-1 text-xs text-amber">Series limit reached — coverage incomplete</span>}</>;
 }
 
@@ -86,7 +90,7 @@ export function TelemetryRate({ queries, perMinute = true, range = "1h" }: { que
   const rate = notice || read?.noCurrentData ? null : pointRate(last, perMinute);
   return <span className="wrap-anywhere">
     {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
-    {read?.demo && <span className="ml-1 text-amber">Demo data</span>}
+    {read?.demo && <span className="ml-1"><DemoChartNote /></span>}
     {last && last.q !== "observed" && rate !== null && <span className="ml-1 text-amber">({last.q === "reset" ? "counter reset" : "partial"})</span>}
     {!notice && !read?.noCurrentData && last?.v !== undefined && rate === null && <span className="ml-1 text-amber">(Partial bucket · Count: {last.v.toLocaleString()}; rate unavailable)</span>}
     {read?.noCurrentData && <span className="ml-1 text-(--text-muted)">No current data</span>}
