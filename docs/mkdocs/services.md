@@ -13,7 +13,11 @@ need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
 The Services overview groups the existing routes by **Connectivity**, **Access**,
-**Inspection** and **Logs**. Individual pages lead with a compact **Configured** /
+**Inspection** and **Logs**. DNS, NTP and proxy software identities are available
+under **Troubleshooting** / **Service details**, not in their primary summaries.
+Overview trend charts require at least two reported samples with some activity;
+empty, single-sample and all-zero series keep the reported rate and error text
+without an empty chart. Individual pages lead with a compact **Configured** /
 **Running** / **Attention** / **Updated time** strip, then settings, then
 **Activity**. Configured describes the candidate editor, not live protection;
 Running uses a separate runtime observation. DHCP and Syslog do not report a
@@ -39,6 +43,10 @@ Antivirus **Scan-path details** retains listener counts and admission metadata;
 fault causes, the scanning outcome and fail policy remain visible. Syslog
 **Delivery details** and per-stream **Technical details** expose batching and exact
 stream positions.
+DHCP reports configuration-render counts, notes and errors inline in **Activity**,
+with issued addresses in **Active Leases**. Its status does not report process IDs,
+configuration-file or lease-file paths, so it has no separate troubleshooting
+expander.
 The antivirus status strip also summarizes the scan-path state and its traffic
 effect before settings. Syslog summarizes known telemetry loss, continuity gaps
 and audit forwarding failures/backlog there; per-stream totals are summed across

@@ -96,10 +96,56 @@ test("missing service entries stay unknown on the overview", async ({ page }) =>
   }
 });
 
-test("service software identities are readable inline", async ({ page }) => {
-  await openServices(page, servicesStatus({ available: false, error: "scanner offline" }));
-  for (const software of ["Envoy + Nginx", "Unbound", "chrony"]) {
-    await expect(page.getByText(`Software: ${software}`, { exact: true })).toBeVisible();
-  }
-  await expect(page.locator("details")).toHaveCount(0);
-});
+for (const width of [1280, 390]) {
+  test(`service software identities stay in keyboard-accessible troubleshooting at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await openServices(page, servicesStatus({ available: false, error: "scanner offline" }));
+    for (const [name, software] of [["Proxies", "Envoy + Nginx"], ["DNS", "Unbound"], ["NTP", "chrony"]]) {
+      const card = page.locator("p").filter({ hasText: new RegExp(`^${name}$`) }).locator("..");
+      const identity = card.getByText(`Software: ${software}`, { exact: true });
+      await expect(identity).not.toBeVisible();
+      const details = card.getByRole("button", { name: "Service details", exact: true });
+      await details.focus();
+      await details.press("Enter");
+      await expect(identity).toBeVisible();
+      await details.press("Space");
+      await expect(identity).not.toBeVisible();
+      await expect(details).toBeFocused();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}
+
+for (const values of [[], [0], [5], [0, 0, 0]]) {
+  test(`overview shows rates without an empty trend for ${JSON.stringify(values)}`, async ({ page }) => {
+    const status = servicesStatus({ available: false, error: "scanner offline" });
+    status.dns = { ...status.dns, ...meter(values, 0.5), errors_rate_per_min: 2 };
+    status.syslog = { ...status.syslog, ...meter(values, 0.5), errors_rate_per_min: 2 };
+    await openServices(page, status);
+    for (const name of ["DNS", "Syslog"]) {
+      const card = page.locator("p").filter({ hasText: new RegExp(`^${name}$`) }).locator("..");
+      await expect(card).toContainText("Rate: 0.5 /min");
+      await expect(card).toContainText("Errors: 2.0/min");
+      await expect(card.locator("[title*='events per minute']")).toHaveCount(0);
+      await expect(card).not.toContainText("Trend:");
+    }
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`overview draws real bars for a reported declining series at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const status = servicesStatus({ available: false, error: "scanner offline" });
+    status.dns = { ...status.dns, ...meter([1, 0], 0.5) };
+    status.syslog = { ...status.syslog, ...meter([1, 0], 0.5) };
+    await openServices(page, status);
+    for (const name of ["DNS", "Syslog"]) {
+      const chart = page.getByTitle(`${name} events per minute`, { exact: true });
+      await expect(chart).toBeVisible();
+      await expect(chart.locator(":scope > div")).toHaveCount(2);
+      expect((await chart.locator(":scope > div").first().boundingBox())!.height).toBeGreaterThan(20);
+      await expect(chart.locator("..")).toContainText("▼ -1");
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}
