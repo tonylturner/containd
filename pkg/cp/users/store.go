@@ -98,7 +98,7 @@ func (s *SQLiteStore) ResetToDefaultAdmin(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("users store unavailable")
 	}
-	tx, err := s.beginBootstrapTx(ctx)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin user reset: %w", err)
 	}
@@ -243,7 +243,7 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 	if !profile.IsStrict() {
 		return ensureDefaultAdmin(ctx, s.db)
 	}
-	tx, err := s.beginBootstrapTx(ctx)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin default admin: %w", err)
 	}
@@ -550,18 +550,19 @@ func (s *SQLiteStore) disableTOTP(ctx context.Context, id string, now time.Time,
 // of factor (every factor when empty) and revokes the account's other
 // sessions atomically, then notifies revocation subscribers.
 func (s *SQLiteStore) updateCredential(ctx context.Context, op, id string, factor Factor, query string, args ...any) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", op, err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	revoked, err := updateCredentialTx(ctx, tx, op, id, factor, query, args...)
+	defer tx.close()
+	revoked, err := updateCredentialTx(ctx, tx.Tx, op, id, factor, query, args...)
 	if err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", op, err)
 	}
+	tx.close()
 	s.revocations.publish(revoked)
 	return nil
 }

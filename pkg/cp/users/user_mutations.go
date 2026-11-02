@@ -39,12 +39,12 @@ func (s *SQLiteStore) Update(ctx context.Context, id string, patch Patch) (*User
 	if patch.Role != "" && patch.Role != "admin" && patch.Role != "view" {
 		return nil, fmt.Errorf("invalid role %q", patch.Role)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if err := lockUser(ctx, tx, id); err != nil {
+	defer tx.close()
+	if err := lockUser(ctx, tx.Tx, id); err != nil {
 		return nil, err
 	}
 	existing, err := getByID(ctx, tx, id)
@@ -53,11 +53,11 @@ func (s *SQLiteStore) Update(ctx context.Context, id string, patch Patch) (*User
 	}
 	role := existing.Role
 	if patch.Role != "" && patch.Role != role {
-		if err := preserveAdmin(ctx, tx, existing); err != nil {
+		if err := preserveAdmin(ctx, tx.Tx, existing); err != nil {
 			return nil, err
 		}
 		role = patch.Role
-		if err := invalidateChallenges(ctx, tx, id); err != nil {
+		if err := invalidateChallenges(ctx, tx.Tx, id); err != nil {
 			return nil, err
 		}
 	}
@@ -69,29 +69,30 @@ func (s *SQLiteStore) Update(ctx context.Context, id string, patch Patch) (*User
 	if err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return nil, err
 	}
+	tx.close()
 	return &updated.User, nil
 }
 
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if err := lockUser(ctx, tx, id); err != nil {
+	defer tx.close()
+	if err := lockUser(ctx, tx.Tx, id); err != nil {
 		return err
 	}
 	existing, err := getByID(ctx, tx, id)
 	if err != nil {
 		return err
 	}
-	if err := preserveAdmin(ctx, tx, existing); err != nil {
+	if err := preserveAdmin(ctx, tx.Tx, existing); err != nil {
 		return err
 	}
-	removed, err := activeSessionIDs(ctx, tx, id, "")
+	removed, err := activeSessionIDs(ctx, tx.Tx, id, "")
 	if err != nil {
 		return err
 	}
@@ -101,9 +102,10 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=?`, id); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return err
 	}
+	tx.close()
 	s.revocations.publish(removed)
 	return nil
 }
