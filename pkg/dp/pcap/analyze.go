@@ -47,7 +47,7 @@ type FlowSummary struct {
 
 // analyzeCore parses offline traffic without generating permission.
 func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*AnalysisResult, error) {
-	reader, err := newPCAPReader(r)
+	reader, err := OpenReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
 	}
@@ -103,7 +103,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 			watermark = ts
 		}
 		observer.record(observer.observer.Sweep(opts.Now()), result, flowEvents)
-		pkt, ok := decodeEthernetPacket(data)
+		pkt, ok := capture.DecodeEthernetFrame(data)
 		truncated = truncated || pkt.CaptureIncomplete || pkt.Invalid == capture.InvalidTruncated
 		result.Truncated = result.Truncated || truncated
 		if !ok {
@@ -297,36 +297,6 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 // AnalyzeWithOptions analyzes with a caller-owned rule snapshot and clock.
 func AnalyzeWithOptions(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	return analyzeCore(r, opts, decoders...)
-}
-
-// decodeEthernetPacket strips the Ethernet (and one 802.1Q) header and
-// decodes the IP packet with capture.DecodeIPPacket, the decoder the live
-// capture path uses. Packets without usable headers are skipped; truncated TCP payload is
-// passed only to the observer, never to the legacy decoder.
-func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
-	if len(data) < 14 {
-		return capture.Packet{}, false
-	}
-	// EtherType is at bytes 12-13.
-	etherType := binary.BigEndian.Uint16(data[12:14])
-	ipData := data[14:]
-
-	// Handle 802.1Q VLAN tagging.
-	for etherType == 0x8100 || etherType == 0x88a8 {
-		if len(ipData) < 4 {
-			return capture.Packet{}, false
-		}
-		etherType = binary.BigEndian.Uint16(ipData[2:4])
-		ipData = ipData[4:]
-	}
-	if etherType != 0x0800 && etherType != 0x86DD {
-		return capture.Packet{}, false
-	}
-	if len(ipData) == 0 || etherType == 0x0800 && ipData[0]>>4 != 4 || etherType == 0x86dd && ipData[0]>>4 != 6 {
-		return capture.Packet{}, false
-	}
-	pkt := capture.DecodeIPPacket(ipData)
-	return pkt, pkt.Invalid == "" || pkt.Invalid == capture.InvalidTruncated && pkt.TCP.Valid
 }
 
 // A readable non-IP EtherType proves that this record cannot contain learner

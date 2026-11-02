@@ -1,0 +1,659 @@
+{
+  "version": 1,
+  "captures": [
+    {
+      "file": "test/modbus/testdata/bad-layout.pcap",
+      "family": "modbus",
+      "sha256": "280ef38defa66c864435706ba85c9b41f8f0abe5a70ca726e95a3258ed0786b8",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/bad-length.pcap",
+      "family": "modbus",
+      "sha256": "555bea9a68d4a59ccf1edb21c630dadcd8cf21887da0325792d894fc12f91eb1",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/diagnostics.pcap",
+      "family": "modbus",
+      "sha256": "ac9deef674151660aeb77674ec515e7b6ebfaa25640a186f26a8d0e835447b1e",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/operations.pcap",
+      "family": "modbus",
+      "sha256": "19962420f0db93b42ff2802a42d6da2e7f150ad71329708bb96286edf42d50a5",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/pid-nonzero.pcap",
+      "family": "modbus",
+      "sha256": "6682aaf636aa3908800b249f292deec435b66964d74664644f98e3c1424122ee",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/source502.pcap",
+      "family": "modbus",
+      "sha256": "c4cd43b74961856a753e8c4d601012acfc5a3be06c98913762a25902149c4be4",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/modbus/testdata/truncation.pcap",
+      "family": "modbus",
+      "sha256": "3cfadc0e35cb76a49e86acd7d847bf3ae8dad103901f10ff43436784a0028946",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/class-range.pcap",
+      "family": "dnp3",
+      "sha256": "91b6cad31c1bed8dbddb9cfc86c0952536c06caf061e5131aadf3ce0540a53e1",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/crc-flip.pcap",
+      "family": "dnp3",
+      "sha256": "f747176b5d9ec861599251fb8550dd7933a3056bfdf34c28e23521a80cad2e34",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/crob.pcap",
+      "family": "dnp3",
+      "sha256": "214ff629573356c8f7e693e4c32b09c4e125e49bc7b5a4b7675722251ca0002d",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/header-crc.pcap",
+      "family": "dnp3",
+      "sha256": "4e66b3d7f9aa1d05f8c0c4fa17af31101447484919910ec05c82546f0d787485",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/iin-error.pcap",
+      "family": "dnp3",
+      "sha256": "29da5986f9c7de6c41b2f68233361f4dee3441053b490a8ca15177aa2dae25dc",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/large-response.pcap",
+      "family": "dnp3",
+      "sha256": "652637124047a97b927e8531148ab9bebaa001d6a1f4491ab2d4819da4392cd4",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/link-only.pcap",
+      "family": "dnp3",
+      "sha256": "90f6a3466c384cfaeb8c957dc1d6218c5e755a83e04fc3f0a4b7f578bb0b95bb",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/qualifier-tail.pcap",
+      "family": "dnp3",
+      "sha256": "afd8e7b6087a87c5a5b985438e60bd3b9947584c1ad09a02dab4421676d25052",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/startup-integrity.pcap",
+      "family": "dnp3",
+      "sha256": "8c93995db09268312622a494de930f21efcc4804c80571bda55cd62988f46de9",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/dnp3/testdata/unsolicited.pcap",
+      "family": "dnp3",
+      "sha256": "e0eb6345d50177bb0e425494aae0714579239942fbdec713e6ac0aa9e15f1d00",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/iec104/testdata/edge-addressing.pcap",
+      "family": "iec104",
+      "sha256": "8161d845f168f94e4f1c28c9903c00128ae961b94ecf754d022f92866e9ea7ff",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.20"
+        },
+        {
+          "role": "server",
+          "originalAddress": "10.235.0.10"
+        }
+      ]
+    },
+    {
+      "file": "test/iec104/testdata/malformed.pcap",
+      "family": "iec104",
+      "sha256": "d1f944c382f26f0ff687994315c12558ecd294344f117bae73fc4b15b0fe6478",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.20"
+        },
+        {
+          "role": "server",
+          "originalAddress": "10.235.0.10"
+        }
+      ]
+    },
+    {
+      "file": "test/iec104/testdata/sbo-command.pcap",
+      "family": "iec104",
+      "sha256": "ca14032bb6ae57e1015f24aaaae47084c292faeae32fb19c2610f2e37f965f7a",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.20"
+        },
+        {
+          "role": "server",
+          "originalAddress": "10.235.0.10"
+        }
+      ]
+    },
+    {
+      "file": "test/iec104/testdata/session-management.pcap",
+      "family": "iec104",
+      "sha256": "f1df588ca0242027d1d7cd8cb5478c44c73ed9d44b6693718105719e6275655f",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.20"
+        },
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.21"
+        },
+        {
+          "role": "server",
+          "originalAddress": "10.235.0.10"
+        }
+      ]
+    },
+    {
+      "file": "test/iec104/testdata/startup-gi-monitor.pcap",
+      "family": "iec104",
+      "sha256": "eff56e6ee72ecec32ec308d897624225b1a517ef51793087e22f0aa8224c0bb8",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.20"
+        },
+        {
+          "role": "client",
+          "originalAddress": "10.235.0.21"
+        },
+        {
+          "role": "server",
+          "originalAddress": "10.235.0.10"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/connected.pcap",
+      "family": "cip",
+      "sha256": "dc91d51fe43ff539dbe451f1e213d6ef970cb5da8a915a2b76318e90dd094bb4",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/explicit.pcap",
+      "family": "cip",
+      "sha256": "22c7bb3dc0720f3726fc9b457f95b0bd9334ac24ead1ef50c7deffdac3a46f31",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/io.pcap",
+      "family": "cip",
+      "sha256": "52b246d2504237a2c21c12cf3fe3ce8b1dbaabb29c570602450551eff6b822ab",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/msp-error.pcap",
+      "family": "cip",
+      "sha256": "bacf9281bbead9ad99f2de1c65718fe83c9d6640a6c04c3fd10a84d16eed3613",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/msp.pcap",
+      "family": "cip",
+      "sha256": "aec51e425eb2499a3ec06d78e838b487090a3cd95a299ae794b06c97a2782c90",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/msp32.pcap",
+      "family": "cip",
+      "sha256": "d38dd94685dee5efb523371de42764a28e74b28844416377d3226d2638d6c17b",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/native-io.pcap",
+      "family": "cip",
+      "sha256": "fe44004acd2f04ea0fda62f1a5d3190decc0d77a1d4957094a68575905c8062b",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/cip/testdata/udp-short-mutation.pcap",
+      "family": "cip",
+      "sha256": "ec87fa0bfa0b86af58ef04d55b8d71fa2e29d4cca6614aa138ee6c3d8a8c37d4",
+      "license": "Apache-2.0",
+      "mutated": true,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "172.19.0.3"
+        },
+        {
+          "role": "server",
+          "originalAddress": "172.19.0.2"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/dns.pcap",
+      "family": "it",
+      "sha256": "04fa87168e59543da8ad786132b8de0799ef7965cf784c70dcdda1a109163713",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/http.pcap",
+      "family": "it",
+      "sha256": "f1d0db380e018d627e95f8f6b70d9a079ee5108fac4ba9c0aa07cb0c6468dceb",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/ntp.pcap",
+      "family": "it",
+      "sha256": "20b1dd1cd5ab74686b7d6e7d13adcad6d363b94dac5ded0f488e22a771067c4f",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/rdp.pcap",
+      "family": "it",
+      "sha256": "f19d2157431fd1098ca00a9681c75d27d34ef6dad7b03462db620f6e792189c3",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/smb.pcap",
+      "family": "it",
+      "sha256": "4613e47d23fc7d788345d20e1cd4fefc61e387bd963c4b5586af18991ebe7652",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/snmp.pcap",
+      "family": "it",
+      "sha256": "d7e40f0b2b244ea135bd157e4f695f9e8c6ff75ced2c03ef158fb85f240bc54b",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/ssh.pcap",
+      "family": "it",
+      "sha256": "8238fb5200773c49ba1ded6508df4951d0949245ffbe303d079128a336c89673",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    },
+    {
+      "file": "test/it/testdata/tls.pcap",
+      "family": "it",
+      "sha256": "cb14b78e9b2de7d156f341f43f4411a793ddb96b922045f48156416585f1cec8",
+      "license": "Apache-2.0",
+      "mutated": false,
+      "roles": [
+        {
+          "role": "client",
+          "originalAddress": "198.51.100.2"
+        },
+        {
+          "role": "server",
+          "originalAddress": "198.51.100.10"
+        }
+      ]
+    }
+  ]
+}
