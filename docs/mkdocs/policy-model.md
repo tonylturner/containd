@@ -84,28 +84,34 @@ move. Keyboard focus follows the moved rule; at an end it switches to the
 remaining enabled direction. **Move to…** also supports top, bottom, before
 or after another rule. Moves stage changes; commit to apply them.
 
-A read-only **Default** row stays last, even with no configured rules. It applies
+A **Default** row stays last, even with no configured rules. It applies
 to any zone and protocol when no enforcing `ALLOW`, `DENY` or `RESET` rule
 decides. Matching `TAG`, under-limit `RATE_LIMIT` and Monitor rules can fall
 through to this default. Its action comes from the
 same candidate revision as the listed rules: an empty or omitted action means
 `DENY`, `ALLOW` carries an unmatched-traffic warning in the description cell,
 and an unreadable or revision-mismatched default is shown as **unknown**, never assumed to deny.
-This row has no edit, delete or move controls.
+Admins can select **Change default**, choose `ALLOW`, `DENY` or
+**System default (DENY)** (the empty value), and confirm
+**Stage default**. `ALLOW` carries a strong warning that all unmatched traffic
+will be permitted. `DENY` can interrupt traffic without an explicit allow rule.
+Use **Commit-confirmed** after reviewing the diff. The editor preserves the
+rest of the candidate and uses its revision precondition; a conflict keeps the
+choice visible but requires Cancel, Refresh and review before saving again.
+View-only users cannot change it. This row has no delete or move controls.
 
 New rules default to the bottom; creation can instead select top, bottom,
 before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows
 an addition. CLI syntax is in [CLI](cli.md).
 
-The rule editor preserves all saved source zones, destination zones and
-protocols, including when only the description or logging changes. Its simple
-controls edit the first entry in each list; additional entries remain unchanged
-and can be inspected under **All saved matching values**. For multi-valued
-lists, the removal option explicitly removes only the first entry and retains
-the others; it does not change the match to any zone or protocol. To edit entire lists,
-use the **Staged** JSON editor in Configuration and review the diff before commit.
-An empty protocol list continues to mean any protocol.
+The create and edit forms expose every source zone, destination zone and
+protocol as an editable row. **Add source zone**, **Add dest zone** and
+**Add protocol** append entries; each **Remove** affects only its own entry.
+Each protocol retains its own optional port or range. Empty zone lists mean
+any zone on that side; an empty protocol list means any protocol. Editing only
+description or logging preserves all lists. Changes use the same revision-checked
+rule payload and stage into the candidate, not the active policy.
 
 | Action | Decides | Effect |
 | --- | --- | --- |

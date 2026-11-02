@@ -42,7 +42,7 @@ for (const count of [0, 3]) {
     ["ALLOW", "ALLOW", "ALLOW"],
     ["invalid", "RESET", "unknown"],
   ] as const) {
-    test(`default ${label} is read-only and last with ${count} rules`, async ({ page }) => {
+    test(`default ${label} is last with ${count} rules and only known defaults can change`, async ({ page }) => {
       await openFirewall(page, { count, action, omitAction: label === "omitted" });
       const region = page.getByRole("region", { name: "Firewall rules" });
       const fallback = region.getByRole("row", { name: "Default policy" });
@@ -52,7 +52,10 @@ for (const count of [0, 3]) {
       await expect(fallback).toContainText("any → any");
       await expect(fallback.getByRole("cell", { name: "any", exact: true })).toHaveCount(1);
       await expect(fallback).toContainText("no enforcing rule allows, blocks or rejects traffic");
-      await expect(fallback.getByRole("button")).toHaveCount(0);
+      const change = fallback.getByRole("button", { name: "Change default", exact: true });
+      await expect(change).toHaveCount(1);
+      if (expected === "unknown") await expect(change).toBeDisabled();
+      else await expect(change).toBeEnabled();
       await expect(fallback.getByRole("link")).toHaveCount(0);
       await expect(fallback.getByText("Unmatched traffic allowed", { exact: true })).toHaveCount(expected === "ALLOW" ? 1 : 0);
     });
@@ -90,7 +93,10 @@ for (const count of [0, 3]) {
       const fallback = region.getByRole("row", { name: "Default policy", exact: true });
       await expect(fallback.getByRole("status")).toHaveText(action);
       await expect(region.locator("tbody tr").last()).toHaveAttribute("aria-label", "Default policy");
-      await expect(fallback.getByRole("button")).toHaveCount(0);
+      const change = fallback.getByRole("button", { name: "Change default", exact: true });
+      await expect(change).toBeVisible();
+      expect(await change.evaluate(el => el.getBoundingClientRect().right <= window.innerWidth)).toBe(true);
+      if (action === "unknown") await expect(change).toBeDisabled();
       await expect(region.locator('[data-label="Action"]')).toHaveCount(count + 1);
       for (const cell of await region.locator('[data-label="Action"]').all()) {
         await expect(cell.getByRole("status")).toBeVisible();

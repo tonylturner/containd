@@ -842,7 +842,7 @@ export type ConfigBundle = {
   dataplane?: DataPlaneConfig;
   pcap?: { enabled?: boolean; filter?: unknown; forwardTargets?: unknown[] };
   firewall?: {
-    defaultAction?: "ALLOW" | "DENY";
+    defaultAction?: "ALLOW" | "DENY" | "";
     rules?: FirewallRule[];
     nat?: NATConfig;
   };

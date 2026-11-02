@@ -17,7 +17,7 @@ import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils
 
 export function ICSPredicateFields({
   protocol, onProtocolChange,
-  mode, onModeChange, globalMode,
+  mode, onModeChange, globalMode, inlineConfigured, onSetupInline,
   functionCodes, onFunctionCodesChange,
   addresses, onAddressesChange,
   unitId, onUnitIdChange,
@@ -31,6 +31,8 @@ export function ICSPredicateFields({
   mode: ICSModeSelection; onModeChange: (v: ICSModeSelection) => void;
   /** The global DPI mode an empty rule mode inherits. */
   globalMode: string | undefined;
+  inlineConfigured?: boolean;
+  onSetupInline?: () => void;
   functionCodes: string; onFunctionCodesChange: (v: string) => void;
   addresses: string; onAddressesChange: (v: string) => void;
   unitId: string; onUnitIdChange: (v: string) => void;
@@ -54,7 +56,7 @@ export function ICSPredicateFields({
             {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
           </select>
         </div>
-        {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} />}
+        {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} inlineConfigured={inlineConfigured} onSetupInline={onSetupInline} />}
         <div className="flex items-end">
           <button
             type="button"

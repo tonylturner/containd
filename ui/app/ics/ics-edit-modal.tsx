@@ -55,6 +55,7 @@ export function EditICSModal({
   available,
   rule,
   globalMode,
+  inlineConfigured,
   onClose,
   onSave,
 }: {
@@ -63,6 +64,7 @@ export function EditICSModal({
   available: boolean;
   rule: FirewallRule;
   globalMode?: ICSModeSelection;
+  inlineConfigured?: boolean;
   onClose: () => void;
   /** The predicate to stage; undefined removes it. */
   onSave: (ics: ICSPredicatePatch | undefined, revision: ConfigBase) => Promise<ApiResult<FirewallRule> | null>;
@@ -194,7 +196,7 @@ export function EditICSModal({
                 ))}
               </select>
             </div>
-            {enabled && protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} label="Safety mode" />}
+            {enabled && protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} label="Safety mode" inlineConfigured={inlineConfigured} />}
           </div>
 
           {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
