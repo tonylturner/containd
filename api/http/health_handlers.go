@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -88,6 +89,7 @@ func healthHandler(store config.Store, engine EngineClient, evidenceProviders ..
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":             "ok",
+			"profile":            profile.Current(),
 			"evidence":           gin.H{"state": evidenceHealth(readEvidence(evidenceProviders...))},
 			"component":          "mgmt",
 			"build":              config.BuildVersion,

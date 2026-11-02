@@ -245,6 +245,19 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	})
 	recordServed(t, ServedManagement{CertFile: dir + "/tls/../tls/server.crt", KeyFile: dir + "/tls/server.key/"})
 	got := read()
+	savedPair, err := mgmttls.ReadPair(savedCert, filepath.Join(dir, "tls", "saved.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	servedPair, err := mgmttls.ReadPair(servedCert, filepath.Join(dir, "tls", "server.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CertFingerprintSHA256 != mgmttls.Fingerprint(savedPair.Leaf) ||
+		got.ServedCertFingerprintSHA256 != mgmttls.Fingerprint(servedPair.Leaf) ||
+		got.CertFingerprintSHA256 == got.ServedCertFingerprintSHA256 {
+		t.Fatalf("separate configured/served fingerprints: %+v", got)
+	}
 	if got.CertFile != savedCert || got.KeyFile != filepath.Join(dir, "tls", "saved.key") ||
 		got.ServedCertFile != servedCert || got.ServedKeyFile != filepath.Join(dir, "tls", "server.key") {
 		t.Fatalf("fallback files = %+v", got)
@@ -272,7 +285,8 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: ":8080", Enabled: true}, HTTPS: config.ManagementListener{Addr: ":8443"}})
 	SetServedManagement(ServedManagement{})
 	if got := read(); got.ServedCertFile != "" || got.ServedKeyFile != "" || got.ServedCertSubject != "" || got.ServedCertNotAfter != "" ||
-		got.ServedCertDNSNames != nil || got.ServedCertIPs != nil || got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" {
+		got.ServedCertDNSNames != nil || got.ServedCertIPs != nil || got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" ||
+		got.ServedCertFingerprintSHA256 != "" || got.CertFingerprintSHA256 != mgmttls.Fingerprint(savedPair.Leaf) {
 		t.Fatalf("readout without HTTPS = %+v", got)
 	}
 }
