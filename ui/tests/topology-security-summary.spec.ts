@@ -117,6 +117,25 @@ test("zones label the computed level as check-based SL", async ({ page }) => {
   await expect(page.locator("body")).not.toContainText(/compliance|achieved|SL-A/i);
 });
 
+test("conduit attention buttons pluralize gap counts", async ({ page }) => {
+  const conduit: Conduit = {
+    from: "ot", to: "dmz", state: "allow", ids: "none", proto: [],
+    traffic: { state: "unavailable", reason: "enforcement disabled" },
+    rules: [], gaps: ["No IDS"], mitre: [], defaultDeny: false,
+    tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
+    auditLogged: true, avEnabled: false,
+  };
+  await serveSecurity(page, [zones[1], zones[2]], [
+    conduit, { ...conduit, from: "dmz", to: "ot", gaps: ["No IDS", "No TLS"] },
+  ]);
+  const loaded = page.waitForResponse("**/api/v1/security/conduits");
+  await page.goto("/topology/");
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  await loaded;
+  await expect(page.getByRole("button", { name: "OT → DMZ: 1 gap", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "DMZ → OT: 2 gaps", exact: true })).toBeVisible();
+});
+
 test("colliding zone slugs keep separate scores, conduits and staging targets", async ({ page }) => {
   const zoneList = [{ name: "OT-1", slTarget: 1 }, { name: "ot_1", slTarget: 1 }];
   const admitted = {

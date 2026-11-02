@@ -20,6 +20,7 @@ import {
   SetupChecklist,
   SystemHealthPanel,
   TrafficCounter,
+  TrafficHistory,
   type InterfaceBindings,
 } from "./dashboard-panels";
 import {
@@ -34,7 +35,6 @@ const Console = dynamic(
   () => import("../components/Console").then((m) => m.Console),
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
-import { TelemetryChart, TelemetryLegend } from "../components/TelemetryChart";
 import { Skeleton } from "../components/Skeleton";
 import { ServiceTelemetryAttention } from "./dashboard-service-attention";
 import { useHealth } from "../hooks/useHealth";
@@ -311,22 +311,14 @@ export default function Home() {
         </div>
 
         {/* Traffic Chart */}
-        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
+        <div className="min-w-0 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
               1h window
             </span>
           </h3>
-          <div className="mb-3 space-y-2">
-            <p className="text-xs text-(--text-muted)">In · bytes/s</p>
-            <TelemetryChart title="In bytes/s" queries={[{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]} />
-            <p className="text-xs text-(--text-muted)">Out · bytes/s</p>
-            <TelemetryChart title="Out bytes/s" queries={[{ metric: "iface.tx_bytes", role: "leaf", group: "role" }]} />
-            <h4 className="text-xs text-(--text-muted)">Events</h4>
-            <TelemetryChart title="Events" queries={[{ metric: "events.total" }]} />
-            <TelemetryLegend />
-          </div>
+          <TrafficHistory />
           <p className="mb-2 text-[10px] text-(--text-muted)">Event totals: last 24 h{eventStats && !eventStats.complete ? " · Partial coverage" : ""}</p>
           {data?.eventStatsError && <p role="status" className="text-xs text-amber">Event totals unavailable: {data.eventStatsError}</p>}
           <div className="grid grid-cols-3 gap-2">

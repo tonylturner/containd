@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 import type { Conduit, TelemetryEvent } from "../lib/api";
 import { observation } from "./fixtures/protection-api";
-import { seriesResponse, type WireResponse } from "./fixtures/telemetry";
+import { manyUnavailableReasons, seriesResponse, type WireResponse } from "./fixtures/telemetry";
 
 const demoEvent: TelemetryEvent = { id: "9007199254740993", flowId: "f1", proto: "ids", kind: "alert", origin: "demo", timestamp: "2026-11-02T12:00:00Z", attributes: { message: "Demo alert" } };
 type Scenario = { eventsFailed?: boolean; totalsFailed?: boolean; conduit?: Conduit["traffic"]; mutate?: (body: WireResponse, url: URL) => void; conduitsFailed?: boolean; reverseBytes?: string };
@@ -56,9 +56,72 @@ async function open(page: Page, path: string, scenario: Scenario = {}) {
     }
     await route.fulfill({ status, json: status === 200 ? body : { error: "read failed" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
+  const loaded = path === "/" ? page.waitForResponse(r => r.url().includes("/telemetry/series?")) : undefined;
   await page.goto(path);
+  await loaded;
   return requests;
 }
+
+for (const width of [1280, 390]) {
+  test(`many Dashboard reasons stay on one line and identical In/Out reasons appear once at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const requests = await open(page, "/", { mutate: body => {
+      if (body.metric.startsWith("iface.")) body.collector.unavailable = manyUnavailableReasons();
+    } });
+    const traffic = page.getByRole("heading", { name: "Traffic1h window", exact: true }).locator("..");
+    if (width === 1280) {
+      const services = page.getByRole("heading", { name: "Service Health", exact: true }).locator("..");
+      expect((await traffic.boundingBox())!.width).toBeCloseTo((await services.boundingBox())!.width, 0);
+    }
+    const notice = traffic.getByRole("status");
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toHaveText("Telemetry unavailable: interface eth1: statistics unreadable: permission denied (+7 more)");
+    expect((await notice.boundingBox())!.height).toBe(16);
+    for (const zone of ["it", "ot"]) {
+      const zoneNotice = page.locator(`[data-telemetry="${zone} throughput"]`).getByRole("status");
+      await expect(zoneNotice).toHaveText(await notice.textContent() ?? "");
+      await expect(zoneNotice).toHaveAttribute("title", await notice.getAttribute("title") ?? "");
+      expect((await zoneNotice.boundingBox())!.height).toBe(16);
+    }
+    const details = await notice.getAttribute("title");
+    for (const { reason } of manyUnavailableReasons()) expect(details).toContain(reason);
+    expect(details?.split("\n")).toHaveLength(8);
+    for (const title of ["In bytes/s", "Out bytes/s"]) {
+      await expect(page.locator(`[data-telemetry="${title}"]`)).toContainText("Rate: Unknown /s");
+      await expect(page.locator(`[data-telemetry="${title}"]`).getByRole("img")).toBeVisible();
+    }
+    await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
+    expect(requests.every(url => url.searchParams.get("origin") === "real")).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: testInfo.outputPath(`dashboard-many-reasons-${width}.png`), fullPage: true });
+  });
+}
+
+test("different In/Out reasons remain visible on their own charts", async ({ page }) => {
+  await open(page, "/", { mutate: body => {
+    if (body.metric.startsWith("iface.")) body.collector.unavailable = [{
+      source: "iface", reason: body.metric === "iface.rx_bytes" ? "receive statistics unreadable" : "transmit statistics unreadable",
+    }];
+  } });
+  await expect(page.locator('[data-telemetry="In bytes/s"]').getByRole("status")).toHaveText("Telemetry unavailable: receive statistics unreadable");
+  await expect(page.locator('[data-telemetry="Out bytes/s"]').getByRole("status")).toHaveText("Telemetry unavailable: transmit statistics unreadable");
+});
+
+test("an ended zone series has neutral No current data without demo fallback", async ({ page }) => {
+  const requests = await open(page, "/", { mutate: (body, url) => {
+    if (url.searchParams.get("group") === "zone") {
+      body.realActive = false;
+      body.series = seriesResponse(url, [10, 0, null]).series;
+    }
+  } });
+  const zone = page.locator('[data-telemetry="it throughput"]');
+  await expect(zone.getByRole("status")).toHaveText("No current data");
+  await expect(zone.getByRole("status")).toHaveClass(/text-\(--text-muted\)/);
+  await expect(zone).not.toContainText("unavailable");
+  await expect(zone.getByRole("img")).toBeVisible();
+  await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
+  expect(requests.every(url => url.searchParams.get("origin") === "real")).toBe(true);
+});
 
 for (const width of [1280, 390]) {
   test(`dashboard keeps six panels and measures In/Out, zones and events at ${width}px`, async ({ page }, testInfo) => {
@@ -106,7 +169,9 @@ for (const metadata of [false, true]) {
     const demoReads = requests.filter(url => url.searchParams.get("origin") === "demo").length;
     outage = true;
     await page.clock.fastForward(10_000);
-    await expect(events).toContainText(metadata ? "Telemetry unavailable: engine connection refused" : "Telemetry unavailable: latest real bucket is a gap");
+    await expect(events).toContainText(metadata ? "Telemetry unavailable: engine connection refused" : "No current data");
+    await expect(events).toContainText("Rate: Unknown /s");
+    if (!metadata) await expect(events.locator(".text-amber")).toHaveCount(0);
     await expect(events.getByText("Demo data", { exact: true })).toHaveCount(0);
     expect(requests.filter(url => url.searchParams.get("origin") === "demo")).toHaveLength(demoReads);
     if (metadata) {
@@ -126,11 +191,11 @@ test("any unavailable real response prevents demo for a multi-metric zone chart"
     body.realActive = false;
     body.series = seriesResponse(url, body.origin === "real" ? [0, 0, 0] : [10, 10, 10]).series;
     if (body.origin === "real" && body.metric === "iface.tx_bytes") {
-      body.collector.unavailable = [{ source: "iface", reason: "interface eth9 missing" }];
+      body.collector.unavailable = [{ source: "iface", reason: "interface eth9: statistics unreadable" }];
     }
   } });
   const zone = page.locator('[data-telemetry="it throughput"]');
-  await expect(zone.getByRole("status")).toHaveText("Telemetry unavailable: interface eth9 missing");
+  await expect(zone.getByRole("status")).toHaveText("Telemetry unavailable: interface eth9: statistics unreadable");
   await expect(zone.getByText("Demo data", { exact: true })).toHaveCount(0);
   await expect(zone.getByRole("img")).toBeVisible();
 });

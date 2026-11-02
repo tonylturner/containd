@@ -35,3 +35,11 @@ export function seriesResponse(url: URL, values: (number | null)[] = [0, 0, 0]):
 export async function fulfillSeries(route: Route, values?: (number | null)[]) {
   await route.fulfill({ json: seriesResponse(new URL(route.request().url()), values) });
 }
+
+/** Repeated per-metric failures must not multiply the operator's notice. */
+export function manyUnavailableReasons(source = "iface"): SourceUnavailable[] {
+  const reasons = Array.from({ length: 8 }, (_, i) => ({
+    source, reason: `interface eth${i + 1}: statistics unreadable: permission denied`,
+  }));
+  return [...reasons, { ...reasons[0] }];
+}
