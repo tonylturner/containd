@@ -36,6 +36,9 @@ func (s *SQLiteStore) resetLocked(ctx context.Context, expected Revision, defaul
 	if err := writeRunningTx(ctx, tx, defaults); err != nil {
 		return "", err
 	}
+	if err := establishTransitionTx(ctx, tx, capture != nil); err != nil {
+		return "", err
+	}
 	revision, err := s.commitRevisionTx(ctx, tx)
 	if err != nil {
 		return "", err

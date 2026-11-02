@@ -38,7 +38,7 @@ func TestRevisionRecoveryBanksAcrossHandles(t *testing.T) {
 				}
 				defer second.Close()
 			}
-			_, err = first.ApplyReset(ctx, before.Revision, DefaultConfig(), func(_ context.Context, _, next *Config) error {
+			_, err = first.ApplyReset(ctx, before.Revision, DefaultConfig(), func(_ context.Context, _, next *RunningSnapshot) error {
 				if next.Description == "original" {
 					return nil
 				}
@@ -63,7 +63,7 @@ func TestRevisionRecoveryBanksAcrossHandles(t *testing.T) {
 						t.Fatal("opening the second handle did not sweep the recovery bank")
 					}
 				} else {
-					_, rejection := second.ApplyChange(ctx, before.Revision, ChangeCommit, 0, func(context.Context, *Config, *Config) error {
+					_, rejection := second.ApplyChange(ctx, before.Revision, ChangeCommit, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 						t.Fatal("stale apply ran")
 						return nil
 					})

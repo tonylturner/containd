@@ -13,11 +13,11 @@ func testBaseRevision(store Store, ctx context.Context) Revision {
 	}
 	return snapshot.Revision
 }
-func testApplyChange(store RuntimeStore, ctx context.Context, change RunningChange, ttl time.Duration, apply func(context.Context, *Config, *Config) error) error {
+func testApplyChange(store RuntimeStore, ctx context.Context, change RunningChange, ttl time.Duration, apply func(context.Context, *RunningSnapshot, *RunningSnapshot) error) error {
 	_, err := store.ApplyChange(ctx, testBaseRevision(store, ctx), change, ttl, apply)
 	return err
 }
-func testApplyReset(store *SQLiteStore, ctx context.Context, cfg *Config, apply func(context.Context, *Config, *Config) error) error {
+func testApplyReset(store *SQLiteStore, ctx context.Context, cfg *Config, apply func(context.Context, *RunningSnapshot, *RunningSnapshot) error) error {
 	_, err := store.ApplyReset(ctx, testBaseRevision(store, ctx), cfg, apply)
 	return err
 }
