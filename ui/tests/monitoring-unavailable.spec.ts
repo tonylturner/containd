@@ -78,7 +78,6 @@ test("simulation failure is unknown, not stopped, and Retry recovers", async ({ 
   await expect(page.getByTitle("Start traffic simulation")).toHaveCount(0);
   unavailable = false;
   await state.getByRole("button", { name: "Retry", exact: true }).click();
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
   await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
   unavailable = true;
   await page.getByTitle("Start traffic simulation").click();

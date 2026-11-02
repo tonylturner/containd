@@ -55,9 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     detail into Troubleshooting. IDS leads with the rules list and one
     add/import flow; groups and export are secondary.
   - Events, alerts, flows and sessions show triage columns first, with full
-    detail in a keyboard-accessible inspector. The dashboard leads with
-    attention and the next setup task; the completed checklist collapses,
-    and simulation and the CLI sit under Tools.
+    detail in a keyboard-accessible inspector.
 
 ### Fixed
 

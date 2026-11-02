@@ -249,13 +249,12 @@ session history.
 
 ## Triage in the web UI
 
-The dashboard leads with attention items and the next setup task. The First-Run
-Checklist collapses once all four tasks are complete, and you can reopen it.
-Traffic and System Health stay visible; Dashboard details holds Network Pulse,
-Zone Status, Service Health and Event Stream. Open Monitoring for live
-investigation. Tools holds SIM and CLI Console. Simulation controls act
-immediately, not on commit, and an active simulation stays indicated while Tools
-is closed.
+The dashboard shows all four First-Run Checklist tasks, including completed
+ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
+System Health stay visible alongside attention and failure notices. Open
+Monitoring for live investigation. The header holds the SIM toggle; simulation
+controls act immediately, not on commit. CLI Console opens on demand below
+the panels.
 
 Events keeps timestamps, endpoints, activity and protection evidence visible.
 Advanced event filters holds exact IDs, protocol, decision, outcome, time and

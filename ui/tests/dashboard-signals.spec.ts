@@ -106,7 +106,6 @@ async function openDashboard(page: Page, mocks: Mocks) {
   ));
   await page.goto("/");
   await loaded;
-  await page.getByRole("button", { name: /^Dashboard details/ }).click();
 }
 
 const zoneCard = (page: Page, name: string) => page.locator("a[href='/zones/']").filter({ hasText: name });
@@ -139,25 +138,40 @@ for (const width of [1280, 390]) {
   }
 
   for (const scenario of [
-    { name: "zero activity", events: [], services: knownServices, text: "0 recent events · 1 service state unknown · 0 zones with alerts" },
-    { name: "single event and zone", events: [idsAlert(1, { srcZone: "lan" })], services: { ...knownServices, proxy: { envoy_running: false } }, text: "1 recent event · 2 service states unknown · 1 zone with alerts" },
-    { name: "multiple events and zones", events: [idsAlert(1, { srcZone: "lan" }), idsAlert(2, { srcZone: "dmz" })], services: null, text: "2 recent events · 6 service states unknown · 2 zones with alerts" },
+    { name: "zero activity", events: [], services: knownServices, unknown: ["IPS"], alertedZones: [] },
+    { name: "single event and zone", events: [idsAlert(1, { srcZone: "lan" })], services: { ...knownServices, proxy: { envoy_running: false } }, unknown: ["IPS", "Proxy"], alertedZones: ["lan"] },
+    { name: "multiple events and zones", events: [idsAlert(1, { srcZone: "lan" }), idsAlert(2, { srcZone: "dmz" })], services: null, unknown: ["IPS", "AV", "DNS", "VPN", "Syslog", "Proxy"], alertedZones: ["lan", "dmz"] },
   ]) {
-    test(`dashboard details summary pluralizes every count: ${scenario.name} at ${width}px`, async ({ page }) => {
+    test(`dashboard panels retain real activity and unknown service states: ${scenario.name} at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
       await openDashboard(page, scenario);
-      const details = page.getByRole("button", { name: /^Dashboard details/ });
-      await expect(details).toHaveAttribute("aria-expanded", "true");
-      await details.click();
-      await expect(details).toHaveAttribute("aria-expanded", "false");
-      await expect(page.getByText(scenario.text, { exact: true })).toBeVisible();
+      const servicePanel = page.getByRole("heading", { name: "Service Health", exact: true }).locator("..");
+      await expect(servicePanel.getByRole("link").filter({ hasText: "Unknown" })).toHaveCount(scenario.unknown.length);
+      for (const name of scenario.unknown) {
+        const card = servicePanel.getByRole("link").filter({ has: page.getByText(name, { exact: true }) });
+        await expect(card).toBeVisible();
+        await expect(card).toContainText("Unknown");
+        await expect(card).not.toHaveClass(/border-emerald/);
+      }
+      const stream = page.getByRole("heading", { name: "Event Stream", exact: true }).locator("..");
+      await expect(stream.getByText("test alert", { exact: true })).toHaveCount(scenario.events.length);
+      if (!scenario.events.length) await expect(stream.getByText("No events yet", { exact: true })).toBeVisible();
+      for (const zone of zones) {
+        const card = zoneCard(page, zone.name);
+        await expect(card).toBeVisible();
+        if (scenario.alertedZones.some(name => name === zone.name)) await expect(card).toContainText("1 alert");
+        else {
+          await expect(card).toContainText("CLEAR");
+          await expect(card).not.toContainText(/alert/);
+        }
+      }
     });
   }
 }
 
 // Counts pixels close to the alert red the canvas uses for critical zones.
 function redPixels(page: Page) {
-  return page.locator("#dashboard-details canvas").first().evaluate((canvas: HTMLCanvasElement) => {
+  return page.getByRole("heading", { name: "Network Pulse", exact: true }).locator("../..").locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext("2d")!;
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
     let red = 0;
@@ -170,7 +184,7 @@ function redPixels(page: Page) {
 
 test("network pulse is a still picture of real zone state", async ({ page }) => {
   await openDashboard(page, { events: [idsAlert(1)], services });
-  const canvas = page.locator("#dashboard-details canvas").first();
+  const canvas = page.getByRole("heading", { name: "Network Pulse", exact: true }).locator("../..").locator("canvas").first();
   await expect(zoneCard(page, "lan")).toContainText("CLEAR");
   const first = await canvas.screenshot();
   await page.waitForTimeout(750);
@@ -226,12 +240,8 @@ for (const scenario of [
   { name: "stopped proxy", status: { ...services, proxy: { forward_enabled: true, reverse_enabled: false, envoy_running: false, nginx_running: false } }, message: "Proxy: Stopped" },
   { name: "syslog errors", status: { ...services, syslog: { configured_forwarders: 1, ...meter(), errors_rate_per_min: 2 } }, message: "Syslog: 1 fwd · 0/min · 2.0 err/min" },
 ]) {
-  test(`service attention stays visible with details collapsed: ${scenario.name}`, async ({ page }) => {
+  test(`service attention stays visible on load: ${scenario.name}`, async ({ page }) => {
     await openDashboard(page, { events: [], services: scenario.status });
-    const details = page.getByRole("button", { name: /^Dashboard details/ });
-    await expect(details).toHaveAttribute("aria-expanded", "true");
-    await details.click();
-    await expect(details).toHaveAttribute("aria-expanded", "false");
     const attention = page.getByRole("status").filter({ hasText: scenario.message });
     await expect(attention).toBeVisible();
     await expect(attention.getByRole("link", { name: "Check service" })).toBeVisible();
@@ -363,34 +373,44 @@ test("Bind interfaces discards stale readiness on a failed refresh and recovers"
 });
 
 
-test("a completed checklist collapses, reopens by keyboard, and keeps every task", async ({ page }) => {
+test("a completed checklist keeps every task visible without a collapse control", async ({ page }) => {
   await openDashboard(page, { events: [], services, ruleCount: 1, interfaceCount: 1,
     interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
   });
-  const toggle = page.getByRole("button", { name: /^First-Run Checklist/ });
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator("#setup-checklist")).toBeHidden();
-  await toggle.focus();
-  await page.keyboard.press("Enter");
-  await expect(toggle).toBeFocused();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("heading", { name: "First-Run Checklist", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^First-Run Checklist/ })).toHaveCount(0);
   for (const task of ["Create zones", "Bind interfaces", "Create policy", "Commit runtime changes"]) {
-    await expect(page.locator("#setup-checklist").getByText(task, { exact: true })).toBeVisible();
+    const card = page.locator("#setup-checklist").getByText(task, { exact: true }).locator("../..");
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Ready", { exact: true })).toBeVisible();
   }
-  await page.keyboard.press("Space");
-  await expect(page.locator("#setup-checklist")).toBeHidden();
 });
 
-test("active simulation stays visible with Tools collapsed and Stop remains immediate", async ({ page }) => {
+test("active simulation is visible in the header and Stop acts immediately", async ({ page }) => {
   await openDashboard(page, { events: [], services, simulation: true });
-  const tools = page.getByRole("button", { name: "Tools", exact: true });
-  await expect(tools).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByRole("status").filter({ hasText: /^Simulation active$/ })).toBeVisible();
-  await expect(page.getByTitle("Stop traffic simulation")).toBeHidden();
-  await tools.click();
-  await expect(page.getByTitle("Stop traffic simulation")).toBeVisible();
-  await expect(page.getByText(/Simulation controls and CLI commands act immediately/)).toBeVisible();
+  const stop = page.getByTitle("Stop traffic simulation");
+  await expect(stop).toBeVisible();
+  await expect(stop).toContainText("SIM");
+  await page.route("**/api/v1/simulation", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postDataJSON()).toEqual({ action: "stop" });
+    await route.fulfill({ json: { running: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+  });
+  await stop.click();
+  await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
+  await expect(stop).toHaveCount(0);
   await expect(page.getByRole("button", { name: "CLI Console", exact: true })).toBeVisible();
+});
+
+const panelHeadings = ["Network Pulse", "Zone Status", "Service Health", "Traffic", "Event Stream", "System Health"];
+
+test("all six dashboard panels and the SIM toggle are visible on load without any click", async ({ page }) => {
+  await openDashboard(page, { events: [], services });
+  for (const heading of panelHeadings) {
+    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic60s window" : heading, exact: true })).toBeVisible();
+  }
+  await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Dashboard details$|^Tools$/ })).toHaveCount(0);
 });
 
 test("stale dashboard totals are discarded while failed enforcement remains prominent", async ({ page }) => {
@@ -413,11 +433,12 @@ test("stale dashboard totals are discarded while failed enforcement remains prom
 });
 
 
-test("dashboard overview and reopened details stay within a 390px viewport", async ({ page }) => {
+test("all dashboard panels stay within a 390px viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDashboard(page, { events: [idsAlert(1)], services, simulation: true });
-  await expect(page.locator("#dashboard-details")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  for (const heading of panelHeadings) {
+    await expect(page.getByRole("heading", { name: heading === "Traffic" ? "Traffic60s window" : heading, exact: true })).toBeVisible();
+  }
+  await expect(page.getByTitle("Stop traffic simulation")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

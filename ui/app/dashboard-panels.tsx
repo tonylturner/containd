@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 
 import type {
   DashboardData,
@@ -87,22 +86,13 @@ export function SetupChecklist({
     },
   ];
 
-  const complete = steps.every(step => step.complete === true);
-  const [disclosure, setDisclosure] = useState<{ complete: boolean; open: boolean } | null>(null);
-  const open = disclosure?.complete === complete ? disclosure.open : !complete;
-  const next = steps.find(step => step.complete !== true);
-
   return (
     <div className="mb-5 rounded-xl border border-white/8 bg-white/3 p-4 shadow-card">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-xs font-semibold text-slate-400">
-            <button type="button" aria-expanded={open} aria-controls="setup-checklist"
-              onClick={() => setDisclosure({ complete, open: !open })}>
-              First-Run Checklist {complete ? "— complete" : "— setup needs attention"}
-            </button>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            First-Run Checklist
           </h3>
-          {next && <p className="mt-2 text-sm text-(--text)">Next: <Link href={next.href} className="underline">{next.title}</Link> — {next.detail}</p>}
           <p className="mt-1 text-sm text-slate-500">
             Use Dashboard for setup and config state. Use Monitoring for live telemetry.
           </p>
@@ -114,7 +104,7 @@ export function SetupChecklist({
           Open Monitoring
         </Link>
       </div>
-      <div id="setup-checklist" hidden={!open} className={open ? "grid gap-3 md:grid-cols-2 xl:grid-cols-4" : "hidden"}>
+      <div id="setup-checklist" className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {steps.map((step) => (
           <div
             key={step.title}
