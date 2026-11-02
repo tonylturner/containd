@@ -78,7 +78,7 @@ export function OpenVPNEditorCard({
   revokeClient,
 }: Props) {
   return (
-    <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+    <div className="relative min-w-0 overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
       <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
       <div className="relative flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -97,14 +97,14 @@ export function OpenVPNEditorCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge tone={faulted || cfg.openvpn.enabled ? "warn" : "off"}>
-            {faulted ? "faulted" : cfg.openvpn.enabled ? "enabled" : "disabled"}
+          <Badge tone={faulted ? "warn" : !canSave ? "info" : cfg.openvpn.enabled ? "warn" : "off"}>
+            {faulted ? "faulted" : !canSave ? "Unknown" : cfg.openvpn.enabled ? "enabled" : "disabled"}
           </Badge>
           <Badge tone={svcStatus?.openvpn_installed ? "info" : "off"}>
-            {svcStatus?.openvpn_installed ? "installed" : "not installed"}
+            {svcStatus?.openvpn_installed === undefined ? "installation unknown" : svcStatus.openvpn_installed ? "installed" : "not installed"}
           </Badge>
           <Badge tone={svcStatus?.openvpn_running ? "ok" : "off"}>
-            {svcStatus?.openvpn_running ? "running" : "stopped"}
+            {svcStatus?.openvpn_running === undefined ? "running state unknown" : svcStatus.openvpn_running ? "running" : "stopped"}
           </Badge>
         </div>
       </div>
@@ -267,13 +267,16 @@ export function OpenVPNEditorCard({
                           }))
                         }
                         className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                        placeholder="password"
+                        aria-label="OpenVPN password"
+                        placeholder={cfg.openvpn.managed.passwordConfigured ? "Password configured — enter to replace" : "password"}
                       />
                     </div>
                   </div>
                 </div>
 
+                {cfg.openvpn.managed.passwordConfigured && <p className="text-xs text-(--text-muted)">Password configured — leave blank to keep it.</p>}
                 <PEMField
+                  configured={cfg.openvpn.managed.caConfigured}
                   title="CA (PEM)"
                   tip="Root CA certificate in PEM format."
                   value={cfg.openvpn.managed.ca ?? ""}
@@ -286,6 +289,7 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <PEMField
+                  configured={cfg.openvpn.managed.certConfigured}
                   title="Client Cert (PEM)"
                   tip="Client certificate for this appliance in PEM format."
                   value={cfg.openvpn.managed.cert ?? ""}
@@ -298,6 +302,7 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <PEMField
+                  configured={cfg.openvpn.managed.keyConfigured}
                   title="Client Key (PEM)"
                   tip="Client private key in PEM format."
                   value={cfg.openvpn.managed.key ?? ""}
@@ -310,7 +315,7 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <div className="text-xs text-(--text-muted)">
-                  This is stored in the appliance config for now; secret encryption/redaction is tracked as a follow-up.
+                  Stored material is never returned by the VPN API. Leave replacement fields blank to keep existing material; Save stages changes for commit.
                 </div>
               </div>
             ) : (
@@ -577,7 +582,7 @@ export function OpenVPNEditorCard({
                     Client credentials
                     <InfoTip label="Issues credentials immediately using the active server, not staged settings. Downloads are read-only." />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={newClientName}
                       aria-label="Client name"

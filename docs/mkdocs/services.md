@@ -219,6 +219,46 @@ do not fill missing series with zero in alerts or dashboards.
   still requires the initialization marker within five seconds before
   acknowledging its loaded revocation list.
 
+### WireGuard keys and peers
+
+The VPN page edits peers as rows: name, public key, allowed IPs (CIDRs), optional
+endpoint and keepalive seconds. **Peers (JSON)** remains under **Advanced peer
+settings** and edits the same list. Add, remove and edit operations stage only
+when you select **Save**; commit applies them.
+
+A stored private key shows **Private key configured — Replace**, without
+revealing it. **Generate key pair** uses WebCrypto X25519 in the browser; it is
+hidden with an explanation when unsupported. Only the private key is submitted
+in the staged write, not in a URL or browser storage. Replacing the server key
+requires updating clients. Saving clears the replacement field.
+
+Client downloads require a known server public key (generated in this editor or
+from live tunnel status) and a server endpoint with port entered in the download
+helper. The endpoint helper is not persisted. **Download client config** produces
+a template, not an issued credential: enter the matching client's private key
+locally, then review its address and routes before use. The peer's allowed IPs
+supply its proposed client addresses, and the server tunnel CIDR supplies the
+initial route; routed networks may need different addresses or additional routes.
+The server peer endpoint is not the server's public endpoint. Downloads never
+include the server private key. A live public key describes the applied server,
+which may differ from staged settings; commit and verify it before connecting.
+
+### VPN secret-presence metadata
+
+`GET /api/v1/services/vpn`, successful VPN stage responses and the VPN object in
+profile-upload responses omit stored secret values. `wireguard.privateKeyConfigured`
+is always a boolean. When `openvpn.managed` exists it always includes boolean
+`caConfigured`, `certConfigured`, `keyConfigured` and `passwordConfigured`.
+These are read-only presence indicators, not proof that a tunnel is running.
+Managed OpenVPN fields show configured material without requiring it again.
+
+Writes retain existing WireGuard keys when `privateKey` is omitted or empty.
+When both old and new managed OpenVPN objects exist, omitted or empty CA,
+certificate, key and password fields retain their stored values. To replace a
+secret, supply a nonempty replacement. Omitting `managed` removes the entire
+managed client configuration; it does not retain that object. These VPN writes
+stage the candidate with the revision precondition; they never auto-commit.
+
 ### OpenVPN (managed client)
 
 The preferred path is to configure OpenVPN as a **managed client** from the UI:

@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configure inline inspection from DPI settings, and edit every zone and
   protocol entry without raw JSON. ICS rule rows stack on phones with actions
   and inspection setup reachable without horizontal scrolling.
+- VPN peer rows, browser X25519 server-key generation and client configuration
+  templates, with secret-presence indicators for WireGuard and managed OpenVPN.
 
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
@@ -74,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
+- VPN reads and stage responses redact stored secrets without falsely reporting
+  configured key and certificate material as missing.
+
 - Editing a firewall rule with several zones or protocols no longer keeps only
   the first of each.
 - DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown

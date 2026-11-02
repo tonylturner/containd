@@ -848,3 +848,19 @@ retention. The internal engine read is
 `GET /internal/inventory?section=iec104`; it uses the existing inventory handler.
 See [ICS DPI](ics-dpi.md#passive-iec-104-inventory) for UI and retention details
 and [OpenAPI](#openapi-specification) for the complete response schemas.
+
+## VPN configuration secrets
+
+`GET /services/vpn` and successful `POST /services/vpn` responses redact the
+WireGuard private key and managed OpenVPN CA, certificate, key and password.
+The `vpn` object returned by profile upload is redacted too.
+`wireguard.privateKeyConfigured` is always present. If `openvpn.managed` exists,
+its `caConfigured`, `certConfigured`, `keyConfigured` and `passwordConfigured`
+booleans are always present, including when false. These fields are read-only.
+
+`POST /services/vpn` retains the stored WireGuard private key when omitted or
+empty. Managed OpenVPN secrets are retained when omitted or empty only if both
+the existing and submitted `managed` objects exist. Omitting `managed` removes
+that object. Nonempty secrets replace stored values. The revision precondition
+is required and changes remain staged until commit. See
+[VPN services](services.md#vpn) for browser key generation and client templates.
