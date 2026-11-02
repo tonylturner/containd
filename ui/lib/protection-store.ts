@@ -32,5 +32,10 @@ export function canRetryProtection(status?: ProtectionStatus) {
 }
 
 export function protectionOutstanding(status?: ProtectionStatus) {
-  return status?.state === "pending" || status?.subsystems.some(s => s.retryable || s.state === "pending" || s.nextRetryAt !== null);
+  if (!status) return false;
+  const requiredPending = status.components.some(c => c.required && c.state === "pending")
+    || status.subsystems.some(s => s.required && s.state === "pending")
+    || status.state === "pending";
+  const retryOutstanding = status.subsystems.some(s => s.state !== "off" && (s.retryable || s.nextRetryAt !== null));
+  return requiredPending || retryOutstanding;
 }

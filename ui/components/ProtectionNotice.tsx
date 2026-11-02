@@ -24,7 +24,8 @@ export function ProtectionRetry({ isAdmin }: { isAdmin: boolean }) {
 export function ProtectionNotice({ isAdmin }: { isAdmin: boolean }) {
   const { status } = useProtection();
   if (!status) return null;
-  const optional = status.subsystems.filter(s => !s.required && (s.fault || s.state === "failed" || s.state === "pending" || s.state === "unknown"));
+  const optional = status.subsystems.filter(s => !s.required && s.state !== "off"
+    && (s.fault || s.state === "failed" || s.state === "unknown" || s.retryable || s.nextRetryAt !== null));
   const trafficNotice = hasTrafficProtectionNotice(status);
   const view = protectionView(status);
   return <>

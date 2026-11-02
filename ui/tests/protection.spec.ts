@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
 import { isProtectionStatus } from "../lib/api-protection";
 import { observation, openProtection, protectionAPI, subsystem } from "./fixtures/protection-api";
 
@@ -322,6 +323,47 @@ test("DHCP faults remain visible and retryable without gating ready", async ({ p
       await page.screenshot({ path: `${dir}/config-summary-${viewport.width}.png`, animations: "disabled" });
     }
   }
+});
+
+test("a disabled scanner is quiet and uses the normal protection polling interval", async ({ page }) => {
+  await page.clock.install();
+  const mock = await protectionAPI(page, observation({ subsystems: [subsystem({
+    name: "scanner", owner: "engine", operation: "stop", required: false, state: "off",
+    fault: null, reason: "scanner disabled", retryable: false, nextRetryAt: null,
+  })] }), { enforcement: "enforcing" });
+  await openProtection(page, "/config/");
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Service convergence" })).toHaveCount(0);
+  const summary = page.getByRole("region", { name: "Running protection summary" });
+  await expect(summary.getByText("running-a", { exact: true })).toHaveCount(3);
+
+  const dir = process.env.CONFIG_FIX_SCREENSHOTS_DIR;
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await summary.evaluate(el => el.parentElement!.scrollIntoView({ block: "start" }));
+      await page.screenshot({ path: `${dir}/config-summary-healthy-${viewport.width}.png`, animations: "disabled" });
+    }
+  }
+
+  const reads = mock.reads;
+  await page.clock.runFor(2_000);
+  expect(mock.reads).toBe(reads);
+  await page.clock.runFor(28_000);
+  await expect.poll(() => mock.reads).toBe(reads + 1);
+});
+
+test("optional pending work without a fault or retry stays quiet regardless of reason", async ({ page }) => {
+  await page.clock.install();
+  const mock = await protectionAPI(page, observation({ subsystems: [subsystem({
+    name: "scanner", required: false, state: "pending", reason: "disabled", retryable: false, nextRetryAt: null,
+  })] }), { enforcement: "enforcing" });
+  await openProtection(page, "/config/");
+  await expect(page.getByRole("status", { name: "Service convergence" })).toHaveCount(0);
+  const reads = mock.reads;
+  await page.clock.runFor(2_000);
+  expect(mock.reads).toBe(reads);
 });
 
 test("a new boot clears a previously healthy claim without retaining installation detail", async ({ page }) => {
