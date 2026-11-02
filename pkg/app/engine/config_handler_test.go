@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -153,7 +152,7 @@ func iecSessionIDs(e *engine.Engine) map[string]int {
 
 func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	dp := newCountingDP(t)
-	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	sim := &simulationManager{dpEngine: dp.Engine}
 	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	learn := `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`
 	if out := postConfig(t, h, learn); out["unchanged"] != false || dp.reconfigs.Load() != 1 {
@@ -231,7 +230,7 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 
 func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 	dp := newCountingDP(t)
-	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	sim := &simulationManager{dpEngine: dp.Engine}
 	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	store := dp.Events()
 	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`)
@@ -278,7 +277,7 @@ func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 
 func TestConfigEqualityIsExact(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
 	steps := []struct {
 		body      string
 		unchanged bool
@@ -304,7 +303,7 @@ func TestConfigEqualityIsExact(t *testing.T) {
 
 func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
 	postConfig(t, h, `{}`)
 	dp.waitStart(t)
 	rec := httptest.NewRecorder()
@@ -320,7 +319,7 @@ func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 
 func TestConfigUnchangedRetriesAStartThatGaveUp(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
 	gaveUp := errors.New("nfqueue 101: giving up after 8 bind attempts")
 	dp.startFn = func(context.Context) error { return gaveUp }
 	postConfig(t, h, `{"dpiEnabled":true}`)
@@ -337,43 +336,47 @@ func TestConfigUnchangedRetriesAStartThatGaveUp(t *testing.T) {
 
 func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 	dp := newCountingDP(t)
-	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	stageDemoCaptures(t, "")
+	sim := &simulationManager{dpEngine: dp.Engine}
 	t.Cleanup(sim.stop)
+	sim.loadRules(rules.Snapshot{Zones: []string{"dmz", "lan", "wan"}})
 	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
-	run := func() string {
-		sim.mu.Lock()
-		defer sim.mu.Unlock()
-		if !sim.running {
-			return ""
-		}
-		return fmt.Sprintf("run %d", sim.runs)
+	postConfig(t, h, `{"dpiMock":true}`)
+	dp.waitStart(t)
+	if sim.status().Running {
+		t.Fatal("DPI mock started replay")
+	}
+	if !dp.ShouldInspect(nil, &dpi.ParsedPacket{}) {
+		t.Fatal("DPI mock must enable inspect-all")
+	}
+	sim.start()
+	first := sim.status()
+	if !first.Running {
+		t.Fatalf("start: %+v", first)
 	}
 	postConfig(t, h, `{"dpiMock":true}`)
 	dp.waitStart(t)
-	first := run()
-	if first == "" {
-		t.Fatal("DPI mock did not start the simulation")
-	}
-	postConfig(t, h, `{"dpiMock":true}`)
-	dp.waitStart(t)
-	if run() != first {
-		t.Fatal("an unchanged POST restarted the simulation")
+	if got := sim.status(); !got.Running || got.RunID != first.RunID {
+		t.Fatalf("unchanged POST restarted replay: %+v", got)
 	}
 	postConfig(t, h, `{"dpiMock":true,"dpiMode":"monitor"}`)
 	dp.waitStart(t)
-	if now := run(); now == "" || now == first {
-		t.Fatal("a changed POST must restart the simulation")
+	if got := sim.status(); !got.Running || got.RunID == first.RunID {
+		t.Fatalf("changed POST did not rebuild replay: %+v", got)
 	}
 	postConfig(t, h, `{"dpiMode":"monitor"}`)
 	dp.waitStart(t)
-	if run() != "" {
-		t.Fatal("turning the DPI mock off must stop the simulation")
+	if !sim.status().Running {
+		t.Fatal("turning DPI mock off stopped replay")
+	}
+	if dp.ShouldInspect(nil, &dpi.ParsedPacket{}) {
+		t.Fatal("DPI mock off must disable inspect-all")
 	}
 }
 
 func TestConfigConcurrentGetAndPost(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
 	go func() {
 		for range dp.results {
 		}
@@ -418,7 +421,7 @@ func TestConfigFailedRebuildIsRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	dp := &countingDP{Engine: e, results: make(chan error, 64)}
-	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	sim := &simulationManager{dpEngine: dp.Engine}
 	coordinator := testProtectionCoordinator(t, dp)
 	h := configHandler(zap.NewNop().Sugar(), dp, sim, coordinator)
 	// The application starts the existing engine before it serves config

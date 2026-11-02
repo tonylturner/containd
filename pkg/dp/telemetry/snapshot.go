@@ -16,6 +16,8 @@ import (
 
 // Collector reads immutable published views through callbacks, never policy locks.
 type Collector struct {
+	// Demo returns only currently running replay samples; faults stay in simulation status.
+	Demo       func() []wire.CounterSample
 	BootID     string
 	Membership func() *Membership
 	Link       func(string) (Link, error)
@@ -99,6 +101,9 @@ func (c Collector) Snapshot(ctx context.Context) wire.CounterSnapshot {
 		missing("events", "event store unavailable")
 	} else {
 		for _, e := range c.Events() {
+			if e.Origin == wire.OriginDemo {
+				continue // demo events use the replay run epoch, only while running
+			}
 			add(wire.EventsTotal, map[string]string{"source": "engine"}, e.Total, c.BootID, e.Origin)
 			for _, class := range []wire.EventClass{wire.ClassIDSAlert, wire.ClassAVDetection, wire.ClassAVBlock, wire.ClassModbusWrite} {
 				add(wire.EventsClass, map[string]string{"source": "engine", "class": string(class)}, e.Classes[class], c.BootID, e.Origin)
@@ -112,6 +117,9 @@ func (c Collector) Snapshot(ctx context.Context) wire.CounterSnapshot {
 		add(wire.AVScans, nil, scans, c.BootID, wire.OriginReal)
 		add(wire.AVScanErrors, nil, errors, c.BootID, wire.OriginReal)
 		add(wire.AVDetections, nil, detections, c.BootID, wire.OriginReal)
+	}
+	if c.Demo != nil {
+		s.Samples = append(s.Samples, c.Demo()...)
 	}
 	return s
 }
