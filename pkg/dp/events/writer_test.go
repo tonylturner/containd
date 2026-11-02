@@ -28,8 +28,45 @@ func TestWriterStampsEveryPublication(t *testing.T) {
 	if counts[0].Total != 0 || counts[1].Total != 2 {
 		t.Fatalf("counted before stamping: %+v", counts)
 	}
-	if page := s.ReadFeed(FeedRequest{}); len(page.Records) != 2 || page.Records[0].Event.Origin != telemetry.OriginDemo {
-		t.Fatalf("feed provenance: %+v", page)
+	if page := s.ReadFeed(FeedRequest{}); len(page.Records) != 0 || page.Tail != 0 || page.Floor != 1 {
+		t.Fatalf("demo advanced the syslog feed: %+v", page)
+	}
+}
+
+func TestDemoSaturationPreservesRealFeed(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		realWrites int
+	}{{"empty", 0}, {"partial", 2}, {"wrapped", 6}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStore(4)
+			for range tc.realWrites {
+				s.Append(Event{Kind: "real"})
+			}
+			before := s.ReadFeed(FeedRequest{})
+			tailBefore := s.ReadFeed(FeedRequest{TailOnly: true})
+			w := s.Writer(telemetry.OriginDemo)
+			for range 4 * demoCapacity {
+				s.Append(Event{Origin: telemetry.OriginDemo, Kind: "demo.direct"})
+				w.Append(Event{Origin: telemetry.OriginReal, Kind: "demo.writer"})
+				w.Record(nil, nil, []dpi.Event{{Kind: "demo.decoder"}})
+			}
+			if after := s.ReadFeed(FeedRequest{}); !reflect.DeepEqual(before, after) {
+				t.Fatalf("demo changed the real feed: before=%+v after=%+v", before, after)
+			}
+			if after := s.ReadFeed(FeedRequest{TailOnly: true}); !reflect.DeepEqual(tailBefore, after) {
+				t.Fatalf("demo advanced the feed boundary: before=%+v after=%+v", tailBefore, after)
+			}
+			counts := s.TelemetryCounts()
+			if counts[0].Total != uint64(tc.realWrites) || counts[1].Total != 12*demoCapacity || len(s.demo.events) != demoCapacity {
+				t.Fatalf("demo bypassed counters or its bank: %+v, retained=%d", counts, len(s.demo.events))
+			}
+			real := s.Append(Event{Kind: "real.after-demo"})
+			next := s.ReadFeed(FeedRequest{Epoch: before.Epoch, After: before.Tail})
+			if next.Tail != before.Tail+1 || len(next.Records) != 1 || next.Records[0].Offset != before.Tail+1 || next.Records[0].Event.ID != real.ID {
+				t.Fatalf("real feed did not resume at the next offset: %+v", next)
+			}
+		})
 	}
 }
 
