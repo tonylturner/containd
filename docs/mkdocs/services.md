@@ -154,6 +154,10 @@ totals cover 24 hours and identify incomplete coverage. Monitoring Traffic Pulse
 uses interface throughput, while Top Protocols counts inspected packets over the
 last hour. Recent-event list counts are not retained traffic totals. Failed event
 reads are unavailable, not zero.
+Interfaces that are not connected to a network device have no traffic history;
+a connected interface whose statistics cannot be read is reported unavailable
+with its reason. A series that ended, such as a zone whose interfaces moved
+away, shows **No current data**.
 
 Demo data appears only while the collector is running, no current source is
 unavailable, the metric has no real activity, every real series has coverage in
