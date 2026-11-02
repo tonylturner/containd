@@ -27,22 +27,27 @@ The policy wizard's **Review & Stage** step also saves for later review and
 commit; it does not activate policy. Configuration tabs and JSON keys retain
 their existing names.
 
-**Review changes** leads with changed sections and their old → new values.
+**Review changes** leads with entity summaries, such as firewall rule counts
+and named zone additions.
 Lists with unique `id` keys (or `name` keys, such as zones and interfaces)
-match items by that key rather than their position. Reordering shows one
-**Order changed** line, followed by any added or removed items and field
-changes labelled with the item's key. A pure reorder does not invent field
+match items by that key rather than their position. Reordering is identified
+separately from additions and removals; a pure reorder does not invent field
 changes. Secret-only changes are identified without showing secret values. **Advanced**
-opens the exact redacted JSON diff and IDS bank fingerprints; the Overview
+opens exact field paths, old → new values, the redacted JSON diff and IDS bank fingerprints; the Overview
 tab's **Advanced** section contains the block explorer. **Staged config**
 keeps the raw JSON editor and **Copy running → staged**, and **Running config**
-keeps the committed JSON viewer.
+keeps the committed JSON viewer. **Validate**, next to **Save staged config**,
+checks the current text without staging it or discarding unsaved edits.
 
 **Commit** and **Commit-confirmed**, with its seconds field, are together at
-the review. **Confirm** is prominent while a server-reported confirmation
+the review in a persistent action bar. **Confirm** is prominent while a server-reported confirmation
 deadline is pending. **Recovery** contains **Rollback** and explains that it
 keeps the newer staged candidate; review that candidate before committing
-again. The committed document is not proof of live traffic protection.
+again. **Factory reset** is a separate immediate action in **Recovery**:
+type `NUCLEAR`, then confirm. It is revision-guarded, wipes configuration,
+users and audit history, applies appliance defaults and resets the default
+admin login. TLS identity files remain; lab web/API tokens remain valid.
+Back up before resetting. The committed document is not proof of live traffic protection.
 Exports, appliance backups and IDS bank backup/restore remain on Overview.
 
 The shared attention area keeps traffic protection, startup recovery, missing
@@ -494,6 +499,12 @@ candidate edit:
 - `{"clear":true}` clears the stored bundle. Do not combine it with nonblank PEM.
 - A rejected upload leaves the previous file unchanged. Successful replacement
   is atomic, so readers cannot observe a partially written bundle.
+
+System Settings offers **Upload CA bundle** and **Clear**. Clearing requires
+confirmation because outbound TLS to private services may stop working; it
+removes additional trust, not the OS trust store. TLS certificate, key and
+trusted-CA paths are selected separately in **Advanced management access**
+and must be staged and committed.
 
 After storing the bundle, management sends its content and revision
 (`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads

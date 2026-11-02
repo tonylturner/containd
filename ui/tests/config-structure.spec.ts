@@ -18,12 +18,11 @@ async function review(page: Page, deadline: string | null = null) {
   return { mock, diff };
 }
 
-test("review leads with old → new values and secret-only changes; exact JSON opens by keyboard", async ({ page }) => {
+test("review leads with entity summaries and secret-only changes; exact values open by keyboard", async ({ page }) => {
   await review(page);
   const summary = page.getByRole("region", { name: "System changes", exact: true });
-  await expect(summary).toContainText("system.hostname");
-  await expect(summary.locator('[aria-label="Old value"]')).toHaveText('"before"');
-  await expect(summary.locator('[aria-label="New value"]')).toHaveText('"after"');
+  await expect(summary).toContainText("System / hostname changed");
+  await expect(summary.locator('[aria-label="Old value"]')).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Services changes", exact: true })).toHaveText(/Secret values changed \(hidden\)/);
   const advanced = page.getByRole("button", { name: "Advanced", exact: true });
   await expect(advanced).toHaveAttribute("aria-expanded", "false");
@@ -32,6 +31,10 @@ test("review leads with old → new values and secret-only changes; exact JSON o
   await page.keyboard.press("Enter");
   await expect(advanced).toBeFocused();
   await expect(advanced).toHaveAttribute("aria-expanded", "true");
+  const fields = page.getByRole("region", { name: "System field changes", exact: true });
+  await expect(fields).toContainText("system.hostname");
+  await expect(fields.locator('[aria-label="Old value"]')).toHaveText('"before"');
+  await expect(fields.locator('[aria-label="New value"]')).toHaveText('"after"');
   const raw = page.getByRole("region", { name: "System JSON changes", exact: true });
   await expect(raw).toContainText('"hostname": "before"');
   await expect(raw).toContainText('"hostname": "after"');
