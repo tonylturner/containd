@@ -15,17 +15,18 @@ import (
 	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	history "github.com/tonylturner/containd/pkg/cp/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/users"
-	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
 type dashboardResponse struct {
-	Health       dashboardHealth     `json:"health"`
-	Counts       dashboardCounts     `json:"counts"`
-	EventStats   dashboardEventStats `json:"eventStats"`
-	Services     any                 `json:"services"`
-	User         any                 `json:"user"`
-	LastActivity *audit.Record       `json:"lastActivity"`
+	Health          dashboardHealth      `json:"health"`
+	Counts          dashboardCounts      `json:"counts"`
+	EventStats      *dashboardEventStats `json:"eventStats"`
+	EventStatsError string               `json:"eventStatsError,omitempty"`
+	Services        any                  `json:"services"`
+	User            any                  `json:"user"`
+	LastActivity    *audit.Record        `json:"lastActivity"`
 }
 
 type dashboardHealth struct {
@@ -47,14 +48,16 @@ type dashboardCounts struct {
 }
 
 type dashboardEventStats struct {
-	Total        int `json:"total"`
-	IDSAlerts    int `json:"idsAlerts"`
-	ModbusWrites int `json:"modbusWrites"`
-	AVDetections int `json:"avDetections"`
-	AVBlocks     int `json:"avBlocks"`
+	WindowSeconds int    `json:"windowSeconds"`
+	Complete      bool   `json:"complete"`
+	Total         uint64 `json:"total"`
+	IDSAlerts     uint64 `json:"idsAlerts"`
+	ModbusWrites  uint64 `json:"modbusWrites"`
+	AVDetections  uint64 `json:"avDetections"`
+	AVBlocks      uint64 `json:"avBlocks"`
 }
 
-func dashboardHandler(store config.Store, engine EngineClient, services ServicesApplier, userStore users.Store, auditStore audit.Store) gin.HandlerFunc {
+func dashboardHandler(store config.Store, services ServicesApplier, userStore users.Store, auditStore audit.Store, telemetryStore TelemetryStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		resp := dashboardResponse{
 			Health: buildDashboardHealth(),
@@ -63,7 +66,10 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 		if err == nil {
 			resp.Counts = loadDashboardCounts(cfg)
 		}
-		resp.EventStats = collectDashboardEventStats(c.Request.Context(), engine, services)
+		resp.EventStats, err = collectDashboardEventStats(c.Request.Context(), telemetryStore)
+		if err != nil {
+			resp.EventStatsError = err.Error()
+		}
 		resp.Services = dashboardServicesStatus(services)
 		resp.User = dashboardCurrentUser(c, userStore)
 		resp.LastActivity = dashboardLastActivity(c.Request.Context(), auditStore)
@@ -105,52 +111,43 @@ func countICSRules(rules []config.Rule) int {
 	return count
 }
 
-func collectDashboardEventStats(ctx context.Context, engine EngineClient, services ServicesApplier) dashboardEventStats {
-	stats := dashboardEventStats{}
-	for _, e := range dashboardEvents(ctx, engine, services) {
-		stats.Total++
-		accumulateDashboardEventStats(&stats, e)
+func collectDashboardEventStats(ctx context.Context, store TelemetryStore) (*dashboardEventStats, error) {
+	if store == nil {
+		return nil, history.ErrUnavailable
 	}
-	return stats
-}
-
-func dashboardEvents(ctx context.Context, engine EngineClient, services ServicesApplier) []dpevents.Event {
-	var events []dpevents.Event
-	if tc, ok := engine.(TelemetryClient); ok && tc != nil {
-		events, _ = tc.ListEvents(ctx, 500)
-	}
-	if ss, ok := services.(interface{ RecentEvents(int) []dpevents.Event }); ok && ss != nil {
-		events = append(events, ss.RecentEvents(500)...)
-	}
-	return events
-}
-
-func accumulateDashboardEventStats(stats *dashboardEventStats, e dpevents.Event) {
-	for _, class := range dpevents.Classify(e) {
-		switch class {
-		case telemetry.ClassIDSAlert:
-			stats.IDSAlerts++
-		case telemetry.ClassAVDetection:
-			stats.AVDetections++
-		case telemetry.ClassAVBlock:
-			stats.AVBlocks++
-		case telemetry.ClassModbusWrite:
-			stats.ModbusWrites++
+	stats := &dashboardEventStats{WindowSeconds: 86400, Complete: true}
+	now := time.Now()
+	for _, counter := range []struct {
+		metric telemetry.Metric
+		class  telemetry.EventClass
+		target *uint64
+	}{
+		{telemetry.EventsTotal, "", &stats.Total},
+		{telemetry.EventsClass, telemetry.ClassIDSAlert, &stats.IDSAlerts},
+		{telemetry.EventsClass, telemetry.ClassModbusWrite, &stats.ModbusWrites},
+		{telemetry.EventsClass, telemetry.ClassAVDetection, &stats.AVDetections},
+		{telemetry.EventsClass, telemetry.ClassAVBlock, &stats.AVBlocks},
+	} {
+		filters := map[string]string{}
+		if counter.class != "" {
+			filters["class"] = string(counter.class)
 		}
-	}
-}
-
-func modbusWriteEvent(e dpevents.Event) bool {
-	// The historical helper accepted only the Modbus attributes. Preserve
-	// that narrow contract while delegating its write predicate to Classify.
-	e.Proto = "modbus"
-	e.Kind = "request"
-	for _, class := range dpevents.Classify(e) {
-		if class == telemetry.ClassModbusWrite {
-			return true
+		resp, err := store.Query(ctx, history.Query{Metric: counter.metric, Range: telemetry.Range24h, Origin: telemetry.OriginReal, Filters: filters}, now)
+		if err != nil {
+			return nil, err
 		}
+		value, complete, err := history.Total(resp)
+		if err != nil {
+			return nil, err
+		}
+		*counter.target = value
+		sources := map[string]bool{}
+		for _, series := range resp.Series {
+			sources[series.Dims["source"]] = true
+		}
+		stats.Complete = stats.Complete && complete && sources["engine"] && sources["services"]
 	}
-	return false
+	return stats, nil
 }
 
 func dashboardServicesStatus(services ServicesApplier) any {

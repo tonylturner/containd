@@ -15,9 +15,15 @@ Check runtime status after commit, not just whether saving succeeded.
 The Services overview groups the existing routes by **Connectivity**, **Access**,
 **Inspection** and **Logs**. DNS, NTP and proxy software identities are available
 under **Troubleshooting** / **Service details**, not in their primary summaries.
-Overview trend charts require at least two reported samples with some activity;
-empty, single-sample and all-zero series keep the reported rate and error text
-without an empty chart. Individual pages lead with a compact **Configured** /
+Operational history comes from retained telemetry, not service-status meter
+arrays. Overview charts show observed activity, including measured zero;
+absent observations are gaps, not zero. Service detail pages offer 1 hour,
+24 hours and 30 days. Rates divide bucket counts by observed seconds and are
+displayed per minute. Trends compare rates only across a continuous observed
+segment with at least two buckets. Partial buckets are dashed, counter resets
+have a diamond marker, and gaps break the chart. Collector failures remain
+visible and are never replaced by demo data. Individual pages lead with a compact
+**Configured** /
 **Running** / **Attention** / **Updated time** strip, then settings, then
 **Activity**. Configured describes the candidate editor, not live protection;
 Running uses a separate runtime observation. DHCP and Syslog do not report a
@@ -139,7 +145,39 @@ Audit-write failure is logged and does not stop enforcement. Metrics expose
 a fault is not proof that a process or kernel interface has stopped.
 Successful later application clears the fault.
 
+## Operational charts
+
+Dashboard Traffic shows kernel leaf-interface In and Out bytes per second over
+the last hour, plus a separate Events chart. Zone Status shows in + out at each
+zone; this is interface throughput, not forwarded traffic between zones. Event
+totals cover 24 hours and identify incomplete coverage. Monitoring Traffic Pulse
+uses interface throughput, while Top Protocols counts inspected packets over the
+last hour. Recent-event list counts are not retained traffic totals. Failed event
+reads are unavailable, not zero.
+
+While the collector is running, the latest real bucket has coverage and a metric
+has no real activity, available demo history is labelled **Demo data**. Once real
+activity exists, charts use real history. Demo events have a **Demo** badge in
+Event Stream, Recent Alerts, Events, and alert/event inspection. If neither
+history exists, charts say **No traffic recorded yet**. A real-source gap never
+permits demo fallback. Activity and coverage flags are metric-wide, not scoped
+to an individual service or interface filter.
+
+Security conduit traffic reports measured bytes and packets for routed traffic
+that passed policy in the last hour, with incomplete coverage labelled. Matrix
+heat is relative to the largest measured conduit, not a baseline percentage.
+Unavailable measurements include their reason. Logical interface RX/TX reports
+the latest retained packet rate, not event-count estimates.
+
 ## Runtime metrics
+
+Service status exposes lifetime `count` and `errors_count` as JSON numbers, not
+rates or sparklines. Read retained `service.events` and `service.errors` history
+from `GET /api/v1/telemetry/series`, filtered by `service`. These count service
+activity/notices, not uniform requests or network bytes. AV uses the engine's
+`av.scans`, `av.scan_errors` and `av.detections` counters. Rates are bucket count
+divided by observation seconds; gaps are not zeros. See
+[retained counter history](api-reference.md#retained-counter-history).
 
 `containd_services_running{service="..."}` reports observed running state
 (`1`) or stopped state (`0`). An absent series means unknown, not stopped;

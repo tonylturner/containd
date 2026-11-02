@@ -12,6 +12,17 @@
   `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
   depend on a writable directory; generic `NewService` application loggers do not
   configure a file path. `CONTAIND_LOG_FILE=0` disables configured file sinks.
+- Retained counter history is separate from event evidence: management writes
+  `CONTAIND_TELEMETRY_DB` (default `data/telemetry.db`, `/data/telemetry.db` in
+  Compose), an independent SQLite WAL file. It retains 10-second buckets for one
+  hour, minute buckets for 24 hours and 15-minute buckets for 30 days, subject to
+  a 64 MiB database-plus-WAL budget and a 320-series cap. Old coarse history is
+  reclaimed under pressure; conservative whole-transaction WAL headroom can
+  reclaim coarse history before the physical high-water mark. Missing coverage
+  remains a gap. This store does not retain event payloads. Management must be
+  running to collect history.
+- Events marked `origin: demo` are labelled demonstration records. They never
+  charge real counter history and are never exported to syslog.
 - `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
 File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are

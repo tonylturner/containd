@@ -164,13 +164,17 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 }
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
-// opts may contain ManagementGuardHealth, ManagementListenerFaults and
-// FactoryResetSessions providers.
+// opts may contain ManagementGuardHealth, ManagementListenerFaults,
+// FactoryResetSessions and TelemetryStore providers.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
+	var telemetryStore TelemetryStore
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
 	var resetSessions FactoryResetSessions
 	for _, opt := range opts {
+		if provider, ok := opt.(TelemetryStore); ok {
+			telemetryStore = provider
+		}
 		if provider, ok := opt.(FactoryResetSessions); ok {
 			resetSessions = provider
 		}
@@ -241,7 +245,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/auth/me/mfa/enable", rateLimitSensitive(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), enableMyMFAHandler(userStore))
 		protected.POST("/auth/me/mfa/disable", rateLimitSensitive(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), disableMyMFAHandler(userStore))
 		protected.GET("/evidence/status", evidenceStatusHandler(auditStore, services))
-		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
+		protected.GET("/dashboard", dashboardHandler(store, services, userStore, auditStore, telemetryStore))
 		protected.GET("/system/management-reservation", managementReservationHandler(store, guardHealth, engine, listenerFaults))
 		protected.GET("/system/stats", systemStatsHandler())
 		protected.GET("/system/inspection", systemInspectionHandler())
@@ -292,6 +296,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/services/proxy/forward", requireAdmin(), requireConfigRevision(), setForwardProxyHandler(store))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		protected.POST("/services/proxy/reverse", requireAdmin(), requireConfigRevision(), setReverseProxyHandler(store))
+		protected.GET("/telemetry/series", telemetrySeriesHandler(telemetryStore))
 		protected.GET("/services/status", getServicesStatusHandler(services, engine))
 		protected.GET("/events", listEventsHandler(engine, services, store))
 		protected.GET("/events/:id", eventDetailHandler(engine, services, store))
@@ -375,7 +380,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/firewall/ics-rules", requireAdmin(), requireConfigRevision(), createICSRuleHandler(store))
 		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), requireConfigRevision(), updateICSRuleHandler(store))
 		registerEvidenceRoutes(protected, store, engine)
-		protected.GET("/security/conduits", securityConduitsHandler(store))
+		protected.GET("/security/conduits", securityConduitsHandler(store, telemetryStore))
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), requireConfigRevision(), setIDSHandler(store))
 		protected.POST("/ids/convert/sigma", limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), convertSigmaHandler())

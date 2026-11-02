@@ -98,6 +98,7 @@ services:
       - CONTAIND_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
       - CONTAIND_AUDIT_DB=${CONTAIND_AUDIT_DB:-/data/audit.db}
       - CONTAIND_USERS_DB=${CONTAIND_USERS_DB:-/data/users.db}
+      - CONTAIND_TELEMETRY_DB=${CONTAIND_TELEMETRY_DB:-/data/telemetry.db}
       - CONTAIND_SSH_ADDR=${CONTAIND_SSH_ADDR:-:2222}
       - CONTAIND_SSH_AUTH_KEYS_DIR=${CONTAIND_SSH_AUTH_KEYS_DIR:-/data/ssh/authorized_keys.d}
       - CONTAIND_SSH_HOST_KEY=${CONTAIND_SSH_HOST_KEY:-/data/ssh/host_key}

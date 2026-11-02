@@ -134,7 +134,13 @@ func Run(ctx context.Context, opts Options) error {
 			srv.RevokeConnections(initiator)
 		}
 	})
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
+	telemetryStore, stopTelemetry := startTelemetry(ctx, logger, engineClient, serviceManager.Manager)
+	defer stopTelemetry()
+	var historyStore httpapi.TelemetryStore
+	if telemetryStore != nil {
+		historyStore = telemetryStore
+	}
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()

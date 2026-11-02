@@ -447,12 +447,17 @@ components:
             icsRules: {type: integer}
         eventStats:
           type: object
+          nullable: true
+          description: Real event counts from both sources over the retained last 24 hours; null on store failure.
           properties:
+            windowSeconds: {type: integer, enum: [86400]}
+            complete: {type: boolean, description: Every bucket from both sources was observed.}
             total: {type: integer}
             idsAlerts: {type: integer}
             modbusWrites: {type: integer}
             avDetections: {type: integer}
             avBlocks: {type: integer}
+        eventStatsError: {type: string}
         services: {type: object}
         user: {type: object}
         lastActivity:
@@ -463,6 +468,7 @@ components:
     Event:
       type: object
       properties:
+        origin: {type: string, enum: [real, demo], description: Omitted means real. Demo events do not enter real counters or syslog.}
         id: {type: string, pattern: '^[0-9]+$', example: '9223372036854775809', description: Exact decimal uint64 event identity}
         flowId: {type: string}
         transportConnectionId:
@@ -517,6 +523,7 @@ components:
     FlowSummary:
       type: object
       properties:
+        origin: {type: string, enum: [real, demo], description: Omitted means real. Demo events do not enter real counters or syslog.}
         flowId: {type: string}
         transportConnectionId:
           type: string
@@ -3115,6 +3122,60 @@ components:
         dstPort: {type: string}
         ttlSeconds: {type: integer, minimum: 0}
       required: [srcIp, dstIp, proto, dstPort]
+    ConduitTraffic:
+      oneOf:
+      - type: object
+        required: [state, windowSeconds, packets, bytes, complete, coverage]
+        properties:
+          state: {type: string, enum: [measured]}
+          windowSeconds: {type: integer, enum: [3600]}
+          packets: {type: string, pattern: '^[0-9]+$'}
+          bytes: {type: string, pattern: '^[0-9]+$'}
+          complete: {type: boolean}
+          coverage: {type: string, enum: [routed], description: Routed forwarding that passed policy; excludes bridged L2 and AV/ICAP input-output gating.}
+      - type: object
+        required: [state, reason]
+        properties:
+          state: {type: string, enum: [unavailable]}
+          reason: {type: string}
+    TelemetryPoint:
+      type: object
+      required: [t, q]
+      properties:
+        t: {type: string, format: date-time}
+        v: {type: string, pattern: '^[0-9]+$', description: Exact uint64 count; absent for a gap.}
+        d: {type: integer, description: Seconds of observation; absent for grouped counts whose member durations differ. No rate is defined without d.}
+        q: {type: string, enum: [observed, partial, reset, gap]}
+    TelemetrySeriesResponse:
+      type: object
+      required: [metric, unit, origin, range, resolutionSeconds, from, to, realCovered, realActive, collector, series]
+      properties:
+        metric: {type: string}
+        unit: {type: string, enum: [bytes, packets, events, scans]}
+        origin: {type: string, enum: [real, demo]}
+        range: {type: string, enum: [1h, 24h, 30d]}
+        resolutionSeconds: {type: integer, enum: [10, 60, 900]}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        retainedFrom: {type: string, format: date-time}
+        realCovered: {type: boolean, description: Persisted once any real bucket was observed.}
+        realActive: {type: boolean, description: Persisted once any real bucket counted more than zero.}
+        collector:
+          type: object
+          required: [state, droppedSeries]
+          properties:
+            state: {type: string, enum: [running, stalled, unavailable]}
+            lastSampleAt: {type: string, format: date-time}
+            error: {type: string}
+            droppedSeries: {type: string, pattern: '^[0-9]+$'}
+        series:
+          type: array
+          items:
+            type: object
+            required: [points]
+            properties:
+              dims: {type: object, additionalProperties: {type: string}}
+              points: {type: array, items: {$ref: '#/components/schemas/TelemetryPoint'}}
     ConduitResult:
       type: object
       required: [from, to]
@@ -3124,7 +3185,7 @@ components:
         state: {type: string}
         ids: {type: string}
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
-        traffic: {type: number}
+        traffic: {$ref: '#/components/schemas/ConduitTraffic'}
         rules: {type: array, items: {type: string}}
         gaps: {type: array, items: {type: string}}
         mitre: {type: array, items: {type: string}}
@@ -8454,12 +8515,53 @@ paths:
         in: query
         required: true
         schema: {type: string}
+  /telemetry/series:
+    get:
+      summary: Read retained counter history (viewer)
+      tags: [Monitoring]
+      description: >-
+        Dense completed buckets only; the open bucket is excluded. Missing or expired
+        coverage is gap, never zero. Grouping iface metrics by zone includes leaf
+        interfaces only. Values are exact decimal strings; divide v by d for rates.
+        Grouped points omit d and become partial when members with values have unequal d.
+        Dimension keys are interface/zone/role for iface.*, from/to for conduit.*,
+        protocol for proto.*, source for events.total, source/class for events.class,
+        service for service.*, and none for av.*. Unknown or repeated parameters are rejected.
+      parameters:
+      - {name: metric, in: query, required: true, schema: {type: string, enum: [iface.rx_bytes, iface.tx_bytes, iface.rx_packets, iface.tx_packets, conduit.bytes, conduit.packets, proto.packets, proto.bytes, events.total, events.class, service.events, service.errors, av.scans, av.scan_errors, av.detections]}}
+      - {name: range, in: query, required: true, schema: {type: string, enum: [1h, 24h, 30d]}}
+      - {name: origin, in: query, required: true, schema: {type: string, enum: [real, demo]}}
+      - {name: group, in: query, schema: {type: string}, description: One valid dimension key for this metric.}
+      - {name: interface, in: query, schema: {type: string}}
+      - {name: zone, in: query, schema: {type: string}}
+      - {name: role, in: query, schema: {type: string}}
+      - {name: from, in: query, schema: {type: string}}
+      - {name: to, in: query, schema: {type: string}}
+      - {name: protocol, in: query, schema: {type: string}}
+      - {name: source, in: query, schema: {type: string}}
+      - {name: class, in: query, schema: {type: string}}
+      - {name: service, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: Retained series
+          content: {application/json: {schema: {$ref: '#/components/schemas/TelemetrySeriesResponse'}}}
+        '400':
+          description: Invalid metric, range, origin or dimension
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '503':
+          description: Telemetry store unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '500':
+          description: Counter sum overflow
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
   /services/status:
     get:
       summary: Inspect live services
       tags: [Services]
       description: >-
-        Management service status keyed by service. The av entry is the
+        Management service status keyed by service. Entries retain count and errors_count
+        as lifetime JSON numbers. Rates and sparklines are not status fields;
+        retained history is available from /telemetry/series. The av entry is the
         engine's live antivirus status (ready, db_version, counters) with the
         scanning gate under gate; when the engine cannot be reached it is
         {"available": false, "error": ...}.
