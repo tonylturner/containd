@@ -117,6 +117,48 @@ test("the saved payload round-trips the scan selection and carries no failOpenIc
   });
 });
 
+test("missing freshclamEnabled is off and an unrelated save does not turn updates on", async ({ page }) => {
+  const mock = await mockAPI(page, { config: { clamav: {} } });
+  await openPage(page);
+  await page.getByText("Advanced local scanner settings", { exact: true }).click();
+  const autoUpdate = page.getByRole("checkbox", { name: "Enable definition auto-update", exact: true });
+  await expect(autoUpdate).not.toBeChecked();
+
+  const openPolicy = page.getByRole("option", { name: "Allow unscanned traffic when the scanner is unavailable", exact: true });
+  await page.locator("select").filter({ has: openPolicy }).selectOption("open");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const payload = mock.requests[0].body as Record<string, unknown>;
+  expect(payload.failPolicy).toBe("open");
+  expect(payload.clamav).not.toHaveProperty("freshclamEnabled");
+  await expect(autoUpdate).not.toBeChecked();
+});
+
+test("explicitly enabled freshclam is checked, opens local settings, and round-trips", async ({ page }) => {
+  const mock = await mockAPI(page, { config: { clamav: { freshclamEnabled: true } } });
+  await openPage(page);
+  const autoUpdate = page.getByRole("checkbox", { name: "Enable definition auto-update", exact: true });
+  await expect(autoUpdate).toBeChecked();
+  await expect(page.locator("details").filter({ has: page.getByText("Advanced local scanner settings", { exact: true }) })).toHaveAttribute("open", "");
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const payload = mock.requests[0].body as Record<string, unknown>;
+  expect((payload.clamav as Record<string, unknown>).freshclamEnabled).toBe(true);
+});
+
+test("explicitly disabled freshclam stays unchecked and does not open local settings", async ({ page }) => {
+  const mock = await mockAPI(page, { config: { clamav: { freshclamEnabled: false } } });
+  await openPage(page);
+  const localSettings = page.locator("details").filter({ has: page.getByText("Advanced local scanner settings", { exact: true }) });
+  await expect(localSettings).not.toHaveAttribute("open", "");
+  await page.getByText("Advanced local scanner settings", { exact: true }).click();
+  const autoUpdate = page.getByRole("checkbox", { name: "Enable definition auto-update", exact: true });
+  await expect(autoUpdate).not.toBeChecked();
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const payload = mock.requests[0].body as Record<string, unknown>;
+  expect((payload.clamav as Record<string, unknown>).freshclamEnabled).toBe(false);
+});
+
 test("an ICS decoder port is flagged before the save", async ({ page }) => {
   await mockAPI(page);
   await openPage(page);
@@ -129,7 +171,7 @@ test("an ICS decoder port is flagged before the save", async ({ page }) => {
 
 test("advanced scanner settings retain protocol and path controls", async ({ page }) => {
   await mockAPI(page, { config: { clamav: {
-    socketPath: "/run/clamav/clamd.sock", customDefsPath: "/data/clamav/custom", freshclamEnabled: true,
+    socketPath: "/run/clamav/clamd.sock", customDefsPath: "/data/clamav/custom", freshclamEnabled: false,
   } } });
   await openPage(page);
   await expect(page.getByText("Socket path", { exact: true })).not.toBeVisible();
@@ -220,7 +262,6 @@ for (const config of [
   { clamav: { socketPath: "/custom/clamd.sock" } },
   { clamav: { customDefsPath: "/custom/defs" } },
   { clamav: { updateSchedule: "4h" } },
-  { clamav: { freshclamEnabled: false } },
 ]) {
   test(`advanced scanner settings reveal mode-required or non-default configuration ${JSON.stringify(config)}`, async ({ page }) => {
     const mock = await mockAPI(page, { config });

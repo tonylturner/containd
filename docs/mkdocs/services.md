@@ -486,9 +486,10 @@ ClamAV mode:
   `clamav.socketPath` (default `/run/clamav/clamd.sock`, which the images
   prepare) and loads every database in `/var/lib/clamav`. clamd restarts only
   when that rendered configuration changes.
-- clamd needs at least one signature database before it starts. With
-  `freshclamEnabled`, FreshClam runs once when enabled and then every
-  `updateSchedule` (a positive Go duration such as `4h`; default `6h`).
+- clamd needs at least one signature database before it starts. Automatic
+  updates are off unless `clamav.freshclamEnabled` is true. When enabled,
+  FreshClam runs once and then every `updateSchedule` (a positive Go duration
+  such as `4h`; default `6h`).
   While AV is enabled, staging rejects any other value, including cron syntax.
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.

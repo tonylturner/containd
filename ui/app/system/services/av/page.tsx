@@ -35,7 +35,6 @@ export default function AVPage() {
     mode: "clamav",
     failPolicy: "open",
     icap: { servers: [] },
-    clamav: { freshclamEnabled: true },
   }, false);
   const [zones, setZones] = useState<Zone[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -93,19 +92,14 @@ export default function AVPage() {
     (cfg.clamav?.socketPath && cfg.clamav.socketPath !== "/run/clamav/clamd.sock") ||
     (cfg.clamav?.customDefsPath && cfg.clamav.customDefsPath !== "/data/clamav/custom") ||
     cfg.clamav?.updateSchedule ||
-    cfg.clamav?.freshclamEnabled === false
+    cfg.clamav?.freshclamEnabled === true
   );
 
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
     const payload: AVConfig = {
       ...cfg,
-      clamav: {
-        ...(cfg.clamav ?? {}),
-        freshclamEnabled: cfg.clamav?.freshclamEnabled ?? true,
-      },
       scan: normalizeScan(cfg.scan),
     };
     const result = await save.run("save", () => write(base => api.setAV(base, payload), { replace: data => data }), {
@@ -264,7 +258,6 @@ export default function AVPage() {
                     next.clamav = {
                       ...(c.clamav ?? {}),
                       socketPath: c.clamav?.socketPath || "/run/clamav/clamd.sock",
-                      freshclamEnabled: c.clamav?.freshclamEnabled ?? true,
                     };
                   }
                   return next;
@@ -413,7 +406,7 @@ export default function AVPage() {
             <label className="flex items-center gap-2 text-sm text-(--text)">
               <input
                 type="checkbox"
-                checked={cfg.clamav?.freshclamEnabled ?? true}
+                checked={cfg.clamav?.freshclamEnabled ?? false}
                 disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), freshclamEnabled: e.target.checked } }))
