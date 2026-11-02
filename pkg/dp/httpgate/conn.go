@@ -96,6 +96,12 @@ func (c *conn) guard(fn func()) {
 // first byte; the idle timeout alone would let a dripped head live on.
 func (c *conn) transaction() bool {
 	c.client.active.Store(false)
+	// Shutdown may miss the keep-alive transition while active is still
+	// true. Once idle is visible, recheck cancellation before waiting for
+	// another request head.
+	if c.srv.ctx.Err() != nil {
+		return false
+	}
 	c.client.boundFromFirstByte(c.srv.settings.Load().ObjectTimeout)
 	raw, err := readHead(c.client.r)
 	c.client.setObjectDeadline(0)
