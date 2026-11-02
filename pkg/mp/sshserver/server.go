@@ -424,12 +424,30 @@ func (s *Server) isLinuxShellMode() bool {
 // client requested none; the shell command needs it.
 func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw *sessionIO, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
-	prompt := "containd# "
-	// Gentle bootstrap hint.
-	writeTTY(rw, "Type 'menu' for setup/diagnostics, or 'help'.\n")
+	api := &cli.API{BaseURL: s.opts.BaseURL, Client: s.opts.APIClient}
+	if conn := connectionFromContext(ctx); conn != nil {
+		api.Client = s.connectionClient(conn)
+	}
+	entry, role := api.SessionEntry(ctx)
+	writeTTY(rw, entry+"\nshell opens the Linux OS shell; exit disconnects SSH. menu and wizard are available here. Type help for commands.\n")
+	defer writeTTY(rw, cli.SessionExit+"\nSSH disconnecting.\n")
 	for {
-		_, _ = io.WriteString(rw, "\r"+prompt)
-		line, ok := readLineInteractive(reader, rw)
+		status := api.SessionStatus(ctx)
+		writeTTY(rw, status.String()+"\n")
+		_, _ = io.WriteString(rw, "\r"+status.Prompt(role))
+		timer := time.NewTicker(5 * time.Second)
+		typing := false
+		rw.idle = timer.C
+		rw.refresh = func() {
+			status = api.SessionStatus(ctx)
+			// Never erase partially entered input. Its next prompt uses fresh status.
+			if !typing {
+				writeTTY(rw, "\r\x1b[2K"+status.String()+"\n"+status.Prompt(role))
+			}
+		}
+		line, ok := readTerminalLineProgress(reader, rw, true, func(nonempty bool) { typing = nonempty })
+		rw.idle, rw.refresh = nil, nil
+		timer.Stop()
 		if !ok {
 			return
 		}
@@ -464,7 +482,10 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 			continue
 		}
 		var buf strings.Builder
-		err := reg.ParseAndExecute(ctx, line, &buf)
+		err := cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
+		if strings.EqualFold(line, "help") {
+			buf.WriteString("\nSSH controls: shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
+		}
 		if s.opts.AuditStore != nil {
 			rec := audit.Record{
 				Actor:  username,

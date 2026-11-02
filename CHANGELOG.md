@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Configuration consoles identify configuration versus immediate Linux OS modes,
+  show authoritative shared-candidate status and commit-confirmation deadlines,
+  and close the web console without logging out of management. SSH setup shows
+  the shared diff before commit and offers an explicit Back to CLI menu choice.
+
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
   links directly to enforcement status.

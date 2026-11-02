@@ -63,7 +63,7 @@ func TestLabModeWizardSkipsPasswordStep(t *testing.T) {
 	if strings.Contains(got, "New password") {
 		t.Fatalf("wizard prompted for a password in lab mode: %q", got)
 	}
-	for _, later := range []string{"Paste an SSH public key", "Enable outbound Internet", "Not committed."} {
+	for _, later := range []string{"Paste an SSH public key", "Stage outbound Internet settings", "Not committed."} {
 		if !strings.Contains(got, later) {
 			t.Fatalf("wizard stopped before %q: %q", later, got)
 		}

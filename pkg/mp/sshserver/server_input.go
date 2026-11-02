@@ -4,6 +4,7 @@ package sshserver
 import (
 	"io"
 	"sync"
+	"time"
 )
 
 // sessionInput reads one SSH channel in a single goroutine, so the appliance
@@ -16,6 +17,8 @@ type sessionInput struct {
 	stop    sync.Once
 	err     error  // the channel's read error; set before chunks closes
 	pending []byte // the rest of a chunk Read has taken
+	idle    <-chan time.Time
+	refresh func()
 }
 
 func newSessionInput(r io.Reader) *sessionInput {
@@ -47,11 +50,19 @@ func (in *sessionInput) pump(r io.Reader) {
 // Read returns input for the CLI.
 func (in *sessionInput) Read(p []byte) (int, error) {
 	if len(in.pending) == 0 {
-		chunk, ok := <-in.chunks
-		if !ok {
-			return 0, in.err
+		for len(in.pending) == 0 {
+			select {
+			case chunk, ok := <-in.chunks:
+				if !ok {
+					return 0, in.err
+				}
+				in.pending = chunk
+			case <-in.idle:
+				if in.refresh != nil {
+					in.refresh()
+				}
+			}
 		}
-		in.pending = chunk
 	}
 	n := copy(p, in.pending)
 	in.pending = in.pending[n:]

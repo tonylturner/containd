@@ -15,11 +15,35 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peterh/liner"
+
 	httpapi "github.com/tonylturner/containd/api/http"
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+func TestCLIInterruptCancelsOnlyInput(t *testing.T) {
+	reads, calls := 0, 0
+	var output strings.Builder
+	err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+		reads++
+		switch reads {
+		case 1:
+			return "", liner.ErrPromptAborted
+		case 2:
+			return "show version", nil
+		default:
+			return "", io.EOF
+		}
+	}, func(string) {}, func(string, *strings.Builder) error {
+		calls++
+		return nil
+	}, true, &output, &output)
+	if err != nil || calls != 1 || reads != 3 {
+		t.Fatalf("interrupt ended session: err=%v calls=%d reads=%d", err, calls, reads)
+	}
+}
 
 func TestCLILoopExitStatus(t *testing.T) {
 	tests := []struct {

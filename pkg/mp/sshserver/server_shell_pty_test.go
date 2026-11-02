@@ -36,7 +36,7 @@ func TestShellCommandNeedsPTY(t *testing.T) {
 			if strings.Contains(out, "marker-42") {
 				t.Fatalf("a Linux shell ran without a PTY: %q", out)
 			}
-			if got := strings.Count(out, "containd# "); got < 4 {
+			if got := strings.Count(out, "containd(config"); got < 4 {
 				t.Fatalf("CLI stopped after a refusal: %q", out)
 			}
 		})
@@ -58,13 +58,14 @@ func TestShellCommandWithPTYOpensLinuxShell(t *testing.T) {
 	}
 	defer client.Close()
 	tty := openTTY(t, client)
-	tty.waitFor(t, "containd# ", 1)
+	tty.waitFor(t, "containd(config", 1)
 	tty.send(t, "shell\n")
-	tty.waitFor(t, "shell\r\n", 1)
+	tty.waitFor(t, "Entering Linux OS shell as ", 1)
 	tty.send(t, "echo marker-$((6*7))\n")
 	tty.waitFor(t, "marker-42", 1)
 	tty.send(t, "exit\n")
-	tty.waitFor(t, "containd# ", 2)
+	tty.waitFor(t, "Returned to configuration CLI; candidate changes remain staged.", 1)
+	tty.waitFor(t, "containd(config", 2)
 	tty.send(t, "exit\n")
 	if err := tty.session.Wait(); err != nil {
 		t.Fatalf("CLI did not exit: %v: %q", err, tty.output())

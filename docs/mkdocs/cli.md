@@ -27,6 +27,50 @@ error without retrying. Read the current configuration, review your intended
 changes, then issue a new command. Outbound quick start composes from one
 candidate snapshot and chains the revisions returned by its staged writes.
 
+## Modes and prompts
+
+All configuration entry points name the appliance and authenticated user/role.
+They are not Linux shells: configuration edits stage into a **shared candidate**;
+`show diff` reviews it and `commit` applies it. Operational commands may act
+immediately. Leaving never commits or discards the shared candidate.
+
+| Prompt | Meaning |
+| --- | --- |
+| `containd(config)#` | Candidate matches running at the last refresh |
+| `containd(config*)#` | Shared candidate has pending changes |
+| `containd(config?)#` | Candidate status unavailable; not a clean-state claim |
+| `containd(view)>` | Authenticated read-only CLI |
+| `root@<host>(os):<cwd>#` | Linux OS shell; commands apply immediately |
+| `containd(menu)>` | SSH numbered menu; Back to CLI differs from Logout |
+| `containd(setup:candidate)>` | Wizard question staging candidate configuration |
+
+Candidate status comes from `/config/diff`, including secret-only and IDS-bank
+changes, independently of runtime enforcement. Pending commit-confirmed deadlines
+are shown separately from the pending-edit marker. Status includes its refresh
+time or the failure cause. The executable refreshes before each prompt; SSH
+refreshes idle prompts every five seconds without redrawing partially entered
+input. The web console refreshes every five seconds and after commands, preserving
+its input, cursor, history and scrollback. Status is advisory, not a mutation
+revision or authorization decision.
+
+- Executable `exit` / `quit` / `logout` ends the CLI process and returns to its
+  caller. It does not create an OS shell. Ctrl-C cancels input; EOF ends the CLI.
+- SSH appliance `exit` / `quit` / `logout` disconnects SSH. The menu's **Back to
+  CLI** returns without logging out; **0 Logout** disconnects. Diagnostics
+  **0 Back** returns to its caller.
+- The dashboard's **CLI Console** opens the **Configuration CLI**, not an OS
+  shell. **Close console** and typed `exit` / `quit` / `logout` close only the
+  console, leaving the management account signed in. `clear` clears terminal
+  output, not configuration or command history.
+- Linux-shell entry identifies the effective OS user and runtime host. OS
+  commands bypass candidate validation and commit. `configure` opens the CLI;
+  `exit` in it returns to that caller. OS-shell exit returns to the SSH CLI
+  after inline entry, or disconnects SSH after a direct Linux-mode login.
+- The setup wizard stages edits as each question is answered. Cancellation
+  retains earlier edits. Password and key enrollment steps act immediately and
+  are labeled accordingly. Before committing, it displays the diff of the
+  entire shared candidate, including other sessions' edits.
+
 ## Command reference
 
 - Inspection and help:

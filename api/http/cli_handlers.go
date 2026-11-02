@@ -104,19 +104,19 @@ func cliCompleteHandler(store config.Store) gin.HandlerFunc {
 
 func cliWSHandler(store config.Store) gin.HandlerFunc {
 	type req struct {
-		Line string `json:"line"`
+		Line    string `json:"line"`
+		Control string `json:"control"`
 	}
 	type resp struct {
-		Output string `json:"output"`
-		Error  string `json:"error,omitempty"`
+		Output  string `json:"output"`
+		Error   string `json:"error,omitempty"`
+		Control string `json:"control,omitempty"`
+		Prompt  string `json:"prompt,omitempty"`
+		Status  string `json:"status,omitempty"`
 	}
 	upgrader := websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		// The route requires a single-use ticket minted by an authenticated,
-		// CSRF-protected POST. That capability, not ambient cookies, authorizes
-		// the upgrade. Comparing Origin with Host adds no CSWSH protection and
-		// rejects reverse proxies that strip the published port from Host.
+		ReadBufferSize: 1024, WriteBufferSize: 1024,
+		// A single-use authenticated ticket authorizes upgrades, including proxies.
 		CheckOrigin: func(*http.Request) bool { return true },
 	}
 	return func(c *gin.Context) {
@@ -125,42 +125,64 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		defer conn.Close()
-
-		token := strings.TrimSpace(bearerOrCookie(c))
-		_ = conn.WriteJSON(resp{Output: "containd in-app CLI. Type 'show version'."})
+		apiClient, err := cliAPIForRequest(c)
+		if err != nil {
+			_ = conn.WriteJSON(resp{Error: err.Error()})
+			return
+		}
+		ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
+		reg := cli.NewRegistry(store, apiClient)
+		entry, role := apiClient.SessionEntry(ctx)
+		send := func(r resp) error {
+			status := apiClient.SessionStatus(ctx)
+			r.Prompt, r.Status = status.Prompt(role), status.String()
+			return conn.WriteJSON(r)
+		}
+		if send(resp{Output: entry + "\nNo Linux shell in this console. Close console leaves the web session signed in.\nSession controls: exit, quit, logout close only this console; clear clears terminal output, not configuration or history."}) != nil {
+			return
+		}
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				return
 			}
 			line := strings.TrimSpace(string(msg))
+			var request req
 			if strings.HasPrefix(line, "{") {
-				var r req
-				if err := json.Unmarshal(msg, &r); err == nil && strings.TrimSpace(r.Line) != "" {
-					line = r.Line
+				if err := json.Unmarshal(msg, &request); err != nil {
+					if send(resp{Error: "invalid console request"}) != nil {
+						return
+					}
+					continue
 				}
+				line = strings.TrimSpace(request.Line)
 			}
-			if strings.TrimSpace(line) == "" {
-				_ = conn.WriteJSON(resp{Output: ""})
+			if request.Control == "status" {
+				if send(resp{Control: "status"}) != nil {
+					return
+				}
 				continue
 			}
-			apiClient, err := cliAPIForRequest(c)
-			if err != nil {
-				_ = conn.WriteJSON(resp{Error: err.Error()})
-				continue
+			switch strings.ToLower(line) {
+			case "exit", "quit", "logout":
+				_ = conn.WriteJSON(resp{Output: cli.SessionExit, Control: "close"})
+				return
 			}
-			// Preserve tokens refreshed by API responses across commands.
-			apiClient.Token = token
-			ctx := cli.WithRole(c.Request.Context(), c.GetString(ctxRoleKey))
-			reg := cli.NewRegistry(store, apiClient)
 			var buf bytes.Buffer
-			err = reg.ParseAndExecute(ctx, line, &buf)
-			token = apiClient.Token
-			if err != nil {
-				_ = conn.WriteJSON(resp{Output: buf.String(), Error: err.Error()})
-				continue
+			err = nil
+			if line != "" {
+				err = cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
 			}
-			_ = conn.WriteJSON(resp{Output: buf.String()})
+			if strings.EqualFold(line, "help") {
+				buf.WriteString("\nSession controls: exit / quit / logout close console (not management logout); clear clears terminal output. No OS shell, menu or wizard here.\n")
+			}
+			r := resp{Output: buf.String()}
+			if err != nil {
+				r.Error = err.Error()
+			}
+			if send(r) != nil {
+				return
+			}
 		}
 	}
 }

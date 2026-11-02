@@ -165,7 +165,7 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	if err := conn.ReadJSON(&greeting); err != nil {
 		t.Fatalf("read greeting: %v", err)
 	}
-	if !strings.Contains(greeting.Output, "containd in-app CLI") {
+	if !strings.Contains(greeting.Output, "Configuration CLI") {
 		t.Fatalf("unexpected greeting: %+v", greeting)
 	}
 
@@ -196,6 +196,42 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	}
 	if cmdResp.Error != "" || !strings.Contains(cmdResp.Output, "status") {
 		t.Fatalf("ticket-authenticated loopback command: %+v", cmdResp)
+	}
+
+	// Mode errors must not execute Linux tools or terminate the console.
+	if err := conn.WriteJSON(map[string]string{"line": "pwd"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&cmdResp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmdResp.Error, "not Linux") {
+		t.Fatal(cmdResp)
+	}
+	if err := conn.WriteJSON(map[string]string{"control": "status"}); err != nil {
+		t.Fatal(err)
+	}
+	var state struct{ Control, Prompt, Status string }
+	if err := conn.ReadJSON(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Control != "status" || !strings.Contains(state.Prompt, "(config") || !strings.Contains(state.Status, "Shared candidate") {
+		t.Fatal(state)
+	}
+	if err := conn.WriteJSON(map[string]string{"line": "exit"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Control != "close" {
+		t.Fatal(state)
+	}
+	// Closing the command runner must not revoke its management session.
+	rec = httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/auth/me", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("console exit logged out management: %d", rec.Code)
 	}
 }
 
@@ -294,6 +330,26 @@ func TestConsoleTLSVerificationAndRotation(t *testing.T) {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.Copy(io.Discard, r.Body); err != nil {
 			t.Errorf("read body: %v", err)
+			return
+		}
+		if r.URL.Path != "/api/v1/health" {
+			wantToken := "Bearer console-secret"
+			if calls.Load() >= 3 {
+				wantToken = "Bearer console-renewed"
+			}
+			if r.Header.Get("Authorization") != wantToken {
+				t.Errorf("status/identity lost refreshed token: %v", r.Header)
+			}
+			switch r.URL.Path {
+			case "/api/v1/auth/me":
+				_, _ = io.WriteString(w, `{"username":"operator","role":"admin"}`)
+			case "/api/v1/config":
+				_, _ = io.WriteString(w, `{"system":{"hostname":"appliance"}}`)
+			case "/api/v1/config/diff":
+				_, _ = io.WriteString(w, `{"changed":false,"pendingConfirm":null}`)
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
 			return
 		}
 		n := calls.Add(1)

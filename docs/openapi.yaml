@@ -8132,7 +8132,13 @@ paths:
         before upgrade: revoked or expired sessions are rejected. Cookies and
         Bearer headers alone do not authorize upgrades; JWTs in query parameters
         are not accepted. Client sends a command string or {line: string};
-        server sends JSON {output: string, error?: string}.
+        server sends JSON {output: string, error?: string, prompt?: string, status?: string,
+        control?: "status"|"close"}. Send {control: "status"} for an authoritative
+        shared-candidate status refresh (including unknown on failure), with no
+        command execution. The server also refreshes status after commands.
+        exit, quit and logout send control "close" and close only this console,
+        leaving the management session signed in. Status is advisory and never
+        supplies a mutation revision.
       parameters:
       - name: ticket
         in: query

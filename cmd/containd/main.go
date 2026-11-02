@@ -138,8 +138,11 @@ func runCLI(ctx context.Context) error {
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
 
-	prompt := "containd# "
-	fmt.Println("containd CLI. Type 'help' for commands, 'exit' to return to shell. Tab to complete.")
+	entry, role := api.SessionEntry(ctx)
+	fmt.Println(entry)
+	fmt.Println("exit ends this CLI process and returns to its caller. For guided setup, use the SSH wizard. Tab to complete; help lists commands.")
+	defer fmt.Println(cli.SessionExit)
+	prompt := "containd(config?)# "
 
 	// peterh/liner provides line editing + tab completion + history.
 	// It falls back to plain line reading when stdin isn't a TTY (the
@@ -156,7 +159,7 @@ func runCLI(ctx context.Context) error {
 	// "set firewall rule") and the completer just filters by the
 	// current line. Liner handles single-match auto-fill + multi-match
 	// listing on its own.
-	commands := reg.Commands()
+	commands := append(reg.Commands(), "exit", "quit", "logout", "help")
 	sort.Strings(commands)
 	state.SetCompleter(func(line string) []string {
 		needle := strings.ToLower(line)
@@ -185,8 +188,15 @@ func runCLI(ctx context.Context) error {
 		}()
 	}
 
-	return runCLILoop(prompt, state.Prompt, state.AppendHistory, func(line string, buf *strings.Builder) error {
-		return reg.ParseAndExecute(cmdCtx, line, buf)
+	return runCLILoop(prompt, func(string) (string, error) {
+		status := api.SessionStatus(ctx)
+		fmt.Println(status.String())
+		return state.Prompt(status.Prompt(role))
+	}, state.AppendHistory, func(line string, buf *strings.Builder) error {
+		if strings.EqualFold(line, "help") {
+			fmt.Fprintln(buf, "Session controls: exit / quit / logout end this CLI process. Use the SSH wizard for guided setup.")
+		}
+		return cli.SessionCommandError(line, reg.ParseAndExecute(cmdCtx, line, buf))
 	}, interactive, os.Stdout, os.Stderr)
 }
 
@@ -211,7 +221,10 @@ func runCLILoop(
 	for {
 		line, err := readLine(prompt)
 		if err != nil {
-			if errors.Is(err, liner.ErrPromptAborted) || errors.Is(err, io.EOF) {
+			if errors.Is(err, liner.ErrPromptAborted) {
+				continue
+			}
+			if errors.Is(err, io.EOF) {
 				return sessionResult()
 			}
 			return err
