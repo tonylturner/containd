@@ -121,6 +121,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The reverse proxy starts in the packaged image. The image now has the
+  `nginx` account its workers run as; before, every reverse-proxy commit failed
+  preflight with `getpwnam("nginx") failed`.
 - Configuration validation restores redacted secrets the same way staging does,
   so a candidate with a managed OpenVPN client no longer fails validation with
   "ca is required".

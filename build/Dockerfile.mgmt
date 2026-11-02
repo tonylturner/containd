@@ -80,6 +80,12 @@ RUN addgroup -S clamav \
     && mkdir -p /var/lib/clamav /run/clamav \
     && chown clamav:clamav /var/lib/clamav /run/clamav
 
+# nginx (reverse proxy) is built with --user=nginx; its workers drop to that
+# account, so preflight and start fail with getpwnam("nginx") without it.
+RUN addgroup -S nginx 2>/dev/null || true \
+    && adduser -S -D -H -G nginx -h /var/lib/nginx -s /sbin/nologin nginx 2>/dev/null || true \
+    && id nginx
+
 # Envoy needs libstdc++ which is not pulled in by default.
 COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
