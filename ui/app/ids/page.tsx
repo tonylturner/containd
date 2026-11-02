@@ -32,7 +32,8 @@ import {
   SourcesCatalog,
   type IDSPanelFields,
 } from "./ids-panels";
-import { isRuleEnabled, isRuleEvaluable, RuleEvaluation } from "./ids-shared";
+import { isRuleEnabled, isRuleEvaluable } from "./ids-shared";
+import { ImportResult } from "./ids-import-result";
 
 /* ── Page ── */
 
@@ -203,18 +204,10 @@ export default function IDSPage() {
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
       {importResult && (
-        <section aria-label="Import result" className="mb-4 rounded-xs border bg-(--surface) p-4">
-          <h2 className="text-sm font-medium">Import staged — commit to apply evaluable rules</h2>
-          <p className="mt-1 text-xs text-(--text-muted)">
-            {importResult.imported} imported, {importResult.skipped} skipped.
-            {" "}Storage-only rules do not run, even when enabled.
-          </p>
-          <ul className="mt-2 space-y-2">
-            {importResult.rules.map(rule => (
-              <li key={rule.id}><span className="text-sm">{rule.id}</span><RuleEvaluation rule={rule} /></li>
-            ))}
-          </ul>
-        </section>
+        <ImportResult result={importResult} onDismiss={() => {
+          setImportResult(null);
+          rulesButton.current?.focus();
+        }} />
       )}
 
       <div className="mb-6 flex flex-wrap items-center gap-4">

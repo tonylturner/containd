@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep large IDS import results compact with evaluability and conversion-note
+  counts, at most 20 attention rows, and a dismiss action.
 - Require protocol restrictions on every matching enforcing ALLOW and a refusing
   fallback before topology can count protocol whitelisting as a configured pass.
   TCP and UDP grants must specify ports; port-less grants remain unknown.
