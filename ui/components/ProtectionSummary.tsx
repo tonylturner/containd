@@ -20,10 +20,9 @@ export function ProtectionRevisions({ status }: { status?: ProtectionStatus }) {
 export function ProtectionOutcomes({ subsystems }: { subsystems: ProtectionSubsystem[] }) {
   return <div className="mt-2 space-y-2 text-xs">
     {subsystems.map(s => <div key={s.name}>
-      <p><span className="font-semibold">{s.name}</span> ({s.required ? "Required" : "Non-gating"}): {s.fault?.reason || s.reason || s.state}</p>
+      <p><span className="font-semibold">{s.name}</span> · {s.owner} · {s.state} · {s.required ? "Required" : "Optional (non-gating)"}</p>
       {s.nextRetryAt && <p>Next automatic retry: <time dateTime={s.nextRetryAt}>{s.nextRetryAt}</time></p>}
-      <p>{s.retryable || s.nextRetryAt ? "Automatic repair is underway. Check the service configuration and appliance connection if this persists."
-        : "Review the service configuration and referenced files, then commit corrected settings."}</p>
+      {(s.fault?.reason || s.reason) && <p>{s.fault?.reason || s.reason}</p>}
     </div>)}
   </div>;
 }

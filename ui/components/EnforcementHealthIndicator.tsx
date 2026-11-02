@@ -1,5 +1,6 @@
 import { useProtection } from "../hooks/useProtection";
 import { isAdmin, type EnforcementHealth } from "../lib/api";
+import { hasTrafficProtectionNotice } from "../lib/protection-view";
 import { effectiveEnforcementState, enforcementDetail } from "./enforcement-detail";
 import { ProtectionRetry } from "./ProtectionNotice";
 import { StatusIndicator } from "./StatusBadge";
@@ -21,10 +22,11 @@ export function EnforcementHealthIndicator({ health }: { health: EnforcementHeal
   const view = VIEWS[state];
   if (state === "enforcing") return <StatusIndicator status={view.status} label={view.label} />;
   const protection = enforcementDetail(health, status);
+  const trafficNotice = hasTrafficProtectionNotice(status);
   return <div className="flex flex-wrap items-center gap-3">
     <StatusIndicator status={view.status} label={view.label}
-      sublabel={status?.ready ? "Protection needs attention" : protection.title} />
-    {protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
+      sublabel={trafficNotice ? undefined : status?.ready ? "Protection needs attention" : protection.title} />
+    {!trafficNotice && protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
     {health.reason && <p className="break-words text-xs text-amber">{health.reason}</p>}
     <ProtectionRetry isAdmin={isAdmin()} />
   </div>;

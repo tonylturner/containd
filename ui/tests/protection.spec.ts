@@ -271,13 +271,21 @@ test("ready hides the traffic banner and shows the three revision identities", a
 });
 
 test("a pending required owner prevents green even when health says enforcing", async ({ page }) => {
-  await protectionAPI(page, observation({ state: "pending", subsystems: [subsystem()] }), { enforcement: "enforcing" });
+  await protectionAPI(page, observation({ state: "pending", subsystems: [subsystem()] }), {
+    enforcement: "enforcing", enforcementReason: "Current ruleset is installed",
+  });
   await openProtection(page, "/firewall/");
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await expect(notice).toContainText("Configuration committed; interfaces are retrying");
-  await expect(notice).toContainText("Required");
+  await expect(notice).toContainText("interfaces · engine · pending · Required");
   await expect(notice).toContainText("Next automatic retry");
-  await expect(notice).toContainText("Automatic repair is underway");
+  await expect(notice).toContainText("waiting for owner");
+  await expect(page.getByText(/Automatic repair is underway/)).toHaveCount(1);
+  await expect(page.getByText("Configuration committed; interfaces are retrying", { exact: true })).toHaveCount(1);
+  const enforcement = page.getByRole("status", { name: "Firewall enforcement degraded: degraded" }).locator("..");
+  await expect(enforcement).not.toContainText("Configuration committed;");
+  await expect(enforcement).not.toContainText("Automatic repair");
+  await expect(enforcement.getByText("Current ruleset is installed", { exact: true })).toBeVisible();
   await expect(notice.getByText("Not verified", { exact: true })).toBeVisible();
   await expect(page.getByRole("status", { name: "Firewall enforcing: healthy", exact: true })).toHaveCount(0);
   const dir = process.env.PROTECTION_SCREENSHOTS_DIR;
@@ -299,8 +307,9 @@ test("DHCP faults remain visible and retryable without gating ready", async ({ p
   await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
   const services = page.getByRole("status", { name: "Service convergence" });
   await expect(services).toContainText("DHCP could not start; retrying");
-  await expect(services).toContainText("Non-gating");
+  await expect(services).toContainText("dhcp · management · failed · Optional (non-gating)");
   await expect(services).toContainText("Next automatic retry");
+  await expect(services.getByText(/Automatic repair is underway/)).toHaveCount(1);
   await services.getByRole("button", { name: "Retry now" }).click();
   expect(mock.retries).toEqual([{ bootId: "boot-a", applyId: "apply-a", desiredRevision: "running-a" }]);
   const summary = page.getByRole("region", { name: "Running protection summary" });
@@ -342,6 +351,35 @@ test("collection failure preserves visible non-gating faults without clean readi
   const services = page.getByRole("status", { name: "Service convergence" });
   await expect(services).toContainText("DNS upstream missing");
   await expect(services).toContainText("Review the service configuration");
+});
+
+test("each attention surface gives one repair direction without hiding simultaneous owner faults", async ({ page }) => {
+  await protectionAPI(page, observation({ state: "pending", subsystems: [
+    subsystem({ fault: { kind: "delivery", reason: "Interface device missing" } }),
+    subsystem({ name: "wireguard", state: "failed", fault: { kind: "delivery", reason: "WireGuard unavailable" } }),
+    subsystem({ name: "dhcp", owner: "management", required: false, state: "failed",
+      fault: { kind: "delivery", reason: "DHCP could not start" } }),
+    subsystem({ name: "dns", owner: "management", required: false, state: "failed",
+      fault: { kind: "config", reason: "DNS upstream missing" }, retryable: false, nextRetryAt: null }),
+  ] }), { enforcement: "degraded", enforcementReason: "Schedule horizon exhausted" });
+  await openProtection(page, "/firewall/");
+  const traffic = page.getByRole("status", { name: "Traffic protection" });
+  const services = page.getByRole("status", { name: "Service convergence" });
+  for (const surface of [traffic, services]) {
+    await expect(surface.getByText(/Automatic repair is underway/)).toHaveCount(1);
+  }
+  for (const reason of ["Interface device missing", "WireGuard unavailable"]) {
+    await expect(traffic.getByText(reason, { exact: true })).toBeVisible();
+  }
+  for (const reason of ["DHCP could not start", "DNS upstream missing"]) {
+    await expect(services.getByText(reason, { exact: true })).toBeVisible();
+  }
+  await expect(services.getByText(/Review the service configuration/)).toHaveCount(1);
+  await expect(services).toContainText("dns · management · failed · Optional (non-gating)");
+  const enforcement = page.getByRole("status", { name: "Firewall enforcement degraded: degraded" }).locator("..");
+  await expect(enforcement).toContainText("Schedule horizon exhausted");
+  await expect(enforcement).not.toContainText("Automatic repair");
+  await expect(page.getByText(/Automatic repair is underway/)).toHaveCount(2);
 });
 
 test("superseded retry refreshes a different target and retires obsolete feedback", async ({ page }) => {

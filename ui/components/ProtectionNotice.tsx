@@ -1,7 +1,7 @@
 "use client";
 
 import { requestProtectionRetry, useProtection } from "../hooks/useProtection";
-import { protectionView } from "../lib/protection-view";
+import { hasTrafficProtectionNotice, protectionView, serviceRepairDirection } from "../lib/protection-view";
 import { canRetryProtection } from "../lib/protection-store";
 import { ProtectionOutcomes, ProtectionRevisions } from "./ProtectionSummary";
 import { Disclosure } from "./Disclosure";
@@ -25,8 +25,7 @@ export function ProtectionNotice({ isAdmin }: { isAdmin: boolean }) {
   const { status } = useProtection();
   if (!status) return null;
   const optional = status.subsystems.filter(s => !s.required && (s.fault || s.state === "failed" || s.state === "pending" || s.state === "unknown"));
-  const requiredFault = status.subsystems.some(s => s.required && (s.fault || s.state === "failed"));
-  const trafficNotice = !status.ready && (status.state !== "disabled" || requiredFault);
+  const trafficNotice = hasTrafficProtectionNotice(status);
   const view = protectionView(status);
   return <>
     {trafficNotice && <aside role="status" aria-label="Traffic protection"
@@ -56,6 +55,7 @@ export function ProtectionNotice({ isAdmin }: { isAdmin: boolean }) {
     </aside>}
     {optional.length > 0 && <aside role="status" aria-label="Service convergence" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-amber">
       <h2 className="text-xs font-semibold">Service configuration needs attention</h2>
+      <p className="mt-1 text-xs">{serviceRepairDirection(optional)}</p>
       <ProtectionOutcomes subsystems={optional} />
       {!trafficNotice && <ProtectionRetry isAdmin={isAdmin} />}
     </aside>}
