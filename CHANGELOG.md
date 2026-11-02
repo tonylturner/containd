@@ -44,11 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   syslog, learned, counted as real (including `/metrics`), or kept in the real
   event, DENY or IEC 104 incident retention. Demo would-deny results are your
   ICS rules evaluated in monitor mode.
-- Charts, Zone Status and conduits show labelled demo data until real traffic
-  is observed. Demo conduit traffic is reported as `recorded`, never measured.
+- Each chart shows labelled demo data until its own metric has real data.
+  Demo conduit traffic is reported as `recorded`, never measured.
 - The Dashboard SIM Start/Stop choice persists (`demo.json` beside
-  `config.db`). With no saved choice, demo runs only until real traffic is
-  observed, then stops for good.
+  `config.db`). With no saved choice, demo runs until the firewall does real
+  work (traffic forwarded between zones, or a real IDS alert or antivirus
+  detection), then stops for good. Management sessions and ARP chatter alone do
+  not stop it.
 
 ## [0.1.38] - 2026-11-01
 

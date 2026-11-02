@@ -184,7 +184,7 @@ the latest retained packet rate, not event-count estimates.
 
 ## Recorded demo replay
 
-Until real traffic is observed, management automatically replays the bundled
+Until the firewall does real work, management automatically replays the bundled
 recorded ICS and IT packet captures through the real protocol decoders and detection
 chain. These are recorded captures on an **illustrative topology**, not packets
 measured on your networks. Replay is detached: it never transmits frames,
@@ -218,17 +218,24 @@ Start saves `on`; Stop saves `off` and persists across management and engine
 restarts. Start remains available after an automatic stop or replay error.
 Management stores the preference in `demo.json` beside `config.db`:
 
-- `auto`: run until real traffic is observed in retained telemetry history,
-  then stop with reason **real traffic observed**. The real-activity latch is
+- `auto`: run until retained telemetry shows the firewall doing real work —
+  traffic forwarded between zones (conduit bytes) or a real IDS alert or
+  antivirus detection or block — then stop with reason **real traffic
+  observed**. Interface bytes alone (management sessions, ARP, bridge chatter)
+  and other engine events do not stop it. With enforcement disabled there are no
+  conduit counters, so only a security event stops it. The latch is
   persistent, so restarting does not re-enable automatic replay.
 - `on`: run regardless of real traffic; charts still prefer real history once
   their metric has real activity.
 - `off`: do not run.
 
 When the preference file is absent, management saves `auto`. `auto` starts only
-after the telemetry sampler completes its first observed interval with no real
-traffic (status reason **waiting for telemetry interval** until then), so an
-upgraded appliance that already carries traffic never starts replay. The engine itself boots stopped; management reconciles the
+after the telemetry sampler completes its first observed interval with no such
+real work (status reason **waiting for telemetry interval** until then), so an
+upgraded appliance that already forwards traffic never starts replay. Each
+chart still prefers its own real data: Traffic and Zone Status show real
+interface bytes as soon as they exist, while Events, Protocols and conduits can
+show demo until their own metric has real activity. The engine itself boots stopped; management reconciles the
 preference after synchronizing running configuration, including after an engine
 restart. A delivery failure does not discard a saved preference. The status line
 shows the replaying capture, a stopped reason or error, and that Stop persists.
