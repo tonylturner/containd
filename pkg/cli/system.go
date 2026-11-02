@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -66,7 +67,7 @@ func showDiff(api *API) Command {
 	}
 }
 
-// showSystem shows saved system settings, health, and the SSH shell mode the
+// showSystem shows effective system settings, health, and the SSH shell mode the
 // appliance runs. A client without the appliance's store runs the command on
 // the appliance, so its own environment never stands in for the appliance's.
 func showSystem(store config.Store, api *API) Command {
@@ -93,14 +94,13 @@ func showSystem(store config.Store, api *API) Command {
 			configErr = monitoringUnavailable(out, "System configuration", configErr)
 		} else {
 			fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
-			fmt.Fprintln(out, savedListenerNotice)
-			listeners := savedListeners(&cfg)
-			fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(listeners.HTTP.Enabled))
-			fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(listeners.HTTPS.Enabled))
+			fmt.Fprintln(out, "Listener settings: effective next-start configuration (not environment address overrides or live socket state).")
+			effective, fields := systemProfileView(&cfg, profile.IsStrict())
+			listeners := savedListeners(effective)
+			printSystemProfileTLS(out, fields)
 			fmt.Fprintf(out, "mgmt.http_listen: %s\n", listeners.HTTP.Addr)
 			fmt.Fprintf(out, "mgmt.https_listen: %s\n", listeners.HTTPS.Addr)
 			fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
-			fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)))
 			if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
 				fmt.Fprintf(out, "mgmt.hsts_max_age_seconds: %d\n", cfg.System.Mgmt.HSTSMaxAgeSeconds)
 			}
