@@ -274,7 +274,11 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		}
 	}
 	stores.auditStore = mustInitAuditStore()
-	stores.userStore = mustInitUsersStore()
+	stores.userStore, err = initUsersStore()
+	if err != nil {
+		stores.auditStore.Close()
+		return fail(err)
+	}
 	if err := stores.userStore.EnsureDefaultAdmin(context.Background()); err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()

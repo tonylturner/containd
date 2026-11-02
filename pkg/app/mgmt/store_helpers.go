@@ -77,23 +77,20 @@ func mustInitAuditStore() audit.Store {
 	return store
 }
 
-func mustInitUsersStore() users.Store {
-	dbPath := common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))
+func usersDBPath() string {
+	return common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))
+}
+
+func initUsersStore() (users.Store, error) {
+	dbPath := usersDBPath()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		fallback := filepath.Join("data", "users.db")
-		if fallback != dbPath {
-			_ = os.MkdirAll(filepath.Dir(fallback), 0o755)
-			logging.NewService("mgmt").Warnf("users db path %s not writable (%v); falling back to %s", dbPath, err, fallback)
-			dbPath = fallback
-		} else {
-			logging.NewService("mgmt").Fatalf("failed to create users dir: %v", err)
-		}
+		return nil, fmt.Errorf("create users dir: %w", err)
 	}
 	store, err := openStoreWithRetry("users", func() (users.Store, error) {
 		return users.NewSQLiteStore(dbPath)
 	})
 	if err != nil {
-		logging.NewService("mgmt").Fatalf("failed to open users store: %v", err)
+		return nil, fmt.Errorf("open users store: %w", err)
 	}
-	return store
+	return store, nil
 }

@@ -6,7 +6,9 @@ package mgmtapp
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,7 +143,10 @@ func TestMustInitStores(t *testing.T) {
 	}
 	_ = auditStore.Close()
 
-	usersStore := mustInitUsersStore()
+	usersStore, err := initUsersStore()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := usersStore.EnsureDefaultAdmin(context.Background()); err != nil {
 		t.Fatalf("users store ensure default admin: %v", err)
 	}
@@ -150,4 +155,27 @@ func TestMustInitStores(t *testing.T) {
 
 func auditRecordForTest() audit.Record {
 	return audit.Record{Actor: "test", Source: "unit", Action: "write", Target: "db", Result: "ok"}
+}
+
+func TestUsersStoreConfiguredPathFailure(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("block"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTAIND_USERS_DB", filepath.Join(blocker, "users.db"))
+	store, err := initUsersStore()
+	if store != nil || err == nil || !strings.Contains(err.Error(), "create users dir:") {
+		t.Fatalf("initUsersStore = %v, %v; want configured path failure", store, err)
+	}
+}
+
+func TestUsersStoreOpenFailure(t *testing.T) {
+	t.Setenv("CONTAIND_USERS_DB", t.TempDir()) // a directory cannot be a SQLite database
+	oldSleep := storeOpenSleep
+	t.Cleanup(func() { storeOpenSleep = oldSleep })
+	storeOpenSleep = func(time.Duration) {}
+	store, err := initUsersStore()
+	if store != nil || err == nil || !strings.Contains(err.Error(), "open users store:") {
+		t.Fatalf("initUsersStore = %v, %v; want configured path failure", store, err)
+	}
 }
