@@ -1,5 +1,10 @@
 # Reserved management path
 
+This path is **training-only**. Strict refuses `CONTAIND_MGMT_RESERVATION`
+because the reserved listener requires plain HTTP. Do not remove a reservation
+without replacing and testing its management boundary; see
+[deployment profiles](deployment-profiles.md#existing-installations-and-migration).
+
 A deployment can reserve plain-HTTP management for exact IPv4 peers independently
 of student interface-access flags and firewall policy:
 

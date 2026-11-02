@@ -23,7 +23,7 @@ curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/
 sh quickstart.sh
 ```
 
-`quickstart.sh` downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, and starts the combined appliance (`containd all`) for you. With Python 3 available, it can auto-adjust fresh default subnets to avoid existing Docker networks.
+`quickstart.sh` selects the training profile, downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, and starts the combined appliance (`containd all`) for you. With Python 3 available, it can auto-adjust fresh default subnets to avoid existing Docker networks.
 
 The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6`, matched to interfaces by subnet.
 
@@ -46,16 +46,18 @@ That writes `docker-compose.yml`, `.env.example`, and `.env`, can auto-adjust co
 | HTTPS | `https://localhost:8443` |
 | SSH console | `ssh -p 2222 containd@localhost` |
 
-Default credentials: `containd` / `containd` -- change on first login.
+Training default credentials: `containd` / `containd` -- change on first login.
+For HTTPS-only management on loopback and a one-time admin password, use the
+[strict deployment profile](docs/mkdocs/deployment-profiles.md).
 
 ### SSH Shell Mode
 
-The SSH server supports two shell modes, controlled by `CONTAIND_SSH_SHELL_MODE` or `set system ssh shell-mode`:
+In training, the SSH server supports two shell modes, controlled by `CONTAIND_SSH_SHELL_MODE` or `set system ssh shell-mode`:
 
 - **`appliance`** (default) -- Drops into the containd CLI. Type `shell` to access the underlying Linux shell, `exit` to return.
 - **`linux`** -- Drops into a full bash shell with standard Linux tools (tcpdump, nft, etc.). Type `configure` or `containd cli` to enter the containd CLI, `exit` to return to bash.
 
-Both modes support bidirectional switching. The `linux` mode is useful for lab environments where students need access to industry tools like `tcpdump` alongside the containd CLI.
+Strict permits only the appliance CLI and refuses `shell`. In training, both modes support bidirectional switching. The `linux` mode is useful for lab environments where students need access to industry tools like `tcpdump` alongside the containd CLI.
 
 ### First 5 Minutes
 
@@ -85,7 +87,7 @@ Traditional IT firewalls don't understand ICS protocols. They can't distinguish 
 
 **Embedded Services** -- DNS (Unbound), NTP (chrony), DHCP, forward proxy (Envoy), reverse proxy (Nginx), VPN (WireGuard + OpenVPN), antivirus (ClamAV or ICAP).
 
-**Management** -- Web UI with dashboard, topology, firewall rules, routing, NAT, services, monitoring, and diagnostics. SSH console with configurable shell mode (appliance CLI or full Linux shell with tcpdump). REST API, Prometheus metrics, syslog forwarding, event export (JSON/Syslog).
+**Management** -- Web UI with dashboard, topology, firewall rules, routing, NAT, services, monitoring, and diagnostics. SSH console with an appliance CLI (training also permits a full Linux shell with tcpdump). REST API, Prometheus metrics, syslog forwarding, event export (JSON/Syslog).
 
 **Config Lifecycle** -- Candidate/running configs with commit-confirmed and auto-rollback, deterministic JSON export/import, schedule and identity predicates on rules, ICS policy templates for rapid deployment.
 
@@ -127,6 +129,7 @@ docker run -d \
   --device /dev/net/tun:/dev/net/tun \
   -p 8080:8080 -p 8443:8443 -p 2222:2222 \
   -v containd-data:/data \
+  -e CONTAIND_PROFILE=training \
   -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
   ghcr.io/tonylturner/containd:latest
 ```
@@ -145,7 +148,7 @@ python3 -m venv build/docs-venv && . build/docs-venv/bin/activate
 python -m pip install -r docs/requirements-mkdocs.txt
 go build -o containd ./cmd/containd
 cd ui && npm ci && npm run build && cd ..
-CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd all
+CONTAIND_PROFILE=training CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd all
 ```
 
 ## Security

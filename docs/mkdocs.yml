@@ -50,6 +50,7 @@ extra_css:
 nav:
   - Home: index.md
   - Getting Started:
+      - Deployment Profiles: deployment-profiles.md
       - Deploy with Docker Compose: docker-compose.md
       - Customizing Lab Compose: lab-compose.md
       - Windows / WSL Notes: windows-wsl.md

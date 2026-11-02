@@ -484,8 +484,9 @@ its containing directory read-only into containd, not the replaceable file inode
 and have the operator replace the bundle atomically in that directory. Separate
 certificate and key files are also accepted, but cannot guarantee atomic
 rotation: a mismatched or unreadable replacement keeps the last-good pair in
-memory. With no valid pair at start, HTTPS is disabled and the reason is logged;
-containd never self-signs external paths. Changing source paths requires restart.
+memory. With no valid pair at start, training disables HTTPS and logs the reason;
+strict refuses startup instead of falling back to HTTP. containd never
+self-signs external paths. Changing source paths requires restart.
 
 `GET /api/v1/system/tls` describes configured and bound files (both file fields
 name `server.pem` in managed mode). Its always-present boolean `managed` uses
@@ -499,6 +500,12 @@ snapshot, not an independently read certificate. `reloadError` reports an invali
 rotation while the last-good identity remains served. Private keys are never
 returned. A pin/rotation race fails verification; retry the operation rather than
 disabling certificate verification.
+
+Strict overrides saved HTTP, HTTPS and HSTS enablement without rewriting saved
+intent. TLS status includes `httpEnabledSource`, `httpsEnabledSource`,
+`hstsEnabledSource` and overridden `*Saved` values, plus
+`servedCertFingerprintSHA256` and `certFingerprintSHA256`. See
+[deployment profiles](deployment-profiles.md) for write and migration rules.
 
 ## Additional CA bundle
 

@@ -186,8 +186,14 @@ jobs:
         env:
           COMPOSE_PROJECT_NAME: containd-quickstart-ci
           CONTAIND_IMAGE: containd/containd:ci
-          CONTAIND_JWT_SECRET: ci-quickstart-secret
+          CONTAIND_JWT_SECRET: ci-quickstart-0123456789abcdef0123456789abcdef
         run: bash scripts/smoke-quickstart.sh
+      - name: Strict profile smoke
+        env:
+          COMPOSE_PROJECT_NAME: containd-strict-ci
+          CONTAIND_IMAGE: containd/containd:ci
+          CONTAIND_JWT_SECRET: ci-strict-0123456789abcdef0123456789abcdef
+        run: bash scripts/smoke-strict.sh
       - name: Trivy vulnerability scan
         run: |
           docker run --rm \

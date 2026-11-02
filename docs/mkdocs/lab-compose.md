@@ -1,5 +1,8 @@
 # Customizing Lab Compose
 
+This guide uses the **training** profile. Lab mode and shell access are
+training-only; see [deployment profiles](deployment-profiles.md) for strict.
+
 This guide is for adapting `deploy/docker-compose.yml` to your own classroom, demo, or research lab topology.
 
 Use Docker Compose to define the world of possible networks and interface attachments. Use containd to bind those interfaces to zones, apply policy, and enforce segmentation between workloads that route through the appliance.
