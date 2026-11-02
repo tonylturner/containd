@@ -25,13 +25,14 @@ const BudgetBytes int64 = 64 << 20
 const reclaimBytes int64 = 60 << 20
 
 type Store struct {
-	mu       sync.Mutex
-	db       *sql.DB
-	path     string
-	state    wire.CollectorState
-	admitted map[string]bool
-	budget   int64
-	reclaim  int64
+	observedInterval bool
+	mu               sync.Mutex
+	db               *sql.DB
+	path             string
+	state            wire.CollectorState
+	admitted         map[string]bool
+	budget           int64
+	reclaim          int64
 }
 
 type row struct {
@@ -183,9 +184,13 @@ func (s *Store) write(ctx context.Context, now time.Time, rows []row) error {
 	}
 	count := len(admitted)
 
+	observedInterval := false
 	var dropped uint64
 	for _, r := range rows {
 		sample := r.sample
+		if sample.Origin != wire.OriginDemo && r.point.Q == wire.QualityObserved {
+			observedInterval = true
+		}
 		if sample.Origin == "" {
 			sample.Origin = wire.OriginReal
 		}
@@ -256,6 +261,7 @@ func (s *Store) write(ctx context.Context, now time.Time, rows []row) error {
 	if err = tx.Commit(); err != nil {
 		return s.fail(err)
 	}
+	s.observedInterval = s.observedInterval || observedInterval
 	s.admitted = admitted
 	s.state.DroppedSeries += dropped
 	if err = s.maintain(ctx); err != nil {

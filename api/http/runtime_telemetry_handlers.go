@@ -178,10 +178,9 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
-func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
+func simulationStatusHandler(sc DemoController) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sc, ok := engine.(SimulationClient)
-		if !ok || sc == nil {
+		if sc == nil {
 			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
@@ -194,10 +193,9 @@ func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
-func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
+func simulationControlHandler(sc DemoController) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sc, ok := engine.(SimulationClient)
-		if !ok || sc == nil {
+		if sc == nil {
 			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
@@ -210,10 +208,10 @@ func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		st, err := sc.SimulationControl(c.Request.Context(), req.Action)
 		if err != nil {
-			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
+			internalError(c, err)
 			return
 		}
-		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "synth"})
+		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "demo"})
 		c.JSON(http.StatusOK, st)
 	}
 }

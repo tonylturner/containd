@@ -14,10 +14,12 @@ import (
 // Sampler has one writer. Source failures are independent: engine outages
 // cannot suppress the management-local counters.
 type Sampler struct {
-	store    *Store
-	readers  []wire.CounterReader
-	previous map[string]previous
-	mu       sync.Mutex
+	// AfterTick runs after the store and sampler locks have been released. Set before Run.
+	AfterTick func(context.Context)
+	store     *Store
+	readers   []wire.CounterReader
+	previous  map[string]previous
+	mu        sync.Mutex
 }
 
 func NewSampler(store *Store, readers ...wire.CounterReader) *Sampler {
@@ -28,7 +30,12 @@ func NewSampler(store *Store, readers ...wire.CounterReader) *Sampler {
 // process-monotonic elapsed time, independent of the wall clock.
 func (s *Sampler) Tick(ctx context.Context, wall time.Time, mono time.Duration) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() {
+		s.mu.Unlock()
+		if s.AfterTick != nil {
+			s.AfterTick(ctx)
+		}
+	}()
 	samples := []wire.CounterSample{}
 	invalid := []wire.CounterSample{}
 	var unavailable []wire.SourceUnavailable

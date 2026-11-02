@@ -59,8 +59,6 @@ var monitoringOperations = []struct {
 	{"DELETE", "/signatures/custom", "", "engine signatures unavailable", "", 204, true},
 	{"GET", "/signatures/matches", "", "engine signature matches unavailable", "[]", 200, false},
 	{"GET", "/interfaces/state", "", "engine interface state unavailable", "[]", 200, false},
-	{"GET", "/simulation", "", "engine simulation unavailable", `{"running":false}`, 200, false},
-	{"POST", "/simulation", `{"action":"stop"}`, "engine simulation unavailable", `{"running":false}`, 200, false},
 }
 
 func TestMonitoringAvailability(t *testing.T) {

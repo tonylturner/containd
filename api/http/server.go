@@ -24,6 +24,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/demo"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
@@ -113,7 +114,7 @@ type WireGuardStatusClient interface {
 	GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error)
 }
 
-// SimulationClient is an optional interface for controlling the synthetic traffic generator.
+// SimulationClient is the engine-side recorded demo capability.
 type SimulationClient interface {
 	SimulationStatus(ctx context.Context) (engineclient.SimulationStatus, error)
 	SimulationControl(ctx context.Context, action string) (engineclient.SimulationStatus, error)
@@ -158,6 +159,12 @@ type ServicesApplier interface {
 	RecordEngineFaults([]config.ServiceFault)
 }
 
+// DemoController persists management intent before engine delivery.
+type DemoController interface {
+	SimulationStatus(context.Context) (demo.Status, error)
+	SimulationControl(context.Context, string) (demo.Status, error)
+}
+
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
 func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
 	return NewServerWithEngineAndServices(store, auditStore, engine, nil, nil)
@@ -165,13 +172,17 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
 // opts may contain ManagementGuardHealth, ManagementListenerFaults,
-// FactoryResetSessions and TelemetryStore providers.
+// FactoryResetSessions, DemoController and TelemetryStore providers.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
+	var demoController DemoController
 	var telemetryStore TelemetryStore
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
 	var resetSessions FactoryResetSessions
 	for _, opt := range opts {
+		if provider, ok := opt.(DemoController); ok {
+			demoController = provider
+		}
 		if provider, ok := opt.(TelemetryStore); ok {
 			telemetryStore = provider
 		}
@@ -301,8 +312,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/events", listEventsHandler(engine, services, store))
 		protected.GET("/events/:id", eventDetailHandler(engine, services, store))
 		protected.GET("/flows", listFlowsHandler(engine))
-		protected.GET("/simulation", simulationStatusHandler(engine))
-		protected.POST("/simulation", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), simulationControlHandler(engine))
+		protected.GET("/simulation", simulationStatusHandler(demoController))
+		protected.POST("/simulation", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), simulationControlHandler(demoController))
 		protected.GET("/stats/protocols", protoStatsHandler(engine))
 		protected.GET("/stats/top-talkers", topTalkersHandler(engine))
 		protected.GET("/anomalies", listAnomaliesHandler(engine))

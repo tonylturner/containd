@@ -485,9 +485,9 @@ func measureConduit(ctx context.Context, store TelemetryStore, from, to string) 
 	if store == nil {
 		return unavailable("telemetry store unavailable")
 	}
-	result := conduitTraffic{State: "measured", WindowSeconds: 3600, Coverage: "routed"}
-	complete := true
 	now := time.Now()
+	responses := make([]wire.SeriesResponse, 0, 2)
+	noSeries := true
 	for _, metric := range []wire.Metric{wire.ConduitPackets, wire.ConduitBytes} {
 		resp, err := store.Query(ctx, history.Query{Metric: metric, Range: wire.Range1h, Origin: wire.OriginReal, Filters: map[string]string{"from": from, "to": to}}, now)
 		if err != nil {
@@ -501,6 +501,41 @@ func measureConduit(ctx context.Context, store TelemetryStore, from, to string) 
 		if resp.Collector.State != "running" {
 			return unavailable("telemetry collector " + resp.Collector.State)
 		}
+		noSeries = noSeries && len(resp.Series) == 0
+		responses = append(responses, resp)
+	}
+	state, coverage := "measured", "routed"
+	if noSeries {
+		responses = nil
+		for _, metric := range []wire.Metric{wire.ConduitPackets, wire.ConduitBytes} {
+			resp, err := store.Query(ctx, history.Query{Metric: metric, Range: wire.Range1h, Origin: wire.OriginDemo, Filters: map[string]string{"from": from, "to": to}}, now)
+			if err != nil {
+				return unavailable(err.Error())
+			}
+			if resp.Collector.State != "running" {
+				return unavailable("telemetry collector " + resp.Collector.State)
+			}
+			for _, entry := range resp.Collector.Unavailable {
+				if entry.Source == "conduit" || entry.Source == "engine" {
+					return unavailable(entry.Reason)
+				}
+			}
+			if len(resp.Series) == 0 {
+				return conduitTraffic{State: "none"}
+			}
+			// Only current recorded coverage can stand in for a never-observed pair.
+			for _, series := range resp.Series {
+				if len(series.Points) == 0 || series.Points[len(series.Points)-1].V == nil || series.Points[len(series.Points)-1].Q == wire.QualityGap {
+					return conduitTraffic{State: "none"}
+				}
+			}
+			responses = append(responses, resp)
+		}
+		state, coverage = "demo", "recorded"
+	}
+	result := conduitTraffic{State: state, WindowSeconds: 3600, Coverage: coverage}
+	complete := true
+	for i, resp := range responses {
 		covered := false
 		for _, series := range resp.Series {
 			for _, p := range series.Points {
@@ -515,7 +550,7 @@ func measureConduit(ctx context.Context, store TelemetryStore, from, to string) 
 			return unavailable(err.Error())
 		}
 		complete = complete && full
-		if metric == wire.ConduitPackets {
+		if i == 0 {
 			result.Packets = strconv.FormatUint(total, 10)
 		} else {
 			result.Bytes = strconv.FormatUint(total, 10)
