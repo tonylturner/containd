@@ -605,7 +605,7 @@ basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment
 extendedKeyUsage = serverAuth
 EOF
-openssl ca -selfsign -batch -config "$scratch/expired-certs/ca.cnf" \
+openssl ca -selfsign -batch -notext -config "$scratch/expired-certs/ca.cnf" \
   -in "$scratch/expired-certs/expired.csr" -keyfile "$scratch/expired-certs/expired.key" \
   -startdate "$expired_start" -enddate "$expired_end" -extensions server \
   -out "$scratch/expired-certs/expired.crt" >"$scratch/expired-certs/ca.log" 2>&1
@@ -615,7 +615,7 @@ jq -n --rawfile cert "$scratch/expired-certs/expired.crt" \
 expect 400 system/tls/cert -H 'Content-Type: application/json' --data-binary @"$scratch/expired-upload.json"
 jq -e --arg before "$expired_not_before" --arg after "$expired_not_after" \
   '.error | contains("has expired") and contains("NotBefore="+$before) and contains("NotAfter="+$after) and contains("current UTC time=")' \
-  "$scratch/body" >/dev/null || fail 'expired certificate upload error omitted its validity dates or current time'
+  "$scratch/body" >/dev/null || fail "expired certificate upload error omitted its validity dates or current time ($(cat "$scratch/body"))"
 expect 200 system/tls
 jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp and .certFingerprintSHA256 == $fp' \
   "$scratch/body" >/dev/null || fail 'expired certificate upload changed the served or configured identity'
