@@ -10,7 +10,9 @@ async function read(queries: SeriesQuery[], range: TelemetryRange): Promise<Tele
   const real = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "real")));
   const stopped = real.find(r => r.collector.state !== "running");
   if (stopped) return { data: real, demo: false, error: `Collector ${stopped.collector.state}${stopped.collector.error ? `: ${stopped.collector.error}` : ""}` };
-  if (real.every(r => !r.realActive)) {
+  const latest = responsePoints(real).at(-1);
+  if (latest?.q === "gap") return { data: real, demo: false, error: "Telemetry unavailable: latest real bucket is a gap" };
+  if (latest?.v !== undefined && real.every(r => !r.realActive)) {
     const demo = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "demo")));
     const stoppedDemo = demo.find(r => r.collector.state !== "running");
     if (stoppedDemo) return { data: [], demo: false, error: `Collector ${stoppedDemo.collector.state}${stoppedDemo.collector.error ? `: ${stoppedDemo.collector.error}` : ""}` };

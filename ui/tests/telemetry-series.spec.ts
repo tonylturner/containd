@@ -51,10 +51,12 @@ test("gaps are breaks, observed zero has no height floor, and a reset is marked"
   await expect(history).toContainText("Rate: 30.0 /min"); // 10 / 20 seconds, not 10 / 10.
 });
 
-test("the latest gap is unknown, never the previous bucket's rate or a zero", async ({ page }) => {
+test("the latest gap is unavailable, never the previous bucket's rate or a zero", async ({ page }) => {
   await open(page, { mutate: body => { const p = body.series[0].points.at(-1)!; delete p.v; delete p.d; p.q = "gap"; } });
-  await expect(chart(page)).toContainText("Rate: Unknown /min");
+  await expect(chart(page)).toContainText("Telemetry unavailable: latest real bucket is a gap");
+  await expect(chart(page)).not.toContainText("Rate: 60.0");
   await expect(chart(page)).not.toContainText("Rate: 0.0");
+  await expect(chart(page).getByRole("img")).toHaveCount(0);
 });
 
 for (const state of ["stalled", "unavailable"] as const) {
@@ -93,13 +95,14 @@ test("a failed refresh clears a previously successful chart and recovers", async
   await expect(chart(page)).not.toContainText("unavailable");
 });
 
-test("fresh charts use explicitly labelled demo data only until real activity exists", async ({ page }) => {
+test("covered quiet charts use explicitly labelled demo data only until real activity exists", async ({ page }) => {
   await page.clock.install();
   let active = false;
   const requests = await open(page, { mutate: (body, url) => {
     body.realActive = active;
-    body.realCovered = active;
-    if (!active && url.searchParams.get("origin") === "real") body.series = [];
+    if (!active && url.searchParams.get("origin") === "real") {
+      body.series = seriesResponse(url, [0, 0, 0]).series;
+    }
   } });
   await expect(chart(page).getByText("Demo data", { exact: true })).toBeVisible();
   expect(requests.some(url => url.searchParams.get("origin") === "demo")).toBe(true);
@@ -109,10 +112,30 @@ test("fresh charts use explicitly labelled demo data only until real activity ex
   await expect(chart(page).getByRole("img")).toBeVisible();
 });
 
+test("a running collector with no real activity cannot mask the latest real gap with demo", async ({ page }) => {
+  await page.clock.install();
+  let gap = false;
+  const requests = await open(page, { mutate: (body, url) => {
+    body.realActive = false;
+    if (url.searchParams.get("origin") === "real") body.series = seriesResponse(url, gap ? [0, 0, null] : [0, 0, 0]).series;
+  } });
+  await expect(chart(page).getByText("Demo data", { exact: true })).toBeVisible();
+  const demoReads = requests.filter(url => url.searchParams.get("origin") === "demo").length;
+  gap = true;
+  await page.clock.fastForward(10_000);
+  await expect(chart(page)).toContainText("Telemetry unavailable: latest real bucket is a gap");
+  await expect(chart(page).getByRole("img")).toHaveCount(0);
+  await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
+  expect(requests.filter(url => url.searchParams.get("origin") === "demo")).toHaveLength(demoReads);
+  gap = false;
+  await page.clock.fastForward(10_000);
+  await expect(chart(page).getByText("Demo data", { exact: true })).toBeVisible();
+});
+
 test("a collector outage found during the demo read outranks fallback", async ({ page }) => {
   await open(page, { mutate: (body, url) => {
     body.realActive = false;
-    if (url.searchParams.get("origin") === "real") body.series = [];
+    if (url.searchParams.get("origin") === "real") body.series = seriesResponse(url, [0]).series;
     else body.collector.state = "unavailable";
   } });
   await expect(chart(page)).toContainText("Collector unavailable");
@@ -120,9 +143,10 @@ test("a collector outage found during the demo read outranks fallback", async ({
 });
 
 test("without real or demo history, show the honest first-run empty state", async ({ page }) => {
-  await open(page, { mutate: body => { body.realActive = false; body.realCovered = false; body.series = []; } });
+  const requests = await open(page, { mutate: body => { body.realActive = false; body.realCovered = false; body.series = []; } });
   await expect(chart(page)).toContainText("No traffic recorded yet");
   await expect(chart(page).getByRole("img")).toHaveCount(0);
+  expect(requests.every(url => url.searchParams.get("origin") === "real")).toBe(true);
 });
 
 test("a previously active metric with no coverage does not claim a fresh install or zero", async ({ page }) => {
