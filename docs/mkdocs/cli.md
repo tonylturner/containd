@@ -78,7 +78,10 @@ candidate snapshot and chains the revisions returned by its staged writes.
   - `set ip rule del <table> [src <cidr>] [dst <cidr>] [priority <n>] | set ip rule del <table> all`
   - `add firewall rule <id> <action> [src_zone] [dst_zone] [position]`
   - `move firewall rule <id> top|bottom|before <id>|after <id>`
-  - `set firewall ics-rule <id> <action> <protocol> [options...]`
+  - `set firewall rule <id> --<field> <value> ...`
+  - `set firewall ics-rule <id> --<field> <value> ...`
+  - `add firewall ics-rule <id> <action> <protocol> [options...]`
+  - `set firewall default <ALLOW|DENY>`
   - `delete firewall rule <id>`
   - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
   - `set outbound quickstart` (stages default route + SNAT + allow rule for LAN/MGMT → WAN)
@@ -113,8 +116,8 @@ Outbound quick start completes all configuration reads before staging its change
 
 For `add firewall rule`, the optional position suffix is `top`, `bottom`,
 `before <id>` or `after <id>`; omitted means `bottom`. `set firewall rule`
-accepts the same creation syntax. `move firewall rule` repositions an existing
-rule without changing its predicates. Unknown anchors and moving a rule
+edits an existing ID with field flags; it never creates a rule. `move firewall rule`
+repositions an existing rule without changing its predicates. Unknown anchors and moving a rule
 relative to itself are rejected. Changes are staged until commit.
 
 ```text
@@ -403,10 +406,11 @@ deletion leaves SSH connections open.
 
 ## ICS firewall rules
 
-`set firewall ics-rule <id> <action> <protocol> [options...]` accepts the
+`add firewall ics-rule <id> <action> <protocol> [options...]` accepts the
 existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
 `--function-code`, `--object-classes`, `--unit-id`, `--addresses`, `--read-only`,
-`--write-only`, and `--mode`). The command creates a new rule; it does not update an existing ID.
+`--write-only`, and `--mode`). The command creates a new rule; use
+`set firewall ics-rule <id> --<field> <value> ...` to edit an existing ID.
 For CIP, `--object-classes <classes>` accepts comma-separated class IDs from
 0 through 65535 in decimal or `0x`-prefixed hex (for example `4,0x66`).
 `show firewall ics-rules` includes these values in `OBJECT_CLASSES`.
@@ -442,8 +446,92 @@ Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
 single-point) in server responses for common address 1 and the selected IOAs:
 
 ```text
-set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+add firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
 ```
 
 `show firewall ics-rules` displays these IEC fields alongside the existing
 ICS predicate fields.
+
+## Focused policy edits
+
+`set firewall rule <id> --<field> <value> ...` updates only supplied fields;
+omitted fields and rule order are preserved. A missing ID is an error, not a
+request to create. `add firewall rule` and `add firewall ics-rule` create rules.
+The old create-only `set` syntax is not accepted.
+
+| Flag | Value |
+| --- | --- |
+| `--action` | `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT`, or `TAG` |
+| `--source-zones`, `--dest-zones` | Comma-separated zone names; `--src-zone` and `--dst-zone` also accept lists |
+| `--sources`, `--destinations` | Comma-separated addresses/CIDRs or supported VPN selectors |
+| `--protocols` | Comma-separated `name[:port-or-range]`, e.g. `tcp:502,udp:1000-2000,icmp` |
+| `--identities`, `--via-forwards` | Comma-separated identity names or port-forward IDs |
+| `--log` | `true` or `false` |
+| `--rate-limit` | Packets per second, optionally `pps:burst`; `none` removes the limit |
+| `--tag`, `--description` | Text; quote spaces |
+| `--schedule-days` | Comma-separated weekdays |
+| `--schedule-start`, `--schedule-end` | `HH:MM` |
+| `--schedule-timezone` | IANA timezone |
+| `--schedule` | `none` removes the schedule |
+
+An empty quoted list (`''`) clears that list. A schedule flag changes only its
+specified subfield. A rate-limit value replaces both rate and burst (omitted
+burst is 0, meaning the packet rate). The API validates the complete resulting
+policy, including action parameters and management reservation.
+
+`set firewall ics-rule` accepts all these flags plus the ICS selectors in the
+preceding section. Use `--ics-protocol <modbus|dnp3|cip|iec104>` to change protocol;
+a protocol change replaces the old predicate, so supply its new selectors in
+the same command. Each selector takes a value: for edits, use `--read-only
+true|false` and `--write-only true|false`, not creation's bare switches.
+An empty quoted selector value clears it; omission preserves it. Clearing
+`--mode ''` restores inheritance from the global DPI mode.
+
+```text
+set firewall rule maintenance --source-zones ops,lan --protocols tcp:502,tcp:20000 --log true
+set firewall ics-rule allow-measurements --type-ids 1,30 --read-only false --description 'Monitoring only'
+set firewall default DENY
+```
+
+`set firewall default <ALLOW|DENY>` stages the unmatched-traffic action and warns
+about its reachability impact. Review the diff and use commit-confirmed when
+changing access policy. It does not turn enforcement on or report runtime
+protection as active.
+
+### DPI and capture groups
+
+- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not enforcement.
+- `set dataplane dpi mode <monitor|enforce>` changes the global ICS mode.
+- `set dataplane dpi protocols <name=bool,...>` edits named IT protocol toggles.
+- `set dataplane dpi ics-protocols <name=bool,...>` edits named ICS protocol toggles.
+- `set dataplane dpi ics-parsing <name=strict|tolerant,...>` edits named ICS parsing modes.
+- `set dataplane dpi exclusions <type:value,...> [reason]` replaces the exclusion
+  list; types are `ip`, `cidr`, and `domain`. IPv6 colons are supported. The optional
+  quoted reason applies to every supplied exclusion.
+- `set dataplane nfqueue-group <0..65535>` and `set dataplane nflog-group <0..65535>`
+  change the respective capture groups; 0 disables that consumer, subject to
+  configuration safety validation.
+
+For maps, unnamed entries stay unchanged; `''` clears the entire map, restoring
+its defaults. For exclusions, `''` clears the list. Other dataplane settings are
+preserved, including capture interfaces, enforcement and the table name.
+
+### Policy metadata and ICS templates
+
+- `set zone consequence <name> <text>` edits zone consequence; `''` clears it.
+- `set asset hostnames <id> <hostname,...>` replaces hostnames on an existing
+  asset; `''` clears them. Other asset fields are preserved.
+- `show templates ics` lists the ICS catalog, descriptions and required parameters.
+- `preview template ics <name> [--source-zones <csv>] [--dest-zones <csv>]
+  [--ranges <csv>] [--mode <monitor|enforce>]` prints generated rules without
+  staging anything. This API operation requires administrator access even for preview.
+- `apply template ics <name>` accepts the same options and stages the generated
+  rules. Templates can update matching rule IDs; preview first and inspect the diff.
+
+These commands use `/templates/ics`, a different catalog from `show templates`
+and `apply template`. Register-guard templates take `--ranges 0-99,400-499`.
+Omitting `--mode` lets generated rules inherit the global ICS mode.
+
+Every edit above stages candidate configuration with the revision read in the
+same invocation. Nothing auto-commits or applies. A stale revision fails visibly
+without retrying; reload and review before issuing the command again.
