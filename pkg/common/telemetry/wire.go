@@ -36,7 +36,9 @@ type Metric string
 
 const (
 	// Kernel link statistics of config-bound interfaces. Dims: interface
-	// (kernel device), zone (from the running config when sampled).
+	// (kernel device), zone (from the running config when sampled), role
+	// (leaf, or parent for a VLAN parent or bridge member; zone sums use
+	// leaf only).
 	IfaceRxBytes   Metric = "iface.rx_bytes"
 	IfaceTxBytes   Metric = "iface.tx_bytes"
 	IfaceRxPackets Metric = "iface.rx_packets"
@@ -152,7 +154,7 @@ type Point struct {
 	// V is the count in the bucket as a decimal string; absent for a gap.
 	V *uint64 `json:"v,string,omitempty"`
 	// D is the seconds of observation V covers; a rate is V/D. Absent for a
-	// gap.
+	// gap, and for a grouped point whose members cover different durations.
 	D int     `json:"d,omitempty"`
 	Q Quality `json:"q"`
 }
