@@ -29,7 +29,7 @@ type Registry struct {
 func NewRegistry(store config.Store, api *API) *Registry {
 	r := &Registry{commands: map[string]Command{}, roles: map[string]Role{}}
 	r.RegisterRole("show version", RoleView, showVersion)
-	r.RegisterRole("convert sigma", RoleView, convertSigma)
+	r.RegisterRole("convert sigma", RoleView, localFilesystemCommand(convertSigma))
 	r.RegisterRole("help", RoleView, helpCommand(r))
 	r.RegisterRole("show help", RoleView, showHelpCommand(r))
 	r.RegisterRole("set help", RoleView, setHelpCommand(r))
@@ -42,7 +42,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("diag traceroute", RoleView, diagTraceroute())
 	r.RegisterRole("diag tcptraceroute", RoleView, diagTCPTraceroute())
 	r.RegisterRole("diag reach", RoleView, diagReach(store))
-	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
+	r.RegisterRole("diag capture", RoleAdmin, localFilesystemCommand(diagCapture()))
 	if api != nil {
 		registerNetworkServiceCommands(r, api)
 		registerAVServiceCommands(r, api)
@@ -57,7 +57,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show backups", RoleView, opsRead(api, "/api/v1/config/backups"))
 		r.RegisterRole("create backup", RoleAdmin, opsBackup(api, "create"))
 		r.RegisterRole("delete backup", RoleAdmin, opsBackup(api, "delete"))
-		r.RegisterRole("download backup", RoleView, opsDownload(api, func(id string) string { return "/api/v1/config/backups/" + url.PathEscape(id) }, "download backup"))
+		r.RegisterRole("download backup", RoleAdmin, opsDownload(api, func(id string) string { return "/api/v1/config/backups/" + url.PathEscape(id) }, "download backup"))
 		r.RegisterRole("show openvpn clients", RoleAdmin, opsRead(api, "/api/v1/services/vpn/openvpn/clients"))
 		r.RegisterRole("issue openvpn client", RoleAdmin, opsOpenVPN(api, "issue"))
 		r.RegisterRole("revoke openvpn client", RoleAdmin, opsOpenVPN(api, "revoke"))
@@ -108,7 +108,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show portforwards", RoleView, showPortForwardsAPI(api))
 		r.RegisterRole("show conntrack", RoleView, showConntrackAPI(api))
 		r.RegisterRole("show sessions", RoleView, showConntrackAPI(api))
-		r.RegisterRole("analyze pcap", RoleAdmin, analyzePcapAPI(api))
+		r.RegisterRole("analyze pcap", RoleAdmin, localFilesystemCommand(analyzePcapAPI(api)))
 		r.RegisterRole("assign interfaces", RoleAdmin, assignInterfacesAPI(api))
 		r.RegisterRole("diag routing reconcile", RoleAdmin, routingReconcileAPI(api))
 		r.RegisterRole("show templates", RoleView, showTemplatesAPI(api))
@@ -192,7 +192,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("confirm", RoleAdmin, confirmCommitAPI(api))
 		r.RegisterRole("rollback", RoleAdmin, rollbackAPI(api))
 		r.RegisterRole("export config", RoleAdmin, exportConfigAPI(api))
-		r.RegisterRole("import config", RoleAdmin, importConfigAPI(api))
+		r.RegisterRole("import config", RoleAdmin, localFilesystemCommand(importConfigAPI(api)))
 	} else if store != nil {
 		r.RegisterRole("show zones", RoleView, showZones(store))
 		r.RegisterRole("show interfaces", RoleView, showInterfaces(store))

@@ -13,6 +13,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
@@ -172,6 +173,71 @@ func TestCLIExecuteRefusesSecretInput(t *testing.T) {
 	}
 }
 
+func TestCLIExecuteRefusesFilesystem(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
+	root := t.TempDir()
+	path := filepath.Join(root, "credential")
+	if err := os.WriteFile(path, []byte("PRIVATE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "download")
+	for _, role := range []string{"admin", "view"} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) { c.Set(ctxRoleKey, role) })
+		store := &mockStore{cfg: config.DefaultConfig()}
+		router.POST("/api/v1/cli/execute", cliExecuteHandler(store))
+		for _, command := range []string{
+			"download backup id " + target,
+			"download openvpn client id " + target,
+			"set vpn wireguard private-key-file " + path,
+			"set vpn openvpn client password-file " + path,
+			"set vpn openvpn client ca-file " + path,
+			"set vpn openvpn client cert-file " + path,
+			"set vpn openvpn client key-file " + path,
+			"import config " + path,
+			"analyze pcap " + path,
+			"convert sigma " + path,
+			"diag capture lo 1 " + target,
+		} {
+			t.Run(role+"/"+strings.Fields(command)[0]+"/"+command, func(t *testing.T) {
+				before, err := json.Marshal(store.cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := json.Marshal(map[string]string{"line": command})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/cli/execute", bytes.NewReader(body))
+				// A web request must not inherit a trusted caller's filesystem access.
+				req = req.WithContext(cli.WithLocalFilesystem(req.Context(), true))
+				req.Header.Set("Authorization", "Bearer test")
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				var result struct{ Output, Error string }
+				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				want := cli.ErrLocalFilesystemUnavailable.Error()
+				if role == "view" && !strings.HasPrefix(command, "convert sigma ") {
+					want = cli.ErrPermissionDenied.Error()
+				}
+				if rec.Code != http.StatusOK || !strings.HasPrefix(result.Error, want) || result.Output != "" {
+					t.Fatalf("status=%d result=%+v", rec.Code, result)
+				}
+				after, err := json.Marshal(store.cfg)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("refused file command changed candidate: %v", err)
+				}
+			})
+		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("web command wrote a file: %v", err)
+	}
+}
+
 func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
@@ -220,6 +286,32 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 		if refusal.Error != cli.ErrWebSecretInput.Error() || refusal.Output != "" {
 			t.Fatalf("web password input: %+v", refusal)
 		}
+	}
+
+	path := filepath.Join(t.TempDir(), "credential")
+	if err := os.WriteFile(path, []byte("PRIVATE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "download")
+	for _, line := range []string{
+		fmt.Sprintf("download backup id %q", target),
+		fmt.Sprintf("download openvpn client id %q", target),
+		fmt.Sprintf("set vpn wireguard private-key-file %q", path),
+		fmt.Sprintf("set vpn openvpn client password-file %q", path),
+	} {
+		if err := conn.WriteJSON(map[string]string{"line": line}); err != nil {
+			t.Fatal(err)
+		}
+		var refusal struct{ Output, Error string }
+		if err := conn.ReadJSON(&refusal); err != nil {
+			t.Fatal(err)
+		}
+		if refusal.Error != cli.ErrLocalFilesystemUnavailable.Error() || refusal.Output != "" {
+			t.Fatalf("web filesystem access: %+v", refusal)
+		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("websocket command wrote a file: %v", err)
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"line":"show version"}`)); err != nil {

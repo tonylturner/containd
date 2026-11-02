@@ -127,6 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   editor open when newer edits are still unsaved.
 - IEC 104 anomaly details offer confirmed, immediate clearing of detected
   anomalies and tracking state, without deleting historical alert events.
+- Web consoles refuse CLI file arguments instead of accessing appliance files.
+  File operations remain available in local and SSH appliance CLI sessions;
+  CLI backup downloads now require admin access.
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
   Unrelated saves preserve an omitted scanner mode rather than staging an explicit default.

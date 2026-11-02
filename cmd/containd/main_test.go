@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/peterh/liner"
@@ -220,5 +222,85 @@ func TestCLIAPIUsesManagementRuntimeRecord(t *testing.T) {
 	}
 	if err := runHealthcheck(); err != nil {
 		t.Fatalf("healthcheck: %v", err)
+	}
+}
+
+func TestCLILocalFilesystem(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(cli.EnvSSHAPISocket, "")
+	t.Setenv("CONTAIND_CONFIG_DB", filepath.Join(root, "config.db"))
+	t.Setenv("CONTAIND_CLI_HISTORY", filepath.Join(root, "history"))
+	var edits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = io.WriteString(w, `{"token":"session-token"}`)
+		case "/api/v1/auth/me":
+			_, _ = io.WriteString(w, `{"username":"operator","role":"admin"}`)
+		case "/api/v1/config/backups/id":
+			_, _ = io.WriteString(w, `{"description":"downloaded"}`)
+		case "/api/v1/services/vpn":
+			if r.Method == http.MethodPost {
+				var payload struct {
+					Wireguard struct{ PrivateKey string }
+				}
+				if err := json.Unmarshal(body, &payload); err != nil || payload.Wireguard.PrivateKey != "PRIVATE" ||
+					r.Header.Get("X-Containd-If-Revision") != "0123456789abcdef.1" {
+					t.Error("local credential edit lost value or revision")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				edits.Add(1)
+				w.Header().Set("X-Containd-Config", "staged")
+			}
+			w.Header().Set("X-Containd-Revision", "0123456789abcdef.1")
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			_, _ = io.WriteString(w, `{}`)
+		}
+	}))
+	defer srv.Close()
+	record := mgmtapp.RuntimeRecord{Listeners: config.ManagementListeners{HTTP: config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true}}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := mgmtapp.RuntimeRecordPath()
+	if err := os.MkdirAll(filepath.Dir(recordPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credential, target := filepath.Join(root, "credential"), filepath.Join(root, "download")
+	if err := os.WriteFile(credential, []byte("PRIVATE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	if _, err := fmt.Fprintf(writer, "download backup id %q\nset vpn wireguard private-key-file %q\nexit\n", target, credential); err != nil {
+		writer.Close()
+		t.Fatal(err)
+	}
+	writer.Close()
+	stdin := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = stdin }()
+	if err := runCLI(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil || !strings.Contains(string(body), "downloaded") || edits.Load() != 1 {
+		t.Fatalf("local file commands did not execute: %v edits=%d", err, edits.Load())
 	}
 }

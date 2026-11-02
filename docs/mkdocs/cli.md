@@ -194,7 +194,9 @@ is not editable. Configure the single ICAP server with
 `set av icap server <host:port> <true|false TLS> <service>`.
 
 VPN `*-file` arguments read credential contents from the appliance process's
-filesystem, not the browser's or SSH client's filesystem. Keep those files
+filesystem, not the browser's or SSH client's filesystem. They require the local
+`containd cli` process or the SSH appliance CLI; the web console refuses them
+before reading a file or contacting the configuration API. Keep those files
 private. File paths, not secret contents, enter command history and audit
 records; save output does not print response bodies or saved secrets. Existing
 redacted VPN secrets are retained by the API when other fields change.
@@ -362,12 +364,16 @@ Appliance configuration backups:
 
 - `show backups`
 - `create backup <name> <redacted|full> CONFIRM` (admin)
-- `download backup <id> <new-file>`
+- `download backup <id> <new-file>` (admin)
 - `delete backup <id> CONFIRM` (admin)
 
 Downloads create a new file with mode `0600`, refuse to overwrite an existing
-file, and never print its contents. Views can only list/download redacted
-backups, as enforced by the API. Full backups and OpenVPN profiles contain
+file, and never print its contents. Both download commands require admin access
+and run only in the local `containd cli` process or the SSH appliance CLI.
+Paths are local to the appliance process, not the browser or SSH client.
+The web console refuses file reads and writes. View accounts can list redacted
+backups; downloading a redacted backup remains available through the web
+Configuration page or the backup API. Full backups and OpenVPN profiles contain
 secrets: keep the files private. Configuration backups do not include the users,
 audit or evidence databases.
 
@@ -395,6 +401,15 @@ support requests. `import config <path>` sends the file bytes unchanged to the
 API's strict import decoder, with the current candidate revision. Unknown,
 duplicate and incorrectly cased root keys are rejected without changing the
 candidate. A successful import is staged only; review the diff before committing.
+
+File-reading commands (`import config`, `analyze pcap`, `convert sigma` and VPN
+`*-file` settings) and file-writing commands (`download backup`,
+`download openvpn client` and `diag capture`) require a local or SSH appliance
+CLI session. This includes piped local CLI and one-shot SSH commands; a terminal
+is only required for secret prompting, not file access. Web `/cli/execute` and
+WebSocket consoles refuse these operations. Use the dedicated browser import,
+upload and download controls instead; typing a browser-local path into the
+console never uploads a file.
 
 ## Authentication
 

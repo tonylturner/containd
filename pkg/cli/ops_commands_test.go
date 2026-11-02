@@ -107,7 +107,11 @@ func TestOpsDownloads(t *testing.T) {
 			registry := NewRegistry(nil, api)
 			var out bytes.Buffer
 			args := []string{"a/b", file}
-			if err := registry.Execute(WithRole(context.Background(), "admin"), name, &out, args); err != nil {
+			ctx := WithLocalFilesystem(context.Background(), true)
+			if err := registry.Execute(WithRole(ctx, "view"), name, &out, args); !errors.Is(err, ErrPermissionDenied) {
+				t.Fatalf("viewer download allowed: %v", err)
+			}
+			if err := registry.Execute(WithRole(ctx, "admin"), name, &out, args); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(file)
@@ -124,7 +128,7 @@ func TestOpsDownloads(t *testing.T) {
 			if strings.Contains(out.String(), "private-data") {
 				t.Fatal("secret rendered")
 			}
-			if err := registry.Execute(WithRole(context.Background(), "admin"), name, &out, args); err == nil {
+			if err := registry.Execute(WithRole(ctx, "admin"), name, &out, args); err == nil {
 				t.Fatal("overwrote existing file")
 			}
 		})
