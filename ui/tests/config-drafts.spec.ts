@@ -589,7 +589,8 @@ test("Firewall creation keeps failed submissions and later typing, independently
   const sources = form.getByPlaceholder("sources CIDR (csv)");
   await id.fill("new-rule");
   await sources.fill("192.0.2.0/24, ");
-  const sourceZone = form.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
+  await form.getByRole("button", { name: "Add source zone", exact: true }).click();
+  const sourceZone = form.getByRole("combobox", { name: "Source zone 1", exact: true });
   await sourceZone.selectOption("lan");
   server.change("/zones", [{ name: "wan" }]);
   server.change("/firewall/rules", [draftRule]);

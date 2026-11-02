@@ -155,7 +155,7 @@ func editableValue(cfg *config.Config, path string) any {
 	case "/services/proxy/reverse":
 		return cfg.Services.Proxy.Reverse
 	case "/services/vpn":
-		return cfg.Services.VPN.RedactedVPNCopy()
+		return redactedVPNRead(cfg.Services.VPN)
 	case "/firewall/ics-rules":
 		var result []config.Rule
 		for _, r := range cfg.Firewall.Rules {

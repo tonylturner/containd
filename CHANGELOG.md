@@ -11,8 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
-- No configuration schema, API or wire change; this release changes the web
-  UI and CLI. Upgrade in place.
+- No configuration schema change. Upgrade in place; the management API, CLI
+  and web UI ship together in one image.
+- API: VPN reads add read-only secret-presence fields
+  (`wireguard.privateKeyConfigured` and `openvpn.managed.*Configured`); stored
+  secrets are still never returned. The CLI WebSocket adds session-control and
+  status messages.
+- CLI: `set firewall rule` and `set firewall ics-rule` now edit an existing
+  rule; use `add firewall rule` / `add firewall ics-rule` to create one. Over
+  SSH, `configure` no longer starts the setup wizard; use `wizard`. In the
+  local CLI, `shell` and `bash` no longer exit the CLI.
 - Automatic antivirus definition updates were already off wherever
   `clamav.freshclamEnabled` was never saved, although the UI showed them as
   on. The UI now shows them as off. Turn them on explicitly if you want
@@ -52,14 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is explicit and admin-only; imports preserve file bytes for strict API validation.
 - `configure` now consistently names the configuration CLI; use SSH `wizard`
   for guided setup.
-
 - Configuration consoles identify configuration versus immediate Linux OS modes,
   show authoritative shared-candidate status and commit-confirmation deadlines,
   and close the web console without logging out of management. SSH setup shows
   the shared diff before commit and offers an explicit Back to CLI menu choice.
   Local `shell` / `bash` no longer silently exit; only SSH `shell` opens Linux,
   while `bash` is an ordinary unknown CLI command.
-
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
   links directly to enforcement status.
@@ -69,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DHCP uses interface pickers and validated pool/reservation rows; IDS offers
   common rule fields, advanced JSON editing, one staged rule save and group descriptions.
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
-  focus retained after moves. A read-only Default row always shows the
+  focus retained after moves. A Default row always shows the
   candidate policy's fallback action for traffic no allow, deny or reject rule
   decides. It warns when that action is ALLOW and shows unknown when the action
   cannot be read coherently.
@@ -111,7 +117,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
 - VPN reads and stage responses redact stored secrets without falsely reporting
   configured key and certificate material as missing.
-
 - Proxy preflight preserves daemon configuration filename extensions so Envoy
   reads generated YAML correctly. Proxies shows concise faults with exact output
   under Technical details and supports editing reverse sites, TLS certificate
