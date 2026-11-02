@@ -1,4 +1,18 @@
-import type { ProtectionStatus } from "./api-protection";
+import type { ProtectionStatus, ProtectionSubsystem } from "./api-protection";
+
+/** Keep shared protection detail in the banner while retaining health-only facts. */
+export function hasTrafficProtectionNotice(status: ProtectionStatus | undefined): boolean {
+  return !!status && !status.ready && (status.state !== "disabled"
+    || status.subsystems.some(s => s.required && (s.fault || s.state === "failed")));
+}
+
+export function serviceRepairDirection(subsystems: ProtectionSubsystem[]): string {
+  const repair = "Review the service configuration and referenced files, then commit corrected settings.";
+  const blocked = subsystems.some(s => s.fault && !s.retryable && !s.nextRetryAt);
+  return subsystems.some(s => s.retryable || s.nextRetryAt)
+    ? `Automatic repair is underway. ${blocked ? repair : "Check service configuration and the appliance connection if this persists."}`
+    : repair;
+}
 
 /** Copy uses effects, never guesses queue delivery from component errors. */
 export function protectionView(status: ProtectionStatus | undefined): { title: string; action: string } {
@@ -15,7 +29,7 @@ export function protectionView(status: ProtectionStatus | undefined): { title: s
     uninspected && `${uninspected} is not being inspected by containd`,
     uncertain && `${uncertain}: traffic protection is unknown`,
   ].filter(Boolean).join("; ");
-  const action = status.subsystems.some(s => s.retryable || s.nextRetryAt) ? "Automatic repair is underway. Check service configuration if this persists."
+  const action = status.subsystems.some(s => s.retryable || s.nextRetryAt) ? serviceRepairDirection(status.subsystems)
     : status.retryable ? "Check appliance health and traffic-inspection settings; retry is available."
     : status.state === "pending" ? "Wait for protection to finish, then check status."
     : status.state === "disabled" ? "Enable enforcement to protect traffic."
