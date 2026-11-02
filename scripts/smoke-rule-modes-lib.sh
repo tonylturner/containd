@@ -16,9 +16,7 @@ modes_apply() {
   code=$(printf '%s' "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
     -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/modes-save.json" -w '%{http_code}')
   [[ $code == 200 ]] || { modes_fail "config save HTTP=$code expected=200; response=$(cat "$WORK_DIR/modes-save.json")"; return 1; }
-  DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
-  export DATAPLANE_CFG
-  apply_snapshot || { modes_fail "engine snapshot apply failed"; return 1; }
+  apply_snapshot || { modes_fail "config commit failed"; return 1; }
 }
 
 modes_counter() {

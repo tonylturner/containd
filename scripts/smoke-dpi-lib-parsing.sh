@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Sourced by smoke-dpi.sh: tolerant and strict ICS parsing on live Modbus
 # traffic. Uses the caller's compose, pass, check_fail, timestamp,
-# engine_apply, engine_apply_id, CURL, AUTH_HEADER, BASE, WORK_DIR, UPDATED_CFG, DATAPLANE_CFG,
+# smoke_commit_config, CURL, AUTH_HEADER, BASE, WORK_DIR, UPDATED_CFG,
 # SMOKE_DPI_CAPTURE and MODBUS_DST.
 #
 # Tolerant (the default, no dpiIcsParsing key) passes content it cannot vouch
@@ -23,25 +23,23 @@ server_pid_fc3_requests() {
 }
 
 # push_parsing LABEL FILTER applies the jq FILTER to the harness config, saves
-# it as the candidate (gating on HTTP 200) and pushes the dataplane document
-# to the engine, which applies a parsing-only change to new decisions without
-# rebuilding or resetting sessions.
+# it as the candidate (gating on HTTP 200), then explicitly commits it through
+# management. The coordinator delivers the committed configuration, never a
+# separately fabricated dataplane intent.
 push_parsing() {
   local label=$1 filter=$2 code
   UPDATED_CFG=$(jq "$filter" <<<"$UPDATED_CFG")
-  DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
   code=$(echo "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -H "$AUTH_HEADER" \
     -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/parsing-config.out" || true)
   if [[ "$code" != "200" ]]; then
     check_fail "$label: config save failed (HTTP $code): $(head -c 300 "$WORK_DIR/parsing-config.out")"
     return 1
   fi
-  code=$(engine_apply engine /internal/config "$WORK_DIR/parsing-engine.out" "$(engine_apply_id)" <<<"$DATAPLANE_CFG")
-  if [[ "$code" != "200" ]]; then
-    check_fail "$label: engine config failed (HTTP $code): $(head -c 300 "$WORK_DIR/parsing-engine.out")"
+  if ! smoke_commit_config "$WORK_DIR/config.revision" "$WORK_DIR/parsing-commit.out"; then
+    check_fail "$label: config commit failed; see $WORK_DIR/parsing-commit.out"
     return 1
   fi
-  pass "$label: dpiIcsParsing $(jq -c '.dpiIcsParsing' <<<"$DATAPLANE_CFG")"
+  pass "$label: dpiIcsParsing $(jq -c '.dataplane.dpiIcsParsing' <<<"$UPDATED_CFG")"
 }
 
 # port_events PORT SINCE OUT writes the telemetry events of the client
@@ -211,7 +209,7 @@ run_parsing_probes() {
   fi
   probe_pid_nonzero tolerant
   probe_bad_length tolerant
-  push_parsing "Strict Modbus parsing saved and pushed to the engine" '.dataplane.dpiIcsParsing = {"modbus": "strict"}' || true
+  push_parsing "Strict Modbus parsing saved and committed" '.dataplane.dpiIcsParsing = {"modbus": "strict"}' || return 1
   probe_pid_nonzero strict
   if compose exec -T ot_client python /opt/modbus/client.py read "$MODBUS_DST" 502 >"$WORK_DIR/strict-read.out" 2>"$WORK_DIR/strict-read.err" &&
     grep -q '^READ_OK' "$WORK_DIR/strict-read.out"; then
@@ -220,5 +218,5 @@ run_parsing_probes() {
     check_fail "Strict: a conformant read failed: $(tr -d '\r' <"$WORK_DIR/strict-read.err" | tr '\n' ' ')"
   fi
   probe_bad_length strict
-  push_parsing "Tolerant parsing restored" 'del(.dataplane.dpiIcsParsing)' || true
+  push_parsing "Tolerant parsing restored" 'del(.dataplane.dpiIcsParsing)'
 }
