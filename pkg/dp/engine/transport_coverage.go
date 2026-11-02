@@ -370,7 +370,9 @@ func (e *Engine) stopDecodeCoverage(marker *transportCoverage, connection *flow.
 			FlowID: key.Hash(), Proto: proto, Transport: pkt.Transport, TransportConnectionID: connection.PublicID(),
 			SrcIP: pkt.SrcIP.String(), DstIP: pkt.DstIP.String(), SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 			Attributes: map[string]any{eventfields.KeyCoverageIncomplete: true, eventfields.KeyReason: reason}})
-		metrics.DPICoverageLosses.Inc()
+		if !e.detached {
+			metrics.DPICoverageLosses.Inc()
+		}
 	}
 }
 

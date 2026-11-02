@@ -114,7 +114,7 @@ func TestConcurrentReconfigureAndStartSerializeNFLogLifecycle(t *testing.T) {
 		if !ok {
 			return func() {}, errors.New("unexpected NFLOG sink type")
 		}
-		store := hits.e.eventStore
+		store := hits.e.Events()
 
 		mu.Lock()
 		eventStores = append(eventStores, store)

@@ -65,7 +65,7 @@ func assertPredicateParity(t *testing.T, entry rules.Entry, ev events.Event, par
 		fallback = rules.ActionDeny
 	}
 	snap := &rules.Snapshot{DPIMode: "enforce", Default: fallback, Firewall: []rules.Entry{entry}}
-	e := &Engine{eventStore: events.NewStore(100), dpiMode: "enforce"}
+	e := &Engine{eventStore: events.NewStore(100).Writer(""), dpiMode: "enforce"}
 	e.ruleSnap.Store(snap)
 	e.SetICSParsing(map[string]string{ev.Proto: string(parsing)})
 	encoded, err := json.Marshal(ev)
@@ -191,7 +191,7 @@ func TestDNP3PerHeaderDenialAndIndependentAllows(t *testing.T) {
 	for _, g := range []int{30, 40, 50} {
 		entries = append(entries, rules.Entry{ID: fmt.Sprint(g), Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", Groups: []int{g}}})
 	}
-	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(10)}
+	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(10).Writer("")}
 	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: entries})
 	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP(ev.SrcIP), DstIP: net.ParseIP(ev.DstIP), SrcPort: ev.SrcPort, DstPort: ev.DstPort, Proto: 6}}
 	if v, _, drop := e.enforceDPIEvents(state, &dpi.ParsedPacket{Proto: "tcp", DstPort: ev.DstPort}, []dpi.Event{{Proto: ev.Proto, Kind: ev.Kind, Attributes: attrs}}, false); drop {
@@ -255,7 +255,7 @@ func TestCIPMSPOperationsJudgeOwnTargets(t *testing.T) {
 			instance, fallback = 2, rules.ActionAllow
 		}
 		entry := rules.Entry{ID: "candidate", Action: action, ICS: rules.ICSPredicate{Protocol: "cip", Instances: []uint16{instance}}}
-		e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100)}
+		e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100).Writer("")}
 		e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: fallback, Firewall: []rules.Entry{entry}})
 		var decoded []dpi.Event
 		for i, attrs := range []map[string]any{wrapper, first, second} {
@@ -487,7 +487,7 @@ func TestDNP3ConformanceRecordedOnceForMultipleHeaders(t *testing.T) {
 	attrs[eventfields.KeyConformance] = []string{"dnp3.finding"}
 	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP("10.60.60.10"), DstIP: net.ParseIP("10.30.30.30"), SrcPort: 40000, DstPort: 20000, Proto: 6}}
 	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 40000, DstPort: 20000}
-	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100)}
+	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100).Writer("")}
 	e.SetICSParsing(map[string]string{"dnp3": "strict"})
 	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{{ID: "decoded-deny", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "dnp3", Groups: []int{40}}}}})
 	v, ctx, drop := e.enforceDPIEvents(state, pkt, []dpi.Event{{Proto: "dnp3", Kind: "request", Attributes: maps.Clone(attrs)}}, false)

@@ -3,16 +3,18 @@
 package events
 
 import (
-	"github.com/tonylturner/containd/pkg/dp/flow"
 	"maps"
 
+	"github.com/tonylturner/containd/pkg/common/telemetry"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// A record lives as long as any event of its group remains in the general
-// ring. Binding survives eviction of the identification (or decoder) event,
+// A record lives as long as any event of its group remains in its retention
+// bank. Binding survives eviction of the identification (or decoder) event,
 // without creating an unbounded second flow store.
 type bindingRecord struct {
+	origin         telemetry.Origin
 	connection     flow.TransportConnectionID
 	refs           int
 	wires          map[string]int
@@ -27,7 +29,7 @@ func (s *Store) retainBinding(ev Event) {
 	key, _ := flowGroup(ev)
 	r := s.bindings[key]
 	if r == nil {
-		r = &bindingRecord{wires: map[string]int{}}
+		r = &bindingRecord{origin: ev.Origin, wires: map[string]int{}}
 		s.bindings[key] = r
 	}
 	if ev.TransportConnectionID != "" {
@@ -37,15 +39,16 @@ func (s *Store) retainBinding(ev Event) {
 	r.wires[ev.FlowID]++
 	if r.refs == 1 && r.identification == nil && r.connection != "" {
 		for _, other := range s.bindings {
-			if other != r && other.connection == r.connection && other.identification != nil {
+			if sameOrigin(other.origin, ev.Origin) && other != r && other.connection == r.connection && other.identification != nil {
 				r.identification = maps.Clone(other.identification)
 				r.application = other.application
 				break
 			}
 		}
 	}
-	if key != ev.FlowID && r.identification == nil {
-		if wire := s.bindings[ev.FlowID]; wire != nil && wire.identification != nil {
+	if _, sessionID := flowGroup(ev); sessionID != "" && r.identification == nil {
+		wireKey, _ := flowGroup(Event{FlowID: ev.FlowID, Origin: ev.Origin})
+		if wire := s.bindings[wireKey]; wire != nil && wire.identification != nil {
 			r.identification = maps.Clone(wire.identification)
 			r.application = wire.application
 		}
@@ -53,7 +56,7 @@ func (s *Store) retainBinding(ev Event) {
 	if ev.Proto == eventfields.ProtoIdentify && ev.Kind == eventfields.KindIdentification {
 		r.identification = maps.Clone(ev.Attributes)
 		for otherKey, other := range s.bindings {
-			if otherKey != key && (other.wires[ev.FlowID] > 0 || r.connection != "" && other.connection == r.connection) {
+			if sameOrigin(other.origin, ev.Origin) && otherKey != key && (other.wires[ev.FlowID] > 0 || r.connection != "" && other.connection == r.connection) {
 				other.identification = maps.Clone(ev.Attributes)
 				if ev.Attributes[eventfields.KeyIdentificationState] == "confirmed" {
 					other.application, _ = ev.Attributes[eventfields.KeyProtocol].(string)
@@ -111,4 +114,8 @@ func legacyApplication(ev Event) string {
 		return ev.Proto
 	}
 	return ""
+}
+
+func sameOrigin(a, b telemetry.Origin) bool {
+	return groupOrigin(a) == groupOrigin(b)
 }

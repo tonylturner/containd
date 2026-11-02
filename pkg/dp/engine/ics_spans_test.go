@@ -142,7 +142,7 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		{deny, aduShortPDU, true},
 	}
 	for _, tc := range cases {
-		e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
+		e := &Engine{eventStore: events.NewStore(10).Writer(""), dpiMode: "enforce"}
 		e.ruleSnap.Store(tc.snap)
 		state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), tc.adu)
 		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
@@ -183,7 +183,7 @@ func assertConformanceUnknownSpanMatch(t *testing.T, action rules.Action, wantMa
 	if action == rules.ActionAllow {
 		defaultAction, wantReason = rules.ActionDeny, reasonDefault
 	}
-	e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
+	e := &Engine{eventStore: events.NewStore(10).Writer(""), dpiMode: "enforce"}
 	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: defaultAction, Firewall: []rules.Entry{entry}})
 	v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
 	if !enforced || !v.Denies() {

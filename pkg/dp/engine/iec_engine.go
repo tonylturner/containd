@@ -32,6 +32,7 @@ func (e *Engine) initIEC(cfg Config) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
 	t = newIECTable(cfg.DPIMode, &e.zones)
+	t.detached = e.detached
 	t.inventory = e.inventory
 	t.learnDelivery = func(id string) {
 		e.recordLearnOutcome([]dpi.Event{{Proto: "iec104", Kind: "evidence.delivery", Attributes: map[string]any{"apdu_id": id, "delivery": "delivered"}, Timestamp: time.Now().UTC()}})
@@ -42,7 +43,9 @@ func (e *Engine) initIEC(cfg Config) {
 	t.shadow = e.countShadow
 	t.markAbort = store.MarkAborted
 	t.onError = cfg.OnError
+	// A detached table never acquires an injector or live health faults.
 	switch {
+	case e.detached:
 	case cfg.ResetInjector != nil:
 		t.injector = cfg.ResetInjector
 	case cfg.NFQueueGroup == 0:

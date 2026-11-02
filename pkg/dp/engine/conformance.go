@@ -218,7 +218,9 @@ func (e *Engine) recordConformanceAlert(state *flow.State, pkt *dpi.ParsedPacket
 			"message":  fmt.Sprintf("%s %s %s: %s", ev.Proto, key, strings.Join(fresh, ", "), action),
 			"protocol": ev.Proto, "action": action, key: fresh,
 		})
-		metrics.IDSAlertsTotal.Inc()
+		if !e.detached {
+			metrics.IDSAlertsTotal.Inc()
+		}
 		e.recordTaggedEvents(state, pkt, []dpi.Event{{
 			FlowID: conformanceFlowID(state, ev), Proto: "ids", Kind: "alert", Timestamp: time.Now().UTC(), Attributes: attrs,
 		}})

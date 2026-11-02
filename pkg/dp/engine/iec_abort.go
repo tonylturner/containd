@@ -63,12 +63,12 @@ var targetNames = [2]string{"client", "server"}
 // verdict completion. A monitor envelope never aborts; callers ensure that.
 func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
-	if s.state == iecAborted {
+	if t.detached || s.state == iecAborted {
 		return acts
 	}
 	acts.merge(t.endInventoryLocked(s))
 	acts.retired = true
-	countIECAbort(reason)
+	t.countAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {
 		dropped = append(dropped, cur)
@@ -270,7 +270,7 @@ func (t *iecTable) apply(acts iecActions) {
 		now := t.now()
 		for i, err := range errs {
 			if err != nil {
-				countIECVerdictFailure(err)
+				t.countVerdictFailure(err)
 				acts.merge(t.completeLocked(acts.drops[i].Token, err, now))
 			}
 		}
@@ -285,6 +285,9 @@ func (t *iecTable) finish(acts iecActions) {
 	t.finishInventory(acts)
 	if len(acts.events) > 0 {
 		t.emit(acts.events)
+	}
+	if t.detached {
+		return
 	}
 	for _, job := range acts.jobs {
 		if !t.jobs.submit(job) {
@@ -314,7 +317,7 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 // its generation went down: the kernel dropped it, so it leaves the ledger.
 func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
-	countIECVerdictFailure(err)
+	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
 	t.inventoryVerdictLocked(tok, v, err, &acts)

@@ -193,7 +193,7 @@ func TestShadowCountersInstallResetRetention(t *testing.T) {
 }
 
 func TestShadowDNP3ObjectsCountOnce(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(100)}
+	e := &Engine{eventStore: events.NewStore(100).Writer("")}
 	snap := &rules.Snapshot{Version: "objects", Default: rules.ActionAllow, Firewall: []rules.Entry{{ID: "all", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "dnp3", Mode: "monitor"}}}}
 	e.ruleSnap.Install(snap, time.Now())
 	ev := dpi.Event{Proto: "dnp3", Kind: "request", Attributes: predicateAttrs("dnp3")}

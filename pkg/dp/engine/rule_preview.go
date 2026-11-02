@@ -63,7 +63,7 @@ func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) P
 	result := PreviewRuleResponse{SampleMatches: []events.Event{}}
 	// Use the same retained evidence window as GET /internal/events, including
 	// protected incidents and DENYs, deduplicated before counting.
-	evs := e.eventStore.ListTelemetry(5000)
+	evs := e.Events().ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
 	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}, ForwardMatches: request.ForwardMatches}

@@ -18,7 +18,7 @@ func previewRule(t *testing.T, events []dpevents.Event, rule string) PreviewRule
 	if err := json.Unmarshal([]byte(rule), &entry); err != nil {
 		t.Fatal(err)
 	}
-	e := &Engine{eventStore: dpevents.NewStore(4096)}
+	e := &Engine{eventStore: dpevents.NewStore(4096).Writer("")}
 	// Append in reverse so the retained newest-first order is fixture order.
 	for i := len(events) - 1; i >= 0; i-- {
 		events[i].Timestamp = time.Unix(int64(len(events)-i), 0)

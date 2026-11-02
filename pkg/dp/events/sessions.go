@@ -3,6 +3,8 @@
 
 package events
 
+import "github.com/tonylturner/containd/pkg/common/telemetry"
+
 const (
 	protoIEC104  = "iec104"
 	keySessionID = "session_id"
@@ -16,10 +18,11 @@ const (
 // with that incarnation, including derived evidence (signature and anomaly
 // alerts) and the engine's decision and outcome events.
 func flowGroup(ev Event) (key, sessionID string) {
+	prefix := string(groupOrigin(ev.Origin)) + "\x00"
 	if id, ok := ev.Attributes[keySessionID].(string); ok && id != "" {
-		return "session/" + id, id
+		return prefix + "session/" + id, id
 	}
-	return ev.FlowID, ""
+	return prefix + ev.FlowID, ""
 }
 
 // isClientSide reports an event whose tuple is the session tuple (client →
@@ -84,4 +87,11 @@ func (a *abortedSet) prune(ring eventRing) {
 		kept = append(kept, id)
 	}
 	a.order = kept
+}
+
+func groupOrigin(origin telemetry.Origin) telemetry.Origin {
+	if origin == "" {
+		return telemetry.OriginReal
+	}
+	return origin
 }
