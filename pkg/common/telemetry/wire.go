@@ -192,6 +192,11 @@ type CollectorState struct {
 	// DroppedSeries counts series refused by the cardinality cap since the
 	// collector started.
 	DroppedSeries uint64 `json:"droppedSeries,string"`
+	// Unavailable lists what the latest tick could not read: the sources and
+	// series the snapshot reported unavailable, and Source "engine" when the
+	// engine snapshot itself failed. Retained history never implies a
+	// source is available now.
+	Unavailable []SourceUnavailable `json:"unavailable,omitempty"`
 }
 
 // SeriesResponse is the GET /api/v1/telemetry/series body.
