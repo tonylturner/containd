@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-11-01
+
+### Upgrade notes
+
+- No configuration schema, API or wire change; this release changes the web
+  UI only. Upgrade in place.
+- Automatic antivirus definition updates were already off wherever
+  `clamav.freshclamEnabled` was never saved, although the UI showed them as
+  on. The UI now shows them as off. Turn them on explicitly if you want
+  FreshClam updates.
+
 ### Changed
 
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
@@ -2454,7 +2465,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.37...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.38...HEAD
+[0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35
