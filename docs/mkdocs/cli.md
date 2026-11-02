@@ -322,16 +322,22 @@ See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
 
 ## Account, backup and runtime operations
 
-These operations do **not** stage configuration or require `commit`. Every
-mutation below requires the final, case-sensitive `CONFIRM` argument and prints
-an immediate-operation notice. Inspect the response: a request being accepted
-is not proof that runtime protection, capture or revocation has converged.
-Errors retain the API's fault details, including durable OpenVPN revocation
-whose runtime installation is not confirmed.
+These operations do **not** stage configuration or require `commit`. Mutations
+require the final, case-sensitive `CONFIRM` argument, except account creation
+and password reset, which confirm through two hidden password prompts.
+They print an immediate-operation notice. Inspect the response: a request being
+accepted is not proof that runtime protection, capture or revocation has converged.
+Except for secret-bearing account requests, errors retain the API's fault
+details, including durable OpenVPN revocation whose runtime installation is not
+confirmed.
 
 Account and credential commands (admin only):
 
 - `show users`
+- `create user <username> [--role admin|view] [--first-name <name>] [--last-name <name>] [--email <email>]`
+  — defaults to the least-privilege `view` role. Quote names containing spaces.
+- `reset user password <username|id>` — resolves an exact username or ID from
+  `show users`; ambiguous matches are refused.
 - `delete user <id> CONFIRM` — subject to the API's last-admin protection.
 - `require mfa user <id> CONFIRM` — applies the API's enrollment grace period.
 - `show openvpn clients`
@@ -339,9 +345,18 @@ Account and credential commands (admin only):
 - `download openvpn client <id> <new-file>` — saves the private profile to a file.
 - `revoke openvpn client <id> CONFIRM`
 
-Passwords are not command arguments. Account creation and password reset remain
-available through System → Users; the SSH menu can change the current account's
-password. There is no account disable/enable API; MFA disable is not account disable.
+Passwords are never command arguments. Account creation and password reset ask
+twice without echo in an interactive local CLI or an SSH appliance CLI with a
+terminal. Input is preserved exactly, including whitespace; blank input or
+Ctrl-C cancels, and a mismatch makes no change. Passwords do not enter command
+history or CLI audit records. These commands apply immediately after matching
+entries and still enforce the API's password policy and account protections.
+Secret-bearing API responses are not displayed, including error bodies; a
+failure reports a generic account-operation error rather than risking disclosure.
+Piped sessions and one-shot SSH commands refuse password input. The web console
+reports: “Set passwords on System → Users; the web console does not take secret input”.
+The SSH menu can also change the current account's password. There is no account
+disable/enable API; MFA disable is not account disable.
 
 Appliance configuration backups:
 

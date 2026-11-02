@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -135,6 +136,42 @@ func TestCLICompleteHandlerSuggestsConfigAwareArgs(t *testing.T) {
 	}
 }
 
+func TestCLIExecuteRefusesSecretInput(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
+	for _, role := range []string{"admin", "view"} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) { c.Set(ctxRoleKey, role) })
+		router.POST("/execute", cliExecuteHandler(&mockStore{cfg: config.DefaultConfig()}))
+		for _, line := range []string{"create user bob", "reset user password bob"} {
+			rec := httptest.NewRecorder()
+			body, err := json.Marshal(map[string]string{"line": line})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			// The console constructs a loopback API client, but must refuse
+			// secret entry before dispatching any account API request.
+			req.Header.Set("Authorization", "Bearer test")
+			router.ServeHTTP(rec, req)
+			var result struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			want := cli.ErrWebSecretInput.Error()
+			if role == "view" {
+				command := strings.TrimSuffix(line, " bob")
+				want = cli.ErrPermissionDenied.Error() + ": " + command + " requires admin"
+			}
+			if rec.Code != http.StatusOK || result.Error != want {
+				t.Fatalf("role=%s line=%s status=%d error=%s", role, line, rec.Code, result.Error)
+			}
+		}
+	}
+}
+
 func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
@@ -167,6 +204,22 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	}
 	if !strings.Contains(greeting.Output, "Configuration CLI") {
 		t.Fatalf("unexpected greeting: %+v", greeting)
+	}
+
+	for _, line := range []string{"create user bob", "reset user password bob"} {
+		if err := conn.WriteJSON(map[string]string{"line": line}); err != nil {
+			t.Fatal(err)
+		}
+		var refusal struct {
+			Output string `json:"output"`
+			Error  string `json:"error"`
+		}
+		if err := conn.ReadJSON(&refusal); err != nil {
+			t.Fatal(err)
+		}
+		if refusal.Error != cli.ErrWebSecretInput.Error() || refusal.Output != "" {
+			t.Fatalf("web password input: %+v", refusal)
+		}
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"line":"show version"}`)); err != nil {
