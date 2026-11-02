@@ -377,6 +377,9 @@ func TestLinuxShellReceivesShellAPISocket(t *testing.T) {
 			socket := regexp.MustCompile(`socket=\[(/[^\]]+)\]`).FindStringSubmatch(tty.output())[1]
 			tty.send(t, "exit\n")
 			if mode == "appliance" {
+				// Idle redraws are not evidence that the Linux shell
+				// has exited and handed input back to the CLI.
+				tty.waitFor(t, "Returned to configuration CLI; candidate changes remain staged.", 1)
 				tty.waitFor(t, "containd(config", 2)
 				tty.send(t, "exit\n")
 			}

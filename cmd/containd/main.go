@@ -189,11 +189,15 @@ func runCLI(ctx context.Context) error {
 		}()
 	}
 
+	statusPoller := cli.NewSessionStatusPoller(ctx, api)
+	defer statusPoller.Close()
 	return runCLILoop(prompt, func(string) (string, error) {
-		status := api.SessionStatus(ctx)
+		status := statusPoller.Snapshot()
 		fmt.Println(status.String())
 		return state.Prompt(status.Prompt(role))
 	}, state.AppendHistory, func(line string, buf *strings.Builder) error {
+		statusPoller.SyncToken(api)
+		defer statusPoller.Refresh(api)
 		if output, handled := cli.SessionConfigure(line); handled {
 			fmt.Fprintln(buf, output)
 			return nil

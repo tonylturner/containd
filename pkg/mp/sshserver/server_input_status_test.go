@@ -5,13 +5,12 @@ import (
 	"bufio"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestSessionInputIdleRefresh(t *testing.T) {
-	ticks := make(chan time.Time, 1)
-	ticks <- time.Now()
-	in := &sessionInput{chunks: make(chan []byte, 1), idle: ticks}
+func TestSessionInputStatusUpdate(t *testing.T) {
+	updates := make(chan struct{}, 1)
+	updates <- struct{}{}
+	in := &sessionInput{chunks: make(chan []byte, 1), status: updates}
 	refreshed := false
 	in.refresh = func() {
 		refreshed = true
