@@ -6,14 +6,11 @@ import { useConfigView, matchingRevisions } from "../../lib/use-config-revision"
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { notifyConfigMutation } from "../../lib/config-events";
-
-import { getJSONList, postJSONResult } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, apiURL, fetchDataPlane, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
+import { api, fetchDataPlane, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { summarizeGenericICS, formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
@@ -22,69 +19,7 @@ import { SkeletonList } from "../../components/Skeleton";
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice } from "../../lib/use-config-editor";
 
-/* ── Types ─────────────────────────────────────────────────────── */
-
-type ICSTemplate = {
-  name: string;
-  description: string;
-  protocol: string;
-  parameters?: TemplateParameter[];
-};
-
-type TemplateParameter = {
-  name: string;
-  label: string;
-  type: "text" | "number" | "select";
-  required?: boolean;
-  placeholder?: string;
-  help?: string;
-};
-
-type TemplateApplyRequest = {
-  template: string;
-  mode?: ICSModeSelection;
-  sourceZones?: string[];
-  destZones?: string[];
-  parameters?: Record<string, string>;
-};
-
-type TemplateApplyResponse = {
-  rules: FirewallRule[];
-  created?: number;
-  updated?: number;
-};
-
-/* ── API helpers ───────────────────────────────────────────────── */
-
-/** The ICS templates; null when unavailable or not a list. */
-function fetchTemplates(): Promise<ICSTemplate[] | null> {
-  return getJSONList<ICSTemplate>("/api/v1/templates/ics");
-}
-
-async function previewTemplate(
-  req: TemplateApplyRequest,
-): Promise<TemplateApplyResponse | null> {
-  try {
-    const res = await fetch(apiURL("/api/v1/templates/ics/apply"), {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...req, preview: true }),
-    });
-    if (!res.ok) return null;
-    notifyConfigMutation(res);
-    return (await res.json()) as TemplateApplyResponse;
-  } catch {
-    return null;
-  }
-}
-
-async function applyTemplate(
-  req: TemplateApplyRequest,
-  revision: string,
-) {
-  return postJSONResult<TemplateApplyResponse>("/api/v1/templates/ics/apply", req, revision);
-}
+import { fetchTemplates, previewTemplate, applyTemplate, type ICSTemplate, type TemplateApplyRequest } from "../../lib/api-templates";
 
 /* ── Protocol badge colors ─────────────────────────────────────── */
 
