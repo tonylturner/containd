@@ -31,6 +31,7 @@ async function mockAPI(page: Page, config: DHCPConfig): Promise<Server> {
     }
     const data = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin-1", username: "containd", role: "admin" }
+      : path.endsWith("/interfaces") ? [{ name: "lan2" }, { name: "lan3" }]
       : path.endsWith("/dhcp/leases") ? { leases: [] }
         : path.endsWith("/services/status") ? { faults: [], dhcp: { enabled: false, ...idleMeter }, av: { available: false, error: "engine unavailable" } }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
@@ -135,28 +136,30 @@ test("a clean editor adopts a server change", async ({ page }) => {
   await expect(notice(page)).toHaveCount(0);
 });
 
-test("DHCP keeps unfinished pool, reservation and CSV text across config refreshes", async ({ page }) => {
+test("DHCP keeps unfinished row and DNS edits across config refreshes", async ({ page }) => {
   await mockAPI(page, { enabled: false, authoritative: false });
   await open(page);
   await page.getByText("Advanced options", { exact: true }).click();
-  const pools = page.getByPlaceholder("lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200");
-  const reservations = page.getByPlaceholder("lan2,aa:bb:cc:dd:ee:ff,192.168.10.50");
-  const ifaces = page.getByPlaceholder("lan2, lan3");
-  await pools.pressSequentially("lan2,192.");
-  await reservations.pressSequentially("lan2,aa:");
-  await ifaces.fill("lan2, ");
+  await page.getByRole("button", { name: "Add pool", exact: true }).click();
+  await page.getByRole("button", { name: "Add reservation", exact: true }).click();
+  const pool = page.getByLabel("Pool 1 start", { exact: true });
+  const reservation = page.getByLabel("Reservation 1 MAC", { exact: true });
+  const dns = page.getByPlaceholder("192.168.1.1, 1.1.1.1");
+  await pool.fill("192.");
+  await reservation.fill("aa:");
+  await dns.fill("192.168.");
   for (const event of [CONFIG_COMMITTED, CONFIG_STAGED]) {
     await Promise.all([
       page.waitForResponse(configRead),
       page.evaluate((name) => window.dispatchEvent(new CustomEvent(name)), event),
     ]);
     await settled(page);
-    await expect(pools).toHaveValue("lan2,192.");
-    await expect(reservations).toHaveValue("lan2,aa:");
-    await expect(ifaces).toHaveValue("lan2, ");
+    await expect(pool).toHaveValue("192.");
+    await expect(reservation).toHaveValue("aa:");
+    await expect(dns).toHaveValue("192.168.");
   }
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
-  await expect(pools).toHaveValue("");
-  await expect(reservations).toHaveValue("");
-  await expect(ifaces).toHaveValue("lan2");
+  await expect(pool).toHaveCount(0);
+  await expect(reservation).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /^lan2/ })).toBeChecked();
 });

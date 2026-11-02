@@ -197,6 +197,12 @@ do not fill missing series with zero in alerts or dashboards.
 - Requests for ineligible addresses receive DHCPNAK only in authoritative mode; otherwise the server stays silent. SELECTING requests naming this server use the same eligibility checks. DISCOVER never receives DHCPNAK, including when the pool is exhausted.
 - Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
+- The DHCP page picks listen interfaces from configured interfaces and edits
+  pools as interface/start/end rows. Reservations use interface/MAC/IP rows;
+  hostnames are observed in leases, not configurable reservation fields.
+  Saved interface names absent from the configured list remain selectable.
+  **Save** validates rows and stages the same configuration arrays; review and
+  commit to apply. Lease, DNS and domain options remain under **Advanced options**.
 
 ## VPN
 
@@ -493,6 +499,14 @@ ClamAV mode:
   While AV is enabled, staging rejects any other value, including cron syntax.
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
+- An omitted scanner mode means **Local scanner (ClamAV)**, including its
+  readiness and definition-update controls. A missing-database fault offers
+  **Update definitions** beside the cause. Both this and **Run definition update**
+  request confirmation and act immediately, independently of **Save**.
+  Definition uploads and deletion also require confirmation.
+- If staging scan selections reports `needs dataplane.enforcement`, follow
+  the link to the Firewall enforcement control, stage enforcement, then retry
+  the AV save. Review both changes and commit to apply; the link changes no settings.
 - `POST /api/v1/services/av/update` queues an immediate run on the same schedule and
   returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
 - Custom definitions are ClamAV database files (`.ndb`, `.hdb`, `.ldb`,
@@ -543,6 +557,8 @@ Scanning:
   limit, so new definitions or another socket never reuse old verdicts.
   ICAP verdicts are never cached because the server may decide by direction,
   HTTP headers and endpoints.
+  **Cache TTL (seconds)** edits the cache duration, including fractional seconds;
+  the API stores `cacheTtl` in nanoseconds. Zero selects the default 10 minutes.
 - ICAP is a generic RFC 3507 backend with exactly one server and no
   failover. Uploads go as `REQMOD` with the request head, downloads as
   `RESPMOD` with the request and response heads. The request head is sent

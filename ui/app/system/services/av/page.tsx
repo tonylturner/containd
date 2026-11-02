@@ -7,6 +7,7 @@ import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { api, isAdmin, type Asset, type AVConfig, type ServicesStatus, type Zone } from "../../../../lib/api";
 import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
@@ -19,15 +20,18 @@ import { Sparkline } from "../../../../components/Sparkline";
 import { ServiceStatusStrip } from "../service-presentation";
 import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
+import { ConfirmDialog, useConfirm } from "../../../../components/ConfirmDialog";
 import { CustomDefinitions } from "./custom-defs";
 import { GateStatus, GateSummary } from "./gate-status";
 import { normalizeScan } from "./scan-model";
 import { ScanSelectionEditor } from "./scan-selection";
 
 const emptyICAPServer = { address: "", useTls: false, service: "" };
+const effectiveMode = <T extends string,>(mode: T | undefined): T | "clamav" => mode ?? "clamav";
 
 export default function AVPage() {
   const canEdit = isAdmin();
+  const confirm = useConfirm();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write } = useConfigEditor<AVConfig>({
@@ -58,7 +62,7 @@ export default function AVPage() {
       const sSnapshot = await api.getAV();
       const s = (sSnapshot?.data ?? null);
       if (!checkLoaded(s)) return;
-      adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
+      adoptConfig({ data: { ...s, mode: effectiveMode(s.mode) }, revision: sSnapshot?.revision ?? "" }, keepEdits);
       const [zoneListSnapshot, assetListSnapshot] = await Promise.all([api.listZones(), api.listAssets()]);
       const zoneList = (zoneListSnapshot?.data ?? null);
       const assetList = (assetListSnapshot?.data ?? null);
@@ -88,6 +92,8 @@ export default function AVPage() {
   }, [autoRefresh, refresh]);
 
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
+  const missingDatabase = cfg.mode === "clamav" && status?.available &&
+    /database|signature/i.test([status.ready_error, status.last_error, status.fault?.message].filter(Boolean).join(" "));
   const localScannerCustomized = Boolean(
     (cfg.clamav?.socketPath && cfg.clamav.socketPath !== "/run/clamav/clamd.sock") ||
     (cfg.clamav?.customDefsPath && cfg.clamav.customDefsPath !== "/data/clamav/custom") ||
@@ -98,6 +104,10 @@ export default function AVPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
+    if (cfg.cacheTtl !== undefined && (!Number.isInteger(cfg.cacheTtl) || cfg.cacheTtl < 0)) {
+      setError("Cache TTL must be a non-negative duration representable in whole nanoseconds.");
+      return;
+    }
     const payload: AVConfig = {
       ...cfg,
       scan: normalizeScan(cfg.scan),
@@ -126,6 +136,15 @@ export default function AVPage() {
     refresh();
   }
 
+  function confirmUpdate() {
+    confirm.open({
+      title: "Update definitions",
+      message: "Download antivirus definitions now? This acts immediately and does not stage or commit configuration.",
+      confirmLabel: "Update definitions",
+      onConfirm: () => void onRunUpdate(),
+    });
+  }
+
   function updateICAPServer(idx: number, field: string, value: any) {
     setCfg((c) => {
       const servers = [...(c.icap?.servers ?? [])];
@@ -152,7 +171,7 @@ export default function AVPage() {
     <Shell
       title="Antivirus / ICAP"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
@@ -161,7 +180,7 @@ export default function AVPage() {
           </button>
           {canEdit && cfg.mode === "clamav" && (
             <button
-              onClick={onRunUpdate}
+              onClick={confirmUpdate}
               disabled={updating}
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
@@ -192,10 +211,16 @@ export default function AVPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["av"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
-      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.available && status.mode === "clamav" ? status.clamav_running : undefined}
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.available && effectiveMode(status.mode) === "clamav" ? status.clamav_running : undefined}
         attention={!status || !status.available ? "Live scanner status unavailable — use Refresh to retry" : status.last_error || status.ready_error || status.freshclam_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
         updated={status?.available ? status.last_render : undefined}
         summary={<GateSummary gate={status?.available ? status.gate : undefined} />} />
+      {missingDatabase && (
+        <div className="mb-4 rounded-xs border p-3 text-sm">
+          <p>The local scanner needs signature databases before it can scan. Updating definitions acts immediately.</p>
+          {canEdit && <button disabled={updating} onClick={confirmUpdate} className="mt-2 rounded-xs border px-3 py-2">Update definitions</button>}
+        </div>
+      )}
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -209,6 +234,9 @@ export default function AVPage() {
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
+          {error.includes("needs dataplane.enforcement") && (
+            <p className="mt-2">Scanning needs firewall enforcement. <Link className="underline" href="/firewall/#enforcement">Stage enforcement on the Firewall page</Link>, then retry Save and review both changes before committing.</p>
+          )}
         </div>
       )}
       <p className="mb-4 text-xs text-(--text-muted)">
@@ -247,7 +275,7 @@ export default function AVPage() {
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
             <select
-              value={cfg.mode ?? "clamav"}
+              value={cfg.mode}
               disabled={!canEdit || !canSave}
               onChange={(e) => {
                 const mode = e.target.value as AVConfig["mode"];
@@ -290,6 +318,20 @@ export default function AVPage() {
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
               className="mt-1 w-full input-industrial"
             />
+          </div>
+          <div>
+            <label htmlFor="av-cache-ttl" className="text-xs uppercase tracking-wide text-(--text-muted)">Cache TTL (seconds)</label>
+            <input
+              id="av-cache-ttl"
+              type="number"
+              min="0"
+              step="any"
+              value={(cfg.cacheTtl ?? 0) / 1_000_000_000}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setCfg((c) => ({ ...c, cacheTtl: Math.round(Number(e.target.value) * 1_000_000_000) }))}
+              className="mt-1 w-full input-industrial"
+            />
+            <p className="mt-1 text-xs text-(--text-muted)">Local scanner verdict cache duration. 0 uses 10 minutes; ICAP is never cached.</p>
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Timeout (seconds)</label>
@@ -451,7 +493,7 @@ export default function AVPage() {
             <div>Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span></div>
             <div>Scanner ready: <span className="text-(--text)">{typeof status?.ready !== "boolean" ? "Unknown" : status.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
             <div>Detections: <span className="text-(--text)">{status?.detections ?? "Unknown"}</span></div>
-            <div>Mode: <span className="text-(--text)">{status?.mode ?? "Unknown"}</span></div>
+            <div>Mode: <span className="text-(--text)">{effectiveMode(status.mode)}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? "Unknown"}</span></div>
             <div>
               Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
@@ -495,6 +537,7 @@ export default function AVPage() {
           </div>
         )}
       </Card>
+      <ConfirmDialog {...confirm.props} />
     </Shell>
   );
 }
