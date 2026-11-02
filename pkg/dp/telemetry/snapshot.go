@@ -4,6 +4,10 @@ package telemetry
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"time"
 
 	wire "github.com/tonylturner/containd/pkg/common/telemetry"
@@ -45,15 +49,22 @@ func (c Collector) Snapshot(ctx context.Context) wire.CounterSnapshot {
 		for _, i := range m.Interfaces {
 			dims := map[string]string{"interface": i.Device, "zone": i.Zone, "role": i.Role}
 			l, err := read(i.Device)
+			if err != nil {
+				var existingDeviceErr *linkReadError
+				if !errors.As(err, &existingDeviceErr) && errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				reason := fmt.Sprintf("interface %s: statistics unreadable: %s", i.Device, shortLinkError(err))
+				for _, metric := range []wire.Metric{wire.IfaceRxBytes, wire.IfaceTxBytes, wire.IfaceRxPackets, wire.IfaceTxPackets} {
+					s.Unavailable = append(s.Unavailable, wire.SourceUnavailable{Source: "iface", Metric: metric, Dims: dims, Reason: reason})
+				}
+				continue
+			}
 			for _, v := range []struct {
 				metric wire.Metric
 				value  uint64
 			}{{wire.IfaceRxBytes, l.RxBytes}, {wire.IfaceTxBytes, l.TxBytes}, {wire.IfaceRxPackets, l.RxPackets}, {wire.IfaceTxPackets, l.TxPackets}} {
-				if err != nil {
-					s.Unavailable = append(s.Unavailable, wire.SourceUnavailable{Source: "iface", Metric: v.metric, Dims: dims, Reason: err.Error()})
-				} else {
-					add(v.metric, dims, v.value, l.Epoch, wire.OriginReal)
-				}
+				add(v.metric, dims, v.value, l.Epoch, wire.OriginReal)
 			}
 		}
 		if c.Conduits == nil {
@@ -103,4 +114,12 @@ func (c Collector) Snapshot(ctx context.Context) wire.CounterSnapshot {
 		add(wire.AVDetections, nil, detections, c.BootID, wire.OriginReal)
 	}
 	return s
+}
+
+func shortLinkError(err error) string {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && pathErr.Err != nil {
+		return pathErr.Err.Error()
+	}
+	return err.Error()
 }
