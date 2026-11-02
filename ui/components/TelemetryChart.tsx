@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { pointRate, responsePoints, type SeriesQuery, type TelemetryRange } from "../lib/api-telemetry";
 import { useTelemetry, type TelemetryRead } from "../hooks/useTelemetry";
 import { Sparkline } from "./Sparkline";
@@ -49,19 +49,18 @@ export function TelemetryChart({ queries, title, ranges = false, perMinute = fal
   const range = selectedRange ?? localRange;
   const setRange = onRangeChange ?? setLocalRange;
   const read = useTelemetry(queries, range);
-  return <div className="min-w-0 space-y-1">
+  return <TelemetryHistory {...{ read, title, perMinute, compact, showTrend, color }}>
     {ranges && <label className="flex flex-wrap items-center gap-2 text-xs text-(--text-muted)">Range
       <select aria-label={`${title} range`} value={range} onChange={e => setRange(e.target.value as TelemetryRange)} className="rounded-xs border bg-(--surface) px-2 py-1">
         <option value="1h">1 hour</option><option value="24h">24 hours</option><option value="30d">30 days</option>
       </select></label>}
-    <TelemetryHistory {...{ read, title, perMinute, compact, showTrend, color }} />
-  </div>;
+  </TelemetryHistory>;
 }
 
 /** Render a snapshot supplied by a panel that coordinates several chart notices. */
-export function TelemetryHistory({ read, title, perMinute = false, compact = false, showTrend = false, color, hideFault = false }: {
+export function TelemetryHistory({ read, title, perMinute = false, compact = false, showTrend = false, color, hideFault = false, children }: {
   read: TelemetryRead | null; title: string; perMinute?: boolean; compact?: boolean;
-  showTrend?: boolean; color?: string; hideFault?: boolean;
+  showTrend?: boolean; color?: string; hideFault?: boolean; children?: ReactNode;
 }) {
   const points = read ? responsePoints(read.data) : [];
   const covered = points.some(p => p.v !== undefined);
@@ -70,7 +69,9 @@ export function TelemetryHistory({ read, title, perMinute = false, compact = fal
   const continuous = firstCovered >= 0 ? points.slice(firstCovered) : [];
   const first = continuous.every(p => p.q === "observed") ? continuous[0] : undefined, last = points.at(-1);
   const trend = first?.q === "observed" && last?.q === "observed" ? pointRate(last, perMinute)! - pointRate(first, perMinute)! : null;
+  // Range controls render inside data-telemetry: they are read-only history controls.
   return <div className="min-w-0 space-y-1" data-telemetry={title}>
+    {children}
     <TelemetryNotice read={read} hideFault={hideFault} />
     {read && !read.error && (covered ? <>
       <Sparkline points={points} title={title} perMinute={perMinute} color={color} className={compact ? "h-5" : "h-14"} />
