@@ -112,6 +112,100 @@ or returns no data, the command reports an error and sends no write; it does not
 substitute running settings or defaults. Unspecified fields are preserved.
 Outbound quick start completes all configuration reads before staging its changes.
 
+### Focused service settings
+
+Admin service setters read the candidate service, preserve unspecified fields,
+and POST with that read's revision. They stage only: review `show diff`, then
+commit separately. A failed read or stale revision stops the edit without retry.
+API validation, including management-access protection, remains authoritative.
+
+Scalar syntax is `set <prefix> <field> <value>`. Booleans accept `true|false`
+or `on|off`; lists take one comma-separated argument, with `-` clearing the
+list. Quote text containing spaces; use `''` for an empty text field. Numeric
+zero selects the API's default where supported. All names below are CLI names,
+not raw JSON keys.
+
+| Prefix | Fields |
+| --- | --- |
+| `dns` | `enabled`, `listen-port`, `listen-zones`, `upstream-servers`, `cache-size-mb` |
+| `ntp` | `enabled`, `servers`, `interval-seconds` |
+| `dhcp` | `enabled`, `authoritative`, `listen-ifaces`, `lease-seconds`, `router`, `dns-servers`, `domain` |
+| `syslog` | `batch-size` (records), `flush-every` (seconds) |
+| `av` | `enabled`, `mode` (`clamav|icap`), `fail-policy` (`open|closed`), `max-size-bytes`, `timeout-sec`, `cache-ttl`, `http-download`, `http-upload` |
+| `av clamav` | `socket-path`, `update-schedule` (positive duration, e.g. `4h`), `custom-defs-path`, `freshclam-enabled` |
+| `av scan` | `download-mode` (`hold|stream_tail`), `ics-zones`, `ics-assets` |
+| `vpn wireguard` | `enabled`, `interface`, `listen-port`, `listen-zone`, `listen-interfaces`, `address-cidr`, `private-key-file` |
+| `vpn openvpn` | `enabled`, `mode` (`client|server`), `config-path`, `source` (`profile|client|server`; see below) |
+| `vpn openvpn client` | `remote`, `port`, `proto` (`udp|tcp`), `username`, `password-file`, `ca-file`, `cert-file`, `key-file` |
+| `vpn openvpn server` | `listen-port`, `proto` (`udp|tcp`), `listen-zone`, `listen-interfaces`, `tunnel-cidr`, `public-endpoint`, `push-dns`, `push-routes`, `client-to-client` |
+| `proxy forward` | `allowed-clients`, `allowed-domains`, `upstream`, `log-requests` |
+| `ids` | `enabled` |
+
+`cache-ttl` accepts a non-negative duration such as `5m` and sends nanoseconds
+without floating-point conversion. `0s` selects the native scanner's 10-minute
+default; ICAP verdicts are never cached. Runtime quarantine (`backendDisabled`)
+is not editable. Configure the single ICAP server with
+`set av icap server <host:port> <true|false TLS> <service>`.
+
+VPN `*-file` arguments read credential contents from the appliance process's
+filesystem, not the browser's or SSH client's filesystem. Keep those files
+private. File paths, not secret contents, enter command history and audit
+records; save output does not print response bodies or saved secrets. Existing
+redacted VPN secrets are retained by the API when other fields change.
+For a new OpenVPN configuration, stage `enabled false`, choose `source`, fill
+the settings and credentials, then stage `enabled true`. Changing `source`
+explicitly removes the other sources: `profile` removes structured client and
+server settings, `client` removes the server and profile path, and `server`
+removes the managed client and profile path. The selected source's existing
+settings are retained. A profile path must already exist on the appliance;
+setting a path does not upload a file.
+
+The forward proxy API currently rejects nonempty `allowedClients` and
+`upstream`; these setters can clear them (`allowed-clients -`, `upstream ''`)
+but do not add runtime support or bypass that refusal. Existing
+`set proxy forward on|off [port] [zone...]` and `set proxy reverse on|off`
+commands remain available.
+
+Collections use separate `add`, `set` and `delete` commands. Add refuses an
+existing key; set and delete refuse missing or ambiguous keys. Set requires at
+least one `--field value` pair and changes only those fields. Delete stages
+removal; it does not immediately change the running service.
+
+| Collection | Key after command | Add requirements | Optional/set fields |
+| --- | --- | --- | --- |
+| `dhcp pool` | `<iface> <start-ip>` | `--end <ip>` | `--end` |
+| `dhcp reservation` | `<iface> <mac>` | `--ip <ip>` | `--ip` |
+| `vpn wireguard peer` | `<public-key>` | `--allowed-ips <cidrs>` | `--name`, `--allowed-ips`, `--endpoint`, `--persistent-keepalive` |
+| `proxy reverse site` | `<name>` | `--listen-port <port> --backends <host:port,...>` | `--listen-port`, `--hostnames`, `--backends`, `--tls-enabled`, `--cert-ref`, `--description` |
+| `ids group` | `<id>` | `--name <text>` | `--name`, `--description`, `--filter`, `--enabled` |
+| `av scan include` | No key on add; `<index>` on set/delete | `--dest-ports <ports-or-ranges>` | `--source-zones`, `--dest-zones`, `--dest-ports` |
+| `av scan exclude` | No key on add; `<index>` on set/delete | At least one nonempty selector (API-validated) | `--source-zones`, `--dest-zones`, `--sources`, `--destinations`, `--dest-ports` |
+
+DHCP supports several pools per interface; changing a pool's start address or
+another collection's key means deleting and adding it. MAC keys are normalized.
+Scan indices are one-based positions in the current candidate selection; inspect
+`show candidate-config` before using them. Include/exclude selectors accept the
+same comma-separated lists and `-` clearing syntax as scalar list settings.
+A reverse site's TLS `cert-ref` names an existing appliance proxy certificate
+pair; it does not upload certificates. New IDS groups default to enabled;
+`ruleCount` is computed, not an editable field. To toggle a single existing IDS
+rule without altering its predicates, use
+`set ids rule enabled <id> <true|false>`.
+
+```text
+set dns upstream-servers 1.1.1.1,9.9.9.9
+add dhcp pool lan 10.0.0.20 --end 10.0.0.100
+add dhcp reservation lan aa:bb:cc:dd:ee:ff --ip 10.0.0.25
+set av cache-ttl 5m
+add av scan include --source-zones lan --dest-zones wan --dest-ports 80,8080-8090
+add vpn wireguard peer PUBLIC_KEY --allowed-ips 10.8.0.2/32 --persistent-keepalive 25
+set proxy reverse site portal --tls-enabled true --cert-ref portal
+set syslog batch-size 100
+set ids rule enabled modbus-write-attempt false
+add ids group plant --name 'Plant rules' --filter 'proto:modbus'
+show diff
+```
+
 ### Rule positions and port forwards
 
 For `add firewall rule`, the optional position suffix is `top`, `bottom`,
