@@ -45,6 +45,7 @@ export default function IDSPage() {
   const refreshId = useRef(0);
   const rulesButton = useRef<HTMLButtonElement>(null);
   const [saving, setSaving] = useState(false);
+  const [savingRule, setSavingRule] = useState(false);
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -210,7 +211,8 @@ export default function IDSPage() {
       </div>
 
       <button ref={rulesButton} type="button" onClick={() => setActiveTab("rules")} className="mb-3 text-sm font-semibold">Rules <span className="text-(--text-muted)">{rules.length.toLocaleString()}</span></button>
-      <RulesTable mutationDisabled={!canSave || saving || importPending || draft.stale} rules={rules} canEdit={canEdit} onEdit={setEditing} onDelete={onDelete}
+      <RulesTable mutationDisabled={!canSave || saving || importPending || draft.stale} editDisabled={!canSave || importPending || draft.stale}
+        rules={rules} canEdit={canEdit} onEdit={rule => { setSuccess(null); setEditing(rule); }} onDelete={onDelete}
         onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
 
       <h2 className="mt-6 text-base font-semibold">Add/import rules</h2>
@@ -255,10 +257,10 @@ export default function IDSPage() {
       </div>
 
       {editing && canEdit && (
-        <EditRuleModal mutationDisabled={!canSave || saving || importPending || draft.stale} busy={saving} rule={editing} saveError={error || loadError}
+        <EditRuleModal mutationDisabled={!canSave || savingRule || importPending || draft.stale} busy={savingRule} saveDisabled={saving} rule={editing} saveError={error || loadError} success={success}
           notice={<ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
           text={text(`rule.${editing.id}`, JSON.stringify(editing, null, 2))}
-          setText={(value) => setText(`rule.${editing.id}`, value)}
+          setText={(value) => { setSuccess(null); setText(`rule.${editing.id}`, value); }}
           onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={async (newRule) => {
             if (!canSave || saving || importPending || draft.stale) return;
             if (newRule.id !== editing.id && rules.some(r => r.id === newRule.id)) {
@@ -266,11 +268,13 @@ export default function IDSPage() {
               return;
             }
             setSaving(true);
+            setSavingRule(true);
             setError(null);
             const result = await write((base, submitted) => api.setIDS(base, {
               ...submitted, rules: (submitted.rules ?? []).map(r => r.id === editing.id ? newRule : r),
             }), { replace: data => data });
             setSaving(false);
+            setSavingRule(false);
             if (!result.ok) { setError(revisionError(result)); return; }
             if (result.adopted && result.unchanged) {
               clearText(`rule.${editing.id}`);

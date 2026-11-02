@@ -283,8 +283,11 @@ test("IDS retains a rule modal draft through a staged save and a deleted server 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
-  const field = page.locator("textarea");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Edit JSON", exact: true }).click();
+  const field = dialog.getByRole("textbox", { name: "Rule JSON", exact: true });
   await field.fill('{"id":"test-rule", "title":');
+  await expect(dialog.getByRole("button", { name: "Save rule", exact: true })).toBeDisabled();
   server.change("/ids/rules", { enabled: true, rules: [] });
   await announce(page, "/ids/rules");
   await expect(field).toHaveValue('{"id":"test-rule", "title":');
@@ -293,6 +296,9 @@ test("IDS retains a rule modal draft through a staged save and a deleted server 
   const refreshed = page.waitForResponse(read("/ids/rules"));
   release();
   await refreshed;
+  await expect(dialog.getByRole("status").filter({ hasText: "IDS rules staged — commit to apply." })).toBeVisible();
+  await expect(dialog.getByText("Edits made after that submission are not included.", { exact: true })).toBeVisible();
+  expect(server.writes).toHaveLength(1);
   await expect(field).toHaveValue('{"id":"test-rule", "title":');
 });
 

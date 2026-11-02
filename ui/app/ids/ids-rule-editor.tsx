@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { IDSRule } from "../../lib/api";
 import { isRuleEnabled } from "./ids-shared";
 
-export function EditRuleModal({ rule, text, setText, onClose, onSave, mutationDisabled, busy, saveError, notice }: {
+export function EditRuleModal({ rule, text, setText, onClose, onSave, mutationDisabled, busy, saveDisabled, saveError, success, notice }: {
   rule: IDSRule;
   text: string;
   setText: (value: string) => void;
@@ -12,7 +12,9 @@ export function EditRuleModal({ rule, text, setText, onClose, onSave, mutationDi
   onSave: (rule: IDSRule) => Promise<void>;
   mutationDisabled: boolean;
   busy: boolean;
+  saveDisabled: boolean;
   saveError: string | null;
+  success: string | null;
   notice: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -53,6 +55,12 @@ export function EditRuleModal({ rule, text, setText, onClose, onSave, mutationDi
       <p className="mb-3 text-xs text-(--text-muted)">Save rule stages this rule and all current IDS page edits. No additional Save is needed; review and commit to apply.</p>
       {notice}
       {(error || saveError) && <p role="alert" className="mb-3 break-words text-sm text-red-400">{error || saveError}</p>}
+      {success && (
+        <div className="mb-3">
+          <p role="status" className="text-sm text-emerald-400">{success}</p>
+          <p className="mt-1 text-xs text-(--text-muted)">Edits made after that submission are not included.</p>
+        </div>
+      )}
       <button type="button" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)} className="mb-3 rounded-xs border px-3 py-2 text-sm">Edit JSON</button>
       <fieldset disabled={mutationDisabled} className="min-w-0">
         {advanced ? <label className="block text-xs">Rule JSON
@@ -113,7 +121,7 @@ export function EditRuleModal({ rule, text, setText, onClose, onSave, mutationDi
       </fieldset>
       <div className="mt-4 flex justify-end gap-2">
         <button disabled={busy} onClick={onClose} className="rounded-xs border px-3 py-2 text-sm">Cancel</button>
-        <button disabled={mutationDisabled} onClick={() => void save()} className="rounded-xs bg-(--amber) px-3 py-2 text-sm text-white disabled:opacity-50">Save rule</button>
+        <button disabled={mutationDisabled || saveDisabled} onClick={() => void save()} className="rounded-xs bg-(--amber) px-3 py-2 text-sm text-white disabled:opacity-50">Save rule</button>
       </div>
     </dialog>
   );

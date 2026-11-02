@@ -36,7 +36,6 @@ export default function AVPage() {
   const toast = useToast();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write } = useConfigEditor<AVConfig>({
     enabled: false,
-    mode: "clamav",
     failPolicy: "open",
     icap: { servers: [] },
   }, false);
@@ -62,7 +61,7 @@ export default function AVPage() {
       const sSnapshot = await api.getAV();
       const s = (sSnapshot?.data ?? null);
       if (!checkLoaded(s)) return;
-      adoptConfig({ data: { ...s, mode: effectiveMode(s.mode) }, revision: sSnapshot?.revision ?? "" }, keepEdits);
+      adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
       const [zoneListSnapshot, assetListSnapshot] = await Promise.all([api.listZones(), api.listAssets()]);
       const zoneList = (zoneListSnapshot?.data ?? null);
       const assetList = (assetListSnapshot?.data ?? null);
@@ -92,7 +91,8 @@ export default function AVPage() {
   }, [autoRefresh, refresh]);
 
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
-  const missingDatabase = cfg.mode === "clamav" && status?.available &&
+  const scannerMode = effectiveMode(cfg.mode);
+  const missingDatabase = scannerMode === "clamav" && status?.available &&
     /database|signature/i.test([status.ready_error, status.last_error, status.fault?.message].filter(Boolean).join(" "));
   const localScannerCustomized = Boolean(
     (cfg.clamav?.socketPath && cfg.clamav.socketPath !== "/run/clamav/clamd.sock") ||
@@ -178,7 +178,7 @@ export default function AVPage() {
           >
             Refresh
           </button>
-          {canEdit && cfg.mode === "clamav" && (
+          {canEdit && scannerMode === "clamav" && (
             <button
               onClick={confirmUpdate}
               disabled={updating}
@@ -275,7 +275,7 @@ export default function AVPage() {
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
             <select
-              value={cfg.mode}
+              value={scannerMode}
               disabled={!canEdit || !canSave}
               onChange={(e) => {
                 const mode = e.target.value as AVConfig["mode"];
@@ -350,8 +350,8 @@ export default function AVPage() {
             <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit && canSave} />
           </div>
         </section>
-        <details className="mt-6 rounded-xs border p-3" open={cfg.mode === "icap" || icapServers.length > 0}>
-          <summary className="cursor-pointer text-sm"><span>Advanced remote scanner settings</span>{(cfg.mode === "icap" || icapServers.length > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
+        <details className="mt-6 rounded-xs border p-3" open={scannerMode === "icap" || icapServers.length > 0}>
+          <summary className="cursor-pointer text-sm"><span>Advanced remote scanner settings</span>{(scannerMode === "icap" || icapServers.length > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
           <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
           <div className="mt-3 space-y-2">

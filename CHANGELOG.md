@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - DHCP uses interface pickers and validated pool/reservation rows; IDS offers
   common rule fields, advanced JSON editing, one staged rule save and group descriptions.
+  Rule drafts survive an earlier pending page save, with save feedback visible in the dialog.
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
   focus retained after moves. A Default row always shows the
   candidate policy's fallback action for traffic no allow, deny or reject rule
@@ -118,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Antivirus default-local mode exposes confirmed definition updates beside missing
   databases, links enforcement refusals to Firewall, and adds a cache-duration control.
+  Unrelated saves preserve an omitted scanner mode rather than staging an explicit default.
 - VPN reads and stage responses redact stored secrets without falsely reporting
   configured key and certificate material as missing.
 - Proxy preflight preserves daemon configuration filename extensions so Envoy

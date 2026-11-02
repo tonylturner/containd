@@ -23,7 +23,7 @@ const data: Record<string, unknown> = {
   "/services/dns": { enabled: false, listenPort: 5353, upstreamServers: ["192.0.2.53"], listenZones: ["lan"], cacheSizeMB: 16 },
   "/services/ntp": { enabled: false, servers: ["ntp.example.test"], intervalSeconds: 90 },
   "/services/syslog": { forwarders: [{ address: "192.0.2.9", port: 6514, proto: "tcp" }], batchSize: 700, flushEvery: 5 },
-  "/services/dhcp": { enabled: false, listenIfaces: ["lan"], leaseSeconds: 900, router: "192.0.2.1", dnsServers: ["192.0.2.53"], domain: "example.test", authoritative: true, pools: [{ iface: "lan", start: "192.0.2.100", end: "192.0.2.200" }], reservations: [{ iface: "lan", mac: "00:11:22:33:44:55", ip: "192.0.2.10" }] },
+  "/services/dhcp": { enabled: false, listenIfaces: ["lan"], leaseSeconds: 900, router: "192.0.2.1", dnsServers: ["192.0.2.53"], domain: "example.test", authoritative: true, pools: [{ iface: "lan", start: "192.0.2.100", end: "192.0.2.200" }], reservations: [{ iface: "lan", mac: "00:11:22:33:44:55", ip: "192.0.2.150" }] },
   "/services/av": { enabled: false, mode: "clamav", failPolicy: "closed", clamav: { freshclamEnabled: false, socket: "/run/clamav/clamd.sock" }, scan: { downloadMode: "hold" } },
   "/services/av/defs": { files: [], path: "/data/clamav" },
   "/services/proxy/forward": { enabled: false, listenPort: 3128, listenZones: ["lan"], allowedDomains: ["example.test"], allowedClients: ["192.0.2.0/24"], upstream: "http://192.0.2.8:3128", logRequests: true },

@@ -22,6 +22,7 @@ export function RulesTable({
   rules,
   canEdit,
   mutationDisabled = false,
+  editDisabled = mutationDisabled,
   onEdit,
   onDelete,
   onBulkDelete,
@@ -31,6 +32,7 @@ export function RulesTable({
   rules: IDSRule[];
   canEdit: boolean;
   mutationDisabled?: boolean;
+  editDisabled?: boolean;
   onEdit: (r: IDSRule) => void;
   onDelete: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
@@ -443,7 +445,7 @@ export function RulesTable({
                       {canEdit && (
                         <>
                           <button
-                            disabled={mutationDisabled}
+                            disabled={editDisabled}
                             onClick={() => onEdit(r)}
                             className="mr-1.5 rounded-xs border bg-(--surface2) px-2 py-0.5 text-[11px] transition-ui"
                           >
