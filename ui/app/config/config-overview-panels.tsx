@@ -1,5 +1,7 @@
 "use client";
 
+import { LiveProtectionSummary } from "../../components/ProtectionSummary";
+
 import { IDSRestore } from "./ids-restore";
 
 import type { ConfigBackup } from "../../lib/api";
@@ -205,6 +207,7 @@ export function ConfigSummaryCard({
           </span>
         </div>
       </div>
+      <LiveProtectionSummary />
       <div className="mt-4 text-xs text-(--text-muted)">
         Typical workflow: define zones, bind interfaces, add policy, review changes, then commit.
       </div>

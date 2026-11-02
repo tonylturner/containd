@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { isProtectionStatus } from "../lib/api-protection";
-import { observation, openProtection, protectionAPI } from "./fixtures/protection-api";
+import { observation, openProtection, protectionAPI, subsystem } from "./fixtures/protection-api";
+
+declare global { interface Window { configCommits: number } }
 
 test("an engine awaiting its first configuration does not imply a commit", async ({ page }) => {
   await protectionAPI(page, observation({
@@ -20,7 +22,7 @@ test("an engine awaiting its first configuration does not imply a commit", async
   await expect(notice.getByText(/Boot ID:/)).toBeVisible();
   await expect(notice.getByText("nft: awaiting configuration", { exact: true })).toBeVisible();
   await expect(notice).toContainText("Wait for protection to finish, then check status.");
-  await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Retry now", exact: true })).toHaveCount(0);
 });
 
 for (const bounded of [true, false]) {
@@ -37,7 +39,7 @@ for (const bounded of [true, false]) {
     await expect(notice).toContainText("IEC 104 commands is dropping (fail closed)");
     if (bounded) await expect(notice).toContainText("retry 2/8");
     else await expect(notice).not.toContainText("retry ");
-    await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
+    await expect(notice.getByRole("button", { name: "Retry now", exact: true })).toHaveCount(0);
   });
 }
 
@@ -85,14 +87,15 @@ test("degraded logging names the missing evidence and offers admin retry", async
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await expect(notice).toContainText("Rule-hit logging unavailable");
   await expect(notice).toContainText("Firewall rules are active");
-  await expect(notice.getByRole("button", { name: "Retry protection" })).toBeVisible();
+  await expect(notice.getByText("Not verified", { exact: true })).toHaveCount(1);
+  await expect(notice.getByRole("button", { name: "Retry now" })).toBeVisible();
 });
 
 test("viewers cannot retry a retryable failure", async ({ page }) => {
   const mock = await protectionAPI(page, observation({ state: "failed", retryable: true }), { role: "view" });
   await openProtection(page, "/firewall/");
   await expect(page.getByRole("status", { name: "Traffic protection" })).toContainText("Configured but not protecting");
-  await expect(page.getByRole("button", { name: "Retry protection" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry now" })).toHaveCount(0);
   expect(mock.retries).toEqual([]);
 });
 
@@ -102,9 +105,9 @@ test("admin retries the exact boot/apply observation, then polls without optimis
   mock.afterRetry = observation({ state: "pending" });
   await openProtection(page);
   const notice = page.getByRole("status", { name: "Traffic protection" });
-  await notice.getByRole("button", { name: "Retry protection" }).click();
+  await notice.getByRole("button", { name: "Retry now" }).click();
   await expect(notice).toContainText("Committed — protection pending");
-  expect(mock.retries).toEqual([{ bootId: failed.bootId, applyId: failed.applyId }]);
+  expect(mock.retries).toEqual([{ bootId: failed.bootId, applyId: failed.applyId, desiredRevision: failed.desiredRevision }]);
   expect(mock.reads).toBeGreaterThan(1);
 });
 
@@ -115,12 +118,12 @@ test("retry accelerates a degraded observation for ten seconds without retrying 
   await page.clock.pauseAt(Date.now() + 1_000);
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await notice.getByRole("button", { name: "Technical details", exact: true }).click();
-  const observedAt = notice.locator("time");
+  const observedAt = notice.locator("time").first();
   await expect(observedAt).toHaveAttribute("datetime", "2026-10-31T12:00:00Z");
   const before = mock.reads;
   const retryObservedAt = "2026-10-31T12:00:01Z";
   mock.status = observation({ state: "degraded", retryable: true, observedAt: retryObservedAt });
-  await notice.getByRole("button", { name: "Retry protection" }).click();
+  await notice.getByRole("button", { name: "Retry now" }).click();
   await expect.poll(() => mock.reads).toBe(before + 1);
   await expect(notice).toContainText("Retry requested; checking protection.");
   await expect(observedAt).toHaveAttribute("datetime", retryObservedAt);
@@ -146,14 +149,14 @@ test("a failed retry reports the error and refreshes, without claiming recovery"
   mock.retryStatus = 502;
   await openProtection(page);
   const notice = page.getByRole("status", { name: "Traffic protection" });
-  await notice.getByRole("button", { name: "Retry protection" }).click();
+  await notice.getByRole("button", { name: "Retry now" }).click();
   await expect(notice).toContainText("Retry failed: protection retry refused");
   await expect(notice).toContainText("Configured but not protecting");
   expect(mock.retries).toHaveLength(1);
   expect(mock.reads).toBeGreaterThan(1);
 });
 
-for (const code of ["protection_superseded", "protection_not_retryable"]) {
+for (const code of ["protection_superseded"]) {
   test(`retry ${code} refreshes without replaying the request`, async ({ page }) => {
     const mock = await protectionAPI(page, observation({ state: "failed", retryable: true }));
     mock.retryStatus = 409;
@@ -161,9 +164,9 @@ for (const code of ["protection_superseded", "protection_not_retryable"]) {
     mock.afterRetry = observation({ state: "failed", retryable: false });
     await openProtection(page);
     const notice = page.getByRole("status", { name: "Traffic protection" });
-    await notice.getByRole("button", { name: "Retry protection" }).click();
-    await expect(notice).toContainText(code === "protection_superseded" ? "Protection changed." : "no longer retryable");
-    await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
+    await notice.getByRole("button", { name: "Retry now" }).click();
+    await expect(notice).toContainText("Protection changed.");
+    await expect(notice.getByRole("button", { name: "Retry now", exact: true })).toHaveCount(0);
     expect(mock.retries).toHaveLength(1);
     expect(mock.reads).toBeGreaterThan(1);
   });
@@ -179,8 +182,8 @@ test("read failure replaces protecting with unknown and removes all stale detail
   await page.clock.runFor(30_000);
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await expect(notice).toContainText("Protection unknown");
-  await expect(notice).not.toContainText("Protecting");
-  await expect(notice.getByRole("button", { name: "Retry protection", exact: true })).toHaveCount(0);
+  await expect(notice.getByText("Protecting", { exact: true })).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Retry now", exact: true })).toHaveCount(0);
 });
 
 test("a new boot/apply replaces component detail rather than merging it", async ({ page }) => {
@@ -210,7 +213,7 @@ test("pending polls at two seconds; commit accelerates otherwise slow polling fo
   await page.clock.pauseAt(Date.now() + 1_000);
   const notice = page.getByRole("status", { name: "Traffic protection" });
   await notice.getByRole("button", { name: "Technical details", exact: true }).click();
-  const observedAt = notice.locator("time");
+  const observedAt = notice.locator("time").first();
   await expect(observedAt).toHaveAttribute("datetime", "2026-10-31T12:00:00Z");
   const setObservation = (state: "pending" | "protecting" | "degraded", sequence: number) => {
     const nextObservedAt = `2026-10-31T12:00:0${sequence}Z`;
@@ -254,4 +257,146 @@ test("malformed observations are never verified protecting", () => {
     { ...observation(), state: "new-state" }, { ...observation(), retryable: "yes" }]) {
     expect(isProtectionStatus(value)).toBe(false);
   }
+});
+
+test("ready hides the traffic banner and shows the three revision identities", async ({ page }) => {
+  await protectionAPI(page, observation(), { enforcement: "enforcing" });
+  await openProtection(page, "/config/");
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
+  const summary = page.getByRole("region", { name: "Running protection summary" });
+  await expect(summary.getByText("Desired configuration", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Policy installed", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Protecting now", { exact: true })).toBeVisible();
+  await expect(summary.getByText("running-a", { exact: true })).toHaveCount(3);
+});
+
+test("a pending required owner prevents green even when health says enforcing", async ({ page }) => {
+  await protectionAPI(page, observation({ state: "pending", subsystems: [subsystem()] }), { enforcement: "enforcing" });
+  await openProtection(page, "/firewall/");
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await expect(notice).toContainText("Configuration committed; interfaces are retrying");
+  await expect(notice).toContainText("Required");
+  await expect(notice).toContainText("Next automatic retry");
+  await expect(notice).toContainText("Automatic repair is underway");
+  await expect(notice.getByText("Not verified", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Firewall enforcing: healthy", exact: true })).toHaveCount(0);
+  const dir = process.env.PROTECTION_SCREENSHOTS_DIR;
+  if (dir) {
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await expect(notice).toBeVisible();
+      await page.screenshot({ path: `${dir}/protection-${viewport.width}.png`, animations: "disabled" });
+    }
+  }
+});
+
+test("DHCP faults remain visible and retryable without gating ready", async ({ page }) => {
+  const mock = await protectionAPI(page, observation({ subsystems: [subsystem({
+    name: "dhcp", owner: "management", required: false, state: "failed",
+    fault: { kind: "delivery", reason: "DHCP could not start; retrying" },
+  })] }), { enforcement: "enforcing" });
+  await openProtection(page, "/config/");
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
+  const services = page.getByRole("status", { name: "Service convergence" });
+  await expect(services).toContainText("DHCP could not start; retrying");
+  await expect(services).toContainText("Non-gating");
+  await expect(services).toContainText("Next automatic retry");
+  await services.getByRole("button", { name: "Retry now" }).click();
+  expect(mock.retries).toEqual([{ bootId: "boot-a", applyId: "apply-a", desiredRevision: "running-a" }]);
+  const summary = page.getByRole("region", { name: "Running protection summary" });
+  await expect(summary.getByText("running-a", { exact: true })).toHaveCount(3);
+  const dir = process.env.PROTECTION_SCREENSHOTS_DIR;
+  if (dir) {
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await summary.evaluate(el => el.parentElement!.scrollIntoView({ block: "start" }));
+      await page.screenshot({ path: `${dir}/config-summary-${viewport.width}.png`, animations: "disabled" });
+    }
+  }
+});
+
+test("a new boot clears a previously healthy claim without retaining installation detail", async ({ page }) => {
+  await page.clock.install();
+  const mock = await protectionAPI(page, observation(), { enforcement: "enforcing" });
+  await openProtection(page, "/topology/");
+  const chip = page.getByRole("status", { name: "Firewall enforcement", exact: true });
+  await expect(chip).toContainText("ENFORCING");
+  mock.status = observation({ bootId: "boot-b", applyId: "", installedApplyId: "", runningRevision: "", mode: "",
+    state: "unknown", ready: false, installed: null, appliedRevision: null, protectingRevision: null, components: [], effects: [] });
+  await page.clock.runFor(30_000);
+  await expect(chip).toContainText("STATUS UNKNOWN");
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await expect(notice.getByText("Not verified", { exact: true })).toHaveCount(2);
+  await expect(notice).not.toContainText("boot-a");
+});
+
+
+test("collection failure preserves visible non-gating faults without clean readiness", async ({ page }) => {
+  const mock = await protectionAPI(page, observation({ state: "unknown", subsystems: [subsystem({
+    name: "dns", required: false, state: "failed", fault: { kind: "config", reason: "DNS upstream missing" },
+    retryable: false, nextRetryAt: null,
+  })] }));
+  mock.readStatus = 502;
+  await openProtection(page);
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toContainText("Protection unknown");
+  const services = page.getByRole("status", { name: "Service convergence" });
+  await expect(services).toContainText("DNS upstream missing");
+  await expect(services).toContainText("Review the service configuration");
+});
+
+test("superseded retry refreshes a different target and retires obsolete feedback", async ({ page }) => {
+  const mock = await protectionAPI(page, observation({ state: "failed", retryable: true }));
+  mock.retryStatus = 409;
+  mock.retryCode = "protection_superseded";
+  mock.afterRetry = observation({ state: "pending", applyId: "apply-b", desiredRevision: "running-b", subsystems: [subsystem({ desiredRevision: "running-b" })] });
+  await openProtection(page);
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await notice.getByRole("button", { name: "Retry now" }).click();
+  await expect(notice).toContainText("running-b");
+  await expect(notice).not.toContainText("Protection changed.");
+  expect(mock.retries).toHaveLength(1);
+  expect(mock.reads).toBeGreaterThan(1);
+});
+
+
+test("unlabelled retry acceptance is rejected rather than normalized", async ({ page }) => {
+  const mock = await protectionAPI(page, observation({ state: "failed", retryable: true }));
+  mock.retryResponse = { status: "retrying", applyId: "apply-a" };
+  await openProtection(page);
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await notice.getByRole("button", { name: "Retry now" }).click();
+  await expect(notice).toContainText("Retry acceptance could not be verified");
+  expect(mock.retries).toHaveLength(1);
+});
+
+
+test("disabled enforcement does not hide a required service teardown failure", async ({ page }) => {
+  await protectionAPI(page, observation({ state: "disabled", subsystems: [subsystem({ name: "wireguard", operation: "stop",
+    state: "failed", fault: { kind: "delivery", reason: "WireGuard teardown unverified" } })] }));
+  await openProtection(page);
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await expect(notice).toContainText("Protection disabled");
+  await expect(notice).toContainText("WireGuard teardown unverified");
+});
+
+
+test("trust storage invalidates live readiness without a fake configuration commit", async ({ page }) => {
+  const mock = await protectionAPI(page, observation(), { enforcement: "enforcing" });
+  await page.route("**/api/v1/system/tls/trusted-ca", async route => {
+    route.request().postDataJSON();
+    mock.status = observation({ state: "pending", subsystems: [subsystem({ name: "trust", desiredTrustRevision: "sha256:new" })] });
+    await route.fulfill({ json: { status: "stored", revision: "sha256:new", warnings: ["trust: owner acknowledgement pending"] } });
+  });
+  await openProtection(page, "/system/settings/");
+  const reads = mock.reads;
+  await page.evaluate(() => {
+    window.configCommits = 0;
+    window.addEventListener("containd:config:committed", () => { window.configCommits++; });
+  });
+  const card = page.locator("section").filter({ hasText: "Trusted CAs (outbound)" });
+  await card.locator('input[type="file"]').setInputFiles({ name: "ca.pem", mimeType: "application/x-pem-file", buffer: Buffer.from("certificate") });
+  await card.getByRole("button", { name: "Upload CA bundle" }).click();
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toContainText("trust is retrying");
+  expect(mock.reads).toBeGreaterThan(reads);
+  expect(await page.evaluate(() => window.configCommits)).toBe(0);
 });

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { observation, protectionAPI } from "./fixtures/protection-api";
+import { observation, protectionAPI, runtimeResult } from "./fixtures/protection-api";
 import { entityChanges } from "../app/config/config-entity-changes";
 import { fieldChanges } from "../app/config/config-field-changes";
 
@@ -69,7 +69,7 @@ for (const conflict of [false, true]) {
     const writes: { body: unknown; revision?: string }[] = [];
     await page.route("**/api/v1/system/factory-reset", async route => {
       writes.push({ body: route.request().postDataJSON(), revision: route.request().headers()["x-containd-if-revision"] });
-      return route.fulfill({ status: conflict ? 412 : 200, json: conflict ? { error: "changed", code: "config_revision_mismatch", currentRevision: "0123456789abcdef.2" } : { message: "Factory reset completed. Log in with the default credentials.", loggedOut: true }, headers: { "X-Containd-Revision": conflict ? "0123456789abcdef.2" : revision } });
+      return route.fulfill({ status: conflict ? 412 : 200, json: conflict ? { error: "changed", code: "config_revision_mismatch", currentRevision: "0123456789abcdef.2" } : { ...runtimeResult("reset"), warnings: [], message: "Factory reset completed. Log in with the default credentials.", loggedOut: true }, headers: { "X-Containd-Revision": conflict ? "0123456789abcdef.2" : revision } });
     });
     await page.goto("/config/");
     await page.getByRole("button", { name: "Recovery", exact: true }).click();

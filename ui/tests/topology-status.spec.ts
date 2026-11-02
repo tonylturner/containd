@@ -4,15 +4,14 @@ import { topologyStatus } from "../app/topology/topology-status";
 import type { HealthResponse } from "../lib/api";
 import { observation, openProtection, protectionAPI } from "./fixtures/protection-api";
 
-// The topology status chip shows health's firewall enforcement state, and
-// unless it is enforcing, a separate protection observation says what traffic
-// is affected. Unversioned ruleset detail cannot be joined to that observation.
+// Green requires aggregate readiness as well as enforcement health.
+// Unversioned ruleset detail cannot be joined to that observation.
 
 const health = (state: NonNullable<HealthResponse["enforcement"]>["state"], reason = ""): HealthResponse =>
   ({ status: "ok", component: "containd", enforcement: { state, reason } });
-test("the chip follows health's enforcement state", () => {
+test("the chip requires aggregate readiness as well as enforcement health", () => {
   expect(topologyStatus(health("enforcing"), observation())).toEqual({ label: "ENFORCING", tone: "ok" });
-  expect(topologyStatus(health("enforcing"), observation({ state: "failed" }))).toEqual({ label: "ENFORCING", tone: "ok" });
+  expect(topologyStatus(health("enforcing"), observation({ state: "failed" }))).toMatchObject({ label: "UNAVAILABLE", tone: "error" });
   expect(topologyStatus(health("disabled"), observation({ state: "disabled" }))).toEqual({
     label: "ENFORCEMENT OFF", tone: "unknown", reason: "Protection disabled", action: "Enable enforcement to protect traffic.",
   });
@@ -22,7 +21,7 @@ test("the chip follows health's enforcement state", () => {
 test("a non-enforcing chip takes reason and action from protection", () => {
   expect(topologyStatus(health("degraded"), observation({ state: "degraded", retryable: true }))).toEqual({
     label: "DEGRADED", tone: "warn", reason: "Rule-hit logging unavailable",
-    action: "Firewall rules are active, but rule-match logging is unavailable. Retry protection, then check status.",
+    action: "Firewall rules are active, but rule-match logging is unavailable. Check appliance health and traffic-inspection settings; retry is available.",
   });
   expect(topologyStatus(health("unavailable")).reason).toBe("Protection unknown");
 });
@@ -56,7 +55,7 @@ for (const path of ["/topology/", "/firewall/", "/ics/"]) {
     }
     await expect(indicator).not.toContainText("Protecting");
     await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Retry protection" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry now" })).toHaveCount(0);
   });
 }
 
@@ -74,4 +73,11 @@ test("the topology chip reads effects without joining old ruleset detail", async
   await expect(page.getByText("ALL NOMINAL")).toHaveCount(0);
   await expect(page.getByText("Logical topology unavailable", { exact: false })).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+
+test("schedule degradation does not invent a rule-hit logging failure", () => {
+  expect(topologyStatus(health("degraded", "schedule horizon exhausted"), observation({
+    state: "degraded", components: [{ name: "nft", state: "ready", required: true, reason: "", since: "2026-10-31T12:00:00Z" }],
+  }))).toMatchObject({ label: "DEGRADED", tone: "warn", reason: "Protection needs attention" });
 });

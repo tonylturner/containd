@@ -1,8 +1,8 @@
 import type { EnforcementHealth, HealthResponse } from "../../lib/api";
 import type { ProtectionStatus } from "../../lib/api-protection";
-import { enforcementDetail } from "../../components/enforcement-detail";
+import { effectiveEnforcementState, enforcementDetail } from "../../components/enforcement-detail";
 
-/** The topology status chip: firewall enforcement as health reports it. */
+/** The topology status chip combines enforcement health and live readiness. */
 export type TopologyStatus = { label: string; tone: "ok" | "warn" | "error" | "unknown"; reason?: string; action?: string };
 
 const STATES: Record<EnforcementHealth["state"], Omit<TopologyStatus, "reason">> = {
@@ -22,14 +22,15 @@ export const TONE_COLORS: Record<TopologyStatus["tone"], string> = {
 };
 
 /**
- * Health owns the chip's state and health-only override reasons. Protection
- * supplies its own reason/action without joining unversioned ruleset detail.
+ * The aggregate gates clean readiness; health retains recovery/schedule reasons.
+ * Never join unversioned ruleset detail to a revision-bound observation.
  */
 export function topologyStatus(health: HealthResponse | undefined, protection?: ProtectionStatus): TopologyStatus {
   const enforcement = health?.enforcement;
   if (!enforcement) return { ...STATES.unknown, reason: "Health unavailable" };
-  const view = STATES[enforcement.state];
-  if (enforcement.state === "enforcing") return view;
+  const state = effectiveEnforcementState(enforcement, protection);
+  const view = STATES[state];
+  if (state === "enforcing") return view;
   const detail = enforcementDetail(enforcement, protection);
   return { ...view, reason: detail.title, action: detail.action };
 }

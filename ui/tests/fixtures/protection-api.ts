@@ -1,14 +1,31 @@
 import { expect, type Page } from "@playwright/test";
-import type { ProtectionStatus } from "../../lib/api-protection";
+import type { RuntimeApplyResult } from "../../lib/api-runtime-result";
+import type { ProtectionSubsystem, ProtectionStatus } from "../../lib/api-protection";
 
 export function observation(overrides: Partial<ProtectionStatus> = {}): ProtectionStatus {
   return {
     bootId: "boot-a", applyId: "apply-a", installedApplyId: "apply-a",
+    runningRevision: "running-a", mode: "normal",
+    installed: { bootId: "boot-a", applyId: "apply-a", runningRevision: "running-a", mode: "normal", operation: "apply" },
+    desiredRevision: "running-a", appliedRevision: "running-a", protectingRevision: overrides.state && overrides.state !== "protecting" ? null : "running-a",
+    ready: !overrides.state || overrides.state === "protecting", subsystems: [],
     state: "protecting", retryable: false, observedAt: "2026-10-31T12:00:00Z",
-    components: [{ name: "nft", required: true, state: "ready", reason: "", since: "2026-10-31T12:00:00Z" }],
+    components: overrides.state === "degraded"
+      ? [{ name: "nflog", required: false, state: "failed", reason: "rule-hit logging unavailable", since: "2026-10-31T12:00:00Z" }]
+      : [{ name: "nft", required: true, state: "ready", reason: "", since: "2026-10-31T12:00:00Z" }],
     effects: [{ traffic: "IEC 104 commands", effect: "normal" }],
     ...overrides,
   };
+}
+
+export function subsystem(overrides: Partial<ProtectionSubsystem> = {}): ProtectionSubsystem {
+  return { name: "interfaces", owner: "engine", desiredRevision: "running-a", operation: "apply", state: "pending",
+    acknowledged: null, fault: null, reason: "waiting for owner", attempt: 1, nextRetryAt: "2026-10-31T12:00:02Z",
+    observedAt: "2026-10-31T12:00:00Z", retryable: true, required: true, ...overrides };
+}
+
+export function runtimeResult(status = "committed"): RuntimeApplyResult {
+  return { status, runningRevision: "running-a", applyId: "apply-a", protection: observation() };
 }
 
 /** Register after catch-all API handlers. Layout tests default to a healthy engine;
@@ -24,7 +41,7 @@ export async function protectionAPI(page: Page, initial: ProtectionStatus, optio
 } = {}) {
   const mock = {
     status: initial as unknown, readStatus: 200, reads: 0,
-    retryStatus: 202, retryCode: "", retries: [] as unknown[],
+    retryStatus: 202, retryCode: "", retries: [] as unknown[], retryResponse: undefined as unknown,
     afterRetry: undefined as ProtectionStatus | undefined,
   };
   const role = options.role ?? "admin";
@@ -40,12 +57,13 @@ export async function protectionAPI(page: Page, initial: ProtectionStatus, optio
       return;
     }
     if (path === "/api/v1/dataplane/protection/retry") {
-      mock.retries.push(route.request().postDataJSON());
+      const target = route.request().postDataJSON();
+      mock.retries.push(target);
       if (mock.afterRetry) mock.status = mock.afterRetry;
       await route.fulfill({
         status: mock.retryStatus,
-        json: mock.retryStatus === 202 ? { status: "retrying", applyId: initial.applyId }
-          : { code: mock.retryCode, error: "protection retry refused" },
+        json: mock.retryResponse ?? (mock.retryStatus === 202 ? { status: "retrying", applyId: target.applyId, desiredRevision: target.desiredRevision }
+          : { code: mock.retryCode, error: "protection retry refused" }),
       });
       return;
     }

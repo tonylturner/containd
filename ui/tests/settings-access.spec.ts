@@ -100,7 +100,7 @@ for (const status of ["updated", "stored", "failed"]) {
     const bodies: unknown[] = [];
     await page.route("**/api/v1/system/tls/trusted-ca", async route => {
       bodies.push(route.request().postDataJSON());
-      return route.fulfill({ status: status === "failed" ? 400 : 200, json: status === "failed" ? { error: "trust update refused" } : { status, revision: "none", warnings: status === "stored" ? ["engine unreachable"] : [] } });
+      return route.fulfill({ status: status === "failed" ? 400 : 200, json: status === "failed" ? { error: "trust update refused" } : { status, revision: "none", warnings: status === "stored" ? ["trust: owner acknowledgement pending"] : [] } });
     });
     await page.goto("/system/settings/");
     await page.getByRole("button", { name: "Clear", exact: true }).click();
@@ -113,6 +113,6 @@ for (const status of ["updated", "stored", "failed"]) {
     await dialog.getByRole("button", { name: "Clear", exact: true }).click();
     await expect.poll(() => bodies.length).toBe(1);
     expect(bodies).toEqual([{ clear: true }]);
-    await expect(page.getByText(status === "updated" ? "Additional trust cleared. Outbound TLS now uses the OS trust store." : status === "stored" ? "Trust certificates saved but not active. Applying configuration retries activation: engine unreachable" : "trust update refused", { exact: true })).toBeVisible();
+    await expect(page.getByText(status === "updated" ? "Additional trust cleared. Outbound TLS now uses the OS trust store." : status === "stored" ? "Trust certificates saved; owner acknowledgement pending. Check live protection status for retry or repair details: trust: owner acknowledgement pending" : "trust update refused", { exact: true })).toBeVisible();
   });
 }
