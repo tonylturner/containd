@@ -3,6 +3,8 @@
 package telemetry
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,6 +52,15 @@ func TestLinkEpochAndFailures(t *testing.T) {
 	for _, d := range []string{"missing", "../eth0"} {
 		if _, err := readLink(root, d); err == nil {
 			t.Fatalf("read %q succeeded", d)
+		}
+	}
+	write("sys/class/net/eth1/ifindex", "8\n")
+	if _, err := readLink(root, "eth1"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing statistics file error = %v, want fs.ErrNotExist", err)
+	} else {
+		var existingDeviceErr *linkReadError
+		if !errors.As(err, &existingDeviceErr) {
+			t.Fatalf("missing statistics file error = %T, want existing-device marker", err)
 		}
 	}
 }
