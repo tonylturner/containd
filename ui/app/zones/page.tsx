@@ -12,7 +12,7 @@ import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from 
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Zone, type Conduit } from "../../lib/api";
@@ -328,6 +328,12 @@ function ZoneRow({
   const [editSlt, setEditSlt] = draft.field(`${JSON.stringify(zone.name)}.editSlt`, zone.slTarget ?? 0);
   const [consequence, setConsequence] = draft.field(`${JSON.stringify(zone.name)}.consequence`, zone.consequence ?? "");
   const [editing, setEditing] = useState(false);
+  const editVersion = useRef(0);
+
+  function editField<T>(setValue: (value: T) => void, value: T) {
+    editVersion.current++;
+    setValue(value);
+  }
 
   // Compute check-based SL from conduit data
   const zv = mapZone(zone);
@@ -341,7 +347,7 @@ function ZoneRow({
         {editing ? (
           <input
             value={alias}
-            onChange={(e) => setAlias(e.target.value)}
+            onChange={(e) => editField(setAlias, e.target.value)}
             disabled={!canEdit}
             className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
@@ -353,7 +359,7 @@ function ZoneRow({
         {editing ? (
           <input
             value={desc}
-            onChange={(e) => setDesc(e.target.value)}
+            onChange={(e) => editField(setDesc, e.target.value)}
             disabled={!canEdit}
             className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
@@ -362,13 +368,13 @@ function ZoneRow({
         )}
       </td>
       <td data-label="Consequence" className="px-4 py-3">
-        {editing ? <input aria-label="Consequence" value={consequence} onChange={e => setConsequence(e.target.value)} disabled={!canEdit} className="w-full input-industrial" /> : zone.consequence || "—"}
+        {editing ? <input aria-label="Consequence" value={consequence} onChange={e => editField(setConsequence, e.target.value)} disabled={!canEdit} className="w-full input-industrial" /> : zone.consequence || "—"}
       </td>
       <td data-label="SL-T" className="px-4 py-3 text-center">
         {editing ? (
           <select
             value={editSlt}
-            onChange={(e) => setEditSlt(Number(e.target.value))}
+            onChange={(e) => editField(setEditSlt, Number(e.target.value))}
             disabled={!canEdit}
             className="rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
@@ -390,13 +396,14 @@ function ZoneRow({
           <div className="inline-flex gap-2">
             <button
               onClick={async () => {
+                const submittedVersion = editVersion.current;
                 const saved = await onUpdate(zone.name, {
                   alias: alias.trim() || undefined,
                   description: desc.trim() || undefined,
                   consequence: consequence.trim(),
                   slTarget: editSlt,
                 });
-                if (saved) setEditing(false);
+                if (saved && editVersion.current === submittedVersion) setEditing(false);
               }}
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
@@ -404,6 +411,7 @@ function ZoneRow({
             </button>
             <button
               onClick={() => {
+                editVersion.current++;
                 setDesc(zone.description ?? "");
                 setAlias(zone.alias ?? "");
                 setConsequence(zone.consequence ?? "");

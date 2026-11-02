@@ -43,7 +43,7 @@ export function DatasetList({
         </button>
         {onDelete && (
           <button
-            className={secondaryButton}
+            className={`${secondaryButton} max-w-full break-all text-left`}
             disabled={busy || dataset.state !== "sealed"}
             title={dataset.state !== "sealed" ? "Only sealed datasets can be deleted. Stop collection first." : undefined}
             onClick={() => onDelete(dataset)}
