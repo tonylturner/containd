@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 
+const counterSince = "2026-11-01T23:51:44.696958333Z";
+
 const rule = {
   id: "plc-read", description: "Read holding registers", action: "ALLOW", log: true,
   sourceZones: ["it", "engineering"], destZones: ["ot", "safety"],
@@ -32,10 +34,10 @@ async function open(page: Page, dataplane: object = {}, coverageFails = false, s
       "/firewall/rules": [rule], "/zones": [], "/routing": { gateways: [], routes: [], rules: [] },
       "/dataplane": { captureInterfaces: [], dpiMock: false, ...dataplane },
       "/dataplane/ics-coverage": { candidate: [coverage], applied: [coverage] },
-      "/firewall/counters": { since: "2026-11-01T12:00:00Z", snapshotVersion: "a", rules: [
+      "/firewall/counters": { since: counterSince, snapshotVersion: "a", rules: [
         { ruleId: rule.id, action: "ALLOW", packets: 7, bytes: 420 },
       ] },
-      "/firewall/shadow-counters": { available: true, since: "2026-11-01T12:00:00Z", snapshotVersion: "a", unit: "messages", rules: [
+      "/firewall/shadow-counters": { available: true, since: counterSince, snapshotVersion: "a", unit: "messages", rules: [
         { ruleId: rule.id, shadowMatches: 12, wouldAllow: 9, wouldDeny: 3 },
       ] },
     };
@@ -59,8 +61,11 @@ async function failRefresh(page: Page, background = false) {
 }
 
 test("seven-column rules expand by keyboard and retain every moved field", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
   await open(page);
   const table = page.getByRole("region", { name: "Firewall rules" });
+  expect(await table.getByRole("table").evaluate(el => getComputedStyle(el).display)).toBe("table");
+  expect(await table.locator("tbody tr[id]").evaluate(el => getComputedStyle(el).display)).toBe("table-row");
   await expect(table.getByRole("columnheader")).toHaveText(["Order", "Description", "Zones", "Protocols", "Action", "Hits", "Actions"]);
   const button = page.getByRole("button", { name: `Inspect rule ${rule.id}`, exact: true });
   await expect(button).toHaveText("Inspect rule");
@@ -78,6 +83,7 @@ test("seven-column rules expand by keyboard and retain every moved field", async
     await expect(detail).toContainText(value);
   }
   await expect(detail.locator("dd").getByText("on", { exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("firewall-desktop.png"), fullPage: true });
   await page.keyboard.press("Space");
   await expect(button).toHaveAttribute("aria-expanded", "false");
   await expect(button).toBeFocused();
@@ -198,13 +204,67 @@ for (const saved of [
   });
 }
 
-test("390 px keeps rule-table scrolling inside its own box, even with details open", async ({ page }) => {
+test("table notes format local times and disclose evaluation guidance by keyboard", async ({ page }) => {
+  await open(page);
+  const notes = page.getByRole("group", { name: "Rule table notes", exact: true });
+  const timestamp = counterSince;
+  const local = await page.evaluate(value => new Date(value).toLocaleString(), timestamp);
+  for (const label of ["Rule counters", "Shadow counters"]) {
+    const time = notes.getByRole("status", { name: label, exact: true }).locator("time");
+    await expect(time).toHaveText(local);
+    await expect(time).toHaveAttribute("title", timestamp);
+    await expect(time).toHaveAttribute("datetime", timestamp);
+  }
+  const disclosure = notes.getByRole("button", { name: "How rules are evaluated", exact: true });
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(notes.getByText(/Among enforcing rules/)).not.toBeVisible();
+  await expect(notes.getByText(/Estimated allow\/block/)).not.toBeVisible();
+  await disclosure.focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toBeFocused();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(notes.getByText(/Among enforcing rules/)).toBeVisible();
+  await expect(notes.getByText(/every apply restarts them at zero/)).toBeVisible();
+  await expect(notes.getByText(/Estimated allow\/block.*not full-policy predictions/)).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(disclosure).toBeFocused();
+});
+
+test("390 px stacks rules and Default with every action readable without horizontal scrolling", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, { dpiEnabled: true });
-  await page.getByRole("button", { name: `Inspect rule ${rule.id}`, exact: true }).click();
+  const region = page.getByRole("region", { name: "Firewall rules" });
+  const row = region.locator('[id="rule-plc-read"]');
+  await expect(region.getByRole("columnheader")).toHaveCount(7);
+  const inspect = row.getByRole("button", { name: `Inspect rule ${rule.id}`, exact: true });
+  for (const control of [inspect, row.locator("[data-rule-id]")]) {
+    expect(await control.evaluate(el => {
+      const style = getComputedStyle(el);
+      return (el.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) -
+        parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth)) / parseFloat(style.lineHeight);
+    })).toBeLessThanOrEqual(1);
+  }
+  for (const visibleRow of [row, region.getByRole("row", { name: "Default policy", exact: true })]) {
+    for (const label of ["Zones", "Protocols", "Action", "Hits", "Actions"]) {
+      const cell = visibleRow.locator(`[data-label="${label}"]`);
+      await expect(cell).toBeVisible();
+      expect(await cell.evaluate(el => {
+        const box = el.getBoundingClientRect();
+        return box.left >= 0 && box.right <= window.innerWidth;
+      })).toBe(true);
+    }
+    await expect(visibleRow.locator('[data-label="Action"]').getByRole("status")).toBeVisible();
+  }
+  await expect(row.getByRole("button", { name: "Move to…", exact: true })).toBeVisible();
+  await expect(row.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+  await expect(row.getByRole("button", { name: "Delete", exact: true })).toBeEnabled();
+  await inspect.click();
+  await expect(page.getByLabel(`Details of ${rule.id}`, { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const box = page.getByRole("region", { name: "Firewall rules" }).locator("div.overflow-x-auto");
-  expect(await box.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+  const box = region.locator("div.overflow-x-auto");
+  expect(await box.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("firewall-mobile.png"), fullPage: true });
 });
 
 test("a failed settings read does not claim DPI is disabled", async ({ page }) => {

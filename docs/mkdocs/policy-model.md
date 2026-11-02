@@ -46,8 +46,10 @@ together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
 The Firewall Rules page leads with enforcement and outbound status, then the
-rule table. Its seven columns are **Order**, **Description**, **Zones**,
-**Protocols**, **Action**, **Hits**, and **Actions**. The exact **ID** appears
+rule table. On larger screens its seven columns are **Order**, **Description**,
+**Zones**, **Protocols**, **Action**, **Hits**, and **Actions**. On phones the same
+rows stack with labelled values, so each action, including the **Default**
+action, is readable without horizontal scrolling. The exact **ID** appears
 below the description. **Inspect rule** on each row opens its **Conditions**
 (CIDRs, identities, forwards and schedule), **ICS Filter** and exact selectors,
 full **Hits** counters, **Shadow matches**, **Log**, and exact matching values.
@@ -56,6 +58,12 @@ indicators even when details are closed. Coverage reasons, unsupported-rule
 warnings and counter-read failures stay visible without opening details. If a
 configuration refresh fails, retained rules remain inspectable while editing,
 deleting and reordering are disabled.
+
+One compact notes block above the rows shows counter availability and causes.
+Counter start times use local time; hover over a time for its exact value.
+**How rules are evaluated** explains precedence, counter resets and the limits
+of monitor estimates. For inactive enforcement, its **Technical details** keeps
+the exact counter response available.
 
 **Create rule** below the table reveals the creation form; closing and reopening
 it preserves unsaved edits. **Deep Packet Inspection** follows the form, with

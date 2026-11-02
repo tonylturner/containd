@@ -100,7 +100,8 @@ for (const path of ["/ics/", "/firewall/"]) {
     const loaded = page.waitForResponse((r) => r.url().includes("firewall/shadow-counters"));
     await page.goto(path);
     await loaded;
-    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Messages matched since ${since}`);
+    const shownSince = path === "/firewall/" ? await page.evaluate(value => new Date(value).toLocaleString(), since) : since;
+    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Messages matched since ${shownSince}`);
     if (path === "/firewall/") {
       for (const id of ["trial", "zero", "pending"]) {
         await page.getByRole("button", { name: `Inspect rule ${id}`, exact: true }).click();
@@ -213,7 +214,8 @@ for (const path of ["/ics/", "/firewall/"]) {
       rules: snapshot.rules.map((r) => ({ ...r, shadowMatches: 0, wouldAllow: 0, wouldDeny: 0 })) };
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(trial).toContainText("0 messages");
-    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(nextSince);
+    const shownSince = path === "/firewall/" ? await page.evaluate(value => new Date(value).toLocaleString(), nextSince) : nextSince;
+    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(shownSince);
     current = { available: false, reason: "before first apply" };
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(trial).toContainText("unavailable");
