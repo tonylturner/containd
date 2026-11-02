@@ -1,12 +1,12 @@
 import type { Route } from "@playwright/test";
-import { metricUnits, type Metric, type Origin, type Quality, type TelemetryRange } from "../../lib/api-telemetry";
+import { metricUnits, type Metric, type Origin, type Quality, type SourceUnavailable, type TelemetryRange } from "../../lib/api-telemetry";
 
 // JSON exactly as emitted by telemetry.SeriesResponse, not client-decoded BigInts.
 export type WirePoint = { t: string; q: Quality; v?: string; d?: number };
 export type WireResponse = {
   metric: Metric; unit: string; origin: Origin; range: TelemetryRange; resolutionSeconds: number;
   from: string; to: string; retainedFrom?: string; realCovered: boolean; realActive: boolean;
-  collector: { state: "running" | "stalled" | "unavailable"; droppedSeries: string; error?: string; lastSampleAt?: string };
+  collector: { state: "running" | "stalled" | "unavailable"; droppedSeries: string; error?: string; lastSampleAt?: string; unavailable?: SourceUnavailable[] };
   series: { dims?: Record<string, string>; points: WirePoint[] }[];
 };
 export function seriesResponse(url: URL, values: (number | null)[] = [0, 0, 0]): WireResponse {

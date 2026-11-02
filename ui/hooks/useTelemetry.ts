@@ -3,20 +3,32 @@
 import { useEffect, useState } from "react";
 import { getTelemetrySeries, responsePoints, type SeriesQuery, type SeriesResponse, type TelemetryRange } from "../lib/api-telemetry";
 
-export type TelemetryRead = { data: SeriesResponse[]; demo: boolean; error?: string };
+export type TelemetryRead = { data: SeriesResponse[]; demo: boolean; error?: string; unavailable?: string };
 // Coalesce simultaneous readers, without preserving a failed or stale snapshot.
 const pending = new Map<string, Promise<TelemetryRead>>();
+function unavailableNotice(responses: SeriesResponse[]): string | undefined {
+  const reasons = responses.flatMap(r => r.collector.unavailable?.map(entry => entry.reason) ?? []);
+  return reasons.length ? `Telemetry unavailable: ${[...new Set(reasons)].join("; ")}` : undefined;
+}
 async function read(queries: SeriesQuery[], range: TelemetryRange): Promise<TelemetryRead> {
   const real = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "real")));
+  const unavailable = unavailableNotice(real);
   const stopped = real.find(r => r.collector.state !== "running");
-  if (stopped) return { data: real, demo: false, error: `Collector ${stopped.collector.state}${stopped.collector.error ? `: ${stopped.collector.error}` : ""}` };
-  const latest = responsePoints(real).at(-1);
-  if (latest?.q === "gap") return { data: real, demo: false, error: "Telemetry unavailable: latest real bucket is a gap" };
-  if (latest?.v !== undefined && real.every(r => !r.realActive)) {
+  if (stopped) return { data: real, demo: false, error: `Collector ${stopped.collector.state}${stopped.collector.error ? `: ${stopped.collector.error}` : ""}${unavailable ? `; ${unavailable}` : ""}` };
+  // Retained real history is still useful, but current failures always outrank demo.
+  if (unavailable) return { data: real, demo: false, unavailable };
+  const quiet = real.every(r => !r.realActive);
+  if (responsePoints(real).at(-1)?.q === "gap" ||
+      (quiet && real.some(r => r.series.some(s => (s.points.at(-1)?.q ?? "gap") === "gap")))) {
+    return { data: real, demo: false, error: "Telemetry unavailable: latest real bucket is a gap" };
+  }
+  if (quiet && real.every(r => r.series.length > 0)) {
     const demo = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "demo")));
     const stoppedDemo = demo.find(r => r.collector.state !== "running");
     if (stoppedDemo) return { data: [], demo: false, error: `Collector ${stoppedDemo.collector.state}${stoppedDemo.collector.error ? `: ${stoppedDemo.collector.error}` : ""}` };
-    if (demo.some(r => r.series.some(s => s.points.some(p => p.v !== undefined)))) return { data: demo, demo: true };
+    const demoUnavailable = unavailableNotice(demo);
+    if (demoUnavailable) return { data: real, demo: false, unavailable: demoUnavailable };
+    if (responsePoints(demo).at(-1)?.v !== undefined) return { data: demo, demo: true };
   }
   return { data: real, demo: false };
 }
