@@ -65,7 +65,9 @@ Retry unavailable requests rather than interpreting them as empty or stopped.
 `POST /api/v1/simulation` (admin) accepts `{"action":"start"}` or
 `{"action":"stop"}`, saves `on` or `off`, reconciles delivery to the engine,
 and returns the same status shape. The saved preference persists even if the
-engine is unreachable: check `error` and `reason`, not just the HTTP status.
+engine is unreachable: delivery failures return HTTP `200` with `error` set, so
+check `error` and `reason`, not just the HTTP status. A failed preference write
+returns HTTP `500`.
 A stopped `auto` reports `reason: "real traffic observed"`; delivery failure
 reports `engine unreachable`. A replay asset fault reports **demo captures
 unavailable**. Start/Stop audit actions are `simulation.start` / `simulation.stop`,

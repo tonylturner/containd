@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bytes for the last hour, or `unavailable` with a reason.
 - The engine owns a third nftables table, `inet <enforceTable>_acct`. It only
   counts traffic and never drops or accepts.
+- `CONTAIND_DPI_MOCK` now only enables inspect-all; it no longer starts demo.
+  `CONTAIND_DEMO_CAPTURES` selects the demo capture directory (default
+  `/usr/share/containd/demo`). `GET/POST /api/v1/simulation` return
+  `preference`, `running`, `loops`, `captureSet`, `capture`, `error` and
+  `reason`; an unreachable engine is reported in `error` with HTTP 200.
 
 ### Added
 
@@ -31,9 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Conduits show measured routed traffic between zones that passed policy, from
   per-zone-pair kernel counters. "% of baseline" is gone.
 - `GET /api/v1/telemetry/series` returns retained counter history.
-- Events carry `origin: "demo"` when the traffic simulator made them. The UI
-  marks them Demo; they are never sent to syslog or counted as real. On a fresh
-  install, charts show labelled demo data until real data arrives.
+- Demo mode replays bundled recorded ICS and IT captures through the real
+  decoders and detection chain on an illustrative topology, instead of writing
+  random events. Replay is detached: it never transmits frames, changes
+  enforcement or touches kernel state. Its events, flows and counters carry
+  `origin: "demo"`; the UI marks them Demo. Demo records are never sent to
+  syslog, learned, counted as real (including `/metrics`), or kept in the real
+  event, DENY or IEC 104 incident retention. Demo would-deny results are your
+  ICS rules evaluated in monitor mode.
+- Charts, Zone Status and conduits show labelled demo data until real traffic
+  is observed. Demo conduit traffic is reported as `recorded`, never measured.
+- The Dashboard SIM Start/Stop choice persists (`demo.json` beside
+  `config.db`). With no saved choice, demo runs only until real traffic is
+  observed, then stops for good.
 
 ## [0.1.38] - 2026-11-01
 

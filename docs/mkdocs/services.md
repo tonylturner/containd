@@ -184,8 +184,8 @@ the latest retained packet rate, not event-count estimates.
 
 ## Recorded demo replay
 
-On a fresh installation, management automatically replays the bundled recorded
-ICS and IT packet captures through the real protocol decoders and detection
+Until real traffic is observed, management automatically replays the bundled
+recorded ICS and IT packet captures through the real protocol decoders and detection
 chain. These are recorded captures on an **illustrative topology**, not packets
 measured on your networks. Replay is detached: it never transmits frames,
 changes firewall enforcement, or injects packets onto lab interfaces.
@@ -225,9 +225,10 @@ Management stores the preference in `demo.json` beside `config.db`:
   their metric has real activity.
 - `off`: do not run.
 
-When the preference file is absent, installations with no operator config commit
-start at `auto`; previously configured installations start at `off`. The resolved
-preference is saved. The engine itself boots stopped; management reconciles the
+When the preference file is absent, management saves `auto`. `auto` starts only
+after the telemetry sampler completes its first observed interval with no real
+traffic (status reason **waiting for telemetry interval** until then), so an
+upgraded appliance that already carries traffic never starts replay. The engine itself boots stopped; management reconciles the
 preference after synchronizing running configuration, including after an engine
 restart. A delivery failure does not discard a saved preference. The status line
 shows the replaying capture, a stopped reason or error, and that Stop persists.
