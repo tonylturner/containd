@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   readiness. Smoke scripts change policy through revision-checked management
   saves and explicit commits instead of direct engine applies.
 
+- Keep consistent default-interface bindings across restarts: boot repair
+  changes only missing devices or devices whose current addresses contradict
+  the saved addresses or subnet authority.
+- Report a disabled AV scanner as `off`, not permanently pending. The UI no
+  longer warns or polls fast for off or quietly converging optional services,
+  and the config review actions sit in a reserved footer that cannot cover
+  content; long commit revisions wrap.
+
 - Keep large IDS import results compact with evaluability and conversion-note
   counts, at most 20 attention rows, and a dismiss action.
 - Require protocol restrictions on every matching enforcing ALLOW and a refusing
