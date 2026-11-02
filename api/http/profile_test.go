@@ -63,18 +63,35 @@ func TestProfileHTTP(t *testing.T) {
 }
 
 func testProfileCookie(t *testing.T) {
-	for _, env := range []string{"", "0", "false", "1", "true"} {
-		t.Setenv("CONTAIND_COOKIE_SECURE", env)
+	router := gin.New()
+	router.GET("/tls", getTLSHandler(&mockStore{cfg: config.DefaultConfig()}))
+	for _, tc := range []struct {
+		env, policy, source string
+	}{
+		{"", "https-only", "default"},
+		{" \t", "https-only", "default"},
+		{"0", "never", "environment"},
+		{"false", "never", "environment"},
+		{"1", "always", "environment"},
+		{"true", "always", "environment"},
+		{" TRUE ", "always", "environment"},
+		{"invalid", "never", "environment"},
+	} {
+		t.Setenv("CONTAIND_COOKIE_SECURE", tc.env)
+		policy, source := tc.policy, tc.source
+		if profile.IsStrict() {
+			policy, source = "always", "profile"
+		}
 		for _, https := range []bool{false, true} {
 			rec := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(rec)
-			ctx.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/tls", nil)
 			if https {
 				ctx.Request.TLS = &tls.ConnectionState{}
 			}
-			want := profile.IsStrict() || env == "1" || env == "true" || env == "" && https
+			want := policy == "always" || policy == "https-only" && https
 			if got := cookieSecure(ctx); got != want {
-				t.Fatalf("env=%q tls=%t: got %t want %t", env, https, got, want)
+				t.Fatalf("env=%q tls=%t: got %t want %t", tc.env, https, got, want)
 			}
 			setAuthCookie(ctx, "token", time.Now().Add(time.Hour))
 			clearAuthCookie(ctx)
@@ -82,6 +99,17 @@ func testProfileCookie(t *testing.T) {
 				if cookie.Secure != want {
 					t.Fatalf("cookie Secure=%t want %t", cookie.Secure, want)
 				}
+			}
+			// Status must report the same policy over HTTP and HTTPS, not
+			// the Secure flag chosen for the status request itself.
+			status := httptest.NewRecorder()
+			router.ServeHTTP(status, ctx.Request)
+			var got map[string]any
+			if err := json.Unmarshal(status.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if status.Code != http.StatusOK || got["secureCookies"] != policy || got["secureCookiesSource"] != source {
+				t.Fatalf("env=%q tls=%t: policy=%s source=%s: %d %s", tc.env, https, policy, source, status.Code, status.Body)
 			}
 		}
 	}

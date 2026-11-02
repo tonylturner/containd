@@ -16,6 +16,8 @@ function tlsInfo(profile: DeploymentProfile): TLSInfo {
     httpsEnabledSource: profile === "strict" ? "profile" : "config",
     hstsEnabled: profile === "strict",
     hstsEnabledSource: profile === "strict" ? "profile" : "config",
+    secureCookies: profile === "strict" ? "always" : "https-only",
+    secureCookiesSource: profile === "strict" ? "profile" : "default",
     httpListenAddr: ":8080", httpsListenAddr: ":8443",
     boundHttpListenAddr: profile === "training" ? "[::]:8080" : undefined,
     boundHttpsListenAddr: "[::]:8443",
@@ -86,14 +88,13 @@ for (const width of [1280, 390]) {
         await expect(row(page, "HTTP enabled (next start)")).toContainText("Disabled · source: profile · saved: enabled");
         await expect(row(page, "HTTPS enabled (next start)")).toContainText("Enabled · source: profile · saved: disabled");
         await expect(row(page, "HSTS")).toContainText("Enabled · source: profile · saved: disabled");
-        await expect(row(page, "Secure cookies")).toContainText("Enabled · source: profile");
+        await expect(row(page, "Secure cookies")).toContainText("Always · source: profile");
         await expect(row(page, "HTTP listen")).toContainText("not bound");
       } else {
         await expect(row(page, "HTTP enabled (next start)")).toContainText("Enabled · source: default");
         await expect(row(page, "HTTPS enabled (next start)")).toContainText("Enabled · source: config");
         await expect(row(page, "HSTS")).toContainText("Disabled · source: config");
-        await expect(row(page, "Secure cookies")).toContainText("Not reported by API");
-        await expect(page.getByText(/The API does not report the effective cookie flag/)).toBeVisible();
+        await expect(row(page, "Secure cookies")).toContainText("HTTPS only · source: default");
         await expect(row(page, "HSTS")).not.toContainText("saved:");
       }
       const details = page.locator("details").filter({ has: page.getByText("Certificate details", { exact: true }) });
@@ -112,6 +113,22 @@ for (const width of [1280, 390]) {
       if (process.env.PROFILE_UI_SCREENSHOTS) {
         await page.screenshot({ path: `${process.env.PROFILE_UI_SCREENSHOTS}/${profile}-tls-${width}.png`, fullPage: true });
       }
+    });
+  }
+
+  for (const [policy, label] of [["always", "Always"], ["never", "Never"]] as const) {
+    test(`training Secure cookies environment policy ${policy} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await mockAPI(page, "training", true);
+      await page.route("**/api/v1/system/tls", (route) => route.fulfill({
+        json: { ...tlsInfo("training"), secureCookies: policy, secureCookiesSource: "environment" },
+      }));
+      const loaded = page.waitForResponse("**/api/v1/system/tls");
+      await page.goto("/system/settings/");
+      await loaded;
+      await expect(row(page, "Secure cookies")).toContainText(`${label} · source: environment`);
+      await expect(page.getByText("Not reported by API")).toHaveCount(0);
+      await noOverflow(page);
     });
   }
 }

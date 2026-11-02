@@ -3,7 +3,6 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
-import { useHealth } from "../../../hooks/useHealth";
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
 import { api, isAdmin, type TLSInfo } from "../../../lib/api";
@@ -23,7 +22,6 @@ export default function SystemSettingsPage() {
   const canEdit = isAdmin();
   const confirm = useConfirm();
   const [tlsInfo, setTLSInfo] = useState<TLSInfo | null>(null);
-  const profile = useHealth()?.profile;
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [caFile, setCAFile] = useState<File | null>(null);
@@ -144,15 +142,9 @@ export default function SystemSettingsPage() {
             <p className="mb-2 text-xs text-(--text-muted)">
               Effective policy and its source. Saved values are shown when the profile overrides them.
             </p>
-            {tlsPolicyRows(tlsInfo, profile).map((row) => (
+            {tlsPolicyRows(tlsInfo).map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />
             ))}
-            {profile === "training" && (
-              <p className="py-2 text-xs text-(--text-muted)">
-                Training sets Secure cookies on HTTPS requests unless CONTAIND_COOKIE_SECURE overrides it.
-                The API does not report the effective cookie flag.
-              </p>
-            )}
             {view.rows.filter((row) => row.label.startsWith("HTTP")).map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />
             ))}

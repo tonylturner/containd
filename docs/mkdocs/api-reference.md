@@ -529,6 +529,16 @@ differ after a rejected reload. Fingerprints are uppercase colon-separated
 SHA-256 DER hashes. Strict disables HTTP and forces HTTPS, HSTS and Secure
 cookies. There is no `/system/ssh` route; use CLI `show system ssh`.
 
+TLS status always includes `secureCookies` (`always`, `https-only` or `never`)
+and `secureCookiesSource` (`profile`, `environment` or `default`). These describe
+the auth cookie Secure policy, not the flag chosen for the status request.
+Strict reports `always` with source `profile`. Training defaults to `https-only`
+with source `default`: Secure is set only when the server request uses TLS, not
+from forwarded headers. In training, a trimmed nonempty `CONTAIND_COOKIE_SECURE`
+reports source `environment`: `1` or case-insensitive `true` selects `always`;
+any other nonempty value selects `never`. System Settings displays this policy
+and its source without inferring them from the browser URL.
+
 ## Events: Filtered Queries and Legacy Lists
 
 Use `GET /api/v1/events?query=1` for an `EventPage` envelope containing `events`,

@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Report the effective Secure-cookie policy and its source in TLS status and
+  System Settings, including training environment overrides.
 - Honor `enableHSTS=false` in training by removing a duplicate HSTS header.
 - Keep large IDS import results compact with evaluability and conversion-note
   counts, at most 20 attention rows, and a dismiss action.

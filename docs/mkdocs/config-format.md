@@ -506,6 +506,9 @@ intent. TLS status includes `httpEnabledSource`, `httpsEnabledSource`,
 `hstsEnabledSource` and overridden `*Saved` values, plus
 `servedCertFingerprintSHA256` and `certFingerprintSHA256`. See
 [deployment profiles](deployment-profiles.md) for write and migration rules.
+The request-independent auth cookie policy and its source are reported as
+`secureCookies` and `secureCookiesSource`; see the
+[TLS status API](api-reference.md#reload-running-configuration-sighup).
 
 ## Additional CA bundle
 
