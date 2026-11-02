@@ -139,6 +139,8 @@ export default function Home() {
   const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
   const zoneThreatMap = useMemo(() => buildZoneThreatMap(events, zones), [events, zones]);
   const zoneSparklineMap = useMemo(() => buildZoneSparklines(events, zones), [events, zones]);
+  const unknownServiceCount = services.filter(service => service.active === null).length;
+  const alertZoneCount = Object.values(zoneThreatMap).filter(zone => zone.alerts > 0).length;
 
   return (
     <Shell title="Dashboard">
@@ -298,7 +300,11 @@ export default function Home() {
           onClick={() => setDetailsOpen(v => !v)} className="rounded-xs border px-3 py-2 text-sm">
           Dashboard details — Network Pulse, Zone Status, Service Health, Event Stream
         </button>
-        <span className="ml-2 text-xs text-(--text-muted)">{eventsUnavailable || zonesUnavailable ? "Zone and activity signals unknown" : `${events.length} recent events`} · {services.filter(s => s.active === null).length} service states unknown{!eventsUnavailable && !zonesUnavailable && ` · ${Object.values(zoneThreatMap).filter(zone => zone.alerts > 0).length} zones with alerts`}</span>
+        <span className="ml-2 text-xs text-(--text-muted)">
+          {eventsUnavailable || zonesUnavailable ? "Zone and activity signals unknown" : `${events.length} recent event${events.length === 1 ? "" : "s"}`}
+          {" · "}{unknownServiceCount} service state{unknownServiceCount === 1 ? "" : "s"} unknown
+          {!eventsUnavailable && !zonesUnavailable && ` · ${alertZoneCount} zone${alertZoneCount === 1 ? "" : "s"} with alerts`}
+        </span>
       </div>
       <div id="dashboard-details" hidden={!detailsOpen} className={detailsOpen ? "grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2" : "hidden"}>
         {/* Network Pulse */}

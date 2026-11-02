@@ -117,6 +117,44 @@ const services = {
   av: { available: true, enabled: true, mode: "clamav", ...meter([3, 1]) },
 };
 
+const knownServices = {
+  ...services,
+  vpn: { wireguard_enabled: false, openvpn_running: false },
+  proxy: { forward_enabled: false, reverse_enabled: false, envoy_running: false, nginx_running: false },
+  syslog: { configured_forwarders: 0, ...meter() },
+};
+
+for (const width of [1280, 390]) {
+  for (const count of [0, 1, 60]) {
+    test(`runtime task count uses plain language and retains its technical title: ${count} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await openDashboard(page, { events: [], services, stats: {
+        ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
+        disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memUsedBytes: 1024, memLimitBytes: 0, memPercent: 0 },
+        runtime: { uptime: "1m", goroutines: count },
+      } });
+      await expect(page.getByTitle("Go runtime goroutines", { exact: true })).toHaveText(`${count} background task${count === 1 ? "" : "s"}`);
+      await expect(page.getByText(`${count} goroutines`, { exact: true })).toHaveCount(0);
+    });
+  }
+
+  for (const scenario of [
+    { name: "zero activity", events: [], services: knownServices, text: "0 recent events · 1 service state unknown · 0 zones with alerts" },
+    { name: "single event and zone", events: [idsAlert(1, { srcZone: "lan" })], services: { ...knownServices, proxy: { envoy_running: false } }, text: "1 recent event · 2 service states unknown · 1 zone with alerts" },
+    { name: "multiple events and zones", events: [idsAlert(1, { srcZone: "lan" }), idsAlert(2, { srcZone: "dmz" })], services: null, text: "2 recent events · 6 service states unknown · 2 zones with alerts" },
+  ]) {
+    test(`dashboard details summary pluralizes every count: ${scenario.name} at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await openDashboard(page, scenario);
+      const details = page.getByRole("button", { name: /^Dashboard details/ });
+      await expect(details).toHaveAttribute("aria-expanded", "true");
+      await details.click();
+      await expect(details).toHaveAttribute("aria-expanded", "false");
+      await expect(page.getByText(scenario.text, { exact: true })).toBeVisible();
+    });
+  }
+}
+
 // Counts pixels close to the alert red the canvas uses for critical zones.
 function redPixels(page: Page) {
   return page.locator("#dashboard-details canvas").first().evaluate((canvas: HTMLCanvasElement) => {
