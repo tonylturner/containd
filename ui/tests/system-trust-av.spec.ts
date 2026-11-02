@@ -49,7 +49,7 @@ test("trusted CA stored but not applied is not reported as applied", async ({ pa
   await uploadCA(page);
   await expect(
     page.getByRole("status").filter({
-      hasText: "Trust certificates saved but not active. Applying configuration retries activation.",
+      hasText: "Trust certificates saved but not active. Applying configuration retries activation: trust: engine unavailable",
     }),
   ).toBeVisible();
   await page.getByText("Trust update details", { exact: true }).click();

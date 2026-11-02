@@ -98,7 +98,12 @@ test("creating a user disables the button while it saves, then confirms", async 
 
   await expect(toast(page)).toContainText("User bob created.");
   await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: saved.");
+  await expect(row(page, "bob").getByRole("button", { name: "Require MFA", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Create user" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add User" }).click();
   await expect(page.getByRole("button", { name: "Create user" })).toBeEnabled();
+  await expect(page.getByPlaceholder("username")).toHaveValue("");
+  await expect(page.getByPlaceholder("password", { exact: true })).toHaveValue("");
   expect(gate.requests.filter((r) => r.method === "POST")).toHaveLength(1);
 });
 
