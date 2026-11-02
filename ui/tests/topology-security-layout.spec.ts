@@ -1,6 +1,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { join } from "node:path";
 import { expect, test } from "./fixtures/topology-test";
+import { securityChecks } from "./fixtures/security";
 import { mockProtection } from "./fixtures/protection-api";
 
 test.use({ viewport: { width: 1024, height: 768 } });
@@ -20,7 +21,7 @@ async function openMatrix(page: Page, count: number) {
       "/api/v1/zones": names.map((name) => ({ name, slTarget: 0 })),
       "/api/v1/security/conduits": [{
         from: "ot", to: "dmz",
-        state: "allow", ids: "none", proto: [], traffic: { state: "measured" as const, windowSeconds: 3600, bytes: "0", packets: "0", complete: true, coverage: "routed" as const }, rules: [],
+        state: "allow", ids: "disabled", proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks, rules: [],
         gaps: [], mitre: [], defaultDeny: false, tlsEnforced: false,
         protoWhitelist: false, mfaRequired: false, auditLogged: true, avEnabled: false,
       }],

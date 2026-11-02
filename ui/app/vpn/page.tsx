@@ -460,7 +460,7 @@ export default function VPNPage() {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-(--text)">WireGuard</h2>
-                <p className="mt-0.5 text-sm text-(--text)">Remote access VPN (preferred).</p>
+                <p className="mt-0.5 text-sm text-(--text)">Remote access VPN (preferred). IPv4-only tunnel addresses, AllowedIPs and endpoints; endpoint hostnames must resolve to IPv4.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">

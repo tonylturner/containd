@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep large IDS import results compact with evaluability and conversion-note
+  counts, at most 20 attention rows, and a dismiss action.
+- Require protocol restrictions on every matching enforcing ALLOW and a refusing
+  fallback before topology can count protocol whitelisting as a configured pass.
+  TCP and UDP grants must specify ports; port-less grants remain unknown.
+- Distinguish configured topology checks from heuristics and unknown evidence;
+  remove assumed authentication and verification passes. Show global IDS settings
+  without claiming conduit coverage.
+- Label port-based plaintext-mixing gaps and all inferred MITRE mappings with
+  their heuristic evidence basis in the existing conduit text, without changing
+  classifications or response shapes.
+- Label non-evaluable IDS imports as storage-only, show conversion notes per rule
+  and in import results, and clarify that YARA imports do not execute or detect threats.
+- Reject unsupported IPv6 in new or edited WireGuard tunnel addresses, AllowedIPs
+  and endpoints, including while disabled. Unchanged stored service faults remain
+  visible and quarantined and may be carried through unrelated edits.
+
 ### Upgrade notes
 
+- API: `/api/v1/security/conduits` `ids` is now `enabled` or `disabled` (was
+  `full`, `partial` or `none`) and each conduit has a `checks` object with
+  `provenance` and `reason` per control. Heuristic `gaps` and `mitre` entries
+  carry a `Heuristic (...)` prefix. IDS import responses list the added rules in
+  `rules`, with evaluability metadata. WireGuard now refuses new or edited IPv6
+  values; stored ones stay quarantined.
 - The appliance keeps counter history in a new SQLite file, `/data/telemetry.db`
   (`CONTAIND_TELEMETRY_DB`), capped at 64 MiB: 10 s points for 1 hour, 1 minute
   for 24 hours and 15 minutes for 30 days. History starts empty after the upgrade.

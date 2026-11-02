@@ -96,6 +96,7 @@ export type IDSImportResult = {
   skipped: number;
   total: number;
   format: string;
+  rules: IDSRule[]; // Newly added rules, including evaluability labels and conversion notes.
 };
 
 export type IDSRuleSource = {

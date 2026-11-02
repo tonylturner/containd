@@ -58,6 +58,16 @@ A reachable backend with no observations still returns `200` with an empty
 list (learner pages use `{items: [], nextCursor?}`).
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
+## WireGuard Address Families
+
+WireGuard supports IPv4-only tunnel addresses (`addressCIDR`), peer `allowedIPs`
+and endpoint addresses. Endpoint hostnames must resolve to IPv4 at runtime.
+New or edited WireGuard settings must use IPv4, including when disabled.
+Previously stored unsupported settings remain visible and are quarantined;
+unchanged faults may be carried through unrelated edits. See
+[Service faults](services.md#service-faults).
+Other IPv6 interface and firewall features are unchanged.
+
 ## Simulation
 
 `GET /api/v1/simulation` returns `preference` (`auto`, `on`, `off`), `running`,
@@ -87,6 +97,36 @@ summaries. Each object contains explicit `from` and `to` zone names alongside
 control flags documented in OpenAPI. Every ordered pair of distinct zones is
 included, in configured zone order (source-major, then destination).
 With fewer than two zones, the response is `[]`.
+
+`checks` gives each control's `provenance` (`configured`, `heuristic`, or `unknown`)
+and a human-readable `reason`. Configured means derived from running policy, not
+verified enforcement. IDS is `enabled` or `disabled` globally, not full or partial
+conduit coverage. Syslog and AV settings likewise do not establish per-conduit
+logging or scanning. Conventional encrypted-service ports are a heuristic only;
+`tlsEnforced` is false because this summary cannot enforce or verify TLS.
+Protocol whitelisting is a conservative all-grants check: a configured pass
+requires a refusing fallback and explicit transport restrictions on every
+zone-matching enforcing ALLOW, including conditional grants. TCP and UDP entries
+must specify ports; ICMP does not require a port. An unrestricted
+host grant cannot be cancelled by a separate TCP/443 grant. Unproved cases
+(including ICS-only grants) remain unknown and never pass automatically.
+The plaintext-mixing entry in `gaps` is prefixed **Heuristic (service ports)**.
+Every inferred mapping in `mitre` carries a heuristic evidence-basis prefix:
+**Heuristic (allowed service ports)** for T0886, T0843 and T1021;
+**Heuristic (policy state)** for T1048; and **Heuristic (source zone name)**
+for T1190 and T1595 inferred from a source zone named `internet` or `wan`.
+These are presentation hints, not observed plaintext or attack evidence;
+both fields remain string arrays.
+`traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).
+Measured and recorded demo counts, coverage, and unavailable reasons follow the
+[telemetry contract](#retained-counter-history); there is no percent-of-baseline value.
+
+The topology's requirement checks show this provenance and explanation.
+Authentication is not inferred from zone names, and security-function verification
+has no automatic evidence. Heuristic and unknown checks never count as passes,
+including when no applicable conduits exist. Only configured checks and explicit
+operator overrides count toward check-based SL. Overrides are operator assertions,
+not independent verification. The check-based level is not a standards assessment.
 
 Zone names are exact, case-sensitive identities and may contain arrows or other
 punctuation. Use the `from` and `to` fields directly; do not split a joined name.

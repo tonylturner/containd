@@ -16,6 +16,7 @@ import {
   type IDSConfig,
   type IDSRule,
   type IDSRuleSource,
+  type IDSImportResult,
 } from "../../lib/api";
 import {
   ConfirmDialog,
@@ -31,7 +32,8 @@ import {
   SourcesCatalog,
   type IDSPanelFields,
 } from "./ids-panels";
-import { isRuleEnabled } from "./ids-shared";
+import { isRuleEnabled, isRuleEvaluable } from "./ids-shared";
+import { ImportResult } from "./ids-import-result";
 
 /* ── Page ── */
 
@@ -49,6 +51,7 @@ export default function IDSPage() {
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<IDSImportResult | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
   const [sources, setSources] = useState<IDSRuleSource[]>([]);
   const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources">("rules");
@@ -89,6 +92,7 @@ export default function IDSPage() {
     if (importPending) return false;
     setImportPending(true);
     setError(null);
+    setImportResult(null);
     const result = await writeRefresh(base => api.importIDSRules(base, file, format || undefined), api.getIDS,
       (view, before, next) => {
         const known = new Set((before.rules ?? []).map(rule => rule.id));
@@ -100,9 +104,10 @@ export default function IDSPage() {
       setError(revisionError(result));
       return false;
     }
-    // The import response contains counts, not rules. Keep Save blocked until
-    // a successful read has acknowledged the additions, even if that read fails.
+    // Keep Save blocked until a successful read acknowledges the additions,
+    // even if that read fails.
     await refresh();
+    setImportResult(result.data);
     const { imported, skipped, format: detected, total } = result.data;
     flashSuccess(`IDS rules staged — commit to apply. Imported ${imported} rule${imported !== 1 ? "s" : ""} (${skipped} skipped). Format: ${detected}. Total: ${total}.`);
     setActiveTab("rules");
@@ -169,6 +174,7 @@ export default function IDSPage() {
   const rules = useMemo(() => ids.rules ?? [], [ids.rules]);
   const groups = useMemo(() => ids.ruleGroups ?? [], [ids.ruleGroups]);
   const enabledCount = useMemo(() => rules.filter(isRuleEnabled).length, [rules]);
+  const evaluableCount = useMemo(() => rules.filter(r => isRuleEnabled(r) && isRuleEvaluable(r)).length, [rules]);
 
 
   return (
@@ -197,6 +203,12 @@ export default function IDSPage() {
       {!editing && <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
+      {importResult && (
+        <ImportResult result={importResult} onDismiss={() => {
+          setImportResult(null);
+          rulesButton.current?.focus();
+        }} />
+      )}
 
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-(--text)">
@@ -206,7 +218,7 @@ export default function IDSPage() {
           Enable intrusion detection
         </label>
         <span className="ml-auto text-xs text-(--text-muted) tabular-nums">
-          {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled
+          {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled; {evaluableCount.toLocaleString()} evaluable
         </span>
       </div>
 

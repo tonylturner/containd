@@ -398,13 +398,17 @@ func validateWireGuard(wg WireGuardConfig, zoneSet, ifaceSet map[string]struct{}
 		return err
 	}
 	if wg.AddressCIDR != "" {
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(wg.AddressCIDR)); err != nil {
+		ip, network, err := net.ParseCIDR(strings.TrimSpace(wg.AddressCIDR))
+		if err != nil {
 			return fmt.Errorf("vpn.wireguard addressCIDR invalid: %q", wg.AddressCIDR)
 		}
+		if _, bits := network.Mask.Size(); ip.To4() == nil || bits != 32 {
+			return fmt.Errorf("vpn.wireguard addressCIDR must be IPv4: %q", wg.AddressCIDR)
+		}
 	}
-	for _, peer := range wg.Peers {
+	for i, peer := range wg.Peers {
 		if err := validateWireGuardPeer(peer); err != nil {
-			return err
+			return fmt.Errorf("vpn.wireguard peers[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -414,20 +418,30 @@ func validateWireGuardPeer(peer WGPeer) error {
 	if strings.TrimSpace(peer.PublicKey) == "" {
 		return errors.New("vpn.wireguard peer publicKey is required")
 	}
-	for _, cidr := range peer.AllowedIPs {
+	for i, cidr := range peer.AllowedIPs {
 		if strings.TrimSpace(cidr) == "" {
 			return errors.New("vpn.wireguard allowedIPs cannot include empty")
 		}
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+		ip, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
 			return fmt.Errorf("vpn.wireguard peer allowedIPs invalid: %q", cidr)
+		}
+		if _, bits := network.Mask.Size(); ip.To4() == nil || bits != 32 {
+			return fmt.Errorf("vpn.wireguard peer allowedIPs[%d] must be IPv4: %q", i, cidr)
 		}
 	}
 	if peer.PersistentKeepalive < 0 {
 		return errors.New("vpn.wireguard persistentKeepalive cannot be negative")
 	}
 	if peer.Endpoint != "" {
-		if _, _, err := net.SplitHostPort(strings.TrimSpace(peer.Endpoint)); err != nil {
+		host, _, err := net.SplitHostPort(strings.TrimSpace(peer.Endpoint))
+		if err != nil {
 			return fmt.Errorf("vpn.wireguard peer endpoint invalid: %q", peer.Endpoint)
+		}
+		// Hostnames remain supported and are resolved by the runtime. A colon
+		// also catches scoped IPv6 literals, which net.ParseIP does not parse.
+		if strings.Contains(host, ":") {
+			return fmt.Errorf("vpn.wireguard peer endpoint must be IPv4 or a hostname resolving to IPv4: %q", peer.Endpoint)
 		}
 	}
 	return nil

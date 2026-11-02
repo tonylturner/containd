@@ -39,7 +39,7 @@ var icsPortNames = map[int]string{
 	ics.CIPImplicitPort: "EtherNet/IP",
 }
 
-// Ports considered encrypted for TLS enforcement check.
+// Conventional encrypted-service ports are only a hint, not TLS evidence.
 var encryptedPorts = map[int]bool{
 	443: true, 22: true, 990: true, 989: true,
 }
@@ -62,21 +62,27 @@ type protoEntry struct {
 }
 
 type conduitResult struct {
-	From           string         `json:"from"`
-	To             string         `json:"to"`
-	State          string         `json:"state"`
-	IDS            string         `json:"ids"`
-	Proto          []protoEntry   `json:"proto"`
-	Traffic        conduitTraffic `json:"traffic"`
-	Rules          []string       `json:"rules"`
-	Gaps           []string       `json:"gaps"`
-	Mitre          []string       `json:"mitre"`
-	DefaultDeny    bool           `json:"defaultDeny"`
-	TLSEnforced    bool           `json:"tlsEnforced"`
-	ProtoWhitelist bool           `json:"protoWhitelist"`
-	MFARequired    bool           `json:"mfaRequired"`
-	AuditLogged    bool           `json:"auditLogged"`
-	AVEnabled      bool           `json:"avEnabled"`
+	From           string                          `json:"from"`
+	To             string                          `json:"to"`
+	State          string                          `json:"state"`
+	IDS            string                          `json:"ids"`
+	Proto          []protoEntry                    `json:"proto"`
+	Traffic        conduitTraffic                  `json:"traffic"`
+	Rules          []string                        `json:"rules"`
+	Gaps           []string                        `json:"gaps"`
+	Mitre          []string                        `json:"mitre"`
+	DefaultDeny    bool                            `json:"defaultDeny"`
+	TLSEnforced    bool                            `json:"tlsEnforced"`
+	ProtoWhitelist bool                            `json:"protoWhitelist"`
+	MFARequired    bool                            `json:"mfaRequired"`
+	AuditLogged    bool                            `json:"auditLogged"`
+	AVEnabled      bool                            `json:"avEnabled"`
+	Checks         map[string]conduitCheckEvidence `json:"checks"`
+}
+
+type conduitCheckEvidence struct {
+	Provenance string `json:"provenance"`
+	Reason     string `json:"reason"`
 }
 
 type conduitGlobalState struct {
@@ -130,9 +136,9 @@ func computeConduitGlobals(cfg *config.Config) conduitGlobalState {
 
 func conduitIDSMode(cfg *config.Config) string {
 	if cfg.IDS.Enabled {
-		return "full"
+		return "enabled"
 	}
-	return "none"
+	return "disabled"
 }
 
 func conduitAuditLogged(cfg *config.Config) bool {
@@ -148,16 +154,16 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 	matching := matchingConduitRules(cfg.Firewall.Rules, from, to)
 	effective := reachableConduitRules(matching, cfg.DataPlane.DPIMode)
 	state := computeConduitState(effective, globals.defaultAction, from, to, cfg.DataPlane.DPIMode)
-	protos, allPorts, hasProtoRestrictions, hasICSPredicate := conduitProtocols(effective)
+	protos, allPorts, hasICSPredicate := conduitProtocols(effective)
 	defaultDeny := globals.defaultAction == config.ActionDeny || hasExplicitDenyAll(effective, from)
-	tlsEnforced := conduitTLSEnforced(allPorts)
-	protoWhitelist := hasProtoRestrictions
+	encryptedPortHint := conduitEncryptedPortHint(allPorts)
+	protoWhitelist, whitelistEvidence := conduitProtocolWhitelist(matching, globals.defaultAction, cfg.DataPlane.DPIMode)
 	if state == "allow" {
-		// An unrestricted winning grant or ALLOW default is not a service whitelist.
-		tlsEnforced, protoWhitelist = false, false
+		// An unrestricted summary cannot establish encrypted-only services.
+		encryptedPortHint = false
 	}
 	ruleDescs := conduitRuleDescriptions(matching, from, to)
-	gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
+	gaps := computeGaps(state, defaultDeny, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
 	mitre := computeMitre(state, protoWhitelist, from, protos)
 	return &conduitResult{
 		From:           from,
@@ -170,11 +176,63 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 		Gaps:           nonNilStrings(gaps),
 		Mitre:          nonNilStrings(mitre),
 		DefaultDeny:    defaultDeny,
-		TLSEnforced:    tlsEnforced,
+		TLSEnforced:    false,
 		ProtoWhitelist: protoWhitelist,
 		MFARequired:    false,
 		AuditLogged:    globals.auditLogged,
 		AVEnabled:      globals.avEnabled,
+		Checks:         conduitCheckProvenance(encryptedPortHint, whitelistEvidence),
+	}
+}
+
+// Prove a sufficient all-grants condition, not an existential service hint.
+// Considering every zone-matching ALLOW is conservative even when ordered
+// coverage could hide one. Conditional selectors never erase a grant, monitor
+// rules do not grant, and an ALLOW fallback cannot establish a whitelist.
+func conduitProtocolWhitelist(matching []config.Rule, fallback config.Action, mode string) (bool, conduitCheckEvidence) {
+	unknown := func(reason string) (bool, conduitCheckEvidence) {
+		return false, conduitCheckEvidence{"unknown", reason}
+	}
+	if !denies(fallback) {
+		return unknown("Protocol whitelisting is not established: the firewall fallback permits unrestricted protocols.")
+	}
+	hasGrant := false
+	for _, r := range matching {
+		if r.Action != config.ActionAllow || rules.MonitorICS(firewallRuleEntry(r), mode) {
+			continue
+		}
+		hasGrant = true
+		if len(r.Protocols) == 0 {
+			return unknown("Protocol whitelisting is not established: a matching ALLOW has no explicit transport restriction, even if host, identity, schedule or ICS selectors limit it.")
+		}
+		for _, p := range r.Protocols {
+			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
+				return unknown("Protocol whitelisting is not established: an ALLOW contains an unsupported protocol selector.")
+			}
+			if (p.Name == "tcp" || p.Name == "udp") && p.Port == "" {
+				return unknown("Protocol whitelisting is not established: a TCP or UDP ALLOW without a port admits every service on that transport.")
+			}
+		}
+	}
+	if !hasGrant {
+		return unknown("No enforcing ALLOW grants establish protocol whitelisting on this conduit.")
+	}
+	return true, conduitCheckEvidence{"configured", "The running firewall fallback refuses traffic and every matching enforcing ALLOW has explicit transport restrictions with ports for TCP/UDP, including conditional grants; not a runtime test."}
+}
+
+func conduitCheckProvenance(encryptedPortHint bool, whitelistEvidence conduitCheckEvidence) map[string]conduitCheckEvidence {
+	tlsReason := "Port selection cannot verify encryption or TLS enforcement."
+	if encryptedPortHint {
+		tlsReason = "Only conventional encrypted-service ports are listed; this does not verify encryption or enforce TLS."
+	}
+	return map[string]conduitCheckEvidence{
+		"defaultDeny":    {"configured", "Derived from the running firewall default and explicit catch-all refusal rules; not a runtime test."},
+		"protoWhitelist": whitelistEvidence,
+		"tlsEnforced":    {"heuristic", tlsReason},
+		"ids":            {"heuristic", "The global IDS enabled flag does not establish evaluable rules, inspection or coverage on this conduit."},
+		"mfaRequired":    {"unknown", "No conduit MFA evidence is available."},
+		"auditLogged":    {"heuristic", "A global syslog forwarder address does not establish that this conduit's traffic is logged or delivered."},
+		"avEnabled":      {"heuristic", "The global AV enabled flag does not establish scan selection, readiness or coverage on this conduit."},
 	}
 }
 
@@ -190,10 +248,9 @@ func matchingConduitRules(rules []config.Rule, from, to string) []config.Rule {
 	return matching
 }
 
-func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool, bool) {
+func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool) {
 	var protos []protoEntry
 	allPorts := make(map[int]bool)
-	hasProtoRestrictions := false
 	hasICSPredicate := false
 	for _, r := range matching {
 		if r.Action != config.ActionAllow {
@@ -205,10 +262,9 @@ func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool,
 		if len(r.Protocols) == 0 {
 			continue
 		}
-		hasProtoRestrictions = true
 		protos = append(protos, protocolEntriesForRule(r, hasICSPredicate, allPorts)...)
 	}
-	return protos, allPorts, hasProtoRestrictions, hasICSPredicate
+	return protos, allPorts, hasICSPredicate
 }
 
 func protocolEntriesForRule(r config.Rule, hasICSPredicate bool, allPorts map[int]bool) []protoEntry {
@@ -252,7 +308,7 @@ func conduitProtocolInfo(p config.Protocol) (string, bool) {
 	return name, industrial
 }
 
-func conduitTLSEnforced(allPorts map[int]bool) bool {
+func conduitEncryptedPortHint(allPorts map[int]bool) bool {
 	if len(allPorts) == 0 {
 		return false
 	}
@@ -372,7 +428,7 @@ func describeRule(r config.Rule, from, to string) string {
 	return fmt.Sprintf("%s %s from %s to %s", action, protoStr, strings.ToUpper(from), strings.ToUpper(to))
 }
 
-func computeGaps(state string, defaultDeny, tlsEnforced, protoWhitelist, auditLogged, avEnabled bool, ports map[int]bool, hasICS bool) []string {
+func computeGaps(state string, defaultDeny, protoWhitelist, auditLogged, avEnabled bool, ports map[int]bool, hasICS bool) []string {
 	var gaps []string
 
 	if !defaultDeny {
@@ -381,8 +437,8 @@ func computeGaps(state string, defaultDeny, tlsEnforced, protoWhitelist, auditLo
 	if state == "allow" && !protoWhitelist {
 		gaps = append(gaps, "No protocol whitelist - all protocols permitted")
 	}
-	if !tlsEnforced && len(ports) > 0 {
-		gaps = append(gaps, "Unencrypted protocols permitted")
+	if len(ports) > 0 {
+		gaps = append(gaps, "Conduit encryption is not verified")
 	}
 	if !auditLogged {
 		gaps = append(gaps, "No audit logging configured")
@@ -399,7 +455,7 @@ func computeGaps(state string, defaultDeny, tlsEnforced, protoWhitelist, auditLo
 			}
 		}
 		if hasPlaintext {
-			gaps = append(gaps, "ICS traffic mixed with plaintext IT protocols")
+			gaps = append(gaps, "Heuristic (service ports): ICS traffic mixed with plaintext IT protocols")
 		}
 	}
 	if state == "unmodeled" {
@@ -421,20 +477,20 @@ func computeMitre(state string, protoWhitelist bool, fromZone string, protos []p
 	}
 
 	if state != "block" && hasICSPort {
-		mitre = append(mitre, "T0886 Remote Services OT", "T0843 Program Download")
+		mitre = append(mitre, "Heuristic (allowed service ports): T0886 Remote Services OT", "Heuristic (allowed service ports): T0843 Program Download")
 	}
 	if state == "allow" && !protoWhitelist {
-		mitre = append(mitre, "T1048 Exfiltration Over Alt Protocol")
+		mitre = append(mitre, "Heuristic (policy state): T1048 Exfiltration Over Alt Protocol")
 	}
 
 	fromLower := strings.ToLower(fromZone)
 	if fromLower == "internet" || fromLower == "wan" {
-		mitre = append(mitre, "T1190 Exploit Public App", "T1595 Active Scanning")
+		mitre = append(mitre, "Heuristic (source zone name): T1190 Exploit Public App", "Heuristic (source zone name): T1595 Active Scanning")
 	}
 
 	for _, p := range protos {
 		if adminProtos[p.N] {
-			mitre = append(mitre, "T1021 Remote Services")
+			mitre = append(mitre, "Heuristic (allowed service ports): T1021 Remote Services")
 			break
 		}
 	}
