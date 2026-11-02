@@ -21,6 +21,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/services"
@@ -134,7 +135,11 @@ func Run(ctx context.Context, opts Options) error {
 			srv.RevokeConnections(initiator)
 		}
 	})
-	telemetryStore, stopTelemetry := startTelemetry(ctx, logger, engineClient, serviceManager.Manager)
+	var counterReader telemetry.CounterReader
+	if transportClient != nil {
+		counterReader = transportClient
+	}
+	telemetryStore, stopTelemetry := startTelemetry(ctx, logger, counterReader, serviceManager.Manager)
 	defer stopTelemetry()
 	var historyStore httpapi.TelemetryStore
 	if telemetryStore != nil {
