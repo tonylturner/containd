@@ -12,7 +12,7 @@ import (
 )
 
 func TestPreviewViaUnavailableUsesCandidateForwards(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(100)}
+	e := &Engine{eventStore: events.NewStore(100).Writer("")}
 	forward := rules.ForwardMatch{Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp",
 		ListenPort: 1502, Backend: netip.MustParseAddrPort("10.0.0.2:502")}
 	e.ruleSnap.Store(&rules.Snapshot{ForwardMatches: map[string]rules.ForwardMatch{"running": forward}})

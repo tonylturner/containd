@@ -6,7 +6,7 @@ import { securityChecks } from "./fixtures/security";
 
 const admitted: Conduit = {
   from: "OT-1", to: "dmz",
-  state: "allow", ids: "enabled", proto: [], traffic: null, checks: securityChecks,
+  state: "allow", ids: "enabled", proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks,
   rules: [], gaps: [], mitre: [], defaultDeny: true,
   tlsEnforced: false, protoWhitelist: true, mfaRequired: false,
   auditLogged: true, avEnabled: false,

@@ -331,7 +331,7 @@ export default function WizardPage() {
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded} />
       <p className="mb-6 text-sm text-(--text-muted)">
-        Select a common connectivity scenario below. The wizard will walk you through each step and stage the necessary firewall rules and NAT configuration automatically.
+        Select a common connectivity scenario below. The wizard saves the required firewall and address-translation settings for review. Commit them from Configuration to apply.
       </p>
 
       {loading && (
@@ -470,7 +470,7 @@ export default function WizardPage() {
           <h3 className="mb-2 text-sm font-semibold text-emerald-400">Success</h3>
           <p className="mb-4 text-sm text-(--text)">{success}</p>
           <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
-            These changes were saved to the candidate config. Review and commit them before expecting runtime behavior to change.
+            These changes are saved, not active yet. Review and commit them from Configuration before expecting traffic behavior to change.
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             <Link

@@ -26,12 +26,12 @@ export function useShadowCounters() {
 }
 
 export function ShadowCountersNote({ counters }: { counters: ShadowCounters | null }) {
-  return <p role="status" aria-label="Shadow counters" className="mb-2 text-xs text-(--text-muted)">
-    {!counters ? "Loading applied-policy shadow counters…" : !counters.available
-      ? `Applied-policy shadow counters unavailable: ${counters.reason}`
-      : <>Applied-policy shadow counters since <time dateTime={counters.since}>{counters.since}</time> (messages).
-        Reset on successful policy apply or engine restart. Rule-local matches, not full-policy predictions.</>}
-  </p>;
+  return <div role="status" aria-label="Shadow counters" className="mb-2 text-xs text-(--text-muted)">
+    {!counters ? "Loading monitor counts…" : !counters.available
+      ? <>Monitor counts unavailable. <span className="break-words">{counters.reason}</span></>
+      : <>Messages matched since <time dateTime={counters.since}>{counters.since}</time>.
+        Reset when policy is applied or the inspection service restarts. Estimated allow/block for this rule only, not full-policy predictions.</>}
+  </div>;
 }
 
 export function ShadowCountersCell({ rule, globalMode, counters }: {

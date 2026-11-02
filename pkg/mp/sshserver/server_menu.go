@@ -18,8 +18,11 @@ func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter,
 	session := newInteractiveSession(s, ctx, username, rw, reader, reg)
 	for {
 		session.renderMainMenu()
-		choice, ok := session.ask("Select option (0-10): ")
+		choice, ok := session.ask("containd(menu)> Select option (0-11): ")
 		if !ok {
+			return false
+		}
+		if choice == "11" || choice == "back" || choice == "exit" {
 			return false
 		}
 		if !session.handleMainMenuChoice(strings.TrimSpace(choice)) {
@@ -35,7 +38,7 @@ func (s *interactiveSession) renderMainMenu() {
 	s.writeLn("0)  Logout")
 	s.writeLn("1)  Assign interfaces (bind)")
 	s.writeLn("2)  Set interface IP address")
-	s.writeLn("3)  Reset admin password")
+	s.writeLn("3)  Change your password (immediate)")
 	s.writeLn("4)  Setup wizard")
 	s.writeLn("5)  Diagnostics")
 	s.writeLn("6)  Show system")
@@ -43,6 +46,7 @@ func (s *interactiveSession) renderMainMenu() {
 	s.writeLn("8)  Show ip route")
 	s.writeLn("9)  Help")
 	s.writeLn("10) Factory reset (NUCLEAR)")
+	s.writeLn("11) Back to CLI (0 logs out of SSH)")
 	s.writeLn("")
 }
 
@@ -219,7 +223,7 @@ func (s *interactiveSession) renderDiagnosticsMenu() {
 
 func (s *interactiveSession) handleDiagnosticsChoice(choice string) bool {
 	switch choice {
-	case "0":
+	case "0", "back", "exit":
 		return false
 	case "1":
 		s.runDiagnosticPing()
@@ -346,7 +350,7 @@ func (s *Server) runWizard(ctx context.Context, username string, rw io.ReadWrite
 func (s *interactiveSession) runWizardFlow() {
 	s.writeLn("")
 	s.writeLn("containd setup wizard (text)")
-	s.writeLn("This writes to candidate config; you can commit at the end.")
+	s.writeLn("Config edits are staged as you answer; cancelling does not undo staged edits. Password/key changes apply immediately.")
 	s.writeLn("")
 	s.showWizardCurrentSystem()
 
@@ -385,29 +389,22 @@ func (s *interactiveSession) runWizardFlow() {
 }
 
 func (s *interactiveSession) showWizardCurrentSystem() {
-	buf, _ := s.execWithOutput("show system")
-	if buf.Len() == 0 {
-		return
-	}
 	s.writeLn("Current:")
-	writeTTY(s.rw, buf.String())
-	if !strings.HasSuffix(buf.String(), "\n") && !strings.HasSuffix(buf.String(), "\r\n") {
-		s.writeLn("")
-	}
+	_ = s.exec("show system")
 	s.writeLn("")
 }
 
 func (s *interactiveSession) wizardPromptSet(prompt, cmdPrefix string) bool {
-	v, ok := s.ask(prompt)
+	v, ok := s.ask("containd(setup:candidate)> " + prompt)
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	if v == "" {
 		return true
 	}
 	if !s.exec(cmdPrefix + shellEscape(v)) {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	s.writeLn("ok")
@@ -415,9 +412,9 @@ func (s *interactiveSession) wizardPromptSet(prompt, cmdPrefix string) bool {
 }
 
 func (s *interactiveSession) wizardPromptSSHPasswordAuth() bool {
-	v, ok := s.ask("Enable SSH password auth? (yes/no, blank to keep): ")
+	v, ok := s.ask("containd(setup:candidate)> Enable SSH password auth? (yes/no, blank to keep): ")
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	v = strings.ToLower(strings.TrimSpace(v))
@@ -426,13 +423,13 @@ func (s *interactiveSession) wizardPromptSSHPasswordAuth() bool {
 		return true
 	case "y", "yes":
 		if !s.exec("set system ssh allow-password true") {
-			s.writeLn("Wizard cancelled.")
+			s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 			return false
 		}
 		s.writeLn("ok")
 	case "n", "no":
 		if !s.exec("set system ssh allow-password false") {
-			s.writeLn("Wizard cancelled.")
+			s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 			return false
 		}
 		s.writeLn("ok")
@@ -445,20 +442,20 @@ func (s *interactiveSession) wizardPromptPassword() bool {
 		s.writeLn("password step skipped: " + err.Error())
 		return true
 	}
-	switch s.changeOwnPassword("ssh setup wizard", "Current password, to change it (blank to skip): ", "New password for this user: ") {
+	switch s.changeOwnPassword("ssh setup wizard", "containd(setup:password-immediate)> Current password, to change it (blank to skip): ", "New password for this user: ") {
 	case ownPasswordChanged:
 		s.writeLn("password updated")
 	case ownPasswordFailed:
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	return true
 }
 
 func (s *interactiveSession) wizardPromptSSHKey() (bool, bool) {
-	v, ok := s.ask("Paste an SSH public key to enroll for this user (blank to skip): ")
+	v, ok := s.ask("containd(setup:key-immediate)> Paste an SSH public key to enroll for this user (blank to skip): ")
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false, false
 	}
 	if strings.TrimSpace(v) == "" {
@@ -474,15 +471,15 @@ func (s *interactiveSession) wizardPromptSSHKey() (bool, bool) {
 }
 
 func (s *interactiveSession) wizardPromptDisablePasswordAfterKey() bool {
-	v, ok := s.ask("Disable SSH password auth now? (yes/no, blank to keep): ")
+	v, ok := s.ask("containd(setup:candidate)> Stage disabling SSH password auth? (yes/no, blank to keep): ")
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "y" || v == "yes" {
 		if !s.exec("set system ssh allow-password false") {
-			s.writeLn("Wizard cancelled.")
+			s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 			return false
 		}
 		s.writeLn("ok")
@@ -491,9 +488,9 @@ func (s *interactiveSession) wizardPromptDisablePasswordAfterKey() bool {
 }
 
 func (s *interactiveSession) wizardPromptOutboundQuickstart() bool {
-	v, ok := s.ask("Enable outbound Internet for LAN/MGMT → WAN now? (yes/no, blank to skip): ")
+	v, ok := s.ask("containd(setup:candidate)> Stage outbound Internet settings for LAN/MGMT → WAN? (yes/no, blank to skip): ")
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	v = strings.ToLower(strings.TrimSpace(v))
@@ -508,9 +505,14 @@ func (s *interactiveSession) wizardPromptOutboundQuickstart() bool {
 }
 
 func (s *interactiveSession) wizardPromptCommit() bool {
-	v, ok := s.ask("Commit changes now? (yes/no): ")
+	s.writeLn("Review the shared candidate, including edits from other sessions:")
+	if !s.exec("show diff") {
+		s.writeLn("Cannot review shared candidate; not committing.")
+		return false
+	}
+	v, ok := s.ask("containd(setup:commit)> Commit changes now? (shared candidate, yes/no): ")
 	if !ok {
-		s.writeLn("Wizard cancelled.")
+		s.writeLn("Wizard cancelled. Earlier candidate edits remain staged; immediate changes are not undone.")
 		return false
 	}
 	v = strings.ToLower(strings.TrimSpace(v))

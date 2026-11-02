@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ConfigBase, ConfigWriteResult } from "../../lib/config-boundary";
 import type { ApiResult } from "../../lib/api";
 import { revisionError } from "../../lib/config-revision";
 
 import { ICSModeSelect } from "../ics/ics-mode-select";
+import { ICSInlinePrerequisite } from "../ics/ics-inline-prerequisite";
+import { InlineInspectionSetup } from "./firewall-inline-inspection";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
@@ -31,12 +33,14 @@ export function DPIConfigSection({
   onSave, onSaveDraft,
   health,
   available,
+  inlineRequiredForEnforce,
 }: {
   config: DataPlaneConfig;
   revision: string;
   onSave: (update: (config: DataPlaneConfig) => DataPlaneConfig) => Promise<ConfigWriteResult<DataPlaneConfig>>;
   onSaveDraft: (base: ConfigBase, config: DataPlaneConfig) => Promise<ApiResult<DataPlaneConfig> | null>;
   available: boolean;
+  inlineRequiredForEnforce: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
 }) {
@@ -48,6 +52,7 @@ export function DPIConfigSection({
   const [showProtoModal, setShowProtoModal] = useState(false);
   const [showExclModal, setShowExclModal] = useState(false);
   const [showICSConfigModal, setShowICSConfigModal] = useState(false);
+  const [needsInline, setNeedsInline] = useState(false);
   const canEdit = isAdmin();
   const dpiOn = cfg.dpiEnabled ?? false;
   const dpiMode = cfg.dpiMode ?? "";
@@ -57,6 +62,37 @@ export function DPIConfigSection({
   const unsupportedICSKeys = Object.keys(icsProtos).filter(
     (key) => !ICS_DPI_PROTOCOLS.some((protocol) => protocol.key === key),
   );
+
+  const nonDefault = dpiOn || (dpiMode !== "" && dpiMode !== "monitor") ||
+    Object.entries(protos).some(([key, value]) => value !== true || !IT_PROTOCOLS.some(p => p.key === key)) ||
+    Object.values(icsProtos).some(value => value !== true) || unsupportedICSKeys.length > 0 ||
+    Object.entries(cfg.dpiIcsParsing ?? {}).some(([key, value]) => value !== "tolerant" || !ICS_DPI_PROTOCOLS.some(p => p.key === key)) || exclusions.length > 0 ||
+    !!cfg.nfqueueGroup || !!cfg.nflogGroup;
+  const [disclosure, setDisclosure] = useState<{ revision: string; open: boolean } | null>(null);
+  const expanded = disclosure?.revision === revision ? disclosure.open : nonDefault;
+  useEffect(() => {
+    function openSetup() {
+      setDisclosure({ revision, open: true });
+      requestAnimationFrame(() => document.getElementById("inline-inspection")?.scrollIntoView());
+    }
+    function reveal() {
+      if (window.location.hash === "#inline-inspection") openSetup();
+    }
+    function followSetupLink(event: MouseEvent) {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      const target = new URL(anchor.href);
+      // Re-clicking the current hash emits no hashchange event.
+      if (target.pathname === window.location.pathname && target.hash === "#inline-inspection") openSetup();
+    }
+    reveal();
+    window.addEventListener("hashchange", reveal);
+    document.addEventListener("click", followSetupLink);
+    return () => {
+      window.removeEventListener("hashchange", reveal);
+      document.removeEventListener("click", followSetupLink);
+    };
+  }, [revision]);
 
   const enabledProtoCount = IT_PROTOCOLS.filter(
     (p) => protos[p.key] !== false,
@@ -87,6 +123,9 @@ export function DPIConfigSection({
   }
 
   function setMode(mode: ICSModeSelection) {
+    const missingInline = mode === "enforce" && !cfg.nfqueueGroup;
+    setNeedsInline(missingInline);
+    if (missingInline && inlineRequiredForEnforce) return;
     save(current => ({ ...current, dpiMode: mode }));
   }
 
@@ -113,7 +152,7 @@ export function DPIConfigSection({
   return (
     <>
       <Card padding="md" className="mt-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-(--text)">
               Deep Packet Inspection
@@ -151,8 +190,8 @@ export function DPIConfigSection({
                 />
               </button>
             )}
-            <StatusBadge variant={dpiOn ? "success" : "neutral"} dot>
-              {dpiOn ? "Enabled" : "Disabled"}
+            <StatusBadge variant={available && dpiOn ? "success" : "neutral"} dot>
+              {!available ? "Unknown" : dpiOn ? "Enabled" : "Disabled"}
             </StatusBadge>
           </div>
         </div>
@@ -163,7 +202,12 @@ export function DPIConfigSection({
           </div>
         )}
 
-        {dpiOn && (
+        <div className="mt-3"><IEC104HealthIndicator health={health?.iec104Enforcement} /></div>
+        <button type="button" aria-expanded={expanded} aria-controls="dpi-settings" onClick={() => setDisclosure({ revision, open: !expanded })}
+          className="mt-3 rounded-xs border bg-(--surface2) px-2.5 py-1 text-xs text-(--text)">
+          DPI settings{unsupportedICSKeys.length > 0 ? " · unsupported settings" : nonDefault ? " · saved settings" : ""}
+        </button>
+        <div id="dpi-settings" hidden={!expanded}>
           <div className="mt-4 space-y-3">
             <div className="rounded-xs border bg-(--surface2) px-3 py-2">
               <div className="flex items-center justify-between">
@@ -173,18 +217,23 @@ export function DPIConfigSection({
                   </span>
                   <InfoTip label="Monitor rules observe independently and never admit or block. Other enforcing rules and scopes still apply. Monitoring does not start learning." />
                 </div>
-                {canEdit && <ICSModeSelect label="ICS DPI Mode" value={dpiMode} onChange={setMode} disabled={saving || !available} />}
+                {canEdit && <ICSModeSelect label="ICS DPI Mode" value={dpiMode} onChange={setMode} disabled={saving || !available}
+                  inlineConfigured={available ? !!cfg.nfqueueGroup : undefined} />}
               </div>
               <p className="mt-1 text-[10px] text-(--text-dim)">
                 Candidate {formatICSMode(dpiMode, undefined).label} — commit to apply. Per-rule overrides take precedence.
               </p>
+              {needsInline && !cfg.nfqueueGroup && dpiMode !== "enforce" && <ICSInlinePrerequisite configured={available ? false : undefined} />}
             </div>
+
+            {canEdit && <InlineInspectionSetup config={cfg} revision={revision} available={available}
+              onSave={(base, config) => save(() => config, base)} />}
 
             <div className="rounded-xs border bg-(--surface2) px-3 py-2">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-medium text-(--text)">
-                    ICS Protocol Decoders
+                    Industrial protocols
                   </span>
                   <span className="ml-2 text-[10px] text-(--text-muted)">
                     {enabledICSCount}/{ICS_DPI_PROTOCOLS.length} enabled
@@ -226,16 +275,13 @@ export function DPIConfigSection({
                   </span>
                 ))}
               </div>
-              <div className="mt-2">
-                <IEC104HealthIndicator health={health?.iec104Enforcement} />
-              </div>
             </div>
 
             <div className="rounded-xs border bg-(--surface2) px-3 py-2">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-medium text-(--text)">
-                    IT Protocol Decoders
+                    Network protocols
                   </span>
                   <span className="ml-2 text-[10px] text-(--text-muted)">
                     {enabledProtoCount}/{IT_PROTOCOLS.length} enabled
@@ -323,7 +369,7 @@ export function DPIConfigSection({
               metadata only (SNI, JA3) — full interception is planned.
             </div>
           </div>
-        )}
+        </div>
       </Card>
 
       {showProtoModal && (

@@ -29,8 +29,6 @@ export interface BuiltIface {
   fullAddrs: string[];
   state: "up" | "down";
   zone: string;
-  rx: string;
-  tx: string;
   vlan: number | null;
 }
 
@@ -98,8 +96,6 @@ export type TopoNodeData = {
   fullAddrs?: string[];
   hosts?: number;
   flows?: number;
-  rx?: string;
-  tx?: string;
   vlan?: number | null;
   desc?: string;
 };
@@ -468,32 +464,15 @@ export async function buildTopology(): Promise<TopoResult | null> {
     }
   }
 
-  const zoneFlowCount: Record<string, { rx: number; tx: number }> = {};
-  for (const fl of flows) {
-    for (const [zn, sub] of Object.entries(zoneSubnet)) {
-      if (fl.srcIp && ipInCidr(fl.srcIp, sub)) {
-        (zoneFlowCount[zn] ??= { rx: 0, tx: 0 }).tx += fl.eventCount || 1;
-      }
-      if (fl.dstIp && ipInCidr(fl.dstIp, sub)) {
-        (zoneFlowCount[zn] ??= { rx: 0, tx: 0 }).rx += fl.eventCount || 1;
-      }
-    }
-  }
-
   const builtIfaces: BuiltIface[] = ((ifaces as Interface[]) || []).map((ifc) => {
     const st = runtimeFor(ifc, ifaceState);
     const address = interfaceAddresses(ifc, ifaceState);
-    const zfc = ifc.zone ? zoneFlowCount[ifc.zone] : undefined;
-    const rxStr = zfc ? `${zfc.rx} pkts` : "0 pkts";
-    const txStr = zfc ? `${zfc.tx} pkts` : "0 pkts";
     return {
       name: ifc.device || ifc.name,
       address,
       fullAddrs: (address.source === "config" ? ifc.addresses : st?.addrs) || [],
       state: st?.up !== false ? "up" : "down",
       zone: ifc.zone || "\u2014",
-      rx: rxStr,
-      tx: txStr,
       vlan: ifc.vlanId || null,
     };
   });
@@ -641,8 +620,6 @@ export async function buildTopology(): Promise<TopoResult | null> {
       ...zoneAddresses[name],
       hosts,
       flows: flCount,
-      rx: "\u2014",
-      tx: "\u2014",
       vlan: ifc?.vlanId || null,
       desc: z.description || z.alias || "",
     };

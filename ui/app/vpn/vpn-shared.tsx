@@ -140,12 +140,14 @@ export function hasLikelyPEM(v: unknown): boolean {
 export function PEMField({
   title,
   tip,
+  configured,
   value,
   disabled,
   onChange,
 }: {
   title: string;
   tip?: string;
+  configured?: boolean;
   value: string;
   disabled: boolean;
   onChange: (next: string) => void;
@@ -164,17 +166,20 @@ export function PEMField({
             disabled={disabled}
             className="hidden"
             onChange={async (e) => {
-              const f = e.target.files?.[0];
+              const input = e.currentTarget;
+              const f = input.files?.[0];
               if (!f) return;
               const text = await f.text();
               onChange(text);
-              e.currentTarget.value = "";
+              input.value = "";
             }}
           />
           Upload
         </label>
       </div>
+      {configured && <p className="mt-2 text-xs text-(--text-muted)">{title} configured — enter or upload a replacement; leave blank to keep it.</p>}
       <textarea
+        aria-label={title}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}

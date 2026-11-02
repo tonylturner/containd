@@ -95,6 +95,13 @@ async function confirmRevoke(page: Page) {
   await dialog.getByRole("button", { name: "Revoke", exact: true }).click();
 }
 
+async function confirmCreate(page: Page) {
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Create client credential?" });
+  await expect(dialog).toContainText("independent of Save");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+}
+
 test("lists credential identity, dates and revoked state without mutations", async ({ page }) => {
   const server = await openClients(page);
   await expect(row(page)).toContainText(active.id);
@@ -109,7 +116,7 @@ test("lists credential identity, dates and revoked state without mutations", asy
 test("creates and displays the returned credential", async ({ page }) => {
   const server = await openClients(page);
   await page.getByRole("textbox", { name: "Client name" }).fill("engineer");
-  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await confirmCreate(page);
   await expect(row(page, "engineer")).toContainText(`${active.issuer}:03`);
   await expect(page.getByRole("textbox", { name: "Client name" })).toHaveValue("");
   expect(server.writes).toEqual([{ path: prefix, body: { name: "engineer" } }]);
@@ -120,7 +127,7 @@ for (const status of [400, 409]) {
     const server = await openClients(page);
     server.createStatus = status;
     await page.getByRole("textbox", { name: "Client name" }).fill("operator");
-    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await confirmCreate(page);
     await expect(page.getByRole("region", { name: "OpenVPN client credentials" }).getByRole("alert")).toHaveText(
       status === 400 ? "invalid client name" : "client name already issued",
     );

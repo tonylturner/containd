@@ -4,6 +4,12 @@ import type { FirewallRule } from "../lib/api";
 
 // Headless page tests for the IEC 104 UI against a mocked management API.
 
+async function showAdvancedSelectors(page: Page) {
+  const button = page.getByRole("button", { name: "Advanced protocol fields", exact: true });
+  if (await button.getAttribute("aria-expanded") !== "true") await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+}
+
 const adminUser = { id: "admin-1", username: "containd", role: "admin" };
 
 const iecRules = [
@@ -209,6 +215,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   await expect(page.getByText("CA 1 IOA 2001")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByText("Write-only", { exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder("3, 16")).toHaveCount(0);
   await expect(page.getByPlaceholder("2001, 65536-65567")).toHaveValue("2001");
@@ -242,6 +249,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
     },
   });
   await page.getByRole("button", { name: "Edit" }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("2");
   await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("31");
   await page.getByLabel("Command states", { exact: true }).fill("");
@@ -250,6 +258,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1].body).toMatchObject({ ics: { commandStates: null, commandQualifiers: null } });
   await page.getByRole("button", { name: "Edit" }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("");
   expect(errors).toEqual([]);
@@ -262,6 +271,7 @@ test("IEC editor rejects command predicate domains before saving and explains st
   await page.goto("/ics");
   await loaded;
   await page.getByRole("button", { name: "Edit" }).click();
+  await showAdvancedSelectors(page);
   for (const [types, state, qualifier, error] of [
     ["", "1", "0", "require explicit Type IDs"],
     ["48", "", "0", "require explicit Type IDs"],
@@ -322,7 +332,7 @@ test("client navigation keeps verified page content visible while revalidating t
     await expect(
       page
         .getByRole("main", { name: "Events" })
-        .getByText(/Use Events for raw telemetry and service activity/),
+        .getByText(/Use Events for activity records and service activity/),
     ).toBeVisible();
     await expect(page.getByText("Checking session...")).toHaveCount(0);
   } finally {
@@ -335,6 +345,7 @@ test("ICS editor refuses a broadcast CA before saving", async ({ page }) => {
   await mockAPI(page, writes);
   await page.goto("/ics");
   await page.getByRole("button", { name: "Edit" }).click();
+  await showAdvancedSelectors(page);
   await page.getByPlaceholder("1", { exact: true }).fill("65535");
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect(page.getByText("CA 65535 is the broadcast address")).toBeVisible();
@@ -355,6 +366,15 @@ test("Events shows decision, verdict and reset evidence and filters by session",
   await expect(page.getByText("IEC 104 packets dropped")).toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
   await expect(page.getByText(`Session ${session} ×`)).toBeVisible();
+  await page.getByRole("button", { name: "Inspect event", exact: true }).first().click();
+  const message = page.locator("details").filter({ has: page.getByText("Message and session details", { exact: true }) }).first();
+  await message.locator("summary").click();
+  await expect(message.getByText(session, { exact: true })).toBeVisible();
+  const attributes = page.locator("details").filter({ has: page.getByText("Event attributes (JSON)", { exact: true }) }).first();
+  await expect(attributes.locator("pre")).not.toBeVisible();
+  await attributes.locator("summary").click();
+  await expect(attributes.locator("pre")).toBeVisible();
+  await expect(attributes.locator("pre")).toContainText(session);
   expect(errors).toEqual([]);
 });
 
@@ -391,7 +411,7 @@ test("Firewall DPI section lists the IEC 104 decoder as enabled when unset", asy
   await mockAPI(page, []);
   const errors = trackErrors(page);
   await page.goto("/firewall");
-  const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
+  const decoders = page.getByText("Industrial protocols").locator("xpath=../../..");
   await expect(decoders.getByText("4/4 enabled")).toBeVisible();
   await expect(decoders.getByText("IEC 60870-5-104", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
@@ -402,17 +422,24 @@ for (const command of [false, true]) {
     const writes: Array<{ method: string; path: string; body: unknown }> = [];
     await mockAPI(page, writes);
     await page.goto("/firewall");
-    await page.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
-    await page.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
-    await page.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
-    await expect(page.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
-    await page.getByPlaceholder("46, 100").fill(command ? "45" : "100");
-    await page.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
+    const disclosure = page.getByRole("button", { name: "Create rule", exact: true })
+      .and(page.locator('[aria-controls="create-rule-panel"]'));
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    const form = page.locator("#create-rule-panel");
+    await form.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
+    await form.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
+    await form.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
+    await expect(form.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
+    await form.getByPlaceholder("46, 100").fill(command ? "45" : "100");
+    await form.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
     if (command) {
-      await page.getByLabel("Command states", { exact: true }).fill("0");
-      await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
+      await showAdvancedSelectors(page);
+      await form.getByLabel("Command states", { exact: true }).fill("0");
+      await form.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
     }
-    await page.getByRole("button", { name: "Create rule" }).click();
+    await form.getByRole("button", { name: "Create rule", exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0].method).toBe("POST");
     expect((writes[0].body as { ics: unknown }).ics).toEqual({
@@ -429,7 +456,7 @@ test("Turning the IEC 104 decoder off saves an explicit false", async ({ page })
   const writes: Array<{ method: string; path: string; body: unknown }> = [];
   await mockAPI(page, writes);
   await page.goto("/firewall");
-  const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
+  const decoders = page.getByText("Industrial protocols").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
   await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -447,7 +474,7 @@ test("A rejected decoder change is reverted and its reason shown", async ({ page
   const reason = "iec104 enforce requires the iec104 decoder";
   await mockAPI(page, writes, reason);
   await page.goto("/firewall");
-  const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
+  const decoders = page.getByText("Industrial protocols").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
   await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -478,6 +505,8 @@ test("Events sends edited filters before limiting and loads older evidence with 
   expect(requests[requests.length - 1]?.searchParams.get("cursor")).toBe("older");
   expect(requests[requests.length - 1]?.searchParams.get("verdict")).toBe("drop_failed");
   await page.getByLabel("Session ID", { exact: true }).fill("unavailable");
+  await expect(page.getByText("Traffic records unavailable. Check filters and retry with Refresh.")).toBeVisible();
+  await page.getByText("Technical details", { exact: true }).click();
   await expect(page.getByText(/Failed to load events/)).toBeVisible();
   await expect(page.getByText("IEC 104 APDU denied")).not.toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).not.toBeVisible();

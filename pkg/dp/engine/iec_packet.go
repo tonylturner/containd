@@ -97,7 +97,7 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 			// engine finds no envelope for it: fail closed rather than let
 			// it through uninspected.
 			e.recordPacketStats(pkt, state)
-			countIECAbort(abortFailClose)
+			t.countAbort(abortFailClose)
 			t.health.fault(faultEnvelope, "nft steering and the engine envelope disagree")
 			return capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}, true
 		}
@@ -260,7 +260,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	// The bound counts tuple keys; a retained tuple reuses its existing key.
 	if prev == nil && len(t.sessions) >= iecMaxSessions {
 		if mode == "enforce" {
-			countIECAbort(abortBound)
+			t.countAbort(abortBound)
 			return dropped(reasonIECFailClose)
 		}
 		// Monitor is fail open when observation capacity is exhausted. Do not
@@ -277,7 +277,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	}
 	if mode == "enforce" && !t.health.injectorReady() {
 		// No session can be reset: none may start.
-		countIECAbort(abortInjector)
+		t.countAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
 	n := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
@@ -301,7 +301,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, state *flow.State, now time.Time) iecResult {
 	if len(t.sessions) >= iecMaxSessions {
 		// Unobserved enforce traffic must not bypass the shared table bound.
-		countIECAbort(abortBound)
+		t.countAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
 	s := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}

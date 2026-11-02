@@ -26,6 +26,7 @@ type InterfaceOption = {
 
 type Props = {
   canEdit: boolean;
+  canSave: boolean;
   cfg: NormalizedVPNConfig;
   setCfg: Dispatch<SetStateAction<NormalizedVPNConfig>>;
   text: (key: string, derived: string) => string;
@@ -52,6 +53,7 @@ type Props = {
 
 export function OpenVPNEditorCard({
   canEdit,
+  canSave,
   cfg,
   setCfg,
   text,
@@ -76,7 +78,7 @@ export function OpenVPNEditorCard({
   revokeClient,
 }: Props) {
   return (
-    <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+    <div className="relative min-w-0 overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
       <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
       <div className="relative flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -95,14 +97,14 @@ export function OpenVPNEditorCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge tone={faulted || cfg.openvpn.enabled ? "warn" : "off"}>
-            {faulted ? "faulted" : cfg.openvpn.enabled ? "enabled" : "disabled"}
+          <Badge tone={faulted ? "warn" : !canSave ? "info" : cfg.openvpn.enabled ? "warn" : "off"}>
+            {faulted ? "faulted" : !canSave ? "Unknown" : cfg.openvpn.enabled ? "enabled" : "disabled"}
           </Badge>
           <Badge tone={svcStatus?.openvpn_installed ? "info" : "off"}>
-            {svcStatus?.openvpn_installed ? "installed" : "not installed"}
+            {svcStatus?.openvpn_installed === undefined ? "installation unknown" : svcStatus.openvpn_installed ? "installed" : "not installed"}
           </Badge>
           <Badge tone={svcStatus?.openvpn_running ? "ok" : "off"}>
-            {svcStatus?.openvpn_running ? "running" : "stopped"}
+            {svcStatus?.openvpn_running === undefined ? "running state unknown" : svcStatus.openvpn_running ? "running" : "stopped"}
           </Badge>
         </div>
       </div>
@@ -112,7 +114,7 @@ export function OpenVPNEditorCard({
           <input
             type="checkbox"
             checked={cfg.openvpn.enabled ?? false}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, enabled: e.target.checked } }))}
             className="h-4 w-4"
           />
@@ -125,7 +127,7 @@ export function OpenVPNEditorCard({
           <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
           <select
             value={cfg.openvpn.mode ?? "client"}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, mode: e.target.value } }))}
             className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
@@ -147,7 +149,7 @@ export function OpenVPNEditorCard({
                 <input
                   type="checkbox"
                   checked={!!cfg.openvpn.managed}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => {
                     const enabled = e.target.checked;
                     setCfg((c) => ({
@@ -175,7 +177,7 @@ export function OpenVPNEditorCard({
                     </label>
                     <input
                       value={cfg.openvpn.managed.remote ?? ""}
-                      disabled={!canEdit}
+                      disabled={!canEdit || !canSave}
                       onChange={(e) =>
                         setCfg((c) => ({
                           ...c,
@@ -194,7 +196,7 @@ export function OpenVPNEditorCard({
                     <input
                       type="number"
                       value={cfg.openvpn.managed.port ?? 1194}
-                      disabled={!canEdit}
+                      disabled={!canEdit || !canSave}
                       onChange={(e) =>
                         setCfg((c) => ({
                           ...c,
@@ -214,7 +216,7 @@ export function OpenVPNEditorCard({
                     <label className="text-xs uppercase tracking-wide text-(--text-muted)">Protocol</label>
                     <select
                       value={cfg.openvpn.managed.proto ?? "udp"}
-                      disabled={!canEdit}
+                      disabled={!canEdit || !canSave}
                       onChange={(e) =>
                         setCfg((c) => ({
                           ...c,
@@ -238,7 +240,7 @@ export function OpenVPNEditorCard({
                     <div className="grid gap-2 md:grid-cols-2">
                       <input
                         value={cfg.openvpn.managed.username ?? ""}
-                        disabled={!canEdit}
+                        disabled={!canEdit || !canSave}
                         onChange={(e) =>
                           setCfg((c) => ({
                             ...c,
@@ -254,7 +256,7 @@ export function OpenVPNEditorCard({
                       <input
                         type="password"
                         value={cfg.openvpn.managed.password ?? ""}
-                        disabled={!canEdit}
+                        disabled={!canEdit || !canSave}
                         onChange={(e) =>
                           setCfg((c) => ({
                             ...c,
@@ -265,17 +267,20 @@ export function OpenVPNEditorCard({
                           }))
                         }
                         className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                        placeholder="password"
+                        aria-label="OpenVPN password"
+                        placeholder={cfg.openvpn.managed.passwordConfigured ? "Password configured — enter to replace" : "password"}
                       />
                     </div>
                   </div>
                 </div>
 
+                {cfg.openvpn.managed.passwordConfigured && <p className="text-xs text-(--text-muted)">Password configured — leave blank to keep it.</p>}
                 <PEMField
+                  configured={cfg.openvpn.managed.caConfigured}
                   title="CA (PEM)"
                   tip="Root CA certificate in PEM format."
                   value={cfg.openvpn.managed.ca ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(v) =>
                     setCfg((c) => ({
                       ...c,
@@ -284,10 +289,11 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <PEMField
+                  configured={cfg.openvpn.managed.certConfigured}
                   title="Client Cert (PEM)"
                   tip="Client certificate for this appliance in PEM format."
                   value={cfg.openvpn.managed.cert ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(v) =>
                     setCfg((c) => ({
                       ...c,
@@ -296,10 +302,11 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <PEMField
+                  configured={cfg.openvpn.managed.keyConfigured}
                   title="Client Key (PEM)"
                   tip="Client private key in PEM format."
                   value={cfg.openvpn.managed.key ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(v) =>
                     setCfg((c) => ({
                       ...c,
@@ -308,12 +315,12 @@ export function OpenVPNEditorCard({
                   }
                 />
                 <div className="text-xs text-(--text-muted)">
-                  This is stored in the appliance config for now; secret encryption/redaction is tracked as a follow-up.
+                  Stored material is never returned by the VPN API. Leave replacement fields blank to keep existing material; Save stages changes for commit.
                 </div>
               </div>
             ) : (
-              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
-                <summary className="cursor-pointer text-sm text-(--text)">Advanced profile path</summary>
+              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3" open={Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled}>
+                <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced profile path</span>{(Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
                 <div className="mt-3">
                   <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Config Path
@@ -321,7 +328,7 @@ export function OpenVPNEditorCard({
                   </label>
                   <input
                     value={cfg.openvpn.configPath ?? ""}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, configPath: e.target.value } }))}
                     className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="/data/openvpn/profiles/client.ovpn"
@@ -330,7 +337,8 @@ export function OpenVPNEditorCard({
               </details>
             )}
 
-            <div className="mt-3 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
+            <details className="mt-3 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
+              <summary className="cursor-pointer">Advanced profile import</summary>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-(--text)">
                   Import profile (advanced)
@@ -340,7 +348,7 @@ export function OpenVPNEditorCard({
                   <input
                     type="file"
                     accept=".ovpn,.conf,.txt"
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
@@ -351,7 +359,7 @@ export function OpenVPNEditorCard({
                   {uploadState === "uploading" ? "Uploading…" : "Choose file"}
                 </label>
               </div>
-            </div>
+            </details>
           </div>
         ) : cfg.openvpn.mode === "server" ? (
           <div className="rounded-xs border bg-black/20 p-3">
@@ -359,7 +367,7 @@ export function OpenVPNEditorCard({
             <div className="mt-3 grid gap-3">
               <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
                 Enabling OpenVPN server automatically opens the listen port on the configured listen zone or interfaces
-                (default WAN) via nftables input so clients can connect.
+                (default WAN) so clients can connect after these settings are applied.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
@@ -367,7 +375,7 @@ export function OpenVPNEditorCard({
                   <input
                     type="number"
                     value={cfg.openvpn.server?.listenPort ?? 1194}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setCfg((c) => ({
                         ...c,
@@ -384,7 +392,7 @@ export function OpenVPNEditorCard({
                   <label className="text-xs uppercase tracking-wide text-(--text-muted)">Protocol</label>
                   <select
                     value={cfg.openvpn.server?.proto ?? "udp"}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setCfg((c) => ({
                         ...c,
@@ -404,7 +412,7 @@ export function OpenVPNEditorCard({
                   </label>
                   <input
                     value={cfg.openvpn.server?.tunnelCIDR ?? "10.9.0.0/24"}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setCfg((c) => ({
                         ...c,
@@ -427,7 +435,7 @@ export function OpenVPNEditorCard({
                   </label>
                   <select
                     value={cfg.openvpn.server?.listenZone ?? ""}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setCfg((c) => ({
                         ...c,
@@ -464,7 +472,7 @@ export function OpenVPNEditorCard({
                             <input
                               type="checkbox"
                               checked={active}
-                              disabled={!canEdit}
+                              disabled={!canEdit || !canSave}
                               onChange={(e) => {
                                 const next = new Set(cfg.openvpn.server?.listenInterfaces ?? []);
                                 if (e.target.checked) {
@@ -504,7 +512,7 @@ export function OpenVPNEditorCard({
                 </label>
                 <input
                   value={cfg.openvpn.server?.publicEndpoint ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -523,7 +531,7 @@ export function OpenVPNEditorCard({
                 <input
                   type="checkbox"
                   checked={cfg.openvpn.server?.clientToClient ?? false}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -546,7 +554,7 @@ export function OpenVPNEditorCard({
                   </label>
                   <input
                     value={text("pushDNS", (cfg.openvpn.server?.pushDNS ?? []).join(", "))}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => setText("pushDNS", e.target.value)}
                     className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="1.1.1.1, 8.8.8.8"
@@ -559,7 +567,7 @@ export function OpenVPNEditorCard({
                   </label>
                   <input
                     value={text("pushRoutes", (cfg.openvpn.server?.pushRoutes ?? []).join(", "))}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => setText("pushRoutes", e.target.value)}
                     className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="192.168.0.0/24, 10.0.0.0/8"
@@ -568,12 +576,13 @@ export function OpenVPNEditorCard({
               </div>
 
               {canEdit && <section aria-label="OpenVPN client credentials" className="rounded-xs border bg-(--surface) p-3">
+                <p className="mb-3 text-xs text-(--text-muted)">Credential actions use the active server immediately, independently of Save. Revocation restarts the server; all clients reconnect.</p>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-(--text)">
                     Client credentials
                     <InfoTip label="Issues credentials immediately using the active server, not staged settings. Downloads are read-only." />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={newClientName}
                       aria-label="Client name"
@@ -584,7 +593,7 @@ export function OpenVPNEditorCard({
                     />
                     <button
                       onClick={() => void createClient()}
-                      disabled={clientBusy || !newClientName.trim()}
+                      disabled={!canSave || clientBusy || !newClientName.trim()}
                       className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                     >
                       Create
@@ -621,7 +630,7 @@ export function OpenVPNEditorCard({
                           </button>
                           {(!credential.revokedAt || !revocationsApplied) && <button
                             onClick={() => revokeClient(credential)}
-                            disabled={clientBusy}
+                            disabled={!canSave || clientBusy}
                             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-red-400 transition-ui disabled:opacity-50"
                           >
                             {pendingRevocations[credential.id] ? "Retry apply" : credential.revokedAt ? "Apply revocation" : "Revoke"}

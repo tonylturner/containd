@@ -48,14 +48,14 @@ The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 ## Monitoring Availability
 
 Flows, protocol/top-talker statistics, anomalies, learner evidence and suggestion
-generation/staging, signatures and matches, interface runtime state and simulation
+generation/staging, signatures and matches, interface runtime state
 return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
 when the required engine capability is missing or its call fails. The same
-convention applies to anomaly clears, learner dataset deletion, signature writes
-and simulation control: unavailable operations never report a successful clear or change.
+convention applies to anomaly clears, learner dataset deletion and signature writes:
+unavailable operations never report a successful clear or change. Simulation
+preference persistence and engine delivery are reported separately below.
 A reachable backend with no observations still returns `200` with an empty
-list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulation
-returns `200` with `running: false`.
+list (learner pages use `{items: [], nextCursor?}`).
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
 ## WireGuard Address Families
@@ -64,6 +64,27 @@ WireGuard supports IPv4-only tunnel addresses (`addressCIDR`), peer `allowedIPs`
 and endpoint addresses. Endpoint hostnames must resolve to IPv4 at runtime.
 IPv6 addresses in these fields are rejected when saving configuration, even
 while WireGuard is disabled. Other IPv6 interface and firewall features are unchanged.
+
+## Simulation
+
+`GET /api/v1/simulation` returns `preference` (`auto`, `on`, `off`), `running`,
+`loops` (completed manifest loops), `captureSet`, `capture`, `error`, and `reason`.
+`POST /api/v1/simulation` (admin) accepts `{"action":"start"}` or
+`{"action":"stop"}`, saves `on` or `off`, reconciles delivery to the engine,
+and returns the same status shape. The saved preference persists even if the
+engine is unreachable: delivery failures return HTTP `200` with `error` set, so
+check `error` and `reason`, not just the HTTP status. A failed preference write
+returns HTTP `500`.
+A stopped `auto` reports `reason: "real traffic observed"`; delivery failure
+reports `engine unreachable`. A replay asset fault reports **demo captures
+unavailable**. Start/Stop audit actions are `simulation.start` / `simulation.stop`,
+with target `demo`.
+
+Replay uses recorded captures through detached real decoders, not generated
+random events. `CONTAIND_DPI_MOCK` enables inspect-all only, not replay.
+`CONTAIND_DEMO_CAPTURES` selects the capture directory. See
+[recorded demo replay](services.md#recorded-demo-replay) for defaults, topology,
+pacing and isolation from real counters, learner and syslog.
 
 ## Security Conduits
 
@@ -80,8 +101,9 @@ verified enforcement. IDS is `enabled` or `disabled` globally, not full or parti
 conduit coverage. Syslog and AV settings likewise do not establish per-conduit
 logging or scanning. Conventional encrypted-service ports are a heuristic only;
 `tlsEnforced` is false because this summary cannot enforce or verify TLS.
-`traffic` is nullable and currently always `null`: it is **not measured**, not
-zero percent of any baseline.
+`traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).
+Measured and recorded demo counts, coverage, and unavailable reasons follow the
+[telemetry contract](#retained-counter-history); there is no percent-of-baseline value.
 
 The topology's requirement checks show this provenance and explanation.
 Authentication is not inferred from zone names, and security-function verification
@@ -756,6 +778,70 @@ In combined `all` mode, the management `/metrics` serves these dataplane series
 from the shared process registry. For split `engine`/`mgmt` processes, scrape the
 engine listener's `/metrics` instead.
 
+## Retained Counter History
+
+`GET /api/v1/telemetry/series?metric=iface.rx_bytes&range=1h&origin=real&role=leaf&group=role`
+is available to viewers. Required parameters are `metric`, `range` (`1h`, `24h`,
+`30d`) and `origin` (`real`, `demo`). Resolution is respectively 10, 60 or 900
+seconds. When grouped members have unequal observation durations, the grouped
+point is partial and omits `d`: its count is known but no aggregate rate is
+claimed. Members with values must share the same `d` to expose a grouped rate.
+Optional filters use the metric's dimension keys; `group` sums members
+by one key. `group=zone` on interface metrics excludes parent interfaces.
+
+| Metric family | Dimension keys |
+|---|---|
+| `iface.rx_bytes`, `iface.tx_bytes`, `iface.rx_packets`, `iface.tx_packets` | `interface`, `zone`, `role` |
+| `conduit.bytes`, `conduit.packets` | `from`, `to` |
+| `proto.bytes`, `proto.packets` | `protocol` |
+| `events.total` | `source` (`engine`, `services`) |
+| `events.class` | `source`, `class` (`ids_alert`, `modbus_write`, `av_detection`, `av_block`) |
+| `service.events`, `service.errors` | `service` |
+| `av.scans`, `av.scan_errors`, `av.detections` | none |
+
+Points are dense, oldest first, from `from` inclusive to `to` exclusive. The
+current open bucket is excluded. `v` is an exact decimal uint64 string and `d`
+is observation seconds: rates are `v/d`. `q` is `observed`, `partial`, `reset`
+or `gap`; gap omits `v` and `d`. Samples run every 10 seconds at a fixed
+200 ms offset from wall-clock boundaries. Samples within ±2 seconds of a
+scheduled tick belong to that tick's slot; late samples use the preceding slot.
+Consecutive slots are observed when both samples are on time and monotonic
+elapsed time is within 10 ±2 seconds; `d` is then exactly 10.
+Other intervals up to 15 minutes place their delta in the bucket immediately
+before the ending slot, leaving intervening buckets as gaps. Their `d` is
+monotonic elapsed seconds rounded to the nearest integer, minimum 1; counts are
+never interpolated. A second sample in the same slot, or a positive elapsed
+interval below one second, is skipped without replacing the baseline.
+Longer intervals establish a new baseline. Counter generation
+changes are resets; ambiguous decreases and clock steps are gaps. Collector
+restart establishes new baselines, without deleting retained history.
+
+`realCovered` and `realActive` persist once real observed coverage or nonzero
+activity exists. `collector` reports running/stalled/unavailable, its last
+successful sample, an error and decimal-string `droppedSeries`.
+`collector.unavailable` lists current source or per-series failures and their
+reasons, replaced each tick and omitted when empty. Entries are scoped to the
+requested metric and dimension filters before grouping. An engine outage
+applies to all engine-sourced metrics, but not service counters or events
+filtered to `source=services`. Retained history does not imply current
+availability. Admission is
+capped at 320 active series; refusals increment `droppedSeries`. `retainedFrom` marks retained coverage;
+older points are gaps. HTTP 400 rejects unknown or repeated parameters, 503
+reports unavailable storage, and 500 reports aggregation overflow.
+
+The dashboard's `eventStats` covers the last 24 hours of real events from both
+sources, with `windowSeconds: 86400` and `complete` only when every bucket was
+observed. Store failures return `eventStats: null` and `eventStatsError`.
+Conduit `traffic` reports `state: measured` with packets/bytes (decimal strings),
+a 3600-second window, `complete` and `coverage: routed`; `state: demo` has the
+same counts/window fields but `coverage: recorded`, meaning recorded demo
+traffic on an illustrative topology. Only a never-observed real pair may use
+demo, not a gapped pair. With no coverage it returns `state: none` (No traffic
+recorded yet). `state: unavailable` carries a reason and outranks demo.
+Current conduit or engine outages override retained measured history; disabling enforcement returns `unavailable` with reason
+`enforcement disabled`. Its scope is routed traffic that passed policy, not bridged L2
+or AV/ICAP input-output gating; it is not a percentage of a baseline.
+
 ## Binary Runtime Environment
 
 These are binary environment names, not Compose interpolation inputs.
@@ -776,6 +862,7 @@ listener setting supplies a value.
 | `CONTAIND_CONFIG_DB` | `data/config.db` | Configuration SQLite database |
 | `CONTAIND_AUDIT_DB` | `data/audit.db` | Audit SQLite database |
 | `CONTAIND_USERS_DB` | `data/users.db` | Users SQLite database |
+| `CONTAIND_TELEMETRY_DB` | `data/telemetry.db` | Management retained counter history SQLite database; Compose uses `/data/telemetry.db` |
 | `CONTAIND_LAB_MODE` | Disabled | Lab authentication described above |
 | `CONTAIND_JWT_SECRET` | Unset | Set a unique secret, e.g. `openssl rand -hex 32` |
 | `CONTAIND_COOKIE_SECURE` | Automatic | Unset: Secure on HTTPS requests. `1` forces Secure; `0` disables it. Set `1` behind a TLS-terminating proxy. |
@@ -871,3 +958,19 @@ retention. The internal engine read is
 `GET /internal/inventory?section=iec104`; it uses the existing inventory handler.
 See [ICS DPI](ics-dpi.md#passive-iec-104-inventory) for UI and retention details
 and [OpenAPI](#openapi-specification) for the complete response schemas.
+
+## VPN configuration secrets
+
+`GET /services/vpn` and successful `POST /services/vpn` responses redact the
+WireGuard private key and managed OpenVPN CA, certificate, key and password.
+The `vpn` object returned by profile upload is redacted too.
+`wireguard.privateKeyConfigured` is always present. If `openvpn.managed` exists,
+its `caConfigured`, `certConfigured`, `keyConfigured` and `passwordConfigured`
+booleans are always present, including when false. These fields are read-only.
+
+`POST /services/vpn` retains the stored WireGuard private key when omitted or
+empty. Managed OpenVPN secrets are retained when omitted or empty only if both
+the existing and submitted `managed` objects exist. Omitting `managed` removes
+that object. Nonempty secrets replace stored values. The revision precondition
+is required and changes remain staged until commit. See
+[VPN services](services.md#vpn) for browser key generation and client templates.

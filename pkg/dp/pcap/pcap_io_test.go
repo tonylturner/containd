@@ -20,7 +20,7 @@ func makePCAPRecord(inclLen uint32, payload []byte) []byte {
 
 func TestReadPCAPPacketRejectsLengthAboveSnaplen(t *testing.T) {
 	data := makePCAPRecord(128, nil)
-	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
+	reader := &Reader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
 	_, _, _, err := reader.readRecord()
 	if err == nil {
 		t.Fatal("expected error for packet length above snaplen")
@@ -32,7 +32,7 @@ func TestReadPCAPPacketRejectsLengthAboveSnaplen(t *testing.T) {
 
 func TestReadPCAPPacketRejectsLengthAboveMaximum(t *testing.T) {
 	data := makePCAPRecord(maxPCAPRecordSize+1, nil)
-	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: maxPCAPRecordSize + 1}
+	reader := &Reader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: maxPCAPRecordSize + 1}
 	_, _, _, err := reader.readRecord()
 	if err == nil {
 		t.Fatal("expected error for packet length above max")
@@ -45,7 +45,7 @@ func TestReadPCAPPacketRejectsLengthAboveMaximum(t *testing.T) {
 func TestReadPCAPPacketAcceptsValidLength(t *testing.T) {
 	payload := []byte{1, 2, 3, 4}
 	data := makePCAPRecord(uint32(len(payload)), payload)
-	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
+	reader := &Reader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
 	_, got, _, err := reader.readRecord()
 	if err != nil {
 		t.Fatalf("readRecord() error = %v", err)

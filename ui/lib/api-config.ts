@@ -34,6 +34,12 @@ export const configAPI = {
   getCandidateConfig: () => getConfigJSON<ConfigBundle>("/api/v1/config/candidate", "object"),
   setCandidateConfig: (expectedRevision: string, cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg, expectedRevision),
+  validateConfig: (cfg: ConfigBundle) =>
+    postJSONResult<{ status: string }>("/api/v1/config/validate", cfg),
+  factoryReset: (expectedRevision: string) =>
+    postJSONResult<{ message: string; loggedOut: boolean; warnings: string[] }>(
+      "/api/v1/system/factory-reset", { confirm: "NUCLEAR" }, expectedRevision,
+    ),
   diffConfig: async () => {
     const snapshot = await getConfigJSON<ConfigDiff>("/api/v1/config/diff");
     const data = normalizeConfigDiff(snapshot?.data ?? null);

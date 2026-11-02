@@ -45,11 +45,73 @@ cannot shadow decisions. The check is conservative: coverage by several rules
 together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
-The firewall table displays configured order and provides move controls.
+The Firewall Rules page leads with enforcement and outbound status, then the
+rule table. Administrators can **Enable enforcement** or **Disable enforcement**
+from its status card after confirmation. This only stages the change; review the
+diff and use **Commit-confirmed** to apply it. Disabling on commit removes the
+installed ruleset. A staged direction replaces the toggle when candidate settings
+and live enforcement differ.
+On larger screens its seven columns are **Order**, **Description**,
+**Zones**, **Protocols**, **Action**, **Hits**, and **Actions**. On phones the same
+rows stack with labelled values, so each action, including the **Default**
+action, is readable without horizontal scrolling. The exact **ID** appears
+below the description. **Inspect rule** on each row opens its **Conditions**
+(CIDRs, identities, forwards and schedule), **ICS Filter** and exact selectors,
+full **Hits** counters, **Shadow matches**, **Log**, and exact matching values.
+Conditions, ICS mode, enabled logging and positive shadow counts have compact
+indicators even when details are closed. Coverage reasons, unsupported-rule
+warnings and counter-read failures stay visible without opening details. If a
+configuration refresh fails, retained rules remain inspectable while editing,
+deleting and reordering are disabled.
+
+One compact notes block above the rows shows counter availability and causes.
+Counter start times use local time; hover over a time for its exact value.
+**How rules are evaluated** explains precedence, counter resets and the limits
+of monitor estimates. For inactive enforcement, its **Technical details** keeps
+the exact counter response available.
+
+**Create rule** below the table reveals the creation form; closing and reopening
+it preserves unsaved edits. **Deep Packet Inspection** follows the form, with
+**DPI settings** open automatically for saved non-default settings, including
+exclusions or parsing overrides even when DPI is disabled. The generated
+configuration preview follows DPI; its warnings and errors remain visible,
+while **Advanced → Generated ruleset** exposes the low-level text on demand.
+Saving rules or DPI settings still stages candidate changes, not live protection.
+
+The firewall table displays configured order, with ↑/↓ controls beside each
+position number for admins. The arrows are disabled at the ends and during a
+move. Keyboard focus follows the moved rule; at an end it switches to the
+remaining enabled direction. **Move to…** also supports top, bottom, before
+or after another rule. Moves stage changes; commit to apply them.
+
+A **Default** row stays last, even with no configured rules. It applies
+to any zone and protocol when no enforcing `ALLOW`, `DENY` or `RESET` rule
+decides. Matching `TAG`, under-limit `RATE_LIMIT` and Monitor rules can fall
+through to this default. Its action comes from the
+same candidate revision as the listed rules: an empty or omitted action means
+`DENY`, `ALLOW` carries an unmatched-traffic warning in the description cell,
+and an unreadable or revision-mismatched default is shown as **unknown**, never assumed to deny.
+Admins can select **Change default**, choose `ALLOW`, `DENY` or
+**System default (DENY)** (the empty value), and confirm
+**Stage default**. `ALLOW` carries a strong warning that all unmatched traffic
+will be permitted. `DENY` can interrupt traffic without an explicit allow rule.
+Use **Commit-confirmed** after reviewing the diff. The editor preserves the
+rest of the candidate and uses its revision precondition; a conflict keeps the
+choice visible but requires Cancel, Refresh and review before saving again.
+View-only users cannot change it. This row has no delete or move controls.
+
 New rules default to the bottom; creation can instead select top, bottom,
 before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows
 an addition. CLI syntax is in [CLI](cli.md).
+
+The create and edit forms expose every source zone, destination zone and
+protocol as an editable row. **Add source zone**, **Add dest zone** and
+**Add protocol** append entries; each **Remove** affects only its own entry.
+Each protocol retains its own optional port or range. Empty zone lists mean
+any zone on that side; an empty protocol list means any protocol. Editing only
+description or logging preserves all lists. Changes use the same revision-checked
+rule payload and stage into the candidate, not the active policy.
 
 | Action | Decides | Effect |
 | --- | --- | --- |
@@ -96,6 +158,9 @@ the applied ruleset; logging need not be on. Every apply restarts the counters
 at zero, and the response says when (`since`). These are rule-path counters,
 not total connection traffic: established packets can use the admission fast
 path without incrementing an `ALLOW` counter, and ICS counters measure steering.
+When counters are unavailable, the firewall page shows the cause inline, not
+zero hits. Inactive firewall enforcement is explained directly; the exact
+engine response remains available under **Technical details**.
 
 ### Established connections and policy changes
 
@@ -174,8 +239,10 @@ nothing if none of its referenced candidate forwards can match. It is reported
 as a warning with its rule ID, the predicate (`identity`, `zone` with the
 `zones` concerned, `addressFamily`, or `forward`), the action and the effect, in:
 
-- The firewall page's nftables ruleset preview, which lists the candidate's
-  warnings.
+- The firewall page's **Generated firewall configuration (nftables)** preview,
+  which lists the candidate's warnings. Expand **Generated ruleset** for the
+  full low-level configuration. Runtime reasons and queue-ownership caveats
+  appear beside the preview.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset; any authenticated user
   reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.

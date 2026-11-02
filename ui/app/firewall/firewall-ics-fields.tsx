@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate, ICSPredicatePatch } from "../../lib/api";
@@ -17,7 +17,7 @@ import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils
 
 export function ICSPredicateFields({
   protocol, onProtocolChange,
-  mode, onModeChange, globalMode,
+  mode, onModeChange, globalMode, inlineConfigured, onSetupInline,
   functionCodes, onFunctionCodesChange,
   addresses, onAddressesChange,
   unitId, onUnitIdChange,
@@ -31,6 +31,8 @@ export function ICSPredicateFields({
   mode: ICSModeSelection; onModeChange: (v: ICSModeSelection) => void;
   /** The global DPI mode an empty rule mode inherits. */
   globalMode: string | undefined;
+  inlineConfigured?: boolean;
+  onSetupInline?: () => void;
   functionCodes: string; onFunctionCodesChange: (v: string) => void;
   addresses: string; onAddressesChange: (v: string) => void;
   unitId: string; onUnitIdChange: (v: string) => void;
@@ -43,6 +45,7 @@ export function ICSPredicateFields({
   const meta = icsProtoMeta(protocol);
   const selectorError = selectorFieldError(protocol, functionCodes, unitId, objectClasses);
   const [showHelp, setShowHelp] = useState(false);
+  const helpId = useId();
 
   return (
     <div className="mt-3 rounded-xs border bg-(--surface) p-4 space-y-3">
@@ -53,9 +56,12 @@ export function ICSPredicateFields({
             {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
           </select>
         </div>
-        {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} />}
+        {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} inlineConfigured={inlineConfigured} onSetupInline={onSetupInline} />}
         <div className="flex items-end">
           <button
+            type="button"
+            aria-expanded={showHelp}
+            aria-controls={helpId}
             onClick={() => setShowHelp(!showHelp)}
             className="rounded-xs border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
           >
@@ -64,8 +70,7 @@ export function ICSPredicateFields({
         </div>
       </div>
 
-      {showHelp && (
-        <div className="rounded-xs border border-blue-500/10 bg-blue-500/3 p-3 space-y-2">
+        <div id={helpId} hidden={!showHelp} className="rounded-xs border border-blue-500/10 bg-blue-500/3 p-3 space-y-2">
           <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
@@ -83,13 +88,13 @@ export function ICSPredicateFields({
             <div className="text-[10px] text-(--text-dim) border-t border-white/4 pt-2 mt-2">{meta.notes}</div>
           )}
         </div>
-      )}
 
       {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
       {protocol === "iec104" ? (
         <IEC104Fields draft={iec} onChange={onIecChange} />
       ) : (
         <>
+          <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.fcLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>

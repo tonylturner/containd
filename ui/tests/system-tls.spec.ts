@@ -179,6 +179,7 @@ async function openSettings(page: Page) {
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/system/tls");
   await page.goto("/system/settings/");
   await loaded;
+  await page.getByText("Certificate details", { exact: true }).click();
   return page.locator("section").filter({ hasText: "Management HTTPS" });
 }
 

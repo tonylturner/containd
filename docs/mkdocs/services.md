@@ -12,6 +12,89 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+The Services overview groups the existing routes by **Connectivity**, **Access**,
+**Inspection** and **Logs**. DNS, NTP and proxy software identities are available
+under **Troubleshooting** / **Service details**, not in their primary summaries.
+Operational history comes from retained telemetry, not service-status meter
+arrays. Overview charts show observed activity, including measured zero;
+absent observations are gaps, not zero. Service detail pages offer 1 hour,
+24 hours and 30 days. Rates divide bucket counts by observed seconds and are
+displayed per minute. Trends compare rates only across a continuous observed
+segment with at least two buckets. Partial buckets are dashed, counter resets
+have a diamond marker, and gaps break the chart. Collector failures remain
+visible and are never replaced by demo data. Individual pages lead with a compact
+**Configured** /
+**Running** / **Attention** / **Updated time** strip, then settings, then
+**Activity**. Configured describes the candidate editor, not live protection;
+Running uses a separate runtime observation. DHCP and Syslog do not report a
+separate running flag, so their strip leaves Running **Unknown**. WireGuard
+link state and remote ICAP readiness are shown separately in Activity, not
+reinterpreted as a process-running flag. Updated time
+is the service's reported render/check time, not a guarantee of freshness.
+
+**Troubleshooting** contains the **Service details** button for process IDs,
+paths and software metadata. The button works with Enter or Space and leaves
+focus on the button when closed. Fault causes remain outside disclosures.
+Inspection stays available when the configuration read fails: editing and
+**Save** are disabled, not troubleshooting or live-status refresh.
+Antivirus keeps **Scanned traffic** beside its enable and fail-policy settings;
+definition updates and VPN credential revocations remain immediate operations,
+separate from staging settings with **Save**.
+
+Service panels show **Unknown** when live status is unavailable; missing readings
+are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
+to request a new observation. **Service details** keeps process IDs, generated
+settings files and scanner metadata available without crowding the status summary.
+Antivirus **Scan-path details** retains listener counts and admission metadata;
+fault causes, the scanning outcome and fail policy remain visible. Syslog
+**Delivery details** and per-stream **Technical details** expose batching and exact
+stream positions.
+DHCP reports configuration-render counts, notes and errors inline in **Activity**,
+with issued addresses in **Active Leases**. Its status does not report process IDs,
+configuration-file or lease-file paths, so it has no separate troubleshooting
+expander.
+The antivirus status strip also summarizes the scan-path state and its traffic
+effect before settings. Syslog summarizes known telemetry loss, continuity gaps
+and audit forwarding failures/backlog there; per-stream totals are summed across
+destinations and sources, not unique lost records. Audit forwarding does not
+report a loss count, and missing progress remains **Unknown**. The collector
+acknowledgement caveat is a neutral note, not itself a delivery fault.
+**Advanced local scanner settings** and **Advanced remote scanner settings**
+retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
+peer JSON and profile import under **Advanced peer settings** and
+**Advanced profile import**; opening a disclosure does not change saved settings.
+Saved peers and customized scanner settings open automatically. DNS and proxy
+advanced options open for non-default values. DHCP keeps listen interfaces,
+gateway and pools beside enablement; its advanced options open for saved
+non-default lease, DNS, domain or reservation settings. Remote scanner
+settings also open whenever ICAP mode requires them. **Advanced profile path**
+opens for a saved OpenVPN path or when an enabled path-based client needs one.
+
+Dashboard's **No recent IDS/AV alerts** describes only the reported alert counts,
+not overall appliance health or protection. The dashboard does not observe live
+IPS protection state, so its IPS card always shows **Unknown**. Unknown service
+cards are visually distinct from disabled services. Rule counts are counts, not
+measured utilization; container memory bars require a reported positive memory
+limit and percentage. An unlimited container has no memory utilization gauge.
+The **Bind interfaces** checklist item is ready only when at least one interface
+is configured and every configured interface matches a reported network device,
+using its Device field or matching interface name. Logical interface counts alone
+do not establish readiness. Missing configuration or live device information
+leaves binding readiness **Unknown**.
+
+Syslog **Last check** records the latest forwarding check, including empty or
+failed batches, not successful delivery. Per-forwarder **Last sent** advances
+only when records are sent. NTP binary details distinguish **not found** (discovery
+reported no binary) from **Unknown** (no discovery result was reported).
+
+Deleting a reverse proxy site first changes local edits. **Save** stages the
+removal; review and **Commit** apply it. Saving alone does not remove a live site.
+
+In Diagnostics, temporary flow blocks match source IP, destination IP,
+destination service port and protocol, with any source port: they can affect
+multiple connections. When enforcement is off, open **Deployment details** for
+configuration and startup guidance. There is no enforcement switch on PCAP.
+
 ## Service faults
 
 An older stored service configuration that no longer passes validation is
@@ -62,7 +145,130 @@ Audit-write failure is logged and does not stop enforcement. Metrics expose
 a fault is not proof that a process or kernel interface has stopped.
 Successful later application clears the fault.
 
+## Operational charts
+
+Dashboard Traffic shows kernel leaf-interface In and Out bytes per second over
+the last hour, plus a separate Events chart. Zone Status shows in + out at each
+zone; this is interface throughput, not forwarded traffic between zones. Event
+totals cover 24 hours and identify incomplete coverage. Monitoring Traffic Pulse
+uses interface throughput, while Top Protocols counts inspected packets over the
+last hour. Recent-event list counts are not retained traffic totals. Failed event
+reads are unavailable, not zero.
+Interfaces that are not connected to a network device have no traffic history;
+a connected interface whose statistics cannot be read is reported unavailable
+with its reason. A series that ended, such as a zone whose interfaces moved
+away, shows **No current data**.
+
+Demo data appears only while the collector is running, no current source is
+unavailable, the metric has no real activity, no existing real series ends in
+a gap, and the latest demo bucket has coverage. A response with no real series
+is eligible. It is labelled **Demo data**, with the note “Recorded captures on
+an illustrative topology”. Current source failures show their reasons beside
+retained real history and never permit demo fallback. Once real
+activity exists, charts use real history. Demo events have a **Demo** badge in
+Event Stream, Recent Alerts, Events, and alert/event inspection. If neither
+history exists, charts say **No traffic recorded yet**. A real-source gap never
+permits demo fallback. Activity and coverage flags are metric-wide, not scoped
+to an individual service or interface filter.
+
+Security conduit traffic reports measured bytes and packets for routed traffic
+that passed policy in the last hour, with incomplete coverage labelled. Matrix
+heat is relative to the largest displayed byte count, not a baseline percentage.
+A never-observed pair may instead show **Demo** and **recorded demo traffic**
+(`coverage: recorded`), not measured or routed traffic. If neither origin has
+coverage, it shows **No traffic recorded yet**.
+Current conduit or engine failures make measurements unavailable with their
+reason, even when measured history remains. Disabling enforcement reports
+**enforcement disabled** until accounting is available again. Logical interface RX/TX reports
+the latest retained packet rate, not event-count estimates.
+
+## Recorded demo replay
+
+Until the firewall does real work, management automatically replays the bundled
+recorded ICS and IT packet captures through the real protocol decoders and detection
+chain. These are recorded captures on an **illustrative topology**, not packets
+measured on your networks. Replay is detached: it never transmits frames,
+changes firewall enforcement, or injects packets onto lab interfaces.
+
+| Capture family | Client role → zone | Server role → zone |
+|---|---|---|
+| ICS (Modbus, DNP3, IEC 104, CIP) | master/HMI → `dmz` | outstation/PLC → `lan` |
+| IT | client → `lan` | server → `wan` |
+
+Zone names resolve against running configuration. When a default name is
+missing, replay uses the first non-`mgmt` zones in configuration order. A capture
+whose endpoints resolve to the same zone contributes no conduit traffic.
+Zone k in configuration order uses `198.18.k.0/24`, from the RFC 2544 benchmarking
+range. Client hosts use `.10`, server hosts `.20`, and extra hosts `.21` onward.
+Each zone has a pseudo-interface `demo:<zone>` with role `leaf`; these names do
+not create kernel interfaces. Addresses are rewritten from the capture and
+client ephemeral ports shift each loop to keep flows separate. Original
+addresses remain in the manifest for provenance.
+
+Replay preserves packet order and payloads. Each recorded inter-packet gap is
+clamped to 100 ms–5 s, with a 10 s pause between captures. One loop visits every
+capture in manifest order. Injection timestamps use the current time. Some
+negative fixtures were recorded and then edited; these carry `mutated: true`
+in the manifest and are not claimed as unmodified network observations.
+
+### Start, Stop and automatic replay
+
+The Dashboard **SIM** toggle acts immediately, without a configuration commit.
+Start saves `on`; Stop saves `off` and persists across management and engine
+restarts. Start remains available after an automatic stop or replay error.
+Management stores the preference in `demo.json` beside `config.db`:
+
+- `auto`: run until retained telemetry shows the firewall doing real work —
+  traffic forwarded between zones (conduit bytes) or a real IDS alert or
+  antivirus detection or block — then stop with reason **real traffic
+  observed**. Interface bytes alone (management sessions, ARP, bridge chatter)
+  and other engine events do not stop it. With enforcement disabled there are no
+  conduit counters, so only a security event stops it. The latch is
+  persistent, so restarting does not re-enable automatic replay.
+- `on`: run regardless of real traffic; charts still prefer real history once
+  their metric has real activity.
+- `off`: do not run.
+
+When the preference file is absent, management saves `auto`. `auto` starts only
+after the telemetry sampler completes its first observed interval with no such
+real work (status reason **waiting for telemetry interval** until then), so an
+upgraded appliance that already forwards traffic never starts replay. Each
+chart still prefers its own real data: Traffic and Zone Status show real
+interface bytes as soon as they exist, while Events, Protocols and conduits can
+show demo until their own metric has real activity. The engine itself boots
+stopped; management reconciles the preference after synchronizing running configuration, including after an engine
+restart. A delivery failure does not discard a saved preference. The status line
+shows the replaying capture, a stopped reason or error, and that Stop persists.
+
+`CONTAIND_DEMO_CAPTURES` selects the runtime asset directory (default
+`/usr/share/containd/demo`), containing `manifest.json` and its captures. Missing
+files or SHA-256 mismatches stop replay and surface **demo captures unavailable**;
+no random-event substitute is generated. The source manifest is
+`test/demo/manifest.json`. Fixture data is licensed Apache-2.0; the image includes
+fixture LICENSE files and a NOTICE naming the capture generators. Generator
+program licenses are separate from the fixture-data license; generator GPL texts
+are not packaged as fixture licenses.
+
+Demo records have `origin: demo`, separate retained counters and bounded event
+storage. They never enter syslog, learner/inventory evidence, real counters,
+Prometheus `/metrics`, or real rule counters. Identification events are not part
+of demo replay. **Would-deny** means the operator's ICS firewall rules evaluated
+in monitor mode, retaining rule IDs and actions—not a live packet drop. Operator
+IDS rules, parsing modes and signatures apply to the detached replay; an
+any-address monitor IEC 104 envelope is supplied when none is configured.
+
+`CONTAIND_DPI_MOCK` (and `dataplane.dpiMock`) only enables inspect-all DPI;
+it does not start demo replay. Leave it disabled for normal traffic inspection.
+
 ## Runtime metrics
+
+Service status exposes lifetime `count` and `errors_count` as JSON numbers, not
+rates or sparklines. Read retained `service.events` and `service.errors` history
+from `GET /api/v1/telemetry/series`, filtered by `service`. These count service
+activity/notices, not uniform requests or network bytes. AV uses the engine's
+`av.scans`, `av.scan_errors` and `av.detections` counters. Rates are bucket count
+divided by observation seconds; gaps are not zeros. See
+[retained counter history](api-reference.md#retained-counter-history).
 
 `containd_services_running{service="..."}` reports observed running state
 (`1`) or stopped state (`0`). An absent series means unknown, not stopped;
@@ -120,6 +326,12 @@ do not fill missing series with zero in alerts or dashboards.
 - Requests for ineligible addresses receive DHCPNAK only in authoritative mode; otherwise the server stays silent. SELECTING requests naming this server use the same eligibility checks. DISCOVER never receives DHCPNAK, including when the pool is exhausted.
 - Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
+- The DHCP page picks listen interfaces from configured interfaces and edits
+  pools as interface/start/end rows. Reservations use interface/MAC/IP rows;
+  hostnames are observed in leases, not configurable reservation fields.
+  Saved interface names absent from the configured list remain selectable.
+  **Save** validates rows and stages the same configuration arrays; review and
+  commit to apply. Lease, DNS and domain options remain under **Advanced options**.
 
 ## VPN
 
@@ -135,6 +347,50 @@ do not fill missing series with zero in alerts or dashboards.
   Connection status clears on a soft restart or process exit. Server startup
   still requires the initialization marker within five seconds before
   acknowledging its loaded revocation list.
+
+### WireGuard keys and peers
+
+The VPN page edits peers as rows: name, public key, allowed IPs (CIDRs), optional
+endpoint and keepalive seconds. **Peers (JSON)** remains under **Advanced peer
+settings** and edits the same list. Add, remove and edit operations stage only
+when you select **Save**; commit applies them.
+
+A stored private key shows **Private key configured — Replace**, without
+revealing it. **Generate key pair** uses WebCrypto X25519 in the browser; it is
+hidden with an explanation when unsupported. Only the private key is submitted
+in the staged write, not in a URL or browser storage. Replacing the server key
+requires updating clients. A successful Save clears each submitted secret field
+even if you edit peers while it is pending. A newer replacement entered during
+that request remains an unsaved draft; failed saves retain the draft for review.
+This applies to the WireGuard private key and managed OpenVPN CA, certificate,
+private key and password.
+
+Client downloads require a known server public key (generated in this editor or
+from live tunnel status) and a server endpoint with port entered in the download
+helper. The endpoint helper is not persisted. **Download client config** produces
+a template, not an issued credential: enter the matching client's private key
+locally, then review its address and routes before use. The peer's allowed IPs
+supply its proposed client addresses, and the server tunnel CIDR supplies the
+initial route; routed networks may need different addresses or additional routes.
+The server peer endpoint is not the server's public endpoint. Downloads never
+include the server private key. A live public key describes the applied server,
+which may differ from staged settings; commit and verify it before connecting.
+
+### VPN secret-presence metadata
+
+`GET /api/v1/services/vpn`, successful VPN stage responses and the VPN object in
+profile-upload responses omit stored secret values. `wireguard.privateKeyConfigured`
+is always a boolean. When `openvpn.managed` exists it always includes boolean
+`caConfigured`, `certConfigured`, `keyConfigured` and `passwordConfigured`.
+These are read-only presence indicators, not proof that a tunnel is running.
+Managed OpenVPN fields show configured material without requiring it again.
+
+Writes retain existing WireGuard keys when `privateKey` is omitted or empty.
+When both old and new managed OpenVPN objects exist, omitted or empty CA,
+certificate, key and password fields retain their stored values. To replace a
+secret, supply a nonempty replacement. Omitting `managed` removes the entire
+managed client configuration; it does not retain that object. These VPN writes
+stage the candidate with the revision precondition; they never auto-commit.
 
 ### OpenVPN (managed client)
 
@@ -409,12 +665,23 @@ ClamAV mode:
   `clamav.socketPath` (default `/run/clamav/clamd.sock`, which the images
   prepare) and loads every database in `/var/lib/clamav`. clamd restarts only
   when that rendered configuration changes.
-- clamd needs at least one signature database before it starts. With
-  `freshclamEnabled`, FreshClam runs once when enabled and then every
-  `updateSchedule` (a positive Go duration such as `4h`; default `6h`).
+- clamd needs at least one signature database before it starts. Automatic
+  updates are off unless `clamav.freshclamEnabled` is true. When enabled,
+  FreshClam runs once and then every `updateSchedule` (a positive Go duration
+  such as `4h`; default `6h`).
   While AV is enabled, staging rejects any other value, including cron syntax.
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
+- An omitted scanner mode means **Local scanner (ClamAV)**, including its
+  readiness and definition-update controls. Unrelated saves leave an omitted
+  mode omitted; selecting a scanner explicitly saves that choice.
+  A missing-database fault offers
+  **Update definitions** beside the cause. Both this and **Run definition update**
+  request confirmation and act immediately, independently of **Save**.
+  Definition uploads and deletion also require confirmation.
+- If staging scan selections reports `needs dataplane.enforcement`, follow
+  the link to the Firewall enforcement control, stage enforcement, then retry
+  the AV save. Review both changes and commit to apply; the link changes no settings.
 - `POST /api/v1/services/av/update` queues an immediate run on the same schedule and
   returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
 - Custom definitions are ClamAV database files (`.ndb`, `.hdb`, `.ldb`,
@@ -465,6 +732,8 @@ Scanning:
   limit, so new definitions or another socket never reuse old verdicts.
   ICAP verdicts are never cached because the server may decide by direction,
   HTTP headers and endpoints.
+  **Cache TTL (seconds)** edits the cache duration, including fractional seconds;
+  the API stores `cacheTtl` in nanoseconds. Zero selects the default 10 minutes.
 - ICAP is a generic RFC 3507 backend with exactly one server and no
   failover. Uploads go as `REQMOD` with the request head, downloads as
   `RESPMOD` with the request and response heads. The request head is sent
@@ -502,7 +771,37 @@ the `gate` object above.
   - `set proxy forward <on|off> [port] [zone...]`
   - `set proxy reverse <on|off>`
 - On commit/rollback, `containd mgmt` renders daemon configs to the services directory (`CONTAIND_SERVICES_DIR` or `/data/services`): `envoy-forward.yaml` and `nginx-reverse.conf`.
-- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. It validates the generated Nginx config with `nginx -t` before restart, tracks last start/error timestamps, and exposes the `/api/v1/services/status` view consumed by `show services status`.
+- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. Before publishing, it validates the staged configs with `envoy --mode validate` and `nginx -t` when those binaries are installed. Staged filenames retain their `.yaml` or `.conf` extension so each daemon uses the correct parser. Management tracks last start/error timestamps and exposes the `/api/v1/services/status` view consumed by `show services status`.
+
+### Reverse sites and TLS
+
+On **Proxies**, **Add** puts a new site in the local list. **Edit** loads an
+existing site's name, listen port, backends, hostnames, description and TLS
+settings; **Update site** changes that local list and **Cancel edit** discards
+the form edits. **Save** stages the list into the candidate with its loaded
+revision. Review and commit to apply; none of these form actions uploads
+certificates or starts a listener immediately.
+
+**Site TLS** opens automatically for a site with TLS enabled or a saved
+certificate reference. Enable TLS and enter `certRef` as a filename stem,
+not a file path: 1–128 ASCII letters, digits, underscores or hyphens, beginning
+with a letter or digit. For reference `plant-web`, externally provision
+`plant-web.crt` and `plant-web.key` in `/data/certs` on the management service
+host (or the directory set by `CONTAIND_CERTS_DIR`). The files must contain a
+matching PEM certificate/private-key pair, and every certificate in the chain
+must be currently valid. Files and resolved symlinks must stay inside that
+directory and be readable by the service. A container deployment needs these
+files in its mounted storage.
+
+There is no proxy-certificate upload API or web form. **System Settings**
+certificate upload replaces the management HTTPS identity, not a proxy site's
+certificate. A reference alone cannot provision the files. Missing, expired,
+not-yet-valid or mismatched material rejects application rather than falling
+back to plaintext.
+
+Proxy faults lead with a short cause summary. **Technical details** retains the
+exact reported diagnostic output, including generated configuration when the
+daemon includes it; it is not a separate generated-file or log download.
 
 ## Auth/SSH
 - Auth uses JWT cookie sessions by default with admin/view roles.

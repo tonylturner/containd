@@ -58,8 +58,13 @@ for (const unavailable of [false, true]) {
           page.getByText("Denied command", { exact: true }),
         ).toBeVisible();
         await expect(
-          page.getByText("Bound / saturation", { exact: true }),
+          page.getByText("Capacity reached", { exact: true }),
         ).toBeVisible();
+        const decisions = page.getByText("Packet-decision failures", { exact: true }).locator("../..");
+        await expect(decisions.locator("dd")).toHaveText("2");
+        await expect(page.getByText("Packet-blocking failures", { exact: false })).toHaveCount(0);
+        await decisions.getByText("Technical details", { exact: true }).click();
+        await expect(decisions.getByText("Inline verdict failures (verdictFailures)", { exact: true })).toBeVisible();
         if (process.env.IEC104_PRESSURE_SCREENSHOT)
           await page.screenshot({
             path: process.env.IEC104_PRESSURE_SCREENSHOT,

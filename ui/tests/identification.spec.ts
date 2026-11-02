@@ -89,6 +89,7 @@ test("PCAP shows identity, coverage, binding, endpoints and unknown scope", asyn
   await expect(connection).toHaveAttribute("title", `capture/1\n${flow.flowId}`);
   await expect(section.getByRole("cell", { name: "[2001:db8::1]:49153 → [2001:db8::2]:1502", exact: true })).toBeVisible();
   await expect(section.getByText(flow.flowId, { exact: true })).toHaveCount(0);
+  for (const summary of await section.locator("summary").all()) await summary.click();
   for (const text of ["observation", "none / dnp3", "tcp/20000", "midstream/no-SYN", "Unknown (no snapshot)"])
     await expect(section.getByText(text, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("cell", { name: "identify", exact: true })).toHaveCount(0);

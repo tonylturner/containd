@@ -21,7 +21,7 @@ async function openMatrix(page: Page, count: number) {
       "/api/v1/zones": names.map((name) => ({ name, slTarget: 0 })),
       "/api/v1/security/conduits": [{
         from: "ot", to: "dmz",
-        state: "allow", ids: "disabled", proto: [], traffic: null, checks: securityChecks, rules: [],
+        state: "allow", ids: "disabled", proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks, rules: [],
         gaps: [], mitre: [], defaultDeny: false, tlsEnforced: false,
         protoWhitelist: false, mfaRequired: false, auditLogged: true, avEnabled: false,
       }],

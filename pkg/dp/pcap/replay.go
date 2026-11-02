@@ -22,7 +22,7 @@ func replayFile(ctx context.Context, path string, iface *net.Interface, ratePPS 
 		return err
 	}
 	defer f.Close()
-	reader, err := newPCAPReader(f)
+	reader, err := OpenReader(f)
 	if err != nil {
 		return err
 	}

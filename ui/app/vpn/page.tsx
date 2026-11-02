@@ -26,6 +26,7 @@ import { authHeaders, fetchWithSession, handleUnauthorized, staticAssetURL } fro
 import { parseErrorBody } from "../../lib/api-request";
 import type { OpenVPNCredential } from "../../lib/api-vpn";
 import { ServiceFaultBanner } from "../../components/ServiceFaultBanner";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -42,6 +43,9 @@ import {
 import { OpenVPNEditorCard } from "./vpn-openvpn-editor";
 import { VPNRuntimeStatusCard } from "./vpn-runtime-status";
 import { WireGuardRuntimeCard } from "./vpn-wireguard-runtime";
+import { WireGuardKeyEditor } from "./vpn-wireguard-key";
+import { WireGuardPeerEditor, parsePeers } from "./vpn-wireguard-peers";
+import { scrubSubmittedVPNSecrets } from "./vpn-secret-draft";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -52,6 +56,7 @@ export default function VPNPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor(() => normalize(null), false);
+  const [generatedKey, setGeneratedKey] = useState<{ publicKey: string; revision?: string } | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +79,11 @@ export default function VPNPage() {
   const { readConfig: refreshClient } = clientForm;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const peersText = text("peers", JSON.stringify(cfg.wireguard.peers ?? [], null, 2));
+  const draftPeers = useMemo(() => {
+    try { return parsePeers(peersText); } catch { return null; }
+  }, [peersText]);
+  const generatedPublicKey = generatedKey?.revision === editor.baseRevision ? generatedKey?.publicKey : undefined;
 
   const wireguardIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.wireguard.enabled) return [];
@@ -81,8 +91,8 @@ export default function VPNPage() {
     if (!hasNonEmptyString(cfg.wireguard.interface)) out.push({ field: "wireguard.interface", severity: "required", message: "Interface name is required (e.g. wg0)." });
     if (!cfg.wireguard.listenPort || cfg.wireguard.listenPort <= 0) out.push({ field: "wireguard.listenPort", severity: "required", message: "Listen port must be set." });
     if (!hasNonEmptyString(cfg.wireguard.addressCIDR)) out.push({ field: "wireguard.addressCIDR", severity: "required", message: "Tunnel address CIDR is required (e.g. 10.8.0.1/24)." });
-    if (!hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
-    if (!cfg.wireguard.peers?.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
+    if (!cfg.wireguard.privateKeyConfigured && !hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
+    if (draftPeers && !draftPeers.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
     if ((cfg.wireguard.listenInterfaces ?? []).length > 0 && hasNonEmptyString(cfg.wireguard.listenZone)) {
       out.push({
         field: "wireguard.listenTargets",
@@ -91,7 +101,7 @@ export default function VPNPage() {
       });
     }
     return out;
-  }, [cfg.wireguard]);
+  }, [cfg.wireguard, draftPeers]);
 
   const openvpnIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.openvpn.enabled) return [];
@@ -103,9 +113,9 @@ export default function VPNPage() {
         if (!hasNonEmptyString(m.remote)) out.push({ field: "openvpn.managed.remote", severity: "required", message: "Remote is required (VPN gateway hostname/IP)." });
         if (!m.port || m.port <= 0) out.push({ field: "openvpn.managed.port", severity: "required", message: "Port must be set." });
         if (!hasNonEmptyString(m.proto)) out.push({ field: "openvpn.managed.proto", severity: "required", message: "Protocol must be set (udp/tcp)." });
-        if (!hasLikelyPEM(m.ca)) out.push({ field: "openvpn.managed.ca", severity: "required", message: "CA certificate (PEM) is required." });
-        if (!hasLikelyPEM(m.cert)) out.push({ field: "openvpn.managed.cert", severity: "required", message: "Client certificate (PEM) is required." });
-        if (!hasLikelyPEM(m.key)) out.push({ field: "openvpn.managed.key", severity: "required", message: "Client key (PEM) is required." });
+        if (!m.caConfigured && !hasLikelyPEM(m.ca)) out.push({ field: "openvpn.managed.ca", severity: "required", message: "CA certificate (PEM) is required." });
+        if (!m.certConfigured && !hasLikelyPEM(m.cert)) out.push({ field: "openvpn.managed.cert", severity: "required", message: "Client certificate (PEM) is required." });
+        if (!m.keyConfigured && !hasLikelyPEM(m.key)) out.push({ field: "openvpn.managed.key", severity: "required", message: "Client key (PEM) is required." });
       } else {
         if (!hasNonEmptyString(cfg.openvpn.configPath)) out.push({ field: "openvpn.configPath", severity: "required", message: "Config Path is required when not using managed config." });
       }
@@ -130,6 +140,11 @@ export default function VPNPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(
     async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
       try {
+        try {
+          setServicesStatus(await api.getServicesStatus());
+        } catch {
+          setServicesStatus(null);
+        }
         const currentSnapshot = await api.getVPN();
         const current = currentSnapshot?.data;
         if (!checkLoaded(current)) return;
@@ -148,11 +163,6 @@ export default function VPNPage() {
           setWgStatus(await api.getWireGuardStatus(ifName));
         } catch {
           setWgStatus(null);
-        }
-        try {
-          setServicesStatus(await api.getServicesStatus());
-        } catch {
-          setServicesStatus(null);
         }
 
         // OpenVPN server: list clients (admin-only).
@@ -195,7 +205,6 @@ export default function VPNPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const peersText = text("peers", JSON.stringify(cfg.wireguard.peers ?? [], null, 2));
   const peerNameByKey = useMemo(() => {
     const out = new Map<string, string>();
     for (const p of cfg.wireguard.peers ?? []) {
@@ -222,8 +231,14 @@ export default function VPNPage() {
     setError(null);
     let peers;
     try {
-      peers = JSON.parse(peersText);
-      if (!Array.isArray(peers)) throw new Error("Peers must be a JSON array.");
+      peers = parsePeers(peersText);
+      for (const peer of peers) {
+        if (!peer.publicKey.trim()) throw new Error("Peer public key is required.");
+        if (peer.allowedIPs?.some(ip => !ip.trim())) throw new Error("Peer allowed IPs cannot include empty entries.");
+        if (peer.persistentKeepalive !== undefined && (!Number.isInteger(peer.persistentKeepalive) || peer.persistentKeepalive < 0)) {
+          throw new Error("Peer keepalive must be a nonnegative whole number of seconds.");
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid peers JSON.");
       return;
@@ -249,17 +264,22 @@ export default function VPNPage() {
         pushRoutes: text("pushRoutes", (openvpn.server.pushRoutes ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
       };
     }
-    const saved = await write(base => api.setVPN(base, {
+    const submitted = {
       ...cfg,
       wireguard: { ...cfg.wireguard, peers },
       openvpn,
-    }), { replace: data => normalize(data) });
+    };
+    const saved = await write(base => api.setVPN(base, submitted), { replace: data => normalize(data) });
     setSaveState(saved.ok ? "saved" : revisionError(saved) === null ? "idle" : "error");
     if (!saved.ok) {
       const msg = revisionError(saved);
       setError(msg);
       if (msg) toast(msg, "error");
     } else {
+      setCfg(current => scrubSubmittedVPNSecrets(current, submitted));
+      if (saved.adopted && saved.unchanged) {
+        setGeneratedKey(current => current ? { ...current, revision: saved.revision } : null);
+      }
       toast(saved.warning ? `VPN staged — commit to apply. Warning: ${saved.warning}` : "VPN staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -408,7 +428,8 @@ export default function VPNPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["wireguard", "openvpn"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || clientForm.editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip label="WireGuard status" configured={canSave ? cfg.wireguard.enabled : undefined} attention={wireguardFaulted ? servicesStatus?.wireguard?.fault?.message || "WireGuard faulted" : !wgStatus || interfaceStateStatus !== "ready" ? "Live tunnel status unavailable — use Refresh to retry" : undefined} updated={svcStatus?.last_render} />
+      <ServiceStatusStrip label="OpenVPN status" configured={canSave ? cfg.openvpn.enabled : undefined} running={svcStatus?.openvpn_running} attention={servicesStatus?.openvpn?.fault?.message || svcStatus?.openvpn_last_error || (!svcStatus ? "Live VPN status unavailable — use Refresh to retry" : undefined)} updated={svcStatus?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
           View-only mode: configuration changes are disabled.
@@ -417,7 +438,6 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -425,7 +445,7 @@ export default function VPNPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+        <div className="relative min-w-0 overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
           <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -444,8 +464,8 @@ export default function VPNPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge tone={wireguardFaulted ? "warn" : cfg.wireguard.enabled ? "ok" : "off"}>
-                {wireguardFaulted ? "faulted" : cfg.wireguard.enabled ? "enabled" : "disabled"}
+              <Badge tone={wireguardFaulted ? "warn" : !canSave ? "info" : cfg.wireguard.enabled ? "ok" : "off"}>
+                {wireguardFaulted ? "faulted" : !canSave ? "Unknown" : cfg.wireguard.enabled ? "enabled" : "disabled"}
               </Badge>
               <Badge
                 tone={interfaceStateStatus === "unavailable" ? "warn" : runtime?.up ? "ok" : runtime ? "warn" : "off"}
@@ -453,7 +473,7 @@ export default function VPNPage() {
               >
                 {interfaceStateStatus === "unavailable" ? "interface state unavailable" : interfaceStateStatus === "loading" ? "Loading…" : runtime ? (runtime.up ? "link up" : "link down") : "not present"}
               </Badge>
-              <Badge tone={wgStatus ? "ok" : "off"} title="WireGuard netlink API reachability">
+              <Badge tone={wgStatus ? "ok" : "off"} title="Tunnel status connection">
                 {wgStatus ? "api ok" : "api n/a"}
               </Badge>
             </div>
@@ -464,7 +484,7 @@ export default function VPNPage() {
               <input
                 type="checkbox"
                 checked={cfg.wireguard.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, enabled: e.target.checked } }))}
                 className="h-4 w-4"
               />
@@ -474,7 +494,7 @@ export default function VPNPage() {
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
             <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
               When enabled and not quarantined, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
-              (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
+              (default <span className="font-mono">wan</span>) so clients can connect after these settings are applied.
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -482,7 +502,7 @@ export default function VPNPage() {
                 <label className="text-xs uppercase tracking-wide text-(--text-muted)">Interface</label>
                 <input
                   value={cfg.wireguard.interface ?? "wg0"}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, interface: e.target.value } }))}
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -495,7 +515,7 @@ export default function VPNPage() {
                 <input
                   type="number"
                   value={cfg.wireguard.listenPort ?? 51820}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -512,7 +532,7 @@ export default function VPNPage() {
                 </label>
                 <select
                   value={cfg.wireguard.listenZone ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -545,7 +565,7 @@ export default function VPNPage() {
                         <input
                           type="checkbox"
                           checked={active}
-                          disabled={!canEdit}
+                          disabled={!canEdit || !canSave}
                           onChange={(e) => {
                             const next = new Set(cfg.wireguard.listenInterfaces ?? []);
                             if (e.target.checked) {
@@ -575,53 +595,27 @@ export default function VPNPage() {
               </label>
               <input
                 value={cfg.wireguard.addressCIDR ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
                 className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                Private Key (base64)
-                <InfoTip label="Server private key. Stored in config; export redaction handled elsewhere." />
-              </label>
-              <input
-                value={cfg.wireguard.privateKey ?? ""}
-                disabled={!canEdit}
-                onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, privateKey: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                placeholder="(leave blank to set later)"
-              />
-            </div>
-
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                Peers (JSON)
-                <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
-              </label>
-              <textarea
-                rows={8}
-                value={peersText}
-                disabled={!canEdit}
-                onChange={(e) => setText("peers", e.target.value)}
-                className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-              />
-            </div>
+            <WireGuardKeyEditor value={cfg.wireguard.privateKey ?? ""}
+              configured={cfg.wireguard.privateKeyConfigured === true} disabled={!canEdit || !canSave}
+              onChange={(privateKey, publicKey) => {
+                setGeneratedKey(publicKey ? { publicKey, revision: editor.baseRevision } : null);
+                setCfg(c => ({ ...c, wireguard: { ...c.wireguard, privateKey } }));
+              }} />
+            <WireGuardPeerEditor value={peersText} onChange={value => setText("peers", value)}
+              disabled={!canEdit || !canSave}
+              serverPublicKey={generatedPublicKey ?? (cfg.wireguard.privateKey ? undefined : wgStatus?.publicKey)}
+              serverAddress={cfg.wireguard.addressCIDR} />
           </div>
         </div>
 
-        <WireGuardRuntimeCard
-          cfgInterface={cfg.wireguard.interface ?? "wg0"}
-          peerCount={(cfg.wireguard.peers ?? []).length}
-          peerNameByKey={peerNameByKey}
-          runtime={runtime}
-          interfaceStateStatus={interfaceStateStatus}
-          onRetry={() => { void refresh({ silent: true }); }}
-          wgStatus={wgStatus}
-        />
-
         <OpenVPNEditorCard
+          canSave={canSave}
           canEdit={canEdit}
           cfg={cfg}
           setCfg={setCfg}
@@ -642,11 +636,25 @@ export default function VPNPage() {
           newClientName={newClientName}
           setNewClientName={setNewClientName}
           uploadOpenVPNProfile={uploadOpenVPNProfile}
-          createClient={createClient}
+          createClient={async () => {
+            confirm.open({ title: "Create client credential?", message: "Issue a credential immediately using the active server? This is independent of Save and cannot be undone; revoke it if no longer needed.", confirmLabel: "Create", onConfirm: () => { void createClient(); } });
+          }}
           downloadClient={downloadClient}
           revokeClient={revokeClient}
         />
       </div>
+
+      <h2 className="mt-6 text-lg font-semibold">Activity</h2>
+      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
+        <WireGuardRuntimeCard
+          cfgInterface={cfg.wireguard.interface ?? "wg0"}
+          peerCount={(cfg.wireguard.peers ?? []).length}
+          peerNameByKey={peerNameByKey}
+          runtime={runtime}
+          interfaceStateStatus={interfaceStateStatus}
+          onRetry={() => { void refresh({ silent: true }); }}
+          wgStatus={wgStatus}
+        />
 
       <p className="mt-3 text-xs text-(--text-muted)">
         State:{" "}
@@ -659,7 +667,6 @@ export default function VPNPage() {
               : "idle"}
       </p>
       <ConfirmDialog {...confirm.props} />
-      </fieldset>
     </Shell>
   );
 }

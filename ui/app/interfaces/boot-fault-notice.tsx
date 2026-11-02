@@ -25,7 +25,7 @@ export function BootFaultStatus({
         {reserved
           ? "Reserved management remains available."
           : "The recovery ruleset keeps the stored management listener access."}{" "}
-        Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.
+        Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The saved configuration has not been activated after startup.
       </p>
     </div>
   );

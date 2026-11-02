@@ -12,6 +12,23 @@
   `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
   depend on a writable directory; generic `NewService` application loggers do not
   configure a file path. `CONTAIND_LOG_FILE=0` disables configured file sinks.
+- Retained counter history is separate from event evidence: management writes
+  `CONTAIND_TELEMETRY_DB` (default `data/telemetry.db`, `/data/telemetry.db` in
+  Compose), an independent SQLite WAL file. It retains 10-second buckets for one
+  hour, minute buckets for 24 hours and 15-minute buckets for 30 days, subject to
+  a 64 MiB database-plus-WAL budget and a 320-series cap. Old coarse history is
+  reclaimed under pressure; conservative whole-transaction WAL headroom can
+  reclaim coarse history before the physical high-water mark. Missing coverage
+  remains a gap. This store does not retain event payloads. Management must be
+  running to collect history.
+- Events marked `origin: demo` are labelled demonstration records. They never
+  charge real counter history or Prometheus metrics, never enter learner or
+  inventory evidence, and are never exported to syslog. Demo events come from
+  [recorded capture replay](services.md#recorded-demo-replay), including flagged
+  mutated negative fixtures, on an illustrative topology. Identification events
+  are not replayed. Demo would-deny is an operator ICS rule evaluated in monitor
+  mode, not an enforced drop. `CONTAIND_DPI_MOCK` enables inspect-all only, not
+  demo replay; `CONTAIND_DEMO_CAPTURES` selects the replay assets.
 - `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
 File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
@@ -21,6 +38,56 @@ without an explicit level. The embedded service managers explicitly use `info`,
 so these variables do not override their levels. CLI queries include
 `show audit` and `show events`; see
 [API Reference](api-reference.md) for wire contracts.
+
+## Collect and review learner evidence
+
+**PCAP Analysis** (`/pcap/`) offers **Import capture** and **Watch live** tabs.
+Import capture contains Upload & Analyze PCAP and Existing PCAP Files; Watch live
+contains duration, Start watch, watch status, Stop watch and pagination. An active
+watch or unavailable watch status remains indicated when viewing Import capture.
+Abnormal stops (including restart, budget and policy change) also show their
+cause there, with an **Inspect watch** link that opens and focuses the affected
+watch. Ordinary operator and deadline stops remain in watch history without an
+extra warning.
+Switching tabs does not start, stop or discard a collection.
+The selected collection tab is underlined as well as highlighted.
+
+The learner steps are explicit: **1 Collect → 2 Generate → 3 Review → 4 Stage**.
+Steps explain action prerequisites. Once a dataset is open, all step navigation
+remains available, including for viewers and expired evidence; only the actions
+are permission- and eligibility-gated. Opening a step only navigates to its
+controls: it does not generate, approve, select or stage anything. Expired datasets
+cannot generate new suggestions; collect new evidence instead.
+
+The selected Dataset review stays above the retained Evidence datasets list.
+Collection details retains its full ID, checksums and reader/configuration
+versions. Review uses a compact table with service descriptions, exact
+address/service scope and **Checks passed**, **Needs review** or **Not eligible**;
+these are bounded checks, not proof that traffic is safe. **Inspect suggestion**
+expands approval controls, proposed rules and evidence. Checks on saved evidence
+retains replay and boundary results, limitations, raw versions, digests and
+counterexamples.
+Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
+visible. Import statistics and content identifications remain available below.
+Withheld reasons explain why a relation cannot be generated and what to check or
+collect next; unknown codes remain visible as **Unrecognized reason (code)**.
+Administrators can **Delete dataset** from Evidence datasets after confirmation.
+Deletion is immediate, requires a sealed dataset and removes its observations and
+dependent suggestions/proofs. Stop a collecting watch first. It does not remove
+already staged rules or the original PCAP file, and requires no commit.
+Missing, invalid or zero-value evidence timestamps display **Unknown**; this
+does not change expiration checks or staging eligibility.
+**Inspect service authority** and its pagination remain available during staging;
+reading authority does not unlock mutation controls or dismiss a staging failure.
+
+**Stage N selected** stays separate from approval and selection. IEC 104 review,
+address/NAT approval where required, the 128-suggestion/128-rule cap, destination
+diff review and atomic monitor-only staging remain required. A failed or
+uncertain staging attempt retains its receipt when retry is permitted:
+**Retry same staging request** sends the identical request. **Discard receipt**
+does not undo any rules already saved. Staged rules are not activated until
+Configuration review and commit. Store-wide counts and saved evidence limits
+remain in their disclosures; they are not per-dataset completeness guarantees.
 
 ## Account and credential audit records
 
@@ -204,6 +271,35 @@ context: narrow by session and use a sufficiently large page. Retrieve and
 preserve evidence off-box before eviction or restart; the built-in cache and best-effort syslog forwarding cannot promise a complete, durable
 session history.
 
+
+## Triage in the web UI
+
+The dashboard shows all four First-Run Checklist tasks, including completed
+ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
+System Health stay visible alongside attention and failure notices. Open
+Monitoring for live investigation. The header holds the SIM toggle; simulation
+controls act immediately, not on commit. Start saves `on`, Stop saves `off`
+across restarts. `auto` stops for good once the firewall forwards traffic between
+zones or raises a real IDS alert or antivirus detection or block; interface
+chatter and other events do not stop it. CLI Console opens on demand below the
+panels.
+
+Events keeps timestamps, endpoints, activity and protection evidence visible.
+Advanced event filters holds exact IDs, protocol, decision, outcome, time and
+cursor bounds, and opens when a deep link fills them. Inspect event keeps
+Message and session details, Event attributes (JSON), and the Event ID lookup
+with Download event JSON. Retention warnings and failure causes always show.
+
+The Alerts Protection outcome separates detection from would-block, deny
+decisions, reported packet drops and reset failures. A deny decision alone does
+not prove that a packet was dropped. Select a message with the pointer or
+keyboard to open its full protocol, packet and reference detail; Close returns
+to that message.
+
+Flows are observed conversations; Sessions lists kernel connections. Inspect
+flow shows exact IDs, Tags and First Seen. Inspect connection shows Mark, Tags,
+Assured, TTL and Reply tuple (NAT). Session Kill stays immediate and keeps its
+exact-connection or client-service scope, revocation interval and confirmation.
 
 ## Search a session before applying the page limit
 

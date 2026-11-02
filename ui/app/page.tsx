@@ -20,14 +20,14 @@ import {
   SetupChecklist,
   SystemHealthPanel,
   TrafficCounter,
+  TrafficHistory,
+  type InterfaceBindings,
 } from "./dashboard-panels";
 import {
-  buildZoneSparklines,
   buildZoneThreatMap,
   deriveServices,
   NetworkPulseCanvas,
   NetworkPulseStats,
-  TrafficChart,
   ZoneList,
 } from "./dashboard-visuals";
 
@@ -36,10 +36,15 @@ const Console = dynamic(
   { ssr: false, loading: () => <div style={{ padding: 16, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading console...</div> },
 );
 import { Skeleton } from "../components/Skeleton";
+import { ServiceTelemetryAttention } from "./dashboard-service-attention";
+import { useHealth } from "../hooks/useHealth";
+import type { SimulationStatus } from "../lib/api-console";
+import { simulationDescription } from "../lib/simulation-status";
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
 
 export default function Home() {
+  const enforcement = useHealth()?.enforcement;
   const [data, setData] = useState<DashboardData | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
@@ -47,10 +52,17 @@ export default function Home() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
+  const [interfaceBindings, setInterfaceBindings] = useState<InterfaceBindings | null>(null);
+  const [dashboardUnavailable, setDashboardUnavailable] = useState(false);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
+  const [eventsUnavailable, setEventsUnavailable] = useState(false);
+  const [zonesUnavailable, setZonesUnavailable] = useState(false);
+  const [statsUnavailable, setStatsUnavailable] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const clock = now === null ? "" : new Date(now).toLocaleTimeString("en-US", { hour12: false });
-  const [simRunning, setSimRunning] = useState<boolean | null>(null);
+  const [simulation, setSimulation] = useState<SimulationStatus | null>(null);
+  const simRunning = simulation?.running ?? null;
   const [simUnavailable, setSimUnavailable] = useState(false);
   const [flowsUnavailable, setFlowsUnavailable] = useState(false);
   const [simToggling, setSimToggling] = useState(false);
@@ -68,19 +80,22 @@ export default function Home() {
     const controller = new AbortController();
     const { signal } = controller;
     const load = () => {
-      api.getDashboard(signal).then((r) => r && setData(r)).catch(() => {});
-      api.listZones(signal).then(snapshot => (snapshot?.data ?? null)).then((r) => r && setZones(r)).catch(() => {});
-      api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
+      api.getDashboard(signal).then((r) => { setData(r); setDashboardUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setData(null); setDashboardUnavailable(true); } });
+      api.listZones(signal).then(snapshot => { setZones(snapshot?.data ?? []); setZonesUnavailable(!snapshot); }).catch(() => { if (!signal.aborted) { setZones([]); setZonesUnavailable(true); } });
+      Promise.all([api.listInterfaces(signal), api.listInterfaceState(signal)]).then(([configured, runtime]) => {
+        setInterfaceBindings(configured?.data && runtime ? { configured: configured.data, runtime } : null);
+      }).catch(() => { if (!signal.aborted) setInterfaceBindings(null); });
+      api.listEvents(50, signal).then((r) => { setEventsLoaded(true); setEvents(r ?? []); setEventsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setEventsLoaded(true); setEvents([]); setEventsUnavailable(true); } });
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
-      api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
-      api.getServicesStatus(signal).then((r) => r && setServicesStatus(r)).catch(() => {});
-      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
+      api.getSystemStats(signal).then((r) => { setStats(r); setStatsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setStats(null); setStatsUnavailable(true); } });
+      api.getServicesStatus(signal).then(setServicesStatus).catch(() => { if (!signal.aborted) setServicesStatus(null); });
+      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimulation(r); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimulation(null); } });
       api.diffConfig().then(snapshot => (snapshot?.data ?? null)).then((r) => {
-        if (!r) return;
+        if (!r) { setConfigDirty(null); return; }
         const running = JSON.stringify(r.running ?? null);
         const candidate = JSON.stringify(r.candidate ?? null);
         setConfigDirty(running !== candidate);
-      }).catch(() => {});
+      }).catch(() => { if (!signal.aborted) setConfigDirty(null); });
     };
     load();
     const id = setInterval(() => { if (!document.hidden) load(); }, 10_000);
@@ -100,7 +115,7 @@ export default function Home() {
         ? await api.stopSimulation()
         : await api.startSimulation();
       setSimUnavailable(r === null);
-      setSimRunning(r?.running ?? null);
+      setSimulation(r);
     } finally {
       setSimToggling(false);
     }
@@ -109,7 +124,7 @@ export default function Home() {
   async function retrySimulation() {
     const result = await api.getSimulationStatus();
     setSimUnavailable(result === null);
-    setSimRunning(result?.running ?? null);
+    setSimulation(result);
   }
 
   async function retryFlows() {
@@ -120,13 +135,13 @@ export default function Home() {
 
   const health = data?.health ?? null;
   const eventStats = data?.eventStats ?? null;
+  const alertCountsKnown = Number.isFinite(eventStats?.idsAlerts) && Number.isFinite(eventStats?.avDetections);
   const hasAlerts =
-    eventStats &&
+    alertCountsKnown && eventStats &&
     (eventStats.idsAlerts > 0 || eventStats.avDetections > 0);
 
-  const services = useMemo(() => deriveServices(servicesStatus, events), [servicesStatus, events]);
+  const services = useMemo(() => deriveServices(servicesStatus), [servicesStatus]);
   const zoneThreatMap = useMemo(() => buildZoneThreatMap(events, zones), [events, zones]);
-  const zoneSparklineMap = useMemo(() => buildZoneSparklines(events, zones), [events, zones]);
 
   return (
     <Shell title="Dashboard">
@@ -137,14 +152,14 @@ export default function Home() {
             <div className="flex items-center gap-2.5">
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
-                  hasAlerts ? "animate-pulse" : "bg-emerald-400"
+                  !alertCountsKnown ? "bg-slate-500" : hasAlerts ? "animate-pulse" : "bg-emerald-400"
                 }`}
               />
               <span className="text-sm font-semibold text-white tracking-wide">
                 {health.hostname ?? "containd"}
               </span>
               <span className="text-xs text-slate-500">
-                {hasAlerts ? "Alerts active" : "All systems nominal"}
+                {!alertCountsKnown ? "Recent IDS/AV alerts unavailable" : hasAlerts ? "Recent IDS/AV alerts" : eventStats?.complete === false ? "IDS/AV alerts: partial 24h coverage" : "No recent IDS/AV alerts"}
               </span>
             </div>
           ) : (
@@ -157,7 +172,16 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex items-center gap-4 text-2xs font-mono text-slate-500">
+        <div className="flex flex-wrap items-center gap-4 text-2xs font-mono text-slate-500">
+          <Link href="/firewall/#enforcement" title={`Firewall enforcement ${enforcement?.state ?? "unknown"}`}
+            className="flex items-center gap-1.5 hover:text-slate-300 transition-colors">
+            FW
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${
+              enforcement?.state === "enforcing" ? "bg-emerald-400"
+                : enforcement?.state === "degraded" ? "bg-amber-400"
+                  : enforcement?.state === "unavailable" ? "bg-red-400" : "bg-slate-600"
+            }`} />
+          </Link>
           {services.slice(0, 4).map((s) => (
             <Link
               key={s.name}
@@ -196,9 +220,11 @@ export default function Home() {
           <span className="tabular-nums">{clock}</span>
         </div>
       </div>
+      {simulation && <p role="status" data-simulation-status className={`mb-4 wrap-anywhere text-xs ${simulation.error ? "text-amber" : "text-(--text-muted)"}`}>{simulationDescription(simulation)}</p>}
 
       <SetupChecklist
         counts={data?.counts}
+        interfaceBindings={interfaceBindings}
         configDirty={configDirty}
         isAdmin={data?.user?.role === "admin"}
       />
@@ -242,6 +268,17 @@ export default function Home() {
         </div>
       )}
 
+      {dashboardUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">Dashboard unavailable — previous totals are not current. Check Monitoring or retry on the next refresh.</p>}
+      {eventsUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">Recent events unavailable — activity and zone signals are unknown.</p>}
+      {statsUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">System telemetry unavailable — resource usage is unknown.</p>}
+      {flowsUnavailable && <div role="status" className="mb-3 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border px-3 py-1">Retry</button></div>}
+      {zonesUnavailable && <p role="alert" className="mb-3 text-sm text-amber">Zones unavailable — zone configuration is unknown.</p>}
+      {services.filter(service => service.state === "unavailable" || service.state === "stopped").map(service => (
+        <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail} — <Link className="underline" href={service.href}>Check service</Link></p>
+      ))}
+
+      {services.filter(s => s.name !== "IPS").map(s => <ServiceTelemetryAttention key={s.name} service={s} />)}
+
       {/* ── Main grid ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_320px] gap-4">
         {/* Network Pulse — spans 2 cols */}
@@ -252,7 +289,7 @@ export default function Home() {
             </h3>
             {!flowsUnavailable && <NetworkPulseStats flows={flows} eventStats={eventStats} />}
           </div>
-          {flowsUnavailable ? <div role="status" className="p-4 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button></div> : <div className="h-[220px]">
+          {flowsUnavailable || eventsUnavailable || zonesUnavailable ? <div className="p-4 text-sm text-amber">Network Pulse unavailable — see the traffic status above.</div> : <div className="h-[220px]">
             <NetworkPulseCanvas zones={zones} threatMap={zoneThreatMap} />
           </div>}
         </div>
@@ -262,8 +299,8 @@ export default function Home() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Zone Status
           </h3>
-          {zones.length > 0 ? (
-            <ZoneList zones={zones} threatMap={zoneThreatMap} sparklineMap={zoneSparklineMap} />
+          {zonesUnavailable ? <p className="text-xs text-amber">Zone activity unknown — check the traffic status above.</p> : zones.length > 0 ? (
+            <ZoneList zones={zones} threatMap={zoneThreatMap} threatsKnown={eventsLoaded && !eventsUnavailable} />
           ) : (
             <Skeleton className="h-32 w-full" />
           )}
@@ -278,25 +315,25 @@ export default function Home() {
         </div>
 
         {/* Traffic Chart */}
-        <div className="rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
+        <div className="min-w-0 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Traffic
             <span className="ml-2 text-2xs font-normal normal-case tracking-normal text-slate-500">
-              60s window
+              1h window
             </span>
           </h3>
-          <div className="h-[120px] mb-3">
-            <TrafficChart events={events} />
-          </div>
+          <TrafficHistory />
+          <p className="mb-2 text-[10px] text-(--text-muted)">Event totals: last 24 h{eventStats && !eventStats.complete ? " · Partial coverage" : ""}</p>
+          {data?.eventStatsError && <p role="status" className="text-xs text-amber">Event totals unavailable: {data.eventStatsError}</p>}
           <div className="grid grid-cols-3 gap-2">
             <TrafficCounter
               label="Total Events"
-              value={eventStats?.total ?? 0}
+              value={eventStats?.total ?? null}
               color=""
             />
             <TrafficCounter
               label="IDS Alerts"
-              value={eventStats?.idsAlerts ?? 0}
+              value={eventStats?.idsAlerts ?? null}
               color="text-red-400"
             />
             {!flowsUnavailable && <TrafficCounter
@@ -313,11 +350,11 @@ export default function Home() {
         </div>
 
         {/* Event Stream — spans 2 cols */}
-        <div className="lg:col-span-2 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
+        <div className="min-w-0 lg:col-span-2 rounded-xl border border-white/8 bg-white/3 shadow-card p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Event Stream
           </h3>
-          <EventStream events={events} />
+          {!eventsLoaded ? <p className="text-xs text-(--text-muted)">Loading recent events…</p> : eventsUnavailable ? <p className="text-xs text-amber">Recent events unavailable.</p> : <EventStream events={events} />}
         </div>
 
         {/* System Health — replaces old stats row */}
@@ -333,6 +370,7 @@ export default function Home() {
       <div className="mt-5">
         <button
           type="button"
+          aria-expanded={consoleOpen} aria-controls="dashboard-console"
           onClick={() => setConsoleOpen((v) => !v)}
           className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-slate-500 transition-colors hover:text-slate-300"
         >
@@ -359,11 +397,7 @@ export default function Home() {
             <polyline points="6,9 12,15 18,9" />
           </svg>
         </button>
-        {consoleOpen && (
-          <div className="animate-fade-in">
-            <Console />
-          </div>
-        )}
+        <div id="dashboard-console" hidden={!consoleOpen}>{consoleOpen && <Console onClose={() => setConsoleOpen(false)} />}</div>
       </div>
     </Shell>
   );

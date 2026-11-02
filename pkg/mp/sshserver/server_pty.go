@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"sync"
 	"syscall"
 	"time"
@@ -65,6 +67,7 @@ func parseWindowChange(data []byte) (uint32, uint32, bool) {
 // stopped. It services the session's remaining requests, such as
 // window-change, until the channel closes.
 func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Channel, requests <-chan *ssh.Request, pr *ptyRequest) {
+	writeTTY(ch, osShellEntry("exit disconnects SSH"))
 	cmd, release := s.shellCommand(ctx, username, pr, ch)
 	defer release()
 
@@ -175,6 +178,8 @@ func closeShellPTY(ptmx *os.File, outputDone <-chan struct{}) {
 // when it exits. The shell first receives what the CLI has buffered but not
 // read; input it has not taken when it exits stays for the CLI.
 func (s *Server) startLinuxShellInline(ctx context.Context, username string, term *sessionIO, buffered *bufio.Reader, pr *ptyRequest, windowCh <-chan ptyRequest) {
+	writeTTY(term, osShellEntry("exit returns to the SSH CLI"))
+	defer writeTTY(term, "Returned to configuration CLI; candidate changes remain staged.\n")
 	cmd, release := s.shellCommand(ctx, username, pr, term)
 	defer release()
 
@@ -264,5 +269,18 @@ func buildShellEnv(username string, pr *ptyRequest) []string {
 		"HOME=/root",
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"LANG=C.UTF-8",
+		"ENV=/etc/profile.d/containd-os-shell.sh",
 	}
+}
+
+func osShellEntry(destination string) string {
+	name := fmt.Sprintf("uid %d", os.Geteuid())
+	if u, err := user.LookupId(fmt.Sprint(os.Geteuid())); err == nil {
+		name = u.Username
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		host = "host unavailable"
+	}
+	return fmt.Sprintf("Entering Linux OS shell as %s on %s. OS commands apply immediately and bypass candidate configuration. Type configure for the configuration CLI; %s.\n", name, host, destination)
 }

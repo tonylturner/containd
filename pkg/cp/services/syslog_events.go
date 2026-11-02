@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/evidence"
+	"github.com/tonylturner/containd/pkg/common/telemetry"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
@@ -154,6 +155,10 @@ func (m *SyslogManager) forwardEvents(ctx context.Context, target syslogTarget, 
 	defer conn.close()
 	sent := 0
 	for _, record := range p.Records {
+		if record.Event.Origin == telemetry.OriginDemo {
+			st.offset = record.Offset
+			continue
+		}
 		payload, err := m.formatSourceEvent(record.Event, format, source, p.Epoch, record.Offset)
 		if err != nil {
 			st.lost++

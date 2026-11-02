@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -14,7 +15,8 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-// Command is a simple handler signature for CLI commands.
+// Command receives transport capabilities, such as WithSecretPrompt, through
+// its context. Secret input is never a command argument.
 type Command func(ctx context.Context, out io.Writer, args []string) error
 
 // Registry holds available commands.
@@ -27,7 +29,7 @@ type Registry struct {
 func NewRegistry(store config.Store, api *API) *Registry {
 	r := &Registry{commands: map[string]Command{}, roles: map[string]Role{}}
 	r.RegisterRole("show version", RoleView, showVersion)
-	r.RegisterRole("convert sigma", RoleView, convertSigma)
+	r.RegisterRole("convert sigma", RoleView, localFilesystemCommand(convertSigma))
 	r.RegisterRole("help", RoleView, helpCommand(r))
 	r.RegisterRole("show help", RoleView, showHelpCommand(r))
 	r.RegisterRole("set help", RoleView, setHelpCommand(r))
@@ -40,8 +42,33 @@ func NewRegistry(store config.Store, api *API) *Registry {
 	r.RegisterRole("diag traceroute", RoleView, diagTraceroute())
 	r.RegisterRole("diag tcptraceroute", RoleView, diagTCPTraceroute())
 	r.RegisterRole("diag reach", RoleView, diagReach(store))
-	r.RegisterRole("diag capture", RoleAdmin, diagCapture())
+	r.RegisterRole("diag capture", RoleAdmin, localFilesystemCommand(diagCapture()))
 	if api != nil {
+		registerNetworkServiceCommands(r, api)
+		registerAVServiceCommands(r, api)
+		registerVPNServiceCommands(r, api)
+		registerProxyServiceCommands(r, api)
+		registerIDSServiceCommands(r, api)
+		r.RegisterRole("show users", RoleAdmin, opsRead(api, "/api/v1/users"))
+		r.RegisterRole("create user", RoleAdmin, opsCreateUser(api))
+		r.RegisterRole("reset user password", RoleAdmin, opsResetUserPassword(api))
+		r.RegisterRole("delete user", RoleAdmin, opsUser(api, "delete"))
+		r.RegisterRole("require mfa user", RoleAdmin, opsUser(api, "require mfa"))
+		r.RegisterRole("show backups", RoleView, opsRead(api, "/api/v1/config/backups"))
+		r.RegisterRole("create backup", RoleAdmin, opsBackup(api, "create"))
+		r.RegisterRole("delete backup", RoleAdmin, opsBackup(api, "delete"))
+		r.RegisterRole("download backup", RoleAdmin, opsDownload(api, func(id string) string { return "/api/v1/config/backups/" + url.PathEscape(id) }, "download backup"))
+		r.RegisterRole("show openvpn clients", RoleAdmin, opsRead(api, "/api/v1/services/vpn/openvpn/clients"))
+		r.RegisterRole("issue openvpn client", RoleAdmin, opsOpenVPN(api, "issue"))
+		r.RegisterRole("revoke openvpn client", RoleAdmin, opsOpenVPN(api, "revoke"))
+		r.RegisterRole("download openvpn client", RoleAdmin, opsDownload(api, func(id string) string { return "/api/v1/services/vpn/openvpn/clients/" + url.PathEscape(id) }, "download openvpn client"))
+		r.RegisterRole("revoke connection", RoleAdmin, opsRevokeConnection(api))
+		r.RegisterRole("show protection", RoleView, opsRead(api, "/api/v1/dataplane/protection"))
+		r.RegisterRole("retry protection", RoleAdmin, opsRetryProtection(api))
+		r.RegisterRole("update av definitions", RoleAdmin, opsConfirmed(api, "update av definitions", "/api/v1/services/av/update"))
+		r.RegisterRole("show pcap status", RoleView, opsRead(api, "/api/v1/pcap/status"))
+		r.RegisterRole("start pcap", RoleAdmin, opsConfirmed(api, "start pcap", "/api/v1/pcap/start"))
+		r.RegisterRole("stop pcap", RoleAdmin, opsConfirmed(api, "stop pcap", "/api/v1/pcap/stop"))
 		r.RegisterRole("show health", RoleView, showHealth(api))
 		r.RegisterRole("show config", RoleView, showConfig(api))
 		r.RegisterRole("show running-config", RoleView, showRunningConfig(api))
@@ -81,7 +108,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show portforwards", RoleView, showPortForwardsAPI(api))
 		r.RegisterRole("show conntrack", RoleView, showConntrackAPI(api))
 		r.RegisterRole("show sessions", RoleView, showConntrackAPI(api))
-		r.RegisterRole("analyze pcap", RoleAdmin, analyzePcapAPI(api))
+		r.RegisterRole("analyze pcap", RoleAdmin, localFilesystemCommand(analyzePcapAPI(api)))
 		r.RegisterRole("assign interfaces", RoleAdmin, assignInterfacesAPI(api))
 		r.RegisterRole("diag routing reconcile", RoleAdmin, routingReconcileAPI(api))
 		r.RegisterRole("show templates", RoleView, showTemplatesAPI(api))
@@ -118,9 +145,19 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set ip rule add", RoleAdmin, setIPRuleAddAPI(api))
 		r.RegisterRole("set ip rule del", RoleAdmin, setIPRuleDelAPI(api))
 		r.RegisterRole("diag interfaces reconcile", RoleAdmin, interfacesReconcileAPI(api))
-		r.RegisterRole("add firewall rule", RoleAdmin, setFirewallRuleAPI(api))
+		r.RegisterRole("add firewall rule", RoleAdmin, addFirewallRuleAPI(api))
 		r.RegisterRole("move firewall rule", RoleAdmin, moveFirewallRuleAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
+		r.RegisterRole("add firewall ics-rule", RoleAdmin, addFirewallICSRuleAPI(api))
+		r.RegisterRole("set firewall default", RoleAdmin, setFirewallDefaultAPI(api))
+		r.RegisterRole("set zone consequence", RoleAdmin, setZoneConsequenceAPI(api))
+		r.RegisterRole("set asset hostnames", RoleAdmin, setAssetHostnamesAPI(api))
+		r.RegisterRole("show templates ics", RoleView, showPolicyICSTemplatesAPI(api))
+		r.RegisterRole("preview template ics", RoleAdmin, policyICSTemplateAPI(api, true))
+		r.RegisterRole("apply template ics", RoleAdmin, policyICSTemplateAPI(api, false))
+		r.RegisterRole("set dataplane dpi", RoleAdmin, setDataPlaneDPIAPI(api))
+		r.RegisterRole("set dataplane nfqueue-group", RoleAdmin, setDataPlaneGroupAPI(api, "nfqueueGroup"))
+		r.RegisterRole("set dataplane nflog-group", RoleAdmin, setDataPlaneGroupAPI(api, "nflogGroup"))
 		r.RegisterRole("set firewall ics-rule", RoleAdmin, setFirewallICSRuleAPI(api))
 		r.RegisterRole("show firewall ics-rules", RoleView, showFirewallICSRulesAPI(api))
 		r.RegisterRole("delete firewall rule", RoleAdmin, deleteFirewallRuleAPI(api))
@@ -155,7 +192,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("confirm", RoleAdmin, confirmCommitAPI(api))
 		r.RegisterRole("rollback", RoleAdmin, rollbackAPI(api))
 		r.RegisterRole("export config", RoleAdmin, exportConfigAPI(api))
-		r.RegisterRole("import config", RoleAdmin, importConfigAPI(api))
+		r.RegisterRole("import config", RoleAdmin, localFilesystemCommand(importConfigAPI(api)))
 	} else if store != nil {
 		r.RegisterRole("show zones", RoleView, showZones(store))
 		r.RegisterRole("show interfaces", RoleView, showInterfaces(store))

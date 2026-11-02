@@ -52,6 +52,7 @@ async function openFirewall(page: Page, rules: unknown[], dataplane: Record<stri
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/firewall/");
   await loaded;
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
   return seen;
 }
 
@@ -60,14 +61,68 @@ function editor(page: Page, id: string) {
   return page.locator("div.fixed").filter({ has: page.getByRole("heading", { name: `Edit rule ${id}` }) });
 }
 
+for (const field of ["description", "logging"] as const) {
+  test(`editing only ${field} preserves every rule zone and protocol`, async ({ page }) => {
+    const multi = {
+      ...rule,
+      sourceZones: ["it", "engineering"],
+      destZones: ["ot", "safety"],
+      protocols: [{ name: "tcp", port: "502" }, { name: "udp", port: "20000" }, { name: "icmp" }],
+    };
+    const seen = await openFirewall(page, [multi]);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const form = editor(page, multi.id);
+    if (field === "description") await form.getByPlaceholder("description").fill("Reviewed");
+    else await form.getByLabel("Log hits").uncheck();
+    await form.getByRole("button", { name: "Save changes" }).click();
+    await expect.poll(() => seen.patches.length).toBe(1);
+    expect(seen.patches[0]).toMatchObject({
+      sourceZones: multi.sourceZones,
+      destZones: multi.destZones,
+      protocols: multi.protocols,
+    });
+  });
+}
+
+test("editing a rule with any protocol does not add a TCP restriction", async ({ page }) => {
+  const seen = await openFirewall(page, [{ ...rule, protocols: [], ics: undefined }]);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const form = editor(page, rule.id);
+  await form.getByPlaceholder("description").fill("Any protocol");
+  await form.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => seen.patches.length).toBe(1);
+  expect(seen.patches[0]).toMatchObject({ protocols: [] });
+});
+
+test("multi-value controls remove exactly the selected match", async ({ page }) => {
+  const multi = {
+    ...rule, ics: undefined,
+    sourceZones: ["it", "engineering"],
+    destZones: ["ot", "safety"],
+    protocols: [{ name: "tcp", port: "502" }, { name: "udp", port: "20000" }],
+  };
+  const seen = await openFirewall(page, [multi]);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const form = editor(page, multi.id);
+  for (const label of ["Remove source zone 1", "Remove dest zone 1", "Remove protocol 1"]) {
+    await form.getByRole("button", { name: label, exact: true }).click();
+  }
+  await form.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => seen.patches.length).toBe(1);
+  expect(seen.patches[0]).toMatchObject({
+    sourceZones: ["engineering"], destZones: ["safety"],
+    protocols: [{ name: "udp", port: "20000" }],
+  });
+});
+
 test("clearing rule fields in the editor clears them", async ({ page }) => {
   const seen = await openFirewall(page, [rule]);
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   const form = editor(page, "plc-write");
   await form.getByPlaceholder("description").fill("");
   await form.getByLabel("Log hits").uncheck();
-  await form.locator("select").filter({ hasText: "Source zone (any)" }).selectOption("");
-  await form.locator("select").filter({ hasText: "Dest zone (any)" }).selectOption("");
+  await form.getByRole("button", { name: "Remove source zone 1", exact: true }).click();
+  await form.getByRole("button", { name: "Remove dest zone 1", exact: true }).click();
   await form.getByPlaceholder("sources CIDR (csv)").fill("");
   await form.getByPlaceholder("destinations CIDR (csv)").fill(" ");
   await form.getByLabel("Identities").fill("");
@@ -253,15 +308,18 @@ test("the rule list tells deciding actions from effects and states precedence", 
     { id: "pps-cap", action: "RATE_LIMIT", rateLimit: { packetsPerSecond: 100, burst: 20 } },
     { id: "label-eng", action: "TAG", tag: "eng-access", identities: ["engineering", "vendor"] },
   ]);
-  await expect(page.getByText(/Among enforcing rules, the first matching terminal rule in list order decides/)).toBeVisible();
+  await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
+  await expect(page.getByText(/Among enforcing rules, the first matching rule that allows or blocks traffic decides/)).toBeVisible();
   await expect(page.getByText(/Monitor ICS rules never decide/)).toBeVisible();
-  const row = (id: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
+  const row = (id: string) => page.getByRole("row").filter({ has: page.getByText(id, { exact: true }) });
   await expect(row("reset-ssh").getByText("RESET", { exact: true })).toHaveClass(/badge-critical/);
   await expect(row("reset-ssh").getByText("effect", { exact: true })).toHaveCount(0);
   await expect(row("pps-cap").getByText("RATE_LIMIT", { exact: true })).toHaveClass(/badge-warning/);
   await expect(row("pps-cap")).toContainText("effect");
   await expect(row("pps-cap")).toContainText("100 pps, burst 20");
   await expect(row("label-eng")).toContainText("eng-access");
-  await expect(row("label-eng")).toContainText("identity engineering, vendor");
-  await expect(row("plc-write")).toContainText("schedule Mon,Fri 08:00-17:00 Europe/Berlin");
+  await page.getByRole("button", { name: "Inspect rule label-eng", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect rule plc-write", exact: true }).click();
+  await expect(page.getByLabel("Details of label-eng", { exact: true })).toContainText("identity engineering, vendor");
+  await expect(page.getByLabel("Details of plc-write", { exact: true })).toContainText("schedule Mon,Fri 08:00-17:00 Europe/Berlin");
 });

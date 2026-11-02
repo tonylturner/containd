@@ -6,7 +6,7 @@ export function ConfigDiffBlocks({ blocks }: { blocks: DiffBlock[] }) {
     <div
       key={block.key}
       role="region"
-      aria-label={`${block.label} changes`}
+      aria-label={`${block.label} JSON changes`}
       className="rounded-xs border bg-(--surface) p-4 shadow-card"
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

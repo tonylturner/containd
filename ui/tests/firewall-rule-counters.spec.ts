@@ -55,8 +55,12 @@ test("the rule list shows hits, excess drops and when counting started", async (
   const errors = await openFirewall(page, { status: 200, json: counters });
   const sinceText = await page.evaluate((s) => new Date(s).toLocaleString(), since);
   await expect(page.getByRole("status", { name: "Rule counters" })).toContainText(`Hit counters since ${sinceText}`);
-  await expect(page.getByRole("status", { name: "Rule counters" })).toContainText("every apply restarts them at zero");
+  await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
+  await expect(page.getByText(/every apply restarts them at zero/)).toBeVisible();
 
+  await expect(page.getByLabel("Hit summary of allow-hmi")).toContainText(`${await page.evaluate(v => v.toLocaleString(), 123456)} pkts`);
+  await expect(page.getByLabel("Hit summary of pps-cap")).toContainText("42 over limit");
+  for (const id of ["allow-hmi", "pps-cap", "label-eng"]) await page.getByRole("button", { name: `Inspect rule ${id}`, exact: true }).click();
   const hits = (id: string) => page.getByLabel(`Hits of ${id}`);
   const count = (n: number) => page.evaluate((v) => v.toLocaleString(), n);
   await expect(hits("allow-hmi")).toContainText(`${await count(123456)} pkts`);
@@ -71,10 +75,18 @@ test("the rule list shows hits, excess drops and when counting started", async (
 
 for (const status of [502, 503]) {
   test(`unavailable counters (${status}) are a quiet state, not an error`, async ({ page }) => {
-    const reason = "rule counters unavailable: nftables enforcement is not active";
+    const reason = "engine rule counters status 503: rule counters unavailable: nftables enforcement is not active";
     const errors = await openFirewall(page, { status, json: { error: reason } });
     const note = page.getByRole("status", { name: "Rule counters" });
-    await expect(note).toHaveText(`Hit counters unavailable: ${reason}`);
+    await expect(note).toContainText("Hit counters unavailable.");
+    await expect(note.getByText("Firewall enforcement is not active.", { exact: true })).toBeVisible();
+    await expect(note.getByText(reason, { exact: true })).not.toBeVisible();
+    expect(await note.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "How rules are evaluated", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await page.getByRole("button", { name: "How rules are evaluated", exact: true }).click();
+    const notes = page.getByRole("group", { name: "Rule table notes", exact: true });
+    await notes.getByText("Technical details", { exact: true }).click();
+    await expect(notes.getByText(reason, { exact: true })).toBeVisible();
     await expect(note).toHaveClass(/text-\(--text-dim\)/);
     await expect(page.getByRole("row").filter({ hasText: "allow-hmi" })).toBeVisible();
     await expect(page.getByLabel("Hits of allow-hmi")).toHaveCount(0);
@@ -83,6 +95,15 @@ for (const status of [502, 503]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("an unfamiliar counter failure keeps its cause visible inline", async ({ page }) => {
+  const reason = "engine connection refused";
+  await openFirewall(page, { status: 502, json: { error: reason } });
+  const note = page.getByRole("status", { name: "Rule counters" });
+  await expect(note.getByText(reason, { exact: true })).toBeVisible();
+  await expect(note).not.toContainText("Firewall enforcement is not active.");
+  await expect(page.getByLabel("Hits of allow-hmi")).toHaveCount(0);
+});
 
 test("counter responses are validated before use", () => {
   expect(normalizeRuleCounters(counters)?.rules).toHaveLength(3);

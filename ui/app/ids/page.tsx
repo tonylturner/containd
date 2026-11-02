@@ -22,9 +22,10 @@ import {
   ConfirmDialog,
   useConfirm,
 } from "../../components/ConfirmDialog";
+import { Disclosure } from "../../components/Disclosure";
+import { EditRuleModal } from "./ids-rule-editor";
 import { RulesTable } from "./ids-rules-table";
 import {
-  EditRuleModal,
   ExportPanel,
   GroupsPanel,
   ImportPanel,
@@ -40,16 +41,19 @@ export default function IDSPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] }, false);
   const { conflictProps, editor, cfg: ids, setCfg: setIds, readConfig: adoptConfig, write, writeRefresh, text, setText, clearText } = draft;
-  const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
+  const panelForm = useConfigForm<IDSPanelFields>({ description: "", name: "", filter: "", format: "", sigmaText: "" });
   const { readConfig: refreshForm } = panelForm;
   const refreshId = useRef(0);
+  const rulesButton = useRef<HTMLButtonElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [savingRule, setSavingRule] = useState(false);
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<IDSImportResult | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
   const [sources, setSources] = useState<IDSRuleSource[]>([]);
-  const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources" | "groups">("rules");
+  const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources">("rules");
   const confirm = useConfirm();
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
@@ -76,7 +80,9 @@ export default function IDSPage() {
     if (!canEdit || !canSave || importPending || draft.stale) return;
     setError(null);
     // The modal is not submitted by the page Save button.
+    setSaving(true);
     const saved = await write((base, submitted) => api.setIDS(base, submitted), { replace: data => data, raw: {} });
+    setSaving(false);
     if (!saved.ok) { setError(revisionError(saved)); return; }
     flashSuccess("IDS rules staged — commit to apply.");
   }
@@ -104,6 +110,7 @@ export default function IDSPage() {
     const { imported, skipped, format: detected, total } = result.data;
     flashSuccess(`IDS rules staged — commit to apply. Imported ${imported} rule${imported !== 1 ? "s" : ""} (${skipped} skipped). Format: ${detected}. Total: ${total}.`);
     setActiveTab("rules");
+    rulesButton.current?.focus();
     return true;
   }
 
@@ -168,13 +175,6 @@ export default function IDSPage() {
   const enabledCount = useMemo(() => rules.filter(isRuleEnabled).length, [rules]);
   const evaluableCount = useMemo(() => rules.filter(r => isRuleEnabled(r) && isRuleEvaluable(r)).length, [rules]);
 
-  const tabs = [
-    { key: "rules" as const, label: "Rules", count: rules.length },
-    { key: "groups" as const, label: "Groups", count: groups.length },
-    { key: "import" as const, label: "Import" },
-    { key: "export" as const, label: "Export" },
-    { key: "sources" as const, label: "Sources", count: sources.length },
-  ];
 
   return (
     <Shell
@@ -185,7 +185,7 @@ export default function IDSPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} disabled={!canSave || importPending || draft.stale} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+            <button onClick={onSave} disabled={!canSave || importPending || draft.stale || saving || !!editing} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               Save
             </button>
           )}
@@ -199,8 +199,7 @@ export default function IDSPage() {
       )}
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...panelForm.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
-      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      {!editing && <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
       {importResult && (
@@ -218,72 +217,91 @@ export default function IDSPage() {
         </section>
       )}
 
-      <div className="mb-6 flex items-center gap-4">
+      <div className="mb-6 flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-(--text)">
-          <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
+          <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit || !canSave}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
             className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-          Enable IDS engine
+          Enable intrusion detection
         </label>
         <span className="ml-auto text-xs text-(--text-muted) tabular-nums">
           {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled; {evaluableCount.toLocaleString()} evaluable
         </span>
       </div>
 
-      {/* Tab bar */}
-      <div className="mb-4 flex gap-1 border-b overflow-x-auto">
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`shrink-0 px-4 py-2 text-sm transition-ui border-b-2 -mb-px ${
-              activeTab === t.key ? "" : "border-transparent text-(--text-muted) hover:text-(--text)"
-            }`}>
-            {t.label}
-            {t.count !== undefined && (
-              <span className="ml-1.5 rounded-xs bg-white/6 px-1.5 py-0.5 text-xs tabular-nums">{t.count.toLocaleString()}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      <button ref={rulesButton} type="button" onClick={() => setActiveTab("rules")} className="mb-3 text-sm font-semibold">Rules <span className="text-(--text-muted)">{rules.length.toLocaleString()}</span></button>
+      <RulesTable mutationDisabled={!canSave || saving || importPending || draft.stale} editDisabled={!canSave || importPending || draft.stale}
+        rules={rules} canEdit={canEdit} onEdit={rule => { setSuccess(null); setEditing(rule); }} onDelete={onDelete}
+        onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
 
-      {activeTab === "rules" && (
-        <RulesTable rules={rules} canEdit={canEdit} onEdit={setEditing} onDelete={onDelete}
-          onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
-      )}
-      {activeTab === "groups" && (
-        <GroupsPanel form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
-          onUpdate={(g) => {
-            if (!canCombinePanel()) return false;
-            setIds((prev) => ({ ...prev, ruleGroups: g }));
-            return true;
-          }} />
-      )}
+      <h2 className="mt-6 text-base font-semibold">Add/import rules</h2>
+      <p className="mt-1 text-xs text-(--text-muted)">Import a file or convert Sigma YAML; review rules before committing. No rules are selected or enabled automatically by opening this flow.</p>
+      <button type="button" aria-expanded={activeTab === "import"} aria-controls="ids-import" onClick={() => setActiveTab(activeTab === "import" ? "rules" : "import")} className="my-3 rounded-xs border px-3 py-2 text-sm">Import</button>
+      <div id="ids-import">
       {activeTab === "import" && canEdit && (
-        <ImportPanel form={panelForm} onImport={onImport} onConverted={(rule, revision) => {
+        <fieldset disabled={!canSave} className="min-w-0"><ImportPanel form={panelForm} onImport={onImport} onConverted={(rule, revision) => {
           if (!canCombinePanel(revision)) return false;
           // Conversion returns a rule but does not stage it on the server.
           setIds((current) => ({ ...current, rules: upsertRow(current.rules ?? [], rule, (r) => r.id) }));
           flashSuccess(`Converted Sigma rule: ${rule.id}. Click Save to persist.`);
           setActiveTab("rules");
+          rulesButton.current?.focus();
           return true;
-        }} onError={setError} />
+        }} onError={setError} /></fieldset>
       )}
       {activeTab === "import" && !canEdit && (
         <div className="py-8 text-center text-sm text-(--text-muted)">Import is disabled in view-only mode.</div>
       )}
-      {activeTab === "export" && <ExportPanel ruleCount={rules.length} />}
+      </div>
+      <h2 className="mt-6 text-base font-semibold">Manage groups</h2>
+      <Disclosure title="Groups" defaultOpen={groups.length > 0} indicator={`${groups.length} group${groups.length !== 1 ? "s" : ""}${groups.length ? " · non-default settings" : ""}`}>
+        <GroupsPanel mutationDisabled={!canSave || saving || importPending || draft.stale} form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
+          onUpdate={(g) => {
+            if (!canCombinePanel()) return false;
+            setIds((prev) => ({ ...prev, ruleGroups: g }));
+            return true;
+          }} />
+      </Disclosure>
+
+      <h2 className="mt-6 text-base font-semibold">Export and sources</h2>
+      <p className="mt-1 text-xs text-(--text-muted)">Export uses active committed rules.</p>
+      <div className="my-3 flex flex-wrap gap-2">
+        <button type="button" aria-expanded={activeTab === "export"} aria-controls="ids-secondary" onClick={() => setActiveTab(activeTab === "export" ? "rules" : "export")} className="rounded-xs border px-3 py-2 text-sm">Export</button>
+        <button type="button" aria-expanded={activeTab === "sources"} aria-controls="ids-secondary" onClick={() => setActiveTab(activeTab === "sources" ? "rules" : "sources")} className="rounded-xs border px-3 py-2 text-sm">Sources <span>{sources.length}</span></button>
+      </div>
+      <div id="ids-secondary">
+      {activeTab === "export" && <ExportPanel ruleCount={rules.length} onError={setError} />}
       {activeTab === "sources" && <SourcesCatalog sources={sources} />}
 
+      </div>
+
       {editing && canEdit && (
-        <EditRuleModal rule={editing}
+        <EditRuleModal mutationDisabled={!canSave || savingRule || importPending || draft.stale} busy={savingRule} saveDisabled={saving} rule={editing} saveError={error || loadError} success={success}
+          notice={<ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
           text={text(`rule.${editing.id}`, JSON.stringify(editing, null, 2))}
-          setText={(value) => setText(`rule.${editing.id}`, value)}
-          onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={(newRule) => {
-          setIds((prev) => ({ ...prev, rules: (prev.rules ?? []).map((r) => r.id === editing.id ? newRule : r) }));
-          clearText(`rule.${editing.id}`);
-          setEditing(null);
-        }} />
+          setText={(value) => { setSuccess(null); setText(`rule.${editing.id}`, value); }}
+          onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={async (newRule) => {
+            if (!canSave || saving || importPending || draft.stale) return;
+            if (newRule.id !== editing.id && rules.some(r => r.id === newRule.id)) {
+              setError("A rule with that ID already exists.");
+              return;
+            }
+            setSaving(true);
+            setSavingRule(true);
+            setError(null);
+            const result = await write((base, submitted) => api.setIDS(base, {
+              ...submitted, rules: (submitted.rules ?? []).map(r => r.id === editing.id ? newRule : r),
+            }), { replace: data => data });
+            setSaving(false);
+            setSavingRule(false);
+            if (!result.ok) { setError(revisionError(result)); return; }
+            if (result.adopted && result.unchanged) {
+              clearText(`rule.${editing.id}`);
+              setEditing(null);
+            }
+            flashSuccess("IDS rules staged — commit to apply. No additional Save is needed.");
+          }} />
       )}
-      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

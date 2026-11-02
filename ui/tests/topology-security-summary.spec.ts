@@ -77,7 +77,7 @@ test("the security view summarizes zones below target, including zones outside t
   await expect(summary).toContainText("OT SL0/2");
   await expect(summary).toContainText("SCADA SL1/3");
   await expect(summary).toContainText("VENDOR SL0/1");
-  await expect(page.getByText("Configured checks and operator overrides can count toward SL; heuristics and unknowns cannot.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Heuristics and unknowns never pass.", { exact: false })).toBeVisible();
   await expect(page.getByText("Click any conduit cell", { exact: false })).toContainText("IEC 62443 SR requirement checks");
   await expect(page.locator("body")).not.toContainText(/compliance|achieved/i);
   expect(errors).toEqual([]);
@@ -86,7 +86,7 @@ test("the security view summarizes zones below target, including zones outside t
 test("conduit details label requirement check results without claiming a security level", async ({ page }) => {
   await serveSecurity(page, [zones[1], zones[2]], [{
     from: "ot", to: "dmz",
-    state: "allow", ids: "disabled", proto: [], traffic: null, checks: securityChecks,
+    state: "allow", ids: "disabled", proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: false,
     tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
     auditLogged: true, avEnabled: false,
@@ -104,7 +104,7 @@ test("conduit details label requirement check results without claiming a securit
   await expect(page.getByText("UNKNOWN", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("HEURISTIC", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("CONFIGURED FAIL", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("not measured", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unavailable: enforcement disabled", { exact: true })).toBeVisible();
   await expect(page.getByText("0% of baseline", { exact: true })).toHaveCount(0);
   await expect(page.getByText("CHECK PASS", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Zone names provide no evidence", { exact: false }).first()).toBeVisible();
@@ -123,10 +123,29 @@ test("zones label the computed level as check-based SL", async ({ page }) => {
   await expect(page.locator("body")).not.toContainText(/compliance|achieved|SL-A/i);
 });
 
+test("conduit attention buttons pluralize gap counts", async ({ page }) => {
+  const conduit: Conduit = {
+    from: "ot", to: "dmz", state: "allow", ids: "disabled", proto: [],
+    traffic: { state: "unavailable", reason: "enforcement disabled" }, checks: securityChecks,
+    rules: [], gaps: ["No IDS"], mitre: [], defaultDeny: false,
+    tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
+    auditLogged: true, avEnabled: false,
+  };
+  await serveSecurity(page, [zones[1], zones[2]], [
+    conduit, { ...conduit, from: "dmz", to: "ot", gaps: ["No IDS", "No TLS"] },
+  ]);
+  const loaded = page.waitForResponse("**/api/v1/security/conduits");
+  await page.goto("/topology/");
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  await loaded;
+  await expect(page.getByRole("button", { name: "OT → DMZ: 1 gap", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "DMZ → OT: 2 gaps", exact: true })).toBeVisible();
+});
+
 test("colliding zone slugs keep separate scores, conduits and staging targets", async ({ page }) => {
   const zoneList = [{ name: "OT-1", slTarget: 1 }, { name: "ot_1", slTarget: 1 }];
   const admitted = {
-    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: null, checks: securityChecks,
+    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: true,
     tlsEnforced: false, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
@@ -158,14 +177,14 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
   await page.goto("/zones/");
   await zoneScoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("—");
-  await expect(rowFor("ot_1").getByRole("cell").nth(4)).toHaveText("—");
+  await expect(rowFor("OT-1").locator('td[data-label="Check-based SL"]')).toHaveText("—");
+  await expect(rowFor("ot_1").locator('td[data-label="Check-based SL"]')).toHaveText("—");
 });
 
 test("arrow-containing endpoints keep distinct matrix selection and zone scores", async ({ page }) => {
   const zoneList = ["a→b", "a", "b", "b→a"].map((name) => ({ name, slTarget: 1 }));
   const admitted = {
-    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: null, checks: securityChecks,
+    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: true,
     tlsEnforced: false, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
@@ -197,7 +216,7 @@ test("arrow-containing endpoints keep distinct matrix selection and zone scores"
   await page.goto("/zones/");
   await scoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("a→b").getByRole("cell").nth(4)).toHaveText("—");
-  await expect(rowFor("a").getByRole("cell").nth(4)).toHaveText("—");
-  await expect(rowFor("b").getByRole("cell").nth(4)).toHaveText("—");
+  await expect(rowFor("a→b").locator('td[data-label="Check-based SL"]')).toHaveText("—");
+  await expect(rowFor("a").locator('td[data-label="Check-based SL"]')).toHaveText("—");
+  await expect(rowFor("b").locator('td[data-label="Check-based SL"]')).toHaveText("—");
 });

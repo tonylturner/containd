@@ -14,37 +14,8 @@ import (
 	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// setFirewallICSRuleAPI creates an ICS-specific firewall rule.
-//
-// Usage:
-//
-//	set firewall ics-rule <id> <action> <protocol> [options...]
-//
-// Options:
-//
-//	--src-zone <zone>
-//	--dst-zone <zone>
-//	--function-code <codes>   (comma-separated uint8 values)
-//	--object-classes <classes> (CIP, comma-separated decimal or 0x-prefixed uint16 values)
-//	--unit-id <id>
-//	--addresses <ranges>      (comma-separated, e.g. "0x0100-0x01FF,0x0200")
-//	--read-only
-//	--write-only
-//	--type-ids <ids>          (IEC104, comma-separated, e.g. "45,46")
-//	--classes <classes>       (IEC104, monitor|control|system|unknown)
-//	--ca <addresses>          (IEC104, comma-separated, 0..65534)
-//	--ioa <ranges>            (IEC104, comma-separated decimal addresses/ranges)
-//	--direction <request|response>
-//	--mode <monitor|enforce>
-//	--masters / --outstations <stations> (DNP3, 0..65519)
-//	--groups / --variations <values>     (DNP3, 0..255)
-//	--instances / --attributes <values> (CIP, 0..65535)
-//	--tags <paths>                      (CIP, comma-separated tag paths)
-//	--cot <values> / --originators <values> (IEC104, 1..63 / 0..255)
-//	--negative <true|false> / --test <true|false> (IEC104)
-//	--command-states <states> --command-qualifiers <QU> (IEC104)
-//	--select-execute <select|execute>    (IEC104)
-func setFirewallICSRuleAPI(api *API) Command {
+// addFirewallICSRuleAPI creates an ICS rule; set edits an existing rule.
+func addFirewallICSRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		rule, err := parseFirewallICSRuleArgs(args)
 		if err != nil {
@@ -56,7 +27,7 @@ func setFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <monitor|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>] [--command-states <states>] [--command-qualifiers <QU>]")
+		return config.Rule{}, fmt.Errorf("usage: add firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <monitor|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>] [--command-states <states>] [--command-qualifiers <QU>]")
 	}
 
 	rule := config.Rule{

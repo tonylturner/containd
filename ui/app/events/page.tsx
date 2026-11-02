@@ -1,5 +1,7 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -11,6 +13,7 @@ import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { IdentificationBadge } from "../flows/identification-badge";
 import { describeICSEvidence } from "./iec104-evidence";
+import { EventInspection } from "./event-inspection";
 
 type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy" | "iec104";
 
@@ -29,55 +32,13 @@ function eventHeadline(ev: TelemetryEvent): string {
   if (evidence) return evidence.headline;
   if (ev.kind === "service.av.detected") return "Antivirus detection";
   if (ev.kind === "service.av.block_flow") return "Antivirus blocked flow";
-  if (ev.kind.startsWith("service.envoy.")) return "Envoy proxy event";
-  if (ev.kind.startsWith("service.nginx.")) return "Nginx proxy event";
+  if (ev.kind.startsWith("service.envoy.")) return "Forward-proxy event";
+  if (ev.kind.startsWith("service.nginx.")) return "Reverse-proxy event";
   if (ev.kind.startsWith("service.dhcp.")) return "DHCP service event";
   if (ev.kind.startsWith("service.")) return "System service event";
   if (ev.proto === "firewall") return "Firewall decision";
   if (ev.proto) return `${ev.proto.toUpperCase()} telemetry`;
   return "Telemetry event";
-}
-
-function eventSubtitle(ev: TelemetryEvent): string {
-  const parts = [ev.kind];
-  if (ev.proto && ev.proto !== "firewall") parts.push(ev.proto.toUpperCase());
-  if (ev.transport) parts.push(ev.transport.toUpperCase());
-  return parts.join(" · ");
-}
-
-function EventDetails({ id }: { id: string }) {
-  const [detail, setDetail] = useState<TelemetryEvent | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState(false);
-  async function load() {
-    setPending(true);
-    setError(false);
-    try {
-      const event = await api.getEvent(id);
-      setDetail(event);
-      setError(!event);
-    } finally {
-      setPending(false);
-    }
-  }
-  const json = detail ? JSON.stringify(detail, null, 2) : "";
-  return (
-    <div className="mt-2 text-xs">
-      <button onClick={() => void load()} disabled={pending}
-        className="rounded-xs border px-2 py-1 font-mono disabled:opacity-50">
-        {pending ? "Loading" : "Event"} {id}
-      </button>
-      {error && <p role="status" className="mt-1 text-amber">Event detail unavailable; it may have left retention.</p>}
-      {detail && (
-        <details open className="mt-2">
-          <summary>Event JSON</summary>
-          <a className="mt-1 inline-block underline" download={`event-${id}.json`}
-            href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download event JSON</a>
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3">{json}</pre>
-        </details>
-      )}
-    </div>
-  );
 }
 
 function EventsInner() {
@@ -100,7 +61,11 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
   const [decision, setDecision] = useState(searchParams.get("decision") || "");
   const [verdict, setVerdict] = useState(searchParams.get("verdict") || "");
   const [since, setSince] = useState(searchParams.get("since") || "");
+  const [detailErrors, setDetailErrors] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [advancedOpen, setAdvancedOpen] = useState<boolean | null>(null);
   const [cursor, setCursor] = useState(searchParams.get("cursor") || "");
+  const filtersOpen = advancedOpen ?? Boolean(sessionFilter || flowFilter || ruleId || mode || apdu || protocol || decision || verdict || since || cursor);
   const requestRef = useRef<AbortController | null>(null);
   const query = useMemo(() => ({
     session: sessionFilter, flow: flowFilter, ruleId, mode, apdu, protocol, decision, verdict, since, cursor,
@@ -124,7 +89,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       if (controller.signal.aborted) return;
       if (!page) {
         setResult({ key: queryKey, events: [], nextCursor: "", truncated: false,
-          error: "Failed to load events. Check query bounds and engine availability." });
+          error: "Failed to load events. Check filters and traffic-monitoring availability." });
         return;
       }
       setResult((previous) => {
@@ -233,7 +198,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       {/* Filter bar */}
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3">
         <div className="w-full text-xs text-(--text-muted)">
-          Use Events for raw telemetry and service activity. Use Flows for active connections and Alerts for IDS triage.
+          Use Events for activity records and service activity. Use Flows for active connections and Alerts for IDS triage.
         </div>
         {FILTER_OPTIONS.map((option) => (
           <button
@@ -282,19 +247,25 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           onChange={(e) => setKindPrefix(e.target.value)}
           className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) outline-hidden focus-visible:shadow-focus-ring"
         />
-        {([
-          ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
-          ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
-          ["APDU ID", apdu, setAPDU], ["Protocol", protocol, setProtocol], ["Decision", decision, setDecision],
-          ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
-          ["Cursor", cursor, setCursor],
-        ] as const).map(([label, value, setValue]) => (
-          <label key={label} className="flex flex-col gap-1 text-xs text-(--text)">
-            {label}
-            <input aria-label={label} value={value} onChange={(e) => setValue(e.target.value)}
-              className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm outline-hidden" />
-          </label>
-        ))}
+        <div className="w-full rounded-xs border p-3">
+          <button type="button" className="text-xs" aria-expanded={filtersOpen} aria-controls="advanced-event-filters"
+            onClick={() => setAdvancedOpen(!filtersOpen)}>Advanced event filters</button>
+          <div id="advanced-event-filters" hidden={!(filtersOpen)} className={(filtersOpen) ? "mt-2 flex flex-wrap gap-2" : "hidden"}>
+            {([
+              ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
+              ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
+              ["APDU ID", apdu, setAPDU], ["Protocol", protocol, setProtocol], ["Decision", decision, setDecision],
+              ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
+              ["Cursor", cursor, setCursor],
+            ] as const).map(([label, value, setValue]) => (
+              <label key={label} className="flex flex-col gap-1 text-xs text-(--text)">
+                {label}
+                <input aria-label={label} value={value} onChange={(e) => setValue(e.target.value)}
+                  className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm outline-hidden" />
+              </label>
+            ))}
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-xs text-(--text)">
           <input
             type="checkbox"
@@ -334,7 +305,9 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
       {nextCursor && <button disabled={live || loading} onClick={() => void refresh(nextCursor)} className="mb-3 rounded-xs border px-3 py-1.5 text-sm disabled:opacity-50">{live ? "Pause live updates to load older evidence" : "Load older evidence"}</button>}
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-          {error}
+          Traffic records unavailable. Check filters and retry with Refresh.
+          <p className="mt-2">{error}</p>
+          <details className="mt-2"><summary className="cursor-pointer">Technical details</summary><pre className="overflow-x-auto">{JSON.stringify(query, null, 2)}</pre></details>
         </div>
       )}
       <div className="mb-3 flex flex-wrap gap-2 text-xs text-(--text)">
@@ -370,20 +343,17 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
           return (
           <div
             key={ev.id}
-            className="table-row-hover rounded-xs border bg-(--surface) p-4"
+            className="table-row-hover min-w-0 wrap-anywhere rounded-xs border bg-(--surface) p-4"
           >
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-(--text)">
-                {eventHeadline(ev)}
+                <span>{eventHeadline(ev)}</span><DemoBadge origin={ev.origin} />
+                <span className="ml-2 text-xs font-normal text-(--text-muted)">{ev.kind}</span>
               </div>
               <div className="text-xs text-(--text-muted)">
                 {new Date(ev.timestamp).toLocaleString()}
               </div>
             </div>
-            <div className="mt-1 text-xs text-(--text-muted)">
-              {eventSubtitle(ev)}
-            </div>
-            <EventDetails id={ev.id} />
             <div className="mt-1 text-xs text-(--text)">
               {formatEndpoint(ev.srcIp, ev.srcPort)} → {formatEndpoint(ev.dstIp, ev.dstPort)}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
@@ -412,21 +382,15 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
                     </button>
                   )}
                 </div>
-                <div className="grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
-                  {evidence.rows.map((row) => (
-                    <div key={row.label} className="flex gap-2">
-                      <span className="shrink-0 text-(--text-dim)">{row.label}</span>
-                      <span className="break-all font-mono text-[11px] text-(--text)">{row.value}</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
-            {ev.attributes && (
-              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-(--text)">
-                {JSON.stringify(ev.attributes, null, 2)}
-              </pre>
-            )}
+            {!evidence && typeof ev.attributes?.error === "string" && <p className="mt-2 text-xs text-amber">{ev.attributes.error}</p>}
+            {detailErrors[ev.id] && <p role="status" className="mt-2 text-xs text-amber">Event detail unavailable; it may have left retention. Open Inspect event to retry.</p>}
+            <button type="button" aria-expanded={!!expanded[ev.id]} aria-controls={`event-inspection-${ev.id}`}
+              onClick={() => setExpanded(old => ({ ...old, [ev.id]: !old[ev.id] }))}
+              className="mt-2 rounded-xs border px-2 py-1 text-xs">Inspect event</button>
+            <EventInspection event={ev} open={!!expanded[ev.id]}
+              onError={failed => setDetailErrors(old => ({ ...old, [ev.id]: failed }))} />
           </div>
           );
         })}

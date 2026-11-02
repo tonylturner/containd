@@ -156,7 +156,7 @@ func (m *Manager) recordServiceEvent(kind string, attrs map[string]any) {
 }
 
 // IncrementServiceMetric allows service managers to bump a per-service counter that feeds
-// sparkline + rate telemetry (e.g., traffic volume or anomaly counts).
+// lifetime counter telemetry (e.g., activity or anomaly counts).
 func (m *Manager) IncrementServiceMetric(service string, delta int) {
 	m.incrementServiceMetric(service, delta, false)
 }

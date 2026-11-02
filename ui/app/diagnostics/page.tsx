@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import Link from "next/link";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
@@ -182,7 +183,7 @@ export default function DiagnosticsPage() {
       const i = (iSnapshot?.data ?? null);
       const dp = (dpSnapshot?.data ?? null);
       setIfaces(i ?? []);
-      setEnforcementEnabled(dp?.enforcement ?? null);
+      setEnforcementEnabled(dp ? (dp.enforcement ?? false) : null);
     })();
   }, []);
 
@@ -418,7 +419,7 @@ export default function DiagnosticsPage() {
           </div>
           {!interfaceStateLoading && state === null && (
             <div role="status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              <p>Interface runtime state unavailable — the engine could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
+              <p>Interface runtime state unavailable — live interface information could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
               <button onClick={refreshInterfaceState} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
             </div>
           )}
@@ -600,8 +601,8 @@ export default function DiagnosticsPage() {
 
         <Card title="Temporary Blocks" padding="lg">
           <div className="text-xs text-(--text-muted)">
-            Push short-lived blocks into nftables. These are best-effort and expire automatically when dataplane
-            enforcement is enabled.
+            Temporarily block matching traffic. Blocks are best-effort and expire automatically while firewall
+            enforcement is active.
           </div>
           {!canEdit && (
             <div className="mt-3 rounded-xs border px-3 py-2 text-xs">
@@ -610,9 +611,15 @@ export default function DiagnosticsPage() {
           )}
           {canEdit && enforcementOff && (
             <div className="mt-3 rounded-xs border px-3 py-2 text-xs">
-              Dataplane enforcement is off, so temporary block actions are disabled. Enable enforcement on the
-              Dataplane page or set <span className="font-semibold">CONTAIND_ENFORCE_ENABLED=1</span> in your lab
-              compose.
+              Firewall enforcement is off, so temporary block actions are disabled.
+              {" Use "}<Link href="/firewall/#enforcement" className="underline">Enable enforcement on the Firewall page</Link>,
+              then review and commit the staged change.
+              <details className="mt-2">
+                <summary className="cursor-pointer">Deployment details</summary>
+                <p className="mt-2">The setting is <code>dataplane.enforcement</code> in the staged configuration JSON.
+                  For enforcement at startup, set <code>CONTAIND_ENFORCE_ENABLED=1</code> in your deployment.
+                  Kernel rule application requires Linux and the documented network privileges. Check Firewall rules for apply errors.</p>
+              </details>
             </div>
           )}
           <div className="mt-4 grid gap-4">
@@ -716,7 +723,7 @@ export default function DiagnosticsPage() {
                 />
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-xs text-(--text-muted)">Blocks a specific 5-tuple (src/dst/port/proto).</div>
+                <div className="text-xs text-(--text-muted)">Matches source IP, destination IP, destination service port and protocol, with any source port. This can block multiple connections.</div>
                 <button
                   type="button"
                   disabled={blockDisabled}

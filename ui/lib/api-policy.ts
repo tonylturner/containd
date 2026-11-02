@@ -41,7 +41,7 @@ export const policyAPI = {
 
   listAudit: () => getJSONList<AuditRecord>("/api/v1/audit"),
   getDashboard: (signal?: AbortSignal) =>
-    getJSONShaped<DashboardData>("/api/v1/dashboard", { objects: ["health", "counts", "eventStats"] }, signal),
+    getJSONShaped<DashboardData>("/api/v1/dashboard", { objects: ["health", "counts"] }, signal),
 
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
   setTLSCert: (certPEM: string, keyPEM: string) =>
@@ -49,12 +49,12 @@ export const policyAPI = {
       certPEM,
       keyPEM,
     }),
-  setTrustedCA: async (pem: string): Promise<TrustedCAUploadResult> => {
+  setTrustedCA: async (pem: string | { clear: true }): Promise<TrustedCAUploadResult> => {
     try {
       const res = await fetchWithSession("/api/v1/system/tls/trusted-ca", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ pem }),
+        body: JSON.stringify(typeof pem === "string" ? { pem } : pem),
       });
       if (handleUnauthorized(res)) return { state: "failed", error: (await failureOf(res)).error };
       clearAuthExpired();

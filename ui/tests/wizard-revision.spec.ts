@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { NATConfig } from "../lib/api";
+import { CARDS } from "../app/wizard/wizard-shared";
+
+test("every wizard describes its final step as staging, not activation", () => {
+  expect(CARDS).toHaveLength(4);
+  for (const card of CARDS) expect(card.steps.at(-1)).toBe("Review & Stage");
+});
 
 const token = (n: number) => `0123456789abcdef.${n}`;
 

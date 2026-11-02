@@ -20,7 +20,7 @@ import (
 
 func signatureMux(e *engine.Engine) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/internal/signatures", signaturesHandler(e))
+	mux.HandleFunc("/internal/signatures", signaturesHandler(e, nil))
 	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(e))
 	return mux
 }

@@ -80,7 +80,7 @@ export default function UsersPage() {
 
   async function onCreate() {
     const username = newUser.username;
-    const created = await runAction("create", () => api.createUser(newUser as any), {
+    const created = await runAction("create", () => api.createUser(newUser), {
       success: `User ${username} created.`,
       failure: "Failed to create user.",
     });
@@ -93,6 +93,8 @@ export default function UsersPage() {
       role: "view",
       password: "",
     });
+    setQuery(username);
+    setActiveTab("manage");
     await refresh();
   }
 

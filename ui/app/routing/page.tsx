@@ -21,6 +21,7 @@ import {
   type RoutingConfig,
   type StaticRoute,
 } from "../../lib/api";
+import { NetworkSetup } from "../interfaces/network-setup";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import {
@@ -144,7 +145,7 @@ export default function RoutingPage() {
     confirm.open({
       title: "Reconcile Routing",
       message:
-        "Live reconcile reapplies running config and will REPLACE containd-managed routes/rules in the OS routing tables (best-effort). Continue?",
+        "Reapply active routes now? This REPLACES routes and routing rules managed by containd. Some changes may fail; check the result.",
       variant: "warning",
       confirmLabel: "Reconcile",
       onConfirm: async () => {
@@ -268,7 +269,7 @@ export default function RoutingPage() {
     setDetecting(false);
     setOSRouting(osr);
     if (!osr) {
-      setError("Failed to load OS routing table (not supported or API unavailable).");
+      setError("Live route table unavailable (not supported or connection unavailable).");
     }
   }
 
@@ -321,7 +322,7 @@ export default function RoutingPage() {
           <button
             onClick={refreshOSRouting}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
-            title="Reload OS routing table snapshot"
+            title="Reload detected routes"
           >
             {detecting ? "Detecting..." : "Detect from OS"}
           </button>
@@ -330,7 +331,7 @@ export default function RoutingPage() {
               onClick={autoWanDefaultRoute}
               disabled={!canSave}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
-              title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
+              title="Try to create a WAN gateway and default route from the detected WAN address."
             >
               Auto WAN default
             </button>
@@ -340,7 +341,7 @@ export default function RoutingPage() {
               onClick={reconcileReplace}
               disabled={reconciling}
               className="rounded-xs border px-3 py-1.5 text-sm transition-ui disabled:opacity-50"
-              title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
+              title="Reapply active routes now; replaces routes and routing rules managed by containd"
             >
               {reconciling ? "Reconciling..." : "Reconcile live"}
             </button>
@@ -354,6 +355,7 @@ export default function RoutingPage() {
         </div>
       }
     >
+      <NetworkSetup current="/routing/" />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       {!canEdit && (
@@ -364,7 +366,7 @@ export default function RoutingPage() {
 
       {interfaceStateUnavailable && (
         <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          <p>Interface runtime state unavailable — the engine could not be reached. Auto WAN setup cannot determine the WAN address; no routing changes were staged.</p>
+          <p>Live interface information is unavailable. Auto WAN setup cannot determine the WAN address; no routing changes were staged.</p>
           <button onClick={autoWanDefaultRoute} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}

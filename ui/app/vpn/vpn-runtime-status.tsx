@@ -1,7 +1,8 @@
 "use client";
 
+import { Disclosure } from "../../components/Disclosure";
 import { Skeleton } from "../../components/Skeleton";
-import { Sparkline } from "../../components/Sparkline";
+import { ServiceHistory } from "../../components/TelemetryChart";
 
 import type { ServicesStatus } from "../../lib/api";
 
@@ -25,18 +26,19 @@ export function VPNRuntimeStatusCard({
         </div>
       ) : (
         <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
+          {!svcStatus && <p role="status" className="md:col-span-2">Unknown — live VPN status unavailable. Use Refresh to retry.</p>}
           <div>
             WireGuard:{" "}
             <span className={wireguardFaulted ? "text-amber" : "text-(--text)"}>
-              {wireguardFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.wireguard_enabled ? "enabled" : "disabled"}
+              {wireguardFaulted ? "faulted" : typeof svcStatus?.wireguard_enabled !== "boolean" ? "Unknown" : svcStatus.wireguard_enabled ? "enabled" : "disabled"}
             </span>
           </div>
           <div>
             OpenVPN:{" "}
             <span className={openvpnFaulted ? "text-amber" : "text-(--text)"}>
-              {openvpnFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.openvpn_running ? "running" : "stopped"}
+              {openvpnFaulted ? "faulted" : typeof svcStatus?.openvpn_running !== "boolean" ? "Unknown" : svcStatus.openvpn_running ? "running" : "stopped"}
             </span>
-            {svcStatus?.openvpn_pid ? <span className="text-(--text-muted)"> (pid {svcStatus.openvpn_pid})</span> : null}
+
           </div>
           {svcStatus?.openvpn_mode === "server" ? (
             <>
@@ -49,30 +51,16 @@ export function VPNRuntimeStatusCard({
               </div>
             </>
           ) : null}
-          <div className="md:col-span-2">
-            Rate: <span className="text-(--text)">{(svcStatus?.rate_per_min ?? 0).toFixed(1)} / min</span>
-          </div>
-          <div className="md:col-span-2">
-            Errors: <span>{(svcStatus?.errors_rate_per_min ?? 0).toFixed(1)} / min</span>
-          </div>
-          <div className="md:col-span-2">
-            OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span>
-          </div>
+          <div className="md:col-span-2"><h3>Troubleshooting</h3><Disclosure title="Service details" indicator={svcStatus?.openvpn_pid === undefined || !svcStatus.openvpn_config_path ? "Some details unknown" : undefined}>
+            <p>Process ID: {svcStatus?.openvpn_pid ?? "Unknown"}</p>
+            <p>OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span></p>
+          </Disclosure></div>
           {svcStatus?.openvpn_last_error ? (
             <div className="md:col-span-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {svcStatus.openvpn_last_error}
             </div>
           ) : null}
-          {svcStatus?.sparkline?.length ? (
-            <div className="md:col-span-2">
-              <Sparkline
-                values={svcStatus.sparkline}
-                color="var(--primary)"
-                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-                title="VPN events per minute"
-              />
-            </div>
-          ) : null}
+          <div className="md:col-span-2"><ServiceHistory service="vpn" title="VPN events per minute" /></div>
         </div>
       )}
     </section>

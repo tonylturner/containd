@@ -62,7 +62,7 @@ test("invalid units and object classes fail without dropping a restriction", () 
 test("a hidden legacy unit selector on DNP3 or CIP blocks save until removed", () => {
   for (const protocol of ["dnp3", "cip"]) {
     const existing: ICSPredicate = { protocol, unitId: 0, direction: "request" };
-    expect(buildRuleICS({ ...icsDraftFrom(existing, ""), existing, action: "ALLOW" })).toMatchObject({ ok: false, error: expect.stringContaining("unitId") });
+    expect(buildRuleICS({ ...icsDraftFrom(existing, ""), existing, action: "ALLOW" })).toMatchObject({ ok: false, error: "Unit ID filtering is unavailable for DNP3 and CIP. Remove this filter before saving." });
     expect(buildRuleICS({ ...icsDraftFrom(existing, ""), unitId: "", existing, action: "ALLOW" })).toMatchObject({ ok: true, ics: { unitId: null } });
   }
 });

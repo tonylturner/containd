@@ -31,7 +31,7 @@ func previewZoneResolver(snap *rules.Snapshot, src, dst net.IP) (string, string)
 }
 
 func TestPreviewRuleZones(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(100)}
+	e := &Engine{eventStore: events.NewStore(100).Writer("")}
 	snap := &rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
 	e.ruleSnap.Store(snap)
 	for _, forward := range []bool{true, false} {
@@ -108,7 +108,7 @@ func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 					client, _ := addrPort(net.ParseIP(evs[0].SrcIP), evs[0].SrcPort)
 					server, _ := addrPort(net.ParseIP(evs[0].DstIP), evs[0].DstPort)
 					s := &iecSession{ctx: iecSessionContext(snap, client, server, previewZoneResolver), mode: "enforce"}
-					e := &Engine{eventStore: events.NewStore(100)}
+					e := &Engine{eventStore: events.NewStore(100).Writer("")}
 					e.ruleSnap.Store(snap)
 					e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
 					want := 0
@@ -165,7 +165,7 @@ func TestPreviewRuleIEC104EqualPorts(t *testing.T) {
 		"apci_type": "I", "direction": "response", "type_id": uint8(1), "ca": uint16(1),
 	})
 	ev.DstPort = iec104Port // client and server both use 2404
-	e := &Engine{eventStore: events.NewStore(10)}
+	e := &Engine{eventStore: events.NewStore(10).Writer("")}
 	e.eventStore.Append(ev)
 	got := e.PreviewRule(PreviewRuleRequest{Entry: rules.Entry{Action: rules.ActionAllow, Sources: []string{ev.DstIP + "/32"},
 		Destinations: []string{ev.SrcIP + "/32"}, ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: true}}})
@@ -183,7 +183,7 @@ func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
 		for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
 			for _, kind := range []string{"unsupported", "malformed", "request", "unframeable"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", parsing, action, kind), func(t *testing.T) {
-					e := &Engine{eventStore: events.NewStore(10)}
+					e := &Engine{eventStore: events.NewStore(10).Writer("")}
 					e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
 					attrs := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1)}
 					want := 0
@@ -219,7 +219,7 @@ func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
 }
 
 func TestPreviewRuleWindowAndSamples(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(6000)}
+	e := &Engine{eventStore: events.NewStore(6000).Writer("")}
 	entry := rules.Entry{Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}}
 	for i := 1; i <= 5100; i++ {
@@ -232,13 +232,13 @@ func TestPreviewRuleWindowAndSamples(t *testing.T) {
 		!got.TimeRange.Start.Equal(time.Unix(101, 0)) || !got.TimeRange.End.Equal(time.Unix(5100, 0)) {
 		t.Fatalf("preview = %+v", got)
 	}
-	if e.eventStore.Len() != 5100 || e.ruleSnap.Load().Firewall != nil {
+	if e.Events().Len() != 5100 || e.ruleSnap.Load().Firewall != nil {
 		t.Fatal("preview mutated live state")
 	}
 }
 
 func TestPreviewRuleEmpty(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(10)}
+	e := &Engine{eventStore: events.NewStore(10).Writer("")}
 	got := e.PreviewRule(PreviewRuleRequest{Entry: rules.Entry{}})
 	if got.MatchCount != 0 || got.TotalEvents != 0 || got.TimeRange != nil || got.SampleMatches == nil {
 		t.Fatalf("empty preview = %+v", got)
@@ -248,7 +248,7 @@ func TestPreviewRuleEmpty(t *testing.T) {
 // TestPreviewRuleZoneWarnings checks that the preview warns about a zone
 // only when the running configuration assigns it no interface.
 func TestPreviewRuleZoneWarnings(t *testing.T) {
-	e := &Engine{eventStore: events.NewStore(10)}
+	e := &Engine{eventStore: events.NewStore(10).Writer("")}
 	e.ruleSnap.Store(&rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}})
 	bound := rules.Entry{ID: "bound", Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"plant"}}
 	if got := e.previewRule(PreviewRuleRequest{Entry: bound}, previewZoneResolver).Warnings; len(got) != 0 {

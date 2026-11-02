@@ -407,12 +407,24 @@ func rollbackAPI(api *API) Command {
 
 func exportConfigAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		redacted := len(args) > 0 && (args[0] == "redacted" || args[0] == "--redacted")
-		var cfg config.Config
 		path := "/api/v1/config/export"
-		if redacted {
-			path += "?redacted=1"
+		if len(args) > 1 {
+			return fmt.Errorf("usage: export config [redacted|--redacted|full] (full contains secrets)")
 		}
+		if len(args) == 1 {
+			switch args[0] {
+			case "redacted", "--redacted":
+				path += "?redacted=1"
+			case "full":
+				if !allowed(RoleAdmin, roleFromContext(ctx)) {
+					return ErrPermissionDenied
+				}
+				path += "?redacted=0"
+			default:
+				return fmt.Errorf("usage: export config [redacted|--redacted|full] (full contains secrets)")
+			}
+		}
+		var cfg config.Config
 		if err := api.getJSON(ctx, path, &cfg); err != nil {
 			return err
 		}
@@ -422,18 +434,29 @@ func exportConfigAPI(api *API) Command {
 
 func importConfigAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) < 1 {
+		if len(args) != 1 {
 			return fmt.Errorf("usage: import config <path>")
 		}
 		raw, err := os.ReadFile(args[0])
 		if err != nil {
 			return err
 		}
-		var cfg config.Config
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			return fmt.Errorf("invalid JSON: %w", err)
+		var candidate json.RawMessage
+		revision, err := api.getConfigJSON(ctx, "/api/v1/config/candidate", &candidate)
+		if err != nil {
+			return err
 		}
-		return api.postJSON(ctx, "/api/v1/config/import", cfg, out)
+		_, headers, err := api.requestBytes(ctx, "POST", "/api/v1/config/import", raw, revision)
+		if err != nil {
+			return err
+		}
+		if out != nil {
+			writeMutationResult(out, headers.Get("X-Containd-Config"))
+			for _, warning := range headers.Values("X-Containd-Warnings") {
+				fmt.Fprintln(out, "Warning:", warning)
+			}
+		}
+		return nil
 	}
 }
 

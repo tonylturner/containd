@@ -426,24 +426,6 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodGet, "/api/v1/simulation", nil)
-	serveWithConfigRevision(t, s, rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":false`) {
-		t.Fatalf("simulation status: expected status payload, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodPost, "/api/v1/simulation", bytes.NewBufferString(`{"action":"start"}`))
-	req.Header.Set("Content-Type", "application/json")
-	serveWithConfigRevision(t, s, rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":true`) {
-		t.Fatalf("simulation control: expected running payload, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if eng.simAction != "start" {
-		t.Fatalf("simulation action = %q", eng.simAction)
-	}
-
-	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/protocols", nil)
 	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"protocol":"modbus"`) {

@@ -15,12 +15,13 @@ import (
 // same flow bypass full re-inspection. This is critical for NFQUEUE mode
 // where every packet is held in the kernel until userspace renders a verdict.
 type VerdictCache struct {
-	mu      sync.RWMutex
-	entries map[string]*cachedVerdict
-	ttl     time.Duration
-	maxSize int
-	now     func() time.Time
-	changed func(string, string, verdict.Verdict)
+	detached bool
+	mu       sync.RWMutex
+	entries  map[string]*cachedVerdict
+	ttl      time.Duration
+	maxSize  int
+	now      func() time.Time
+	changed  func(string, string, verdict.Verdict)
 }
 
 type cachedVerdict struct {
@@ -51,7 +52,9 @@ func (vc *VerdictCache) Get(flowHash string) (verdict.Verdict, bool) {
 	entry, ok := vc.entries[flowHash]
 	if !ok {
 		vc.mu.RUnlock()
-		metrics.VerdictCacheMisses.Inc()
+		if !vc.detached {
+			metrics.VerdictCacheMisses.Inc()
+		}
 		return verdict.Verdict{}, false
 	}
 	v := entry.verdict
@@ -60,10 +63,14 @@ func (vc *VerdictCache) Get(flowHash string) (verdict.Verdict, bool) {
 	if expired {
 		// Lazy eviction — don't bother locking for write here;
 		// the next Put or evictExpiredLocked will clean it up.
-		metrics.VerdictCacheMisses.Inc()
+		if !vc.detached {
+			metrics.VerdictCacheMisses.Inc()
+		}
 		return verdict.Verdict{}, false
 	}
-	metrics.VerdictCacheHits.Inc()
+	if !vc.detached {
+		metrics.VerdictCacheHits.Inc()
+	}
 	return v, true
 }
 

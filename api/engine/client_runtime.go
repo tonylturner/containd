@@ -22,9 +22,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
-// SimulationStatus holds the state of the synthetic traffic generator.
+// SimulationStatus holds the state of the recorded demo replayer.
 type SimulationStatus struct {
-	Running bool `json:"running"`
+	Running    bool   `json:"running"`
+	RunID      string `json:"runId"`
+	Loops      uint64 `json:"loops"`
+	CaptureSet string `json:"captureSet"`
+	Capture    string `json:"capture"`
+	Error      string `json:"error"`
 }
 
 // RuntimeHealth is the engine health needed by the management API.
@@ -79,7 +84,7 @@ func (c *HTTPClient) QueryEvents(ctx context.Context, q dpevents.Query) (dpevent
 	return page, err
 }
 
-// ListProtoStats fetches protocol counters derived from live DPI events.
+// ListProtoStats fetches captured-packet, payload-byte, and semantic event counters per protocol.
 func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/stats/protocols", nil)
 	if err != nil {
@@ -103,7 +108,7 @@ func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, er
 	return out, nil
 }
 
-// ListTopTalkers fetches top flow summaries derived from live DPI events.
+// ListTopTalkers fetches directional host-pair/protocol counters derived from captured packets.
 func (c *HTTPClient) ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error) {
 	u := c.BaseURL + "/internal/stats/top-talkers"
 	if n > 0 {
@@ -326,7 +331,7 @@ func (c *HTTPClient) ListFlows(ctx context.Context, limit int) ([]dpevents.FlowS
 	return out, nil
 }
 
-// SimulationStatus returns whether the synthetic traffic generator is running.
+// SimulationStatus returns whether the recorded demo replayer is running.
 func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, error) {
 	if c.BaseURL == "" {
 		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")
@@ -350,7 +355,7 @@ func (c *HTTPClient) SimulationStatus(ctx context.Context) (SimulationStatus, er
 	return st, nil
 }
 
-// SimulationControl sends a start or stop action to the synthetic traffic generator.
+// SimulationControl sends a start or stop action to the recorded demo replayer.
 func (c *HTTPClient) SimulationControl(ctx context.Context, action string) (SimulationStatus, error) {
 	if c.BaseURL == "" {
 		return SimulationStatus{}, fmt.Errorf("engine BaseURL is empty")

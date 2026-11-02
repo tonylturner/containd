@@ -11,12 +11,225 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Distinguish configured topology checks from heuristics and unknown evidence;
   remove assumed authentication and verification passes. Show global IDS settings
-  without claiming conduit coverage, and unmeasured conduit traffic as unavailable
-  (`null` in the API), not zero percent of baseline.
+  without claiming conduit coverage.
 - Label non-evaluable IDS imports as storage-only, show conversion notes per rule
   and in import results, and clarify that YARA imports do not execute or detect threats.
 - Reject unsupported IPv6 WireGuard tunnel addresses, AllowedIPs and endpoints
   during configuration validation, including while disabled; clarify IPv4-only support.
+
+### Upgrade notes
+
+- The appliance keeps counter history in a new SQLite file, `/data/telemetry.db`
+  (`CONTAIND_TELEMETRY_DB`), capped at 64 MiB: 10 s points for 1 hour, 1 minute
+  for 24 hours and 15 minutes for 30 days. History starts empty after the upgrade.
+- API: `GET /api/v1/services/status` no longer returns `sparkline`,
+  `errors_sparkline`, `rate_per_min` or `errors_rate_per_min`; read history from
+  `GET /api/v1/telemetry/series`. `/api/v1/dashboard` `eventStats` now covers the
+  last 24 hours from retained counters, with `windowSeconds` and `complete`; it is
+  `null` with `eventStatsError` when history is unavailable, never zero.
+  `/api/v1/security/conduits` `traffic` is now an object: measured packets and
+  bytes for the last hour, or `unavailable` with a reason.
+- The engine owns a third nftables table, `inet <enforceTable>_acct`. It only
+  counts traffic and never drops or accepts.
+- `CONTAIND_DPI_MOCK` now only enables inspect-all; it no longer starts demo.
+  `CONTAIND_DEMO_CAPTURES` selects the demo capture directory (default
+  `/usr/share/containd/demo`). `GET/POST /api/v1/simulation` return
+  `preference`, `running`, `loops`, `captureSet`, `capture`, `error` and
+  `reason`; an unreachable engine is reported in `error` with HTTP 200.
+
+### Added
+
+- Charts show retained history of real counters: interface throughput per zone
+  (Dashboard Traffic, Zone Status, Monitoring, Topology), events, services and
+  antivirus. A missed sample shows as a gap, a counter restart as a reset mark,
+  and a failed read as unavailable, never as zero.
+- Conduits show measured routed traffic between zones that passed policy, from
+  per-zone-pair kernel counters. "% of baseline" is gone.
+- `GET /api/v1/telemetry/series` returns retained counter history.
+- Demo mode replays bundled recorded ICS and IT captures through the real
+  decoders and detection chain on an illustrative topology, instead of writing
+  random events. Replay is detached: it never transmits frames, changes
+  enforcement or touches kernel state. Its events, flows and counters carry
+  `origin: "demo"`; the UI marks them Demo. Demo records are never sent to
+  syslog, learned, counted as real (including `/metrics`), or kept in the real
+  event, DENY or IEC 104 incident retention. Demo would-deny results are your
+  ICS rules evaluated in monitor mode.
+- Each chart shows labelled demo data until its own metric has real data.
+  Demo conduit traffic is reported as `recorded`, never measured.
+- The Dashboard SIM Start/Stop choice persists (`demo.json` beside
+  `config.db`). With no saved choice, demo runs until the firewall does real
+  work (traffic forwarded between zones, or a real IDS alert or antivirus
+  detection), then stops for good. Management sessions and ARP chatter alone do
+  not stop it.
+
+## [0.1.38] - 2026-11-01
+
+### Upgrade notes
+
+- No configuration schema change. Upgrade in place; the management API, CLI
+  and web UI ship together in one image.
+- API: VPN reads add read-only secret-presence fields
+  (`wireguard.privateKeyConfigured` and `openvpn.managed.*Configured`); stored
+  secrets are still never returned. The CLI WebSocket adds session-control and
+  status messages.
+- CLI: `set firewall rule` and `set firewall ics-rule` now edit an existing
+  rule; use `add firewall rule` / `add firewall ics-rule` to create one. Over
+  SSH, `configure` no longer starts the setup wizard; use `wizard`. In the
+  local CLI, `shell` and `bash` no longer exit the CLI.
+- Automatic antivirus definition updates were already off wherever
+  `clamav.freshclamEnabled` was never saved, although the UI showed them as
+  on. The UI now shows them as off. Turn them on explicitly if you want
+  FreshClam updates.
+
+### Added
+
+- Firewall admins can stage the default action with consequence warnings,
+  configure inline inspection from DPI settings, and edit every zone and
+  protocol entry without raw JSON. ICS rule rows stack on phones with actions
+  and inspection setup reachable without horizontal scrolling.
+- VPN peer rows, browser X25519 server-key generation and client configuration
+  templates, with secret-presence indicators for WireGuard and managed OpenVPN.
+- System Settings now stages management and SSH access settings and TLS paths,
+  and confirms trusted-CA clearing. Configuration adds non-mutating Validate,
+  guarded factory reset, entity-first reviews and persistent commit actions.
+- User creation returns to the new account with Require MFA available, including
+  on narrow screens; template preview and staging retain their request semantics
+  through a dedicated API module.
+- Zones support consequence metadata and assets support hostnames in create/edit
+  forms; passive inventory clearing and learner dataset deletion are confirmed
+  immediate actions.
+- Network tables keep actions visible on phones; NAT clarifies staged saves, and
+  PCAP suggestions use compact review rows with expandable evidence and actionable
+  withholding explanations.
+- CLI policy editors now stage existing firewall/ICS rule updates, default
+  action, DPI settings and capture groups, zone consequence, asset hostnames,
+  and ICS template preview/apply with revision checks. `add firewall ics-rule`
+  creates rules; `set firewall rule` and `set firewall ics-rule` now only edit.
+- The appliance CLI can stage focused DNS, NTP, DHCP pool/reservation, antivirus
+  scanning, VPN, proxy site/TLS, syslog batching and IDS enable/group edits,
+  preserving unspecified settings and candidate revision checks. VPN credentials
+  are read from appliance-local files instead of command-line secret values.
+- The CLI provides confirmed immediate backup, OpenVPN credential, connection
+  revocation, protection retry, antivirus update and managed capture operations,
+  plus account listing, deletion and MFA requirements. Admins can create users
+  and reset passwords through confirmed, hidden prompts in the interactive local
+  or SSH appliance CLI; web and piped consoles refuse secret input. Full
+  configuration export is explicit and admin-only; imports preserve file bytes
+  for strict API validation.
+- IEC 104 anomaly details offer confirmed, immediate clearing of detected
+  anomalies and tracking state, without deleting historical alert events.
+- CLI file arguments (downloads, imports, credential files) work in local and SSH
+  appliance CLI sessions and name appliance-local paths; the web console refuses
+  them. Downloads require admin access.
+- `configure` now consistently names the configuration CLI; use SSH `wizard`
+  for guided setup.
+- Configuration consoles identify configuration versus immediate Linux OS modes,
+  show authoritative shared-candidate status and commit-confirmation deadlines,
+  and close the web console without logging out of management. SSH setup shows
+  the shared diff before commit and offers an explicit Back to CLI menu choice.
+  Local `shell` / `bash` no longer silently exit; only SSH `shell` opens Linux,
+  while `bash` is an ordinary unknown CLI command.
+- Administrators can stage firewall enforcement on or off from the Firewall
+  status card, with confirmation and a review link; the dashboard's FW indicator
+  links directly to enforcement status.
+
+### Changed
+
+- DHCP uses interface pickers and validated pool/reservation rows; IDS offers
+  common rule fields, advanced JSON editing, one staged rule save and group descriptions.
+- Firewall rule reorder arrows now sit beside each order number, with keyboard
+  focus retained after moves. A Default row always shows the
+  candidate policy's fallback action for traffic no allow, deny or reject rule
+  decides. It warns when that action is ALLOW and shows unknown when the action
+  cannot be read coherently.
+- Operator-facing text uses plain language instead of backend terms such as
+  NFQUEUE, nftables, conntrack, engine and daemon names. Exact values, IDs,
+  paths and raw diagnostics stay available under technical details. Button,
+  tab and column names are unchanged.
+- Pages lead with what needs attention and fold detail into expandable rows
+  and sections. No capability, field or control is removed, and every button,
+  tab and column keeps its name. Collapsed rows and sections still show
+  failures, warnings and non-default values.
+  - Firewall: the rules table comes first, with seven columns and an
+    expandable detail row per rule (conditions, ICS filter, shadow matches,
+    logging, full counters). Create rule opens on demand; DPI settings and
+    the generated configuration follow the table.
+  - ICS rules: the page leads with the active inspection state. Matching
+    details and setup help fold away, and protocol editors split basic and
+    advanced fields, opening the advanced ones when they are set.
+  - Configuration: the review leads with changed sections and old → new
+    values (secrets show only as changed), with the exact JSON under
+    Advanced. Protection, startup recovery, missing activity records and
+    pending settings share one attention area and stay independent.
+  - PCAP analysis follows Collect → Generate → Review → stage steps, each
+    with the reason it is unavailable. Capture separates capture now, saved
+    captures and replay to a network.
+  - Interfaces show the detected device, logical interface and zone
+    together, with an inspect view for addressing and link settings.
+    Topology labels live and saved-target data; the Physical tab keeps its
+    deployment detail.
+  - Service pages lead with status and essential settings and fold process
+    detail into Troubleshooting. IDS leads with the rules list and one
+    add/import flow; groups and export are secondary.
+  - Events, alerts, flows and sessions show triage columns first, with full
+    detail in a keyboard-accessible inspector.
+
+### Fixed
+
+- The reverse proxy starts in the packaged image. The image now has the
+  `nginx` account its workers run as; before, every reverse-proxy commit failed
+  preflight with `getpwnam("nginx") failed`.
+- Configuration validation restores redacted secrets the same way staging does,
+  so a candidate with a managed OpenVPN client no longer fails validation with
+  "ca is required".
+- Antivirus default-local mode exposes confirmed definition updates beside missing
+  databases, links enforcement refusals to Firewall, and adds a cache-duration control.
+- VPN reads and stage responses redact stored secrets without falsely reporting
+  configured key and certificate material as missing.
+- Proxy preflight preserves daemon configuration filename extensions so Envoy
+  reads generated YAML correctly. Proxies shows concise faults with exact output
+  under Technical details and supports editing reverse sites, TLS certificate
+  references and descriptions with explicit certificate provisioning guidance.
+- Editing a firewall rule with several zones or protocols no longer keeps only
+  the first of each.
+- DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown
+  instead of not installed, stopped or zero.
+- The dashboard no longer reports "all systems nominal" from alert counts
+  alone, no longer shows IPS as always active, and no longer draws synthetic
+  usage bars for rule counts or missing container memory.
+- Diagnostics names the real enforcement setting and states that temporary
+  blocks match any source port.
+- Deleting a reverse-proxy site says it stages on save and applies on commit.
+- The interfaces page no longer names another product in its management
+  access notice.
+- Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- The antivirus page shows automatic definition updates as off when the
+  setting is not saved, and saving no longer turns them on.
+- A packet capture that never started shows "Not started" instead of a
+  start date of 12/31/1.
+- Reordering rules shows as one order change in the configuration review,
+  and changes to rules, zones and interfaces are matched by ID or name
+  instead of list position.
+- The topology Physical view describes only what it observes. It no longer
+  flags an unused CONTAIND_AUTH setting, and it no longer claims host
+  networking is expected for a firewall; it notes that the container then
+  shares the host's interfaces and loopback.
+- Collapsed sections open automatically when they hold saved non-default
+  values or settings the selected mode needs (ICS selectors, IEC 104 options,
+  WireGuard peers, ICAP and local scanner settings, capture options). Fault
+  causes and reported errors always show without expanding.
+- Audit log rows show source, action and result inline again.
+- Syslog shows the last forwarding check as "Last check"; only the
+  per-forwarder "Last sent" claims delivery.
+- Strict protocol parsing describes unrecognized messages as violations rather
+  than promising a block in monitor mode.
+- Firewall hit-counter failures show their cause inline, and the ICS page
+  shows saved capture interfaces without expanding a section.
+- The dashboard marks interfaces ready only when configured interfaces match
+  live devices, as the Interfaces page does. Saved OpenVPN profile paths stay
+  visible.
+- The Default rule row keeps a compact action badge, and sidebar group labels
+  are easier to read.
 
 ## [0.1.37] - 2026-11-01
 
@@ -192,6 +405,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The executable CLI resolves shared-candidate status before each prompt within
+  a 250 ms request budget, instead of repeatedly displaying a refreshing unknown
+  prompt even when the management API is healthy.
 - The engine keeps watching kernel interface, address and route changes after
   an interrupted system call instead of stopping until restart; drift was
   otherwise repaired only by the 10-second periodic reconcile.
@@ -2381,7 +2597,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.37...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.38...HEAD
+[0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35

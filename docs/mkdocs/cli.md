@@ -27,6 +27,56 @@ error without retrying. Read the current configuration, review your intended
 changes, then issue a new command. Outbound quick start composes from one
 candidate snapshot and chains the revisions returned by its staged writes.
 
+## Modes and prompts
+
+All configuration entry points name the appliance and authenticated user/role.
+They are not Linux shells: configuration edits stage into a **shared candidate**;
+`show diff` reviews it and `commit` applies it. Operational commands may act
+immediately. Leaving never commits or discards the shared candidate.
+
+| Prompt | Meaning |
+| --- | --- |
+| `containd(config)#` | Candidate matches running at the last refresh |
+| `containd(config*)#` | Shared candidate has pending changes |
+| `containd(config?)#` | Candidate status unavailable; not a clean-state claim |
+| `containd(view)>` | Authenticated read-only CLI |
+| `root@<host>(os):<cwd>#` | Linux OS shell; commands apply immediately |
+| `containd(menu)>` | SSH numbered menu; Back to CLI differs from Logout |
+| `containd(setup:candidate)>` | Wizard question staging candidate configuration |
+
+Candidate status comes from `/config/diff`, including secret-only and IDS-bank
+changes, independently of runtime enforcement. Pending commit-confirmed deadlines
+are shown separately from the pending-edit marker. Status includes its refresh
+time or the failure cause. The executable resolves status before each prompt,
+with a maximum 250 ms wait; it does not refresh while editing a line.
+A failed or timed-out request shows unknown, never a cached clean-state claim.
+SSH refreshes asynchronously every five seconds and after commands, showing
+unknown while a refresh is outstanding; each request has the same 250 ms timeout.
+SSH redraws idle prompts when results arrive, never partially entered
+input. The web console refreshes every five seconds and after commands, preserving
+its input, cursor, history and scrollback. Status is advisory, not a mutation
+revision or authorization decision.
+
+- Executable `exit` / `quit` / `logout` ends the CLI process and returns to its
+  caller. It does not create an OS shell. `shell` is unavailable here and
+  `bash` is an ordinary unknown command; neither exits. Ctrl-C cancels input;
+  EOF ends the CLI.
+- SSH appliance `exit` / `quit` / `logout` disconnects SSH. The menu's **Back to
+  CLI** returns without logging out; **0 Logout** disconnects. Diagnostics
+  **0 Back** returns to its caller.
+- The dashboard's **CLI Console** opens the **Configuration CLI**, not an OS
+  shell. **Close console** and typed `exit` / `quit` / `logout` close only the
+  console, leaving the management account signed in. `clear` clears terminal
+  output, not configuration or command history.
+- Linux-shell entry identifies the effective OS user and runtime host. OS
+  commands bypass candidate validation and commit. `configure` opens the CLI;
+  `exit` in it returns to that caller. OS-shell exit returns to the SSH CLI
+  after inline entry, or disconnects SSH after a direct Linux-mode login.
+- The setup wizard stages edits as each question is answered. Cancellation
+  retains earlier edits. Password and key enrollment steps act immediately and
+  are labeled accordingly. Before committing, it displays the diff of the
+  entire shared candidate, including other sessions' edits.
+
 ## Command reference
 
 - Inspection and help:
@@ -78,7 +128,10 @@ candidate snapshot and chains the revisions returned by its staged writes.
   - `set ip rule del <table> [src <cidr>] [dst <cidr>] [priority <n>] | set ip rule del <table> all`
   - `add firewall rule <id> <action> [src_zone] [dst_zone] [position]`
   - `move firewall rule <id> top|bottom|before <id>|after <id>`
-  - `set firewall ics-rule <id> <action> <protocol> [options...]`
+  - `set firewall rule <id> --<field> <value> ...`
+  - `set firewall ics-rule <id> --<field> <value> ...`
+  - `add firewall ics-rule <id> <action> <protocol> [options...]`
+  - `set firewall default <ALLOW|DENY>`
   - `delete firewall rule <id>`
   - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
   - `set outbound quickstart` (stages default route + SNAT + allow rule for LAN/MGMT → WAN)
@@ -109,12 +162,108 @@ or returns no data, the command reports an error and sends no write; it does not
 substitute running settings or defaults. Unspecified fields are preserved.
 Outbound quick start completes all configuration reads before staging its changes.
 
+### Focused service settings
+
+Admin service setters read the candidate service, preserve unspecified fields,
+and POST with that read's revision. They stage only: review `show diff`, then
+commit separately. A failed read or stale revision stops the edit without retry.
+API validation, including management-access protection, remains authoritative.
+
+Scalar syntax is `set <prefix> <field> <value>`. Booleans accept `true|false`
+or `on|off`; lists take one comma-separated argument, with `-` clearing the
+list. Quote text containing spaces; use `''` for an empty text field. Numeric
+zero selects the API's default where supported. All names below are CLI names,
+not raw JSON keys.
+
+| Prefix | Fields |
+| --- | --- |
+| `dns` | `enabled`, `listen-port`, `listen-zones`, `upstream-servers`, `cache-size-mb` |
+| `ntp` | `enabled`, `servers`, `interval-seconds` |
+| `dhcp` | `enabled`, `authoritative`, `listen-ifaces`, `lease-seconds`, `router`, `dns-servers`, `domain` |
+| `syslog` | `batch-size` (records), `flush-every` (seconds) |
+| `av` | `enabled`, `mode` (`clamav|icap`), `fail-policy` (`open|closed`), `max-size-bytes`, `timeout-sec`, `cache-ttl`, `http-download`, `http-upload` |
+| `av clamav` | `socket-path`, `update-schedule` (positive duration, e.g. `4h`), `custom-defs-path`, `freshclam-enabled` |
+| `av scan` | `download-mode` (`hold|stream_tail`), `ics-zones`, `ics-assets` |
+| `vpn wireguard` | `enabled`, `interface`, `listen-port`, `listen-zone`, `listen-interfaces`, `address-cidr`, `private-key-file` |
+| `vpn openvpn` | `enabled`, `mode` (`client|server`), `config-path`, `source` (`profile|client|server`; see below) |
+| `vpn openvpn client` | `remote`, `port`, `proto` (`udp|tcp`), `username`, `password-file`, `ca-file`, `cert-file`, `key-file` |
+| `vpn openvpn server` | `listen-port`, `proto` (`udp|tcp`), `listen-zone`, `listen-interfaces`, `tunnel-cidr`, `public-endpoint`, `push-dns`, `push-routes`, `client-to-client` |
+| `proxy forward` | `allowed-clients`, `allowed-domains`, `upstream`, `log-requests` |
+| `ids` | `enabled` |
+
+`cache-ttl` accepts a non-negative duration such as `5m` and sends nanoseconds
+without floating-point conversion. `0s` selects the native scanner's 10-minute
+default; ICAP verdicts are never cached. Runtime quarantine (`backendDisabled`)
+is not editable. Configure the single ICAP server with
+`set av icap server <host:port> <true|false TLS> <service>`.
+
+VPN `*-file` arguments read credential contents from the appliance process's
+filesystem, not the browser's or SSH client's filesystem. They require the local
+`containd cli` process or the SSH appliance CLI; the web console refuses them
+before reading a file or contacting the configuration API. Keep those files
+private. File paths, not secret contents, enter command history and audit
+records; save output does not print response bodies or saved secrets. Existing
+redacted VPN secrets are retained by the API when other fields change.
+For a new OpenVPN configuration, stage `enabled false`, choose `source`, fill
+the settings and credentials, then stage `enabled true`. Changing `source`
+explicitly removes the other sources: `profile` removes structured client and
+server settings, `client` removes the server and profile path, and `server`
+removes the managed client and profile path. The selected source's existing
+settings are retained. A profile path must already exist on the appliance;
+setting a path does not upload a file.
+
+The forward proxy API currently rejects nonempty `allowedClients` and
+`upstream`; these setters can clear them (`allowed-clients -`, `upstream ''`)
+but do not add runtime support or bypass that refusal. Existing
+`set proxy forward on|off [port] [zone...]` and `set proxy reverse on|off`
+commands remain available.
+
+Collections use separate `add`, `set` and `delete` commands. Add refuses an
+existing key; set and delete refuse missing or ambiguous keys. Set requires at
+least one `--field value` pair and changes only those fields. Delete stages
+removal; it does not immediately change the running service.
+
+| Collection | Key after command | Add requirements | Optional/set fields |
+| --- | --- | --- | --- |
+| `dhcp pool` | `<iface> <start-ip>` | `--end <ip>` | `--end` |
+| `dhcp reservation` | `<iface> <mac>` | `--ip <ip>` | `--ip` |
+| `vpn wireguard peer` | `<public-key>` | `--allowed-ips <cidrs>` | `--name`, `--allowed-ips`, `--endpoint`, `--persistent-keepalive` |
+| `proxy reverse site` | `<name>` | `--listen-port <port> --backends <host:port,...>` | `--listen-port`, `--hostnames`, `--backends`, `--tls-enabled`, `--cert-ref`, `--description` |
+| `ids group` | `<id>` | `--name <text>` | `--name`, `--description`, `--filter`, `--enabled` |
+| `av scan include` | No key on add; `<index>` on set/delete | `--dest-ports <ports-or-ranges>` | `--source-zones`, `--dest-zones`, `--dest-ports` |
+| `av scan exclude` | No key on add; `<index>` on set/delete | At least one nonempty selector (API-validated) | `--source-zones`, `--dest-zones`, `--sources`, `--destinations`, `--dest-ports` |
+
+DHCP supports several pools per interface; changing a pool's start address or
+another collection's key means deleting and adding it. MAC keys are normalized.
+Scan indices are one-based positions in the current candidate selection; inspect
+`show candidate-config` before using them. Include/exclude selectors accept the
+same comma-separated lists and `-` clearing syntax as scalar list settings.
+A reverse site's TLS `cert-ref` names an existing appliance proxy certificate
+pair; it does not upload certificates. New IDS groups default to enabled;
+`ruleCount` is computed, not an editable field. To toggle a single existing IDS
+rule without altering its predicates, use
+`set ids rule enabled <id> <true|false>`.
+
+```text
+set dns upstream-servers 1.1.1.1,9.9.9.9
+add dhcp pool lan 10.0.0.20 --end 10.0.0.100
+add dhcp reservation lan aa:bb:cc:dd:ee:ff --ip 10.0.0.25
+set av cache-ttl 5m
+add av scan include --source-zones lan --dest-zones wan --dest-ports 80,8080-8090
+add vpn wireguard peer PUBLIC_KEY --allowed-ips 10.8.0.2/32 --persistent-keepalive 25
+set proxy reverse site portal --tls-enabled true --cert-ref portal
+set syslog batch-size 100
+set ids rule enabled modbus-write-attempt false
+add ids group plant --name 'Plant rules' --filter 'proto:modbus'
+show diff
+```
+
 ### Rule positions and port forwards
 
 For `add firewall rule`, the optional position suffix is `top`, `bottom`,
 `before <id>` or `after <id>`; omitted means `bottom`. `set firewall rule`
-accepts the same creation syntax. `move firewall rule` repositions an existing
-rule without changing its predicates. Unknown anchors and moving a rule
+edits an existing ID with field flags; it never creates a rule. `move firewall rule`
+repositions an existing rule without changing its predicates. Unknown anchors and moving a rule
 relative to itself are rejected. Changes are staged until commit.
 
 ```text
@@ -176,6 +325,95 @@ candidate may already be staged. Review `show diff`, then `commit` or `commit
 confirmed`. Monitor rules do not authorize traffic: enforcement requires a later
 explicit candidate mode edit and commit. The old profile/bulk workflow is removed.
 See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
+
+## Account, backup and runtime operations
+
+These operations do **not** stage configuration or require `commit`. Mutations
+require the final, case-sensitive `CONFIRM` argument, except account creation
+and password reset, which confirm through two hidden password prompts.
+They print an immediate-operation notice. Inspect the response: a request being
+accepted is not proof that runtime protection, capture or revocation has converged.
+Except for secret-bearing account requests, errors retain the API's fault
+details, including durable OpenVPN revocation whose runtime installation is not
+confirmed.
+
+Account and credential commands (admin only):
+
+- `show users`
+- `create user <username> [--role admin|view] [--first-name <name>] [--last-name <name>] [--email <email>]`
+  — defaults to the least-privilege `view` role. Quote names containing spaces.
+- `reset user password <username|id>` — resolves an exact username or ID from
+  `show users`; ambiguous matches are refused.
+- `delete user <id> CONFIRM` — subject to the API's last-admin protection.
+- `require mfa user <id> CONFIRM` — applies the API's enrollment grace period.
+- `show openvpn clients`
+- `issue openvpn client <name> CONFIRM` — returns credential metadata, not a profile.
+- `download openvpn client <id> <new-file>` — saves the private profile to a file.
+- `revoke openvpn client <id> CONFIRM`
+
+Passwords are never command arguments. Account creation and password reset ask
+twice without echo in an interactive local CLI or an SSH appliance CLI with a
+terminal. Input is preserved exactly, including whitespace; blank input or
+Ctrl-C cancels, and a mismatch makes no change. Passwords do not enter command
+history or CLI audit records. These commands apply immediately after matching
+entries and still enforce the API's password policy and account protections.
+Secret-bearing API responses are not displayed, including error bodies; a
+failure reports a generic account-operation error rather than risking disclosure.
+Piped sessions and one-shot SSH commands refuse password input. The web console
+reports: “Set passwords on System → Users; the web console does not take secret input”.
+The SSH menu can also change the current account's password. There is no account
+disable/enable API; MFA disable is not account disable.
+
+Appliance configuration backups:
+
+- `show backups`
+- `create backup <name> <redacted|full> CONFIRM` (admin)
+- `download backup <id> <new-file>` (admin)
+- `delete backup <id> CONFIRM` (admin)
+
+Downloads create a new file with mode `0600`, refuse to overwrite an existing
+file, and never print its contents. Both download commands require admin access
+and run only in the local `containd cli` process or the SSH appliance CLI.
+Paths are local to the appliance process, not the browser or SSH client.
+The web console refuses file reads and writes. View accounts can list redacted
+backups; downloading a redacted backup remains available through the web
+Configuration page or the backup API. Full backups and OpenVPN profiles contain
+secrets: keep the files private. Configuration backups do not include the users,
+audit or evidence databases.
+
+Runtime inspection and actions:
+
+- `show protection` — includes the current boot/apply IDs and fault causes.
+- `retry protection <boot-id> <apply-id> CONFIRM` (admin) — use IDs from the
+  inspected status; stale requests fail rather than silently retrying another apply.
+- `update av definitions CONFIRM` (admin) — starts an immediate definition update.
+- `show pcap status`
+- `start pcap CONFIRM` / `stop pcap CONFIRM` (admin) — use the committed collector
+  settings; these do not edit capture configuration.
+- `revoke connection <connection|client-service> <duration-seconds> <tcp|udp> <src> <dst> <sport> <dport> CONFIRM` (admin)
+- `revoke connection <connection|client-service> <duration-seconds> <icmp|icmpv6> <src> <dst> <id> <type> <code> CONFIRM` (admin)
+
+Connection revocation uses the original tuple shown by `show conntrack`.
+`client-service` covers the selected client/service rather than only that tuple.
+The API validates durations, protocols and addresses and reports connection
+removal separately from revocation installation.
+
+`export config [redacted|--redacted]` retains the default redacted export.
+`export config full` explicitly requests an **unredacted, admin-only** export.
+Its output is JSON and can contain secrets; do not paste it into logs or public
+support requests. `import config <path>` sends the file bytes unchanged to the
+API's strict import decoder, with the current candidate revision. Unknown,
+duplicate and incorrectly cased root keys are rejected without changing the
+candidate. A successful import is staged only; review the diff before committing.
+
+File-reading commands (`import config`, `analyze pcap`, `convert sigma` and VPN
+`*-file` settings) and file-writing commands (`download backup`,
+`download openvpn client` and `diag capture`) require a local or SSH appliance
+CLI session. This includes piped local CLI and one-shot SSH commands; a terminal
+is only required for secret prompting, not file access. Web `/cli/execute` and
+WebSocket consoles refuse these operations. Use the dedicated browser import,
+upload and download controls instead; typing a browser-local path into the
+console never uploads a file.
 
 ## Authentication
 
@@ -250,11 +488,11 @@ Notes:
 
 The SSH shell mode selects what an interactive SSH login opens:
 
-- `appliance` (default): the containd CLI. Type `shell` or `bash` to open a
+- `appliance` (default): the containd CLI. Type `shell` to open a
   Linux shell. Type `exit` in that shell to return to the CLI.
 - `linux`: a Linux `bash` login shell with the image's tools, such as
   `tcpdump` and `nft`. Type `configure` or `containd cli` to open the containd
-  CLI. Type `exit`, `shell` or `bash` in that CLI to return to the shell.
+  CLI. Type `exit` in that CLI to return to the shell.
 
 A command on the `ssh` command line, such as
 `ssh -p 2222 containd@localhost show version`, runs as one CLI command in both
@@ -278,8 +516,9 @@ says whether the environment overrides it or it applies after a restart.
 
 The Linux shell needs a PTY. Interactive `ssh` requests one by default;
 `ssh -T` does not. Without a PTY, a `linux` mode login opens the appliance CLI
-with a warning. There, `shell` and `bash` say that the Linux shell needs an
-interactive session, and the CLI keeps running.
+with a warning. There, `shell` says that the Linux shell needs an
+interactive session, and the CLI keeps running. `bash` is an ordinary unknown
+CLI command, not a shell-entry or exit alias.
 
 In a Linux shell opened over SSH, `configure` and `containd cli` act as the
 SSH login: they ask for no password and have the login's role. The shell
@@ -316,7 +555,8 @@ connection is open. With a JWT secret, the login's session also ends after 4
 hours; reconnect after that. Lab mode without a JWT secret has no session
 and no such limit.
 The `menu`, `wizard` and `diagnostics` commands exist only in the appliance
-SSH CLI. There, `configure` opens the setup wizard, the same as `wizard`.
+SSH CLI. `wizard` opens guided setup. `configure` inside any configuration CLI
+only confirms that you are already there; it never starts the wizard.
 
 Access and lab caveats:
 
@@ -403,10 +643,11 @@ deletion leaves SSH connections open.
 
 ## ICS firewall rules
 
-`set firewall ics-rule <id> <action> <protocol> [options...]` accepts the
+`add firewall ics-rule <id> <action> <protocol> [options...]` accepts the
 existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
 `--function-code`, `--object-classes`, `--unit-id`, `--addresses`, `--read-only`,
-`--write-only`, and `--mode`). The command creates a new rule; it does not update an existing ID.
+`--write-only`, and `--mode`). The command creates a new rule; use
+`set firewall ics-rule <id> --<field> <value> ...` to edit an existing ID.
 For CIP, `--object-classes <classes>` accepts comma-separated class IDs from
 0 through 65535 in decimal or `0x`-prefixed hex (for example `4,0x66`).
 `show firewall ics-rules` includes these values in `OBJECT_CLASSES`.
@@ -442,8 +683,92 @@ Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
 single-point) in server responses for common address 1 and the selected IOAs:
 
 ```text
-set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+add firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
 ```
 
 `show firewall ics-rules` displays these IEC fields alongside the existing
 ICS predicate fields.
+
+## Focused policy edits
+
+`set firewall rule <id> --<field> <value> ...` updates only supplied fields;
+omitted fields and rule order are preserved. A missing ID is an error, not a
+request to create. `add firewall rule` and `add firewall ics-rule` create rules.
+The old create-only `set` syntax is not accepted.
+
+| Flag | Value |
+| --- | --- |
+| `--action` | `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT`, or `TAG` |
+| `--source-zones`, `--dest-zones` | Comma-separated zone names; `--src-zone` and `--dst-zone` also accept lists |
+| `--sources`, `--destinations` | Comma-separated addresses/CIDRs or supported VPN selectors |
+| `--protocols` | Comma-separated `name[:port-or-range]`, e.g. `tcp:502,udp:1000-2000,icmp` |
+| `--identities`, `--via-forwards` | Comma-separated identity names or port-forward IDs |
+| `--log` | `true` or `false` |
+| `--rate-limit` | Packets per second, optionally `pps:burst`; `none` removes the limit |
+| `--tag`, `--description` | Text; quote spaces |
+| `--schedule-days` | Comma-separated weekdays |
+| `--schedule-start`, `--schedule-end` | `HH:MM` |
+| `--schedule-timezone` | IANA timezone |
+| `--schedule` | `none` removes the schedule |
+
+An empty quoted list (`''`) clears that list. A schedule flag changes only its
+specified subfield. A rate-limit value replaces both rate and burst (omitted
+burst is 0, meaning the packet rate). The API validates the complete resulting
+policy, including action parameters and management reservation.
+
+`set firewall ics-rule` accepts all these flags plus the ICS selectors in the
+preceding section. Use `--ics-protocol <modbus|dnp3|cip|iec104>` to change protocol;
+a protocol change replaces the old predicate, so supply its new selectors in
+the same command. Each selector takes a value: for edits, use `--read-only
+true|false` and `--write-only true|false`, not creation's bare switches.
+An empty quoted selector value clears it; omission preserves it. Clearing
+`--mode ''` restores inheritance from the global DPI mode.
+
+```text
+set firewall rule maintenance --source-zones ops,lan --protocols tcp:502,tcp:20000 --log true
+set firewall ics-rule allow-measurements --type-ids 1,30 --read-only false --description 'Monitoring only'
+set firewall default DENY
+```
+
+`set firewall default <ALLOW|DENY>` stages the unmatched-traffic action and warns
+about its reachability impact. Review the diff and use commit-confirmed when
+changing access policy. It does not turn enforcement on or report runtime
+protection as active.
+
+### DPI and capture groups
+
+- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not enforcement.
+- `set dataplane dpi mode <monitor|enforce>` changes the global ICS mode.
+- `set dataplane dpi protocols <name=bool,...>` edits named IT protocol toggles.
+- `set dataplane dpi ics-protocols <name=bool,...>` edits named ICS protocol toggles.
+- `set dataplane dpi ics-parsing <name=strict|tolerant,...>` edits named ICS parsing modes.
+- `set dataplane dpi exclusions <type:value,...> [reason]` replaces the exclusion
+  list; types are `ip`, `cidr`, and `domain`. IPv6 colons are supported. The optional
+  quoted reason applies to every supplied exclusion.
+- `set dataplane nfqueue-group <0..65535>` and `set dataplane nflog-group <0..65535>`
+  change the respective capture groups; 0 disables that consumer, subject to
+  configuration safety validation.
+
+For maps, unnamed entries stay unchanged; `''` clears the entire map, restoring
+its defaults. For exclusions, `''` clears the list. Other dataplane settings are
+preserved, including capture interfaces, enforcement and the table name.
+
+### Policy metadata and ICS templates
+
+- `set zone consequence <name> <text>` edits zone consequence; `''` clears it.
+- `set asset hostnames <id> <hostname,...>` replaces hostnames on an existing
+  asset; `''` clears them. Other asset fields are preserved.
+- `show templates ics` lists the ICS catalog, descriptions and required parameters.
+- `preview template ics <name> [--source-zones <csv>] [--dest-zones <csv>]
+  [--ranges <csv>] [--mode <monitor|enforce>]` prints generated rules without
+  staging anything. This API operation requires administrator access even for preview.
+- `apply template ics <name>` accepts the same options and stages the generated
+  rules. Templates can update matching rule IDs; preview first and inspect the diff.
+
+These commands use `/templates/ics`, a different catalog from `show templates`
+and `apply template`. Register-guard templates take `--ranges 0-99,400-499`.
+Omitting `--mode` lets generated rules inherit the global ICS mode.
+
+Every edit above stages candidate configuration with the revision read in the
+same invocation. Nothing auto-commits or applies. A stale revision fails visibly
+without retrying; reload and review before issuing the command again.

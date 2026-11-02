@@ -7,10 +7,10 @@ export type ShadowCounters =
 
 /** Never interpret missing or malformed telemetry as a zero observation. */
 export function normalizeShadowCounters(value: unknown): ShadowCounters {
-  const unavailable = { available: false as const, reason: "Malformed shadow counters response" };
+  const unavailable = { available: false as const, reason: "Monitor counts could not be read: malformed response" };
   if (!value || typeof value !== "object" || Array.isArray(value)) return unavailable;
   const v = value as Record<string, unknown>;
-  if (v.available === false) return { available: false, reason: typeof v.reason === "string" ? v.reason : "Engine unavailable" };
+  if (v.available === false) return { available: false, reason: typeof v.reason === "string" ? v.reason : "Traffic-monitoring service unavailable" };
   if (v.available !== true || typeof v.snapshotVersion !== "string" || !v.snapshotVersion ||
       typeof v.since !== "string" || !Number.isFinite(Date.parse(v.since)) || v.unit !== "messages" || !Array.isArray(v.rules)) return unavailable;
   const rules: ShadowRuleCount[] = [];

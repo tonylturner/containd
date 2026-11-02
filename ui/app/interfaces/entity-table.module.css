@@ -1,0 +1,45 @@
+/* Keep one set of controls and draft state across viewport changes. */
+@media (max-width: 639px) {
+  .entities,
+  .entities tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .entities thead {
+    display: none;
+  }
+
+  .entities tr {
+    display: block;
+    margin: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--surface);
+  }
+
+  .entities tr[hidden] {
+    display: none;
+  }
+
+  .entities td {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+
+  .entities td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .entities td input,
+  .entities td select {
+    max-width: 100%;
+  }
+}

@@ -9,14 +9,16 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation, type DHCPStatus } from "../../lib/api";
+import { api, isAdmin, type DHCPConfig, type DHCPLease, type Interface, type DHCPStatus } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { SaveStateLine } from "../../components/SaveStateLine";
 import { useSaveAction } from "../../hooks/useSaveAction";
 import { Skeleton } from "../../components/Skeleton";
-import { Sparkline } from "../../components/Sparkline";
+import { ServiceHistory } from "../../components/TelemetryChart";
 import { InfoTip } from "../../components/InfoTip";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
+import { DHCPRows, validateRows } from "./dhcp-rows";
 import { Card } from "../../components/Card";
 
 function normalize(cfg: DHCPConfig | null): DHCPConfig {
@@ -34,41 +36,13 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
   };
 }
 
-function poolsToText(pools: DHCPPool[]): string {
-  return pools.map((p) => `${p.iface},${p.start},${p.end}`).join("\n");
-}
-
-function textToPools(text: string): DHCPPool[] {
-  return text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const [iface, start, end] = l.split(",").map((s) => s.trim());
-      return { iface: iface || "", start: start || "", end: end || "" };
-    });
-}
-
-function reservationsToText(reservations: DHCPReservation[]): string {
-  return reservations.map((r) => `${r.iface},${r.mac},${r.ip}`).join("\n");
-}
-
-function textToReservations(text: string): DHCPReservation[] {
-  return text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const [iface, mac, ip] = l.split(",").map((s) => s.trim());
-      return { iface: iface || "", mac: mac || "", ip: ip || "" };
-    });
-}
-
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { conflictProps, editor, cfg, setCfg, dirty, readConfig: adoptConfig, write, text, setText } = useConfigEditor(() => normalize(null), false);
+  const [interfaces, setInterfaces] = useState<Interface[]>([]);
+  const [interfaceError, setInterfaceError] = useState<string | null>(null);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +61,9 @@ export default function DHCPPage() {
       if (!checkLoaded(current)) return;
       const next = normalize(current);
       adoptConfig({ data: next, revision: currentSnapshot?.revision ?? "" }, keepEdits);
+      const interfaceSnapshot = await api.listInterfaces();
+      setInterfaces(interfaceSnapshot?.data ?? []);
+      setInterfaceError(interfaceSnapshot ? null : "Configured interfaces unavailable. Refresh to retry; existing interface selections are retained.");
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -126,19 +103,18 @@ export default function DHCPPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const listenIfacesText = text("listenIfaces", (cfg.listenIfaces ?? []).join(", "));
   const dnsServersText = text("dnsServers", (cfg.dnsServers ?? []).join(", "));
-  const poolsText = text("pools", poolsToText(cfg.pools ?? []));
-  const reservationsText = text("reservations", reservationsToText(cfg.reservations ?? []));
 
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     const payload = { ...cfg,
-      listenIfaces: listenIfacesText.split(",").map((s) => s.trim()).filter(Boolean),
       dnsServers: dnsServersText.split(",").map((s) => s.trim()).filter(Boolean),
-      pools: textToPools(poolsText), reservations: textToReservations(reservationsText),
+      pools: (cfg.pools ?? []).map(p => ({ iface: p.iface.trim(), start: p.start.trim(), end: p.end.trim() })),
+      reservations: (cfg.reservations ?? []).map(r => ({ iface: r.iface.trim(), mac: r.mac.trim(), ip: r.ip.trim() })),
     };
+    const invalid = validateRows(payload);
+    if (invalid) { setError(invalid); return; }
     const saved = await save.run("save", () => write(base => api.setDHCP(base, payload), { replace: data => normalize(data) }), {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
@@ -154,7 +130,7 @@ export default function DHCPPage() {
     <Shell
       title="DHCP"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => void refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
@@ -184,7 +160,7 @@ export default function DHCPPage() {
     >
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)} updated={status?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -204,59 +180,11 @@ export default function DHCPPage() {
           DNS resolver &rarr;
         </Link>
       </div>
-      <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
-        {loading ? (
-          <div className="mt-3 space-y-2">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-8 w-1/2" />
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
-            <div>
-              Enabled: <span className="text-(--text)">{status?.enabled ? "yes" : "no"}</span>
-            </div>
-            <div>
-              Pools: <span className="text-(--text)">{status?.pools ?? 0}</span>
-            </div>
-            <div>
-              Reservations: <span className="text-(--text)">{status?.reservations ?? 0}</span>
-            </div>
-            <div>
-              Listen ifaces: <span className="text-(--text)">{status?.listen_ifaces ?? 0}</span>
-            </div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
-            </div>
-            {status?.last_error ? (
-              <div className="md:col-span-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {status.last_error}
-              </div>
-            ) : null}
-            {status?.note ? (
-              <div className="md:col-span-2 text-xs text-(--text-muted)">{status.note}</div>
-            ) : null}
-            {status?.sparkline.length ? (
-              <div className="md:col-span-2">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--teal)"
-                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                  title="DHCP events per minute"
-                />
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Card>
 
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">DHCPv4 Server</h2>
         <p className="mt-1 text-sm text-(--text)">
-          Configure LAN-side DHCP. The engine runs a minimal DHCPv4 server (IPv4 only) when enabled and committed.
+          Assign IPv4 addresses to LAN clients after saving and applying these settings.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -264,7 +192,7 @@ export default function DHCPPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))}
               className="h-4 w-4"
             />
@@ -276,7 +204,7 @@ export default function DHCPPage() {
             <input
               type="checkbox"
               checked={cfg.authoritative ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, authoritative: e.target.checked }))}
               className="h-4 w-4"
             />
@@ -284,24 +212,37 @@ export default function DHCPPage() {
             <InfoTip label="Sends DHCPNAK for addresses this server cannot lease on served interfaces. Eligible addresses are adopted in either mode. Leave off when another DHCP server owns the subnet." />
           </label>
 
-          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3">
-            <summary className="cursor-pointer text-sm text-(--text)">
-              Advanced options
-            </summary>
+          <fieldset className="min-w-0" disabled={!canEdit || !canSave}>
+            <legend className="text-xs text-(--text-muted)">Listen Interfaces</legend>
+            {interfaceError && <p role="alert" className="text-sm text-red-400">{interfaceError}</p>}
+            {[...new Set([...interfaces.map(i => i.name), ...(cfg.listenIfaces ?? [])])].map(name => (
+              <label key={name} className="mt-2 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={cfg.listenIfaces?.includes(name) ?? false} onChange={e => setCfg(c => ({
+                  ...c, listenIfaces: e.target.checked ? [...(c.listenIfaces ?? []), name] : c.listenIfaces?.filter(n => n !== name),
+                }))} />
+                {name}{!interfaces.some(i => i.name === name) && " (not in configured interfaces)"}
+              </label>
+            ))}
+          </fieldset>
+          <div>
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+              Router (Gateway)
+              <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
+            </label>
+            <input
+              value={cfg.router ?? ""}
+              disabled={!canEdit || !canSave}
+              onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
+              placeholder="192.168.1.1"
+              className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <DHCPRows pools={cfg.pools ?? []} interfaces={interfaces} disabled={!canEdit || !canSave} onPools={pools => setCfg(c => ({ ...c, pools }))} />
+          </div>
+          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3" open={(cfg.leaseSeconds ?? 3600) !== 3600 || !!cfg.domain || !!cfg.dnsServers?.length || !!cfg.reservations?.length}>
+            <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced options</span>{((cfg.leaseSeconds ?? 3600) !== 3600 || !!cfg.domain || !!cfg.dnsServers?.length || !!cfg.reservations?.length) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Listen Interfaces (CSV)
-                  <InfoTip label="Comma-separated interfaces where DHCP listens (e.g., lan2, lan3)." />
-                </label>
-                <input
-                  value={listenIfacesText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("listenIfaces", e.target.value)}
-                  placeholder="lan2, lan3"
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
 
               <div>
                 <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
@@ -311,22 +252,8 @@ export default function DHCPPage() {
                 <input
                   type="number"
                   value={cfg.leaseSeconds ?? 3600}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
-                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Router (Gateway)
-                  <InfoTip label="Default gateway handed to clients (usually the firewall LAN IP)." />
-                </label>
-                <input
-                  value={cfg.router ?? ""}
-                  disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
-                  placeholder="192.168.1.1"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
@@ -338,7 +265,7 @@ export default function DHCPPage() {
                 </label>
                 <input
                   value={dnsServersText}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setText("dnsServers", e.target.value)}
                   placeholder="192.168.1.1, 1.1.1.1"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -352,7 +279,7 @@ export default function DHCPPage() {
                 </label>
                 <input
                   value={cfg.domain ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
                   placeholder="lab.local"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -360,33 +287,7 @@ export default function DHCPPage() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Pools (one per line)
-                  <InfoTip label="Format: iface,start,end (validated on save)." />
-                </label>
-                <textarea
-                  rows={6}
-                  value={poolsText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("pools", e.target.value)}
-                  placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
-                  className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                  Reservations (one per line)
-                  <InfoTip label="Format: iface,mac,ip (must fall inside pool for that iface)." />
-                </label>
-                <textarea
-                  rows={6}
-                  value={reservationsText}
-                  disabled={!canEdit}
-                  onChange={(e) => setText("reservations", e.target.value)}
-                  placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
-                  className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                />
+                <DHCPRows reservations={cfg.reservations ?? []} interfaces={interfaces} disabled={!canEdit || !canSave} onReservations={reservations => setCfg(c => ({ ...c, reservations }))} />
               </div>
             </div>
           </details>
@@ -408,13 +309,52 @@ export default function DHCPPage() {
         )}
       </Card>
 
+      <Card className="mb-4">
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
+        {loading ? (
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-8 w-1/2" />
+          </div>
+        ) : !status ? (
+          <div role="status" className="mt-3 text-sm text-(--text-muted)">
+            Unknown — live service status unavailable.
+            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
+            <div>
+              Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span>
+            </div>
+            <div>
+              Pools: <span className="text-(--text)">{status?.pools ?? "Unknown"}</span>
+            </div>
+            <div>
+              Reservations: <span className="text-(--text)">{status?.reservations ?? "Unknown"}</span>
+            </div>
+            <div>
+              Listen ifaces: <span className="text-(--text)">{status?.listen_ifaces ?? "Unknown"}</span>
+            </div>
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {status.last_error}
+              </div>
+            ) : null}
+            {status?.note ? (
+              <div className="md:col-span-2 text-xs text-(--text-muted)">{status.note}</div>
+            ) : null}
+            <div className="md:col-span-2"><ServiceHistory service="dhcp" title="DHCP events per minute" /></div>
+          </div>
+        )}
+      </Card>
       <Card className="mt-6">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-(--text)">Active Leases</h2>
-            <p className="mt-1 text-sm text-(--text)">Leases issued by the embedded DHCP server (best-effort).</p>
+            <p className="mt-1 text-sm text-(--text)">Leases issued by the DHCP service on this appliance (best-effort).</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href="/events?filter=service&kind=service.dhcp.reservation"
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
@@ -436,7 +376,7 @@ export default function DHCPPage() {
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xs border">
+        <div className="mt-4 overflow-x-auto rounded-xs border">
           {leasesLoading ? (
             <div className="space-y-2 p-3">
               <Skeleton className="h-10 w-full" />
@@ -477,7 +417,6 @@ export default function DHCPPage() {
           )}
         </div>
       </Card>
-      </fieldset>
     </Shell>
   );
 }

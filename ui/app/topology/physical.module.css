@@ -134,6 +134,7 @@
   display: flex; align-items: center; gap: 4px;
 }
 .badgeOk { background: #14532d; color: #22c55e; }
+.badgeUnknown { background: var(--surface2); color: var(--text-muted); }
 .badgeWarn { background: #78490a; color: #f59e0b; }
 .badgeCrit { background: #7f1d1d; color: #ef4444; }
 .badgeInfo { background: #164e63; color: #06b6d4; }
@@ -285,3 +286,24 @@
 .flagBody { flex: 1; }
 .flagTitle { font-family: var(--mono); font-size: 9px; color: var(--topo-text); }
 .flagDesc { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 2px; }
+
+/* Deployment inspection keeps warnings independent of the selected layer. */
+.deploymentView { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.attention { padding: 12px 16px; max-height: 35%; overflow: auto; flex-shrink: 0; }
+.deploymentWorkspace { grid-template-columns: minmax(0, 1fr) minmax(280px, 40%); min-width: 0; }
+.deploymentWorkspace > * { min-width: 0; }
+.layerHeader { cursor: pointer; gap: 8px; flex-wrap: wrap; }
+.layerHeader:focus-visible { outline: 2px solid var(--amber); outline-offset: -3px; }
+.layerTitleGroup, .kvVal, .flagBody { min-width: 0; overflow-wrap: anywhere; }
+.mountTable { table-layout: fixed; overflow-wrap: anywhere; }
+.flag { border: 1px solid var(--topo-border); }
+.flagWarn { border-color: var(--amber-dim); }
+.flagCrit { border-color: var(--red-dim); }
+@media (max-width: 700px) {
+  .deploymentWorkspace { grid-template-columns: minmax(0, 1fr); overflow-y: auto; display: flex; flex-direction: column; }
+  .inspector { flex: 0 0 50vh; max-height: none; min-height: 300px; }
+  .stackView { height: auto; padding: 12px; overflow: visible; flex-shrink: 0; }
+  .layer, .layerGap { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+  .layerNode { width: 24px; height: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { .layer { animation: none; } }

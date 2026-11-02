@@ -34,7 +34,7 @@ func moveFirewallRuleAPI(api *API) Command {
 	}
 }
 
-func setFirewallRuleAPI(api *API) Command {
+func addFirewallRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: add firewall rule <id> <action> [src_zone] [dst_zone] [top|bottom|before <id>|after <id>]")

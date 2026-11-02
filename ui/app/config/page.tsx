@@ -13,6 +13,9 @@ import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
 import { ConfigDiffBlocks } from "./config-diff-blocks";
+import { ConfigChangeSummary } from "./config-change-summary";
+import { ConfigActionBar } from "./config-action-bar";
+import { Disclosure } from "../../components/Disclosure";
 import type { ConfigDiff } from "../../lib/api-config";
 import { formatICSMode } from "../ics/ics-shared";
 import { Shell } from "../../components/Shell";
@@ -25,7 +28,6 @@ import {
   ViewerSource,
 } from "./config-block-explorer";
 import {
-  ConfigActionBar,
   ConfigBackupRecoveryCard,
   ConfigSummaryCard,
   IDSRulesCard,
@@ -120,6 +122,32 @@ function ConfigPage() {
     } catch (e) {
       setStatus("Invalid JSON.");
     }
+  }
+
+  async function validateCandidate() {
+    if (!canEdit) return;
+    try {
+      const submitted = candidateText;
+      const res = await api.validateConfig(JSON.parse(submitted) as ConfigBundle);
+      setStatus(res.ok ? "Configuration valid. Unsaved text has not been staged." : `Validation failed: ${res.error}`);
+    } catch {
+      setStatus("Invalid JSON.");
+    }
+  }
+
+  function doFactoryReset() {
+    if (!canEdit || !canSaveNow() || !diffRevision) return;
+    dialogOpen.current = true;
+    confirm.open({
+      title: "Factory reset appliance", variant: "danger", confirmLabel: "Reset now",
+      message: "This immediately wipes configuration, users and audit history and applies appliance defaults. It cannot be undone. Log in afterwards with the default credentials. Lab web/API tokens remain valid.",
+      onConfirm: async () => {
+        if (!canSaveNow()) { setStatus("Factory reset failed: configuration unavailable."); return; }
+        const result = await diffView.writeRefresh(base => api.factoryReset(base), api.diffConfig);
+        setStatus(result.ok ? statusWithWarning(result.data.message, result.warning) : `Factory reset failed: ${result.error}`);
+        if (result.ok) refresh();
+      },
+    });
   }
 
   async function copyRunningToCandidate() {
@@ -355,7 +383,7 @@ function ConfigPage() {
     {
       id: "config:restore",
       title: "Restore carefully",
-      body: "Restore replaces the candidate config; use commit-confirmed if you need a safe rollback window.",
+      body: "Restore replaces saved changes, not active settings. Use Commit-confirmed for a safe rollback window when applying them.",
       when: () => canEdit,
     },
     {
@@ -394,6 +422,14 @@ function ConfigPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {configDiff?.pendingConfirm && (
+        <section aria-label="Pending confirmation" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 p-4 text-sm text-amber">
+          <p className="font-semibold">Confirm before <time dateTime={configDiff.pendingConfirm.deadline}>{new Date(configDiff.pendingConfirm.deadline).toLocaleString()}</time> to keep these changes.</p>
+          <p className="mt-1 text-xs">Otherwise they will be undone automatically.</p>
+          {canEdit && <button onClick={doConfirm} disabled={!canSave || !diffRevision || diffView.stale}
+            className="mt-3 rounded-xs bg-(--amber) px-3 py-1.5 font-semibold text-white disabled:opacity-50">Confirm</button>}
+        </section>
+      )}
       <div className="mb-4 flex flex-wrap gap-2">
         {(["overview", "running", "candidate", "diff"] as Tab[]).map((t) => (
           <button
@@ -411,7 +447,7 @@ function ConfigPage() {
         ))}
       </div>
       <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
-        Workflow: edit the staged config, review the change summary, then commit or commit-confirmed to update the live appliance safely.
+        Workflow: save changes, review the change summary, then use Commit to apply or Commit-confirmed for automatic rollback unless you confirm.
       </div>
 
       {status && (
@@ -482,24 +518,27 @@ function ConfigPage() {
             onChanged={refresh}
           />
 
-          <ConfigBlockExplorer
-            viewerSource={viewerSource}
-            setViewerSource={setViewerSource}
-            selectedBlock={selectedBlock}
-            setSelectedBlock={setSelectedBlock}
-            selectedItemId={selectedItemId}
-            setSelectedItemId={setSelectedItemId}
-            blockItems={blockItems}
-            selectedItem={selectedItem}
-            blockValue={blockValue}
-            viewerConfig={viewerConfig}
-            idsBankCount={configDiff?.idsBank?.[viewerSource].count ?? null}
-            setSelectedRef={(node) => {
-              selectedRef.current = node;
-            }}
-          />
-
+          <Disclosure title="Advanced">
+            <ConfigBlockExplorer
+              viewerSource={viewerSource}
+              setViewerSource={setViewerSource}
+              selectedBlock={selectedBlock}
+              setSelectedBlock={setSelectedBlock}
+              selectedItemId={selectedItemId}
+              setSelectedItemId={setSelectedItemId}
+              blockItems={blockItems}
+              selectedItem={selectedItem}
+              blockValue={blockValue}
+              viewerConfig={viewerConfig}
+              idsBankCount={configDiff?.idsBank?.[viewerSource].count ?? null}
+              setSelectedRef={(node) => {
+                selectedRef.current = node;
+              }}
+            />
+          </Disclosure>
           <ConfigActionBar
+            showReview={false}
+            pendingConfirm={!!configDiff?.pendingConfirm}
             canEdit={canEdit}
             canMutate={canSave && !!diffRevision && !diffView.stale}
             canCommit={false}
@@ -509,6 +548,7 @@ function ConfigPage() {
             onCommitConfirmed={doCommitConfirmed}
             onConfirmCommit={doConfirm}
             onRollback={doRollback}
+            onFactoryReset={doFactoryReset}
           />
         </div>
       )}
@@ -532,6 +572,9 @@ function ConfigPage() {
                   className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
                 >
                   Copy running → staged
+                </button>
+                <button onClick={validateCandidate} className="rounded-xs border px-3 py-1.5 text-sm">
+                  Validate
                 </button>
                 <button
                   onClick={saveCandidate}
@@ -566,7 +609,7 @@ function ConfigPage() {
           <div className="mb-3 text-xs text-(--text-muted)">
             This is the last committed config, not proof of live enforcement.
           </div>
-          <pre>{runningText}</pre>
+          <pre className="max-w-full overflow-x-auto">{runningText}</pre>
         </div>
       )}
 
@@ -574,7 +617,7 @@ function ConfigPage() {
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
             <div className="rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
-              Staged config looks older than running config. Copy running → staged first if you want to review your latest committed state.
+              Saved changes are older than the last committed configuration. Review before replacing them with Copy running → staged.
             </div>
           )}
           {configDiff === undefined ? (
@@ -594,13 +637,23 @@ function ConfigPage() {
               No differences between running and staged config.
             </div>
           ) : (
-            <ConfigDiffBlocks blocks={diffBlocks} />
+            <>
+              <p className="text-xs text-(--text-muted)">Running → Staged. This is the last committed config, not proof of live enforcement.</p>
+              <ConfigChangeSummary diff={configDiff} blocks={diffBlocks} />
+              <Disclosure title="Advanced">
+                <p className="mb-3 text-xs text-(--text-muted)">Exact redacted JSON changes by block.</p>
+                <div className="mb-4 grid min-w-0 gap-4"><ConfigChangeSummary diff={configDiff} blocks={diffBlocks} detailed /></div>
+                <div className="grid min-w-0 gap-4"><ConfigDiffBlocks blocks={diffBlocks} /></div>
+              </Disclosure>
+            </>
           )}
         </div>
       )}
 
       {tab !== "overview" && (
         <ConfigActionBar
+          showReview={tab === "diff"}
+          pendingConfirm={!!configDiff?.pendingConfirm}
           canEdit={canEdit}
           canMutate={canSave && !!diffRevision && !diffView.stale}
           canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
@@ -610,6 +663,7 @@ function ConfigPage() {
           onCommitConfirmed={doCommitConfirmed}
           onConfirmCommit={doConfirm}
           onRollback={doRollback}
+          onFactoryReset={doFactoryReset}
         />
       )}
     </Shell>

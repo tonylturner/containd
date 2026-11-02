@@ -13,18 +13,9 @@ export type ServiceFaultState = { state?: "faulted"; fault?: ServiceFault };
 
 /** Event meter every management service entry carries. */
 export type ServiceMeter = ServiceFaultState & {
-  /**
-   * Events per minute, oldest first, one entry per minute through the
-   * current minute (quiet minutes are 0); empty before the first event.
-   */
-  sparkline: number[];
-  /** Events since management started. */
+  /** Events since management started. Historical rates come from telemetry/series. */
   count: number;
-  /** Average events per minute across `sparkline`. */
-  rate_per_min: number;
-  errors_sparkline: number[];
   errors_count: number;
-  errors_rate_per_min: number;
 };
 
 /** Audit delivery of one forwarder, as of its last flush. */

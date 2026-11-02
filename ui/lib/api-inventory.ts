@@ -1,4 +1,4 @@
-import { getJSONWithStatus } from "./api-request";
+import { deleteJSONResult, getJSONWithStatus } from "./api-request";
 
 export type IEC104Point = {
   ioa: number;
@@ -43,6 +43,7 @@ export type IEC104Inventory = {
 };
 
 export const inventoryAPI = {
+  clearInventory: () => deleteJSONResult<{ status: string }>("/api/v1/inventory"),
   getIEC104Inventory: () =>
     getJSONWithStatus<IEC104Inventory>("/api/v1/inventory/iec104", {
       lists: ["pairs"],

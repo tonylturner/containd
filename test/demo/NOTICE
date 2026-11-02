@@ -1,0 +1,23 @@
+containd recorded demonstration captures
+
+The capture data is licensed under Apache-2.0. Each capture family's LICENSE
+is included beside its recordings. The versioned manifest identifies original
+addresses, hashes and recorded-then-edited negative fixtures (mutated: true).
+
+These files contain recorded wire traffic, not generator program code.
+Generator programs and their software license collections are not distributed
+as part of this capture set:
+
+* Modbus: pymodbus 3.11.4.
+* DNP3: opendnp3 3.1.2 master/outstation examples.
+* IEC 60870-5-104: lib60870-C 2.4.1, the containd endpoint harness and Go
+  malformer client. malformed.pcap is recorded malformed traffic, not an edit.
+* CIP / EtherNet/IP: OpENer, EIPScanner and cpppo 4.4.3.
+* IT: Debian bind9, OpenSSL, Apache httpd, curl, OpenSSH, sshpass, chrony,
+  ntpsec-ntpdate, Net-SNMP, xrdp, FreeRDP, Samba and smbclient.
+* Recording/oracles: tcpdump and TShark (Wireshark). Python and Xvfb support
+  the capture tooling.
+
+Generator versions, source identities and software notices remain in the
+source repository's test/<family>/capture directories and IEC104 endpoint
+directory. Their licenses do not change the fixture-data license.

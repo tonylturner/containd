@@ -185,7 +185,7 @@ func TestSecurityConduitsEvidenceAndUnmeasuredTraffic(t *testing.T) {
 			t.Fatalf("status %d body=%s err=%v", rec.Code, rec.Body, err)
 		}
 		c := requireConduit(t, got, "ot", "dmz")
-		if c.Traffic != nil || c.TLSEnforced {
+		if c.Traffic.State != "unavailable" || c.Traffic.Reason == "" || c.TLSEnforced {
 			t.Fatalf("unmeasured or unverified control claimed: %+v", c)
 		}
 		wantIDS := "disabled"
@@ -202,17 +202,6 @@ func TestSecurityConduitsEvidenceAndUnmeasuredTraffic(t *testing.T) {
 		} {
 			if e := c.Checks[key]; e.Provenance != want || e.Reason == "" {
 				t.Errorf("%s evidence = %+v, want %s and a reason", key, e, want)
-			}
-		}
-		// A missing field would also decode to a nil pointer. Assert the wire
-		// contract distinguishes explicit unavailable from an omitted metric.
-		var wire []map[string]json.RawMessage
-		if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
-			t.Fatal(err)
-		}
-		for _, entry := range wire {
-			if string(entry["traffic"]) != "null" {
-				t.Fatalf("traffic must be explicit null: %s", entry["traffic"])
 			}
 		}
 	}

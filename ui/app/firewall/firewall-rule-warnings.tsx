@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { RulePreview, RuleWarning } from "../../lib/api";
 import { ICSCoverageSection } from "../ics/ics-coverage";
 import { RulePreviewEvents } from "./firewall-rule-samples";
+import { TechnicalDetails } from "../../components/TechnicalDetails";
 
 function warningKind(w: RuleWarning): string {
   if (w.shadowedBy) return "shadowed";
@@ -86,10 +87,11 @@ export function RuleImpactSummary({ preview }: { preview: RulePreview }) {
   return (
     <div aria-label="Rule impact preview" className="mt-3">
       <p className="text-sm text-(--text)">
-        {preview.unavailable || (preview.total_events === 0
-          ? "No recent events to search: the engine has retained none yet."
+        {preview.unavailable ? "Recent-event comparison unavailable." : (preview.total_events === 0
+          ? "No recent events to search: none have been retained yet."
           : `${preview.match_count} of ${preview.total_events} recent events match this rule on its own.`)}
       </p>
+      {preview.unavailable && <TechnicalDetails>{preview.unavailable}</TechnicalDetails>}
       {!preview.unavailable && <RulePreviewEvents preview={preview} />}
       <ICSCoverageSection coverage={preview.icsCoverage} />
       <RuleWarningList warnings={preview.warnings} />

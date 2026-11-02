@@ -4,6 +4,7 @@ import { revisionError } from "../../lib/config-revision";
 
 import { useConfigView } from "../../lib/use-config-revision";
 
+import entityStyles from "../interfaces/entity-table.module.css";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { IEC104Inventory } from "./IEC104Inventory";
@@ -43,11 +44,12 @@ export default function AssetsPage() {
   const [zone, setZone] = useState("");
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
+  const [hostnames, setHostnames] = useState("");
 
   const retainedDraft = useRef(false);
   useLayoutEffect(() => {
-    retainedDraft.current = !!(id || name || alias || zone || ips || type !== "PLC" || criticality !== "HIGH" || editing);
-  }, [id, name, alias, zone, ips, type, criticality, editing]);
+    retainedDraft.current = !!(id || name || alias || zone || ips || hostnames || type !== "PLC" || criticality !== "HIGH" || editing);
+  }, [id, name, alias, zone, ips, hostnames, type, criticality, editing]);
 
   const { refresh } = useAsyncRefresh(useCallback(async () => {
     const [aSnapshot, zSnapshot] = await Promise.all([api.listAssets(), api.listZones()]);
@@ -79,6 +81,7 @@ export default function AssetsPage() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      hostnames: hostnames.split(",").map(s => s.trim()).filter(Boolean),
       criticality,
     }), { patch: (rows, data) => [...rows, data] });
     if (!result.ok) {
@@ -90,6 +93,7 @@ export default function AssetsPage() {
     setName("");
     setAlias("");
     setIps("");
+    setHostnames("");
     refresh();
   }
 
@@ -179,6 +183,10 @@ export default function AssetsPage() {
             placeholder="IPs (csv)"
             className="input-industrial md:col-span-2 transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
+          <label className="text-sm">Hostnames (comma-separated)
+            <input value={hostnames} onChange={e => setHostnames(e.target.value)}
+              className="mt-1 w-full input-industrial" />
+          </label>
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}
@@ -202,8 +210,8 @@ export default function AssetsPage() {
       </Card>
       )}
 
-      <div className="mt-6 rounded-xs border bg-(--surface) overflow-hidden shadow-card">
-        <table className="w-full text-sm">
+      <div className="mt-6 rounded-xs border bg-(--surface) overflow-x-auto shadow-card">
+        <table aria-label="Configured assets" className={`w-full text-sm ${entityStyles.entities}`}>
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">ID</th>
@@ -212,6 +220,7 @@ export default function AssetsPage() {
               <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">IPs</th>
+              <th className="px-4 py-3">Hostnames</th>
               <th className="px-4 py-3">Criticality</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -219,7 +228,7 @@ export default function AssetsPage() {
           <tbody>
             {assets.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <EmptyState
                     title="No assets configured"
                     description="Add an asset above to begin tracking OT/ICS devices."
@@ -229,26 +238,29 @@ export default function AssetsPage() {
             )}
             {assets.map((a) => (
               <tr key={a.id} className="border-t table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-(--text)">
+                <td data-label="ID" className="px-4 py-3 font-mono text-xs text-(--text)">
                   {a.id}
                 </td>
-                <td className="px-4 py-3 text-(--text)">{a.name}</td>
-                <td className="px-4 py-3 text-(--text)">{a.alias || "\u2014"}</td>
-                <td className="px-4 py-3 text-(--text)">{a.type || "\u2014"}</td>
-                <td className="px-4 py-3 text-(--text)">
+                <td data-label="Name" className="px-4 py-3 text-(--text)">{a.name}</td>
+                <td data-label="Alias" className="px-4 py-3 text-(--text)">{a.alias || "\u2014"}</td>
+                <td data-label="Type" className="px-4 py-3 text-(--text)">{a.type || "\u2014"}</td>
+                <td data-label="Zone" className="px-4 py-3 text-(--text)">
                   {a.zone ? zoneName(zones, a.zone) : "\u2014"}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td data-label="IPs" className="px-4 py-3 text-(--text)">
                   {(a.ips ?? []).join(", ") || "\u2014"}
                 </td>
-                <td className="px-4 py-3">
+                <td data-label="Hostnames" className="px-4 py-3">
+                  {(a.hostnames ?? []).join(", ") || "—"}
+                </td>
+                <td data-label="Criticality" className="px-4 py-3">
                   {a.criticality ? (
                     <StatusBadge variant={criticalityVariant(a.criticality)}>
                       {a.criticality}
                     </StatusBadge>
                   ) : "\u2014"}
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td data-label="Actions" className="px-4 py-3 text-right">
                   {isAdmin() && (
                     <>
                       <button
@@ -314,6 +326,7 @@ function EditAssetModal({
   const [criticality, setCriticality] = useState(
     asset.criticality ?? "HIGH",
   );
+  const [hostnames, setHostnames] = useState((asset.hostnames ?? []).join(", "));
   const [tags, setTags] = useState((asset.tags ?? []).join(", "));
   const [description, setDescription] = useState(asset.description ?? "");
 
@@ -327,6 +340,7 @@ function EditAssetModal({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      hostnames: hostnames.split(",").map(s => s.trim()).filter(Boolean),
       criticality,
       tags: tags
         .split(",")
@@ -337,8 +351,8 @@ function EditAssetModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-xs bg-(--surface) border p-5 shadow-card-lg animate-fade-in animate-slide-down">
+    <div role="dialog" aria-modal="true" aria-label={`Edit asset ${asset.id}`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
+      <div className="max-h-[90dvh] overflow-y-auto w-full max-w-xl rounded-xs bg-(--surface) border p-5 shadow-card-lg animate-fade-in animate-slide-down">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-(--text)">
             Edit asset {asset.id}
@@ -393,6 +407,10 @@ function EditAssetModal({
             placeholder="IPs (csv)"
             className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
+          <label className="text-sm">Hostnames (comma-separated)
+            <input value={hostnames} onChange={e => setHostnames(e.target.value)}
+              className="mt-1 w-full input-industrial" />
+          </label>
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}

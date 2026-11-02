@@ -41,8 +41,8 @@ for (const path of ["/firewall/", "/ics/", "/zones/", "/sessions/"]) {
     await open(page, path);
     const banner = page.getByRole("status", { name: "Boot recovery" });
     await expect(banner).toHaveCount(1);
-    await expect(banner).toContainText("Boot recovery active: new transit dropped");
-    await expect(banner).toContainText("stored configuration refused at boot");
+    await expect(banner).toContainText("Startup recovery active: new through-traffic is blocked");
+    await expect(banner.getByText("stored configuration refused at boot", { exact: true })).toBeVisible();
     await expect(banner).toContainText("Commit a safe configuration");
     await expect(banner).toHaveClass(/text-amber/);
     await expect(banner.getByRole("link", { name: "Interfaces" })).toHaveAttribute("href", "/interfaces/");
@@ -50,14 +50,19 @@ for (const path of ["/firewall/", "/ics/", "/zones/", "/sessions/"]) {
 }
 
 for (const [state, title] of [
-  ["pending", "Boot recovery pending: recovery ruleset not applied"],
-  ["failed", "Boot recovery failed: recovery ruleset not applied"],
+  ["pending", "Startup recovery pending: recovery protection is not active"],
+  ["failed", "Startup recovery failed: recovery protection is not active"],
   ["unknown", "Boot recovery state unknown"],
 ] as const) {
   test(`firewall names ${state} boot recovery`, async ({ page }) => {
     await mockAPI(page, { state, reason: "" });
     await open(page, "/firewall/");
-    await expect(page.getByRole("status", { name: "Boot recovery" })).toContainText(title);
+    const banner = page.getByRole("status", { name: "Boot recovery" });
+    await expect(banner).toContainText(title);
+    await expect(banner).not.toContainText("Management access remains reserved");
+    if (state !== "unknown") {
+      await expect(banner).toContainText("Management is serving; verify listener and interface access.");
+    }
   });
 }
 

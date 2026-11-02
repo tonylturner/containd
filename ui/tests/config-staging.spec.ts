@@ -52,7 +52,7 @@ async function setup(page: Page) {
   return state;
 }
 
-const pending = "Uncommitted changes — not active until you commit.";
+const pending = "Saved changes are not active yet.";
 
 test("successful zone mutation immediately refreshes global status; commit refreshes editors", async ({ page }) => {
   const state = await setup(page);
@@ -131,7 +131,7 @@ test("capture cannot start when discovery reports the saved device is absent", a
   const state = await setup(page);
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No network devices reported.", { exact: true })).toBeVisible();
   await expect(page.getByText("Kernel devices not found: eth0. Bind the interfaces or choose an available device.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start capture now", exact: true })).toBeDisabled();
   expect(state.writes).toEqual([]);
@@ -156,7 +156,7 @@ test("topology surfaces failed zone patches without optimistic target changes", 
   const state = await setup(page);
   state.zones = [{ name: "MixedCase" }, { name: "wan" }];
   state.reject = true;
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "disabled", traffic: null, checks: securityChecks, proto: [], gaps: [], rules: [], mitre: [], defaultDeny: false, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "disabled", traffic: { state: "unavailable" as const, reason: "enforcement disabled" }, checks: securityChecks, proto: [], gaps: [], rules: [], mitre: [], defaultDeny: false, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await page.getByText("ALLOW", { exact: true }).click();
@@ -286,7 +286,8 @@ for (const bank of [
       idsBank: { running: unchangedBank, candidate: bank },
     }));
     await page.goto("/config/?tab=diff");
-    const block = page.getByRole("region", { name: "IDS changes", exact: true });
+    await page.getByRole("button", { name: "Advanced", exact: true }).click();
+    const block = page.getByRole("region", { name: "IDS JSON changes", exact: true });
     await expect(block.getByText("IDS rule bank", { exact: true })).toBeVisible();
     await expect(block).toContainText("Running: 30,000 rules · SHA-256 aaaaaaaaaaaa");
     await expect(block).toContainText(`Staged: ${bank.count.toLocaleString("en-US")} rules · SHA-256 bbbbbbbbbbbb`);
@@ -309,15 +310,17 @@ test("Config review includes unknown sections and complete known top-level secti
     running, candidate,
   }));
   await page.goto("/config/?tab=diff");
-  const firewall = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await expect(page.getByRole("region", { name: "Firewall changes", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const firewall = page.getByRole("region", { name: "Firewall JSON changes", exact: true });
   await expect(firewall).toContainText('"defaultAction": "ALLOW"');
   await expect(firewall).toContainText('"defaultAction": "DENY"');
-  await expect(page.getByRole("region", { name: "Data plane changes", exact: true })).toContainText('"dpiMode": "enforce"');
-  const future = page.getByRole("region", { name: "futureSection changes", exact: true });
+  await expect(page.getByRole("region", { name: "Data plane JSON changes", exact: true })).toContainText('"dpiMode": "enforce"');
+  const future = page.getByRole("region", { name: "futureSection JSON changes", exact: true });
   await expect(future).toContainText('"mode": "before"');
   await expect(future).toContainText('"mode": "after"');
-  await expect(page.getByRole("region", { name: "hiddenFuture changes", exact: true })).toContainText("Secret values changed (hidden).");
-  await expect(page.getByRole("region", { name: / changes$/ })).toHaveCount(4);
+  await expect(page.getByRole("region", { name: "hiddenFuture JSON changes", exact: true })).toContainText("Secret values changed (hidden).");
+  await expect(page.getByRole("region", { name: / JSON changes$/ })).toHaveCount(4);
 });
 
 test("Config review combines IDS settings lines and bank summary", async ({ page }) => {
@@ -327,7 +330,8 @@ test("Config review combines IDS settings lines and bank summary", async ({ page
     idsBank: { running: unchangedBank, candidate: { count: 30001, sha256: "b".repeat(64) } },
   }));
   await page.goto("/config/?tab=diff");
-  const block = page.getByRole("region", { name: "IDS changes", exact: true });
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const block = page.getByRole("region", { name: "IDS JSON changes", exact: true });
   await expect(block).toContainText('"enabled": false');
   await expect(block).toContainText('"enabled": true');
   await expect(block).toContainText("IDS rule bank");
@@ -364,7 +368,7 @@ test("Config candidate editor saves the omitted bank unchanged and summary uses 
   expect(state.writes[0].body.ids).not.toHaveProperty("rules");
   expect(state.writes[0].body).not.toHaveProperty("idsBank");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await expect(page.getByText("Running IDS bank: 30000 committed rules. Restores stage the candidate bank; commit promotes both.", { exact: true })).toBeVisible();
+  await expect(page.getByText("30000 committed detection rules. Restored rules are saved for review; commit applies them with the configuration.", { exact: true })).toBeVisible();
 });
 
 test("saved candidate JSON adopts a later server refresh", async ({ page }) => {
@@ -433,12 +437,13 @@ test("Config IDS explorer shows the selected bank count and a browse link withou
     }
   });
   await page.goto("/config/");
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("button", { name: "IDS", exact: true }).click();
   const bank = page.getByRole("region", { name: "IDS rule bank", exact: true });
   await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
   await expect(bank).not.toContainText(/\b0 rules\b/);
   await expect(bank.getByRole("link", { name: "Browse IDS rules", exact: true })).toHaveAttribute("href", "/ids/");
-  await expect(bank).toContainText("Rule bodies are omitted from this viewer.");
+  await expect(bank).toContainText("Open the detection-rule editor to see rule contents.");
 
   await page.getByRole("button", { name: "Staged", exact: true }).click();
   await expect(bank).toContainText("Staged IDS bank: 42,000 rules.");

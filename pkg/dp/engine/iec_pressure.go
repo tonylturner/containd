@@ -113,3 +113,15 @@ func (e *Engine) IEC104PressureMetrics() map[string]float64 {
 		"pending_seconds_limit":          p.Limits.PendingSeconds, "reset_worker_jobs_limit": float64(p.Limits.ResetWorkerJobs),
 	}
 }
+
+func (t *iecTable) countAbort(reason *iecAbortReason) {
+	if !t.detached {
+		countIECAbort(reason)
+	}
+}
+
+func (t *iecTable) countVerdictFailure(err error) {
+	if !t.detached {
+		countIECVerdictFailure(err)
+	}
+}

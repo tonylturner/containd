@@ -226,7 +226,7 @@ func (s *Store) QueryTelemetry(q Query) Page {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	candidates := append([]Event(nil), s.general.events...)
+	candidates := s.generalEvents()
 	candidates = append(candidates, s.denies.events...)
 	for _, r := range s.incidents.groups {
 		candidates = append(candidates, r.events...)

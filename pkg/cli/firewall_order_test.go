@@ -50,7 +50,7 @@ func TestFirewallOrderCommands(t *testing.T) {
 			if err := moveFirewallRuleAPI(api)(context.Background(), nil, append([]string{"b"}, words...)); err != nil {
 				t.Fatal(err)
 			}
-			if err := setFirewallRuleAPI(api)(context.Background(), nil, append([]string{"new", "allow", "lan", "wan"}, words...)); err != nil {
+			if err := addFirewallRuleAPI(api)(context.Background(), nil, append([]string{"new", "allow", "lan", "wan"}, words...)); err != nil {
 				t.Fatal(err)
 			}
 		})

@@ -71,7 +71,7 @@ func TestRetireTablesOnlyOnRename(t *testing.T) {
 	if got := old.RetireTables(same); got != "" {
 		t.Fatalf("same tables retired: %q", got)
 	}
-	want := DeleteTable("containd_policy") + DeleteTable("containd")
+	want := DeleteTable("containd_policy") + DeleteTable("containd") + DeleteTable("containd_acct")
 	if got := old.RetireTables(renamed); got != want {
 		t.Fatalf("retire = %q, want %q", got, want)
 	}

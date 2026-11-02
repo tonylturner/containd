@@ -7,19 +7,86 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/peterh/liner"
 
 	httpapi "github.com/tonylturner/containd/api/http"
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+func TestCLIInterruptCancelsOnlyInput(t *testing.T) {
+	reads, calls := 0, 0
+	var output strings.Builder
+	err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+		reads++
+		switch reads {
+		case 1:
+			return "", liner.ErrPromptAborted
+		case 2:
+			return "show version", nil
+		default:
+			return "", io.EOF
+		}
+	}, func(string) {}, func(string, *strings.Builder) error {
+		calls++
+		return nil
+	}, true, &output, &output)
+	if err != nil || calls != 1 || reads != 3 {
+		t.Fatalf("interrupt ended session: err=%v calls=%d reads=%d", err, calls, reads)
+	}
+}
+
+func TestCLILocalShellWordsDoNotExit(t *testing.T) {
+	lines := []string{"shell", "bash", "show version", "exit"}
+	index, calls := 0, 0
+	var stdout, stderr strings.Builder
+	reg := cli.NewRegistry(nil, nil)
+	err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+		if index == len(lines) {
+			return "", io.EOF
+		}
+		line := lines[index]
+		index++
+		return line, nil
+	}, func(string) {}, func(line string, out *strings.Builder) error {
+		calls++
+		return cli.SessionCommandError(line, reg.ParseAndExecute(context.Background(), line, out))
+	}, false, &stdout, &stderr)
+	if !errors.Is(err, errCLISessionCommandFailed) || calls != 3 || index != 4 ||
+		!strings.Contains(stdout.String(), "containd") ||
+		!strings.Contains(stderr.String(), "unknown command: shell") ||
+		!strings.Contains(stderr.String(), "unknown command: bash") {
+		t.Fatalf("shell word ended session: err=%v calls=%d lines=%d stdout=%q stderr=%q", err, calls, index, stdout.String(), stderr.String())
+	}
+}
+
+func TestCLIExitAliases(t *testing.T) {
+	for _, alias := range []string{"exit", "quit", "logout"} {
+		t.Run(alias, func(t *testing.T) {
+			var output strings.Builder
+			err := runCLILoop("containd(config?)# ", func(string) (string, error) {
+				return alias, nil
+			}, func(string) {}, func(string, *strings.Builder) error {
+				t.Fatal("exit control executed as a command")
+				return nil
+			}, true, &output, &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestCLILoopExitStatus(t *testing.T) {
 	tests := []struct {
@@ -155,5 +222,85 @@ func TestCLIAPIUsesManagementRuntimeRecord(t *testing.T) {
 	}
 	if err := runHealthcheck(); err != nil {
 		t.Fatalf("healthcheck: %v", err)
+	}
+}
+
+func TestCLILocalFilesystem(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(cli.EnvSSHAPISocket, "")
+	t.Setenv("CONTAIND_CONFIG_DB", filepath.Join(root, "config.db"))
+	t.Setenv("CONTAIND_CLI_HISTORY", filepath.Join(root, "history"))
+	var edits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_, _ = io.WriteString(w, `{"token":"session-token"}`)
+		case "/api/v1/auth/me":
+			_, _ = io.WriteString(w, `{"username":"operator","role":"admin"}`)
+		case "/api/v1/config/backups/id":
+			_, _ = io.WriteString(w, `{"description":"downloaded"}`)
+		case "/api/v1/services/vpn":
+			if r.Method == http.MethodPost {
+				var payload struct {
+					Wireguard struct{ PrivateKey string }
+				}
+				if err := json.Unmarshal(body, &payload); err != nil || payload.Wireguard.PrivateKey != "PRIVATE" ||
+					r.Header.Get("X-Containd-If-Revision") != "0123456789abcdef.1" {
+					t.Error("local credential edit lost value or revision")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				edits.Add(1)
+				w.Header().Set("X-Containd-Config", "staged")
+			}
+			w.Header().Set("X-Containd-Revision", "0123456789abcdef.1")
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			_, _ = io.WriteString(w, `{}`)
+		}
+	}))
+	defer srv.Close()
+	record := mgmtapp.RuntimeRecord{Listeners: config.ManagementListeners{HTTP: config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true}}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := mgmtapp.RuntimeRecordPath()
+	if err := os.MkdirAll(filepath.Dir(recordPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credential, target := filepath.Join(root, "credential"), filepath.Join(root, "download")
+	if err := os.WriteFile(credential, []byte("PRIVATE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	if _, err := fmt.Fprintf(writer, "download backup id %q\nset vpn wireguard private-key-file %q\nexit\n", target, credential); err != nil {
+		writer.Close()
+		t.Fatal(err)
+	}
+	writer.Close()
+	stdin := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = stdin }()
+	if err := runCLI(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil || !strings.Contains(string(body), "downloaded") || edits.Load() != 1 {
+		t.Fatalf("local file commands did not execute: %v edits=%d", err, edits.Load())
 	}
 }

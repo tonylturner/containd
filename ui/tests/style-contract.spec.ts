@@ -30,14 +30,14 @@ test("login retains the industrial palette, corners and input focus", async ({ p
   await expect(page.getByRole("button", { name: "Login", exact: true })).toHaveCSS("cursor", "pointer");
 });
 
-test("DHCP keeps fixed line boxes, intrinsic info tips and keyboard focus", async ({ page }) => {
+test("DHCP keeps fixed line boxes, square info tips and keyboard focus", async ({ page }) => {
   await page.goto("/dhcp");
   await page.evaluate(() => document.fonts.ready);
   const label = page.locator("label").filter({ hasText: "Authoritative" }).first();
   await expect(label).toHaveCSS("line-height", "20px");
   const tip = label.getByRole("img");
-  await expect(tip).toHaveCSS("height", "22px");
-  expect((await tip.boundingBox())!.width).toBeLessThan(10);
+  await expect(tip).toHaveCSS("height", "16px");
+  await expect(tip).toHaveCSS("width", "16px");
   await tip.focus();
   await expect(tip).toHaveCSS("box-shadow", /rgb\(245, 158, 11\) 0px 0px 0px 4px/);
   await expect(label.getByRole("tooltip")).toHaveCSS("opacity", "1");

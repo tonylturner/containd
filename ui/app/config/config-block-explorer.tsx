@@ -42,7 +42,7 @@ const BLOCK_OPTIONS: Array<{ key: BlockKey; label: string; help: string }> = [
   { key: "objects", label: "Objects", help: "Named address/service objects for reuse in rules." },
   { key: "ids", label: "IDS", help: "Detection rules, Sigma/YARA imports, and settings." },
   { key: "services", label: "Services", help: "DNS, NTP, DHCP, proxy, VPN, AV, and syslog." },
-  { key: "dataPlane", label: "Data plane", help: "Enforcement, capture interfaces, nftables." },
+  { key: "dataPlane", label: "Data plane", help: "Firewall protection and traffic-inspection settings." },
   { key: "dpi", label: "DPI", help: "DPI mode (monitor/enforce), protocol enable/disable, exclusions." },
   { key: "pcap", label: "PCAP", help: "Capture settings and forwarding." },
 ];
@@ -144,7 +144,7 @@ export function ConfigBlockExplorer({
                     : `${VIEWER_SOURCE_LABEL[viewerSource]} IDS bank: ${idsBankCount.toLocaleString()} rules.`}
               </p>
               <p className="mt-1 text-xs text-(--text-muted)">
-                Rule bodies are omitted from this viewer.
+                Open the detection-rule editor to see rule contents.
               </p>
               <a href="/ids/" className="mt-2 inline-block text-xs text-(--amber) hover:underline transition-ui">
                 Browse IDS rules
@@ -257,7 +257,7 @@ export function ConfigBlockExplorer({
         </div>
       </div>
       <div className="mt-3 text-xs text-(--text-muted)">
-        Select a block to jump to its JSON. Use Running for the last committed config and Staged for candidate changes waiting for commit.
+        Select a block to jump to its JSON. Use Running for the last committed configuration and Staged for saved changes waiting for commit. Neither view proves live protection.
       </div>
     </Card>
   );

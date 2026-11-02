@@ -84,7 +84,8 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
     await page.screenshot({ path: `${shots}/status-review-${width}.png`, fullPage: true, animations: "disabled" });
   }
   await page.getByRole("link", { name: "Review diff", exact: true }).click();
-  await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByText("Advanced", { exact: true }).click();
+  await expect(page.getByRole("region", { name: "System field changes" })).toContainText("initial");
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.screenshot({ path: `${shots}/diff-review-${width}.png`, fullPage: true, animations: "disabled" });
@@ -99,7 +100,7 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
   const response = page.waitForResponse("**/api/v1/config/diff");
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
   await (await response).finished();
-  await expect(page.getByRole("region", { name: "System changes" })).not.toContainText("not-reviewed");
+  await expect(page.getByRole("region", { name: "System field changes" })).not.toContainText("not-reviewed");
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/commit", revision: token(1) });
@@ -108,7 +109,7 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
   await page.getByRole("button", { name: "Reload", exact: true }).click();
   await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Commit failed:", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "System changes" })).toContainText("not-reviewed");
+  await expect(page.getByRole("region", { name: "System field changes" })).toContainText("not-reviewed");
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
@@ -179,14 +180,15 @@ test("a selected config import retains its destination base across refresh and c
 test("commit-confirmed remains bound to the diff visible when its dialog opened", async ({ page }) => {
   const { state, writes } = await mockConfig(page);
   await page.goto("/config/?tab=diff");
-  await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByText("Advanced", { exact: true }).click();
+  await expect(page.getByRole("region", { name: "System field changes" })).toContainText("initial");
   await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
   state.counter++;
   state.hostname = "unreviewed";
   const response = page.waitForResponse("**/api/v1/config/diff");
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
   await (await response).finished();
-  await expect(page.getByRole("region", { name: "System changes" })).not.toContainText("unreviewed");
+  await expect(page.getByRole("region", { name: "System field changes" })).not.toContainText("unreviewed");
   await page.getByRole("dialog").getByRole("button", { name: "Start timer", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/commit_confirmed", revision: token(1) });
@@ -203,7 +205,7 @@ test("428 keeps the draft and requires Reload rather than inventing a revision",
   const raw = '{"system":{"hostname":"mine"}}';
   await editor.fill(raw);
   await page.getByRole("button", { name: "Save staged config", exact: true }).click();
-  await expect(page.getByText("Configuration revision unavailable. Reload before saving.", { exact: true })).toBeVisible();
+  await expect(page.getByText("The current configuration version could not be checked. Reload before saving.", { exact: true })).toBeVisible();
   await expect(editor).toHaveValue(raw);
   await expect(page.getByRole("button", { name: "Keep my edits", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Reload", exact: true }).click();
@@ -284,6 +286,7 @@ test("Confirm and Rollback are disabled without a diff revision", async ({ page 
   await mockConfig(page);
   await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
   await page.goto("/config/?tab=diff");
+  await page.getByRole("button", { name: "Recovery", exact: true }).click();
   await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Rollback", exact: true })).toBeDisabled();
 });
@@ -291,14 +294,16 @@ test("Confirm and Rollback are disabled without a diff revision", async ({ page 
 test("rollback holds the displayed diff and the revision captured when its dialog opens", async ({ page }) => {
   const { state, writes } = await mockConfig(page);
   await page.goto("/config/?tab=diff");
-  await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByText("Advanced", { exact: true }).click();
+  await expect(page.getByRole("region", { name: "System field changes" })).toContainText("initial");
+  await page.getByRole("button", { name: "Recovery", exact: true }).click();
   await page.getByRole("button", { name: "Rollback", exact: true }).click();
   state.counter++;
   state.hostname = "not-reviewed";
   const response = page.waitForResponse("**/api/v1/config/diff");
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
   await (await response).finished();
-  await expect(page.getByRole("region", { name: "System changes" })).not.toContainText("not-reviewed");
+  await expect(page.getByRole("region", { name: "System field changes" })).not.toContainText("not-reviewed");
   await page.getByRole("dialog").getByRole("button", { name: "Rollback", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/rollback", revision: token(1) });
@@ -319,7 +324,7 @@ test("an uncertain learner request still requires review after an unavailable de
   await page.getByLabel("Select modbus-1", { exact: true }).check();
   await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Destination candidate: unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pending configuration unavailable. Reload before saving.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
   offline = false;
   await page.getByRole("button", { name: "Refresh suggestions", exact: true }).click();

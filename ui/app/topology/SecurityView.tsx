@@ -1,5 +1,8 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
+import { decimalCounter } from "../../lib/api-telemetry";
+import { trafficDescription } from "../../lib/conduit-traffic";
 import { revisionError } from "../../lib/config-revision";
 
 import { useConfigView } from "../../lib/use-config-revision";
@@ -34,6 +37,7 @@ export default function SecurityView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const selectedButton = useRef<HTMLButtonElement | null>(null);
 
   const { initialLoading: loading, loading: refreshing, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
@@ -49,12 +53,17 @@ export default function SecurityView() {
       setConduits(conds);
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, INITIAL_ZONES).map((z) => z.id));
     } catch (e) {
+      setConduits([]);
       setError(String(e));
     }
   }, [readConfig]));
 
   useConfigRefresh(fetchData);
 
+  const maxTraffic = conduits.reduce((max, c) => {
+    const bytes = (c.traffic.state === "measured" || c.traffic.state === "demo") ? decimalCounter(c.traffic.bytes) : BigInt(0);
+    return bytes > max ? bytes : max;
+  }, BigInt(1));
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
   const targets = useMemo(() => summarizeTargets(allZones, conduits), [allZones, conduits]);
   const conduitIndex = useMemo(() => {
@@ -125,7 +134,8 @@ export default function SecurityView() {
   }, [allZones, fetchData, toast, write]);
 
   // ── Cell selection ──
-  const selectCell = useCallback((from: string, to: string) => {
+  const selectCell = useCallback((from: string, to: string, button: HTMLButtonElement) => {
+    selectedButton.current = button;
     setSelected({ from, to });
     setPanelOpen(true);
   }, []);
@@ -161,15 +171,28 @@ export default function SecurityView() {
         {revisionNotice(() => window.location.reload())}
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
-          <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduits summarize running policy, not live verification. Each cell is a conduit &mdash; click to inspect policy, IDS configuration, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Configured checks and operator overrides can count toward SL; heuristics and unknowns cannot. This is not a standards assessment.</div>
           <div role="status" aria-label="Zones below target" className={s.targetSummary}>
             <span style={{ color: targets.below.length > 0 ? "var(--amber)" : targets.total > 0 ? "var(--topo-green)" : "var(--text-dim)" }}>{targetSummaryText(targets)}</span>
             {targets.below.map((z) => (
               <span key={z.id} className={s.targetGap} style={{ color: slColor(z.sl_a, z.sl_t) }}>{z.name} SL{z.sl_a}/{z.sl_t}</span>
             ))}
           </div>
+          <div className={s.matrixSubtitle}>Saved target: candidate settings. Traffic: measured or labelled Demo. Conduits summarize running policy, not live verification. Select a cell for checks and provenance. Heuristics and unknowns never pass. Not a standards assessment.</div>
+
         </div>
 
+        {conduits.some(conduit => conduit.gaps?.length) && (
+          <div className="flex flex-wrap gap-2 px-4 py-2 text-xs text-(--text)">
+            <span>What needs attention?</span>
+            {conduits.filter(conduit => conduit.gaps?.length).map(conduit => (
+              <button key={JSON.stringify([conduit.from, conduit.to])} className="rounded-xs border px-2 py-1 text-(--amber)"
+                aria-controls="conduit-inspector" aria-expanded={panelOpen && selected?.from === conduit.from && selected?.to === conduit.to}
+                onClick={event => selectCell(conduit.from, conduit.to, event.currentTarget)}>
+                {allZones.find(zone => zone.id === conduit.from)?.name || conduit.from} → {allZones.find(zone => zone.id === conduit.to)?.name || conduit.to}: {conduit.gaps.length} {conduit.gaps.length === 1 ? "gap" : "gaps"}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Zone selector bar */}
         <div className={s.zoneSelectorBar}>
           <span className={s.zoneSelectorLabel}>Zones</span>
@@ -268,10 +291,10 @@ export default function SecurityView() {
                     const isSelected = selected?.from === fromZ.id && selected.to === toZ.id;
                     if (!cd) {
                       return (
-                        <div key={toZ.id} className={`${s.cell} ${s.cellUnmodeled} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(fromZ.id, toZ.id)}>
+                        <button type="button" aria-label={`Inspect ${fromZ.name} to ${toZ.name}`} aria-controls="conduit-inspector" aria-expanded={panelOpen && isSelected} key={toZ.id} className={`${s.cell} ${s.cellUnmodeled} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={event => selectCell(fromZ.id, toZ.id, event.currentTarget)}>
                           <div className={s.cellAccent} />
                           <div className={s.cellBody}><div className={s.cellState}>&mdash;</div></div>
-                        </div>
+                        </button>
                       );
                     }
                     const stateCls = cd.state === "allow" ? s.cellAllow : cd.state === "block" ? s.cellBlock : cd.state === "partial" ? s.cellPartial : s.cellUnmodeled;
@@ -282,16 +305,16 @@ export default function SecurityView() {
                     const gaps = cd.gaps || [];
                     const topProtos = proto.slice(0, 2).map((p) => p.n).join(" \u00b7 ") || "\u2014";
                     return (
-                      <div key={toZ.id} className={`${s.cell} ${stateCls} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(fromZ.id, toZ.id)}>
+                      <button type="button" aria-label={`Inspect ${fromZ.name} to ${toZ.name}`} aria-controls="conduit-inspector" aria-expanded={panelOpen && isSelected} key={toZ.id} className={`${s.cell} ${stateCls} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={event => selectCell(fromZ.id, toZ.id, event.currentTarget)}>
                         <div className={s.cellAccent} />
                         {gaps.length > 0 && <div className={s.cellFindings}><div className={s.findingDot} style={{ background: "var(--amber)" }} /></div>}
                         <div className={s.cellBody}>
-                          <div className={s.cellState}>{cd.state === "unmodeled" ? "NONE" : cd.state.toUpperCase()}</div>
+                          <div className={s.cellState}>{cd.state === "unmodeled" ? "NONE" : cd.state.toUpperCase()}{cd.traffic.state === "demo" && <span title="recorded demo traffic on an illustrative topology"><DemoBadge origin="demo" /></span>}</div>
                           <div className={s.cellProto}>{topProtos}</div>
                         </div>
                         <div className={`${s.cellIds} ${idsClass}`}>{idsText}</div>
-                        {cd.traffic !== null && <div className={s.cellTraffic} style={{ background: volColor, opacity: 0.15 + cd.traffic * 0.5 }} />}
-                      </div>
+                        {cd.traffic.state === "measured" || cd.traffic.state === "demo" ? <div className={s.cellTraffic} title={trafficDescription(cd.traffic)} style={{ background: volColor, opacity: Number(decimalCounter(cd.traffic.bytes)) / Number(maxTraffic), borderTop: cd.traffic.complete ? undefined : "1px dashed var(--amber)" }} /> : <span className="text-[8px] text-amber" title={trafficDescription(cd.traffic)}>{cd.traffic.state === "none" ? "No traffic recorded yet" : "Traffic unavailable"}</span>}
+                      </button>
                     );
                   })}
                 </div>
@@ -312,7 +335,7 @@ export default function SecurityView() {
           <div style={{ width: 1, height: 12, background: "var(--topo-border)", margin: "0 4px" }} />
           <div className={s.legendItem}><span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--amber)" }}>SL/T</span> = check-based / target</div>
         </div>
-        {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
+        {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel" aria-expanded={panelOpen} aria-controls="conduit-inspector">&#x25C0;</button>}
         <div className={ts.zoomControls}>
           <button className={ts.zoomBtn} onClick={zoomIn} title="Zoom in">+</button>
           <div className={ts.zoomLevel} onClick={zoomReset} style={{ cursor: "pointer" }}>{Math.round(zoom * 100)}%</div>
@@ -321,8 +344,8 @@ export default function SecurityView() {
       </div>
 
       {/* Detail panel */}
-      {panelOpen && (
-        <div className={`${ts.detailPanel} ${s.detailPanel}`} role="region" aria-label="Conduit details">
+      {(
+        <div className={`${ts.detailPanel} ${s.detailPanel}`} id="conduit-inspector" hidden={!panelOpen} style={panelOpen ? undefined : { display: "none" }} role="region" aria-label="Conduit details">
           <div className={ts.panelHeader}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
               <span className={ts.panelTitle} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedFrom && selectedTo ? `${selectedFrom.name} \u2192 ${selectedTo.name}` : "SELECT A CELL"}</span>
@@ -335,7 +358,7 @@ export default function SecurityView() {
               )}
               {!selectedConduit && <span style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1, background: "#78490a", color: "#f59e0b", flexShrink: 0 }}>IEC 62443</span>}
             </div>
-            <button className={ts.panelClose} onClick={() => setPanelOpen(false)} aria-label="Hide detail panel">&#x25B6;</button>
+            <button className={ts.panelClose} onClick={() => { setPanelOpen(false); selectedButton.current?.focus(); }} aria-label="Hide detail panel" aria-expanded={panelOpen} aria-controls="conduit-inspector">&#x25B6;</button>
           </div>
           <div className={ts.panelBody}>
             {selectedConduit && selectedFrom && selectedTo ? (
@@ -373,7 +396,9 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
         <DR k="From" v={fromZ.name} vc={fromZ.color} />
         <DR k="To" v={toZ.name} vc={toZ.color} />
         <DR k="IDS configuration" v={`${conduit.ids} globally; coverage unknown`} />
-        <DR k="Traffic" v={conduit.traffic === null ? "not measured" : `${Math.round(conduit.traffic * 100)}% of baseline`} />
+        {conduit.traffic.state === "demo" && <p className="text-xs text-(--text-muted)"><DemoBadge origin="demo" /> recorded demo traffic on an illustrative topology</p>}
+        <DR k="Source" v={conduit.traffic.state === "demo" ? "recorded demo traffic, last hour" : conduit.traffic.state === "none" ? "No traffic recorded yet" : "routed traffic that passed policy, last hour"} />
+        <DR k="Traffic" v={trafficDescription(conduit.traffic)} />
         {Object.entries(conduit.checks).map(([key, evidence]) => (
           <div key={key} className={s.evidenceItem}>{key} — {evidence.provenance}: {evidence.reason}</div>
         ))}
@@ -451,14 +476,15 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
       <div style={{ marginTop: 8 }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", marginBottom: 4, letterSpacing: 1 }}>SL TARGET &mdash; click to set</div>
         <div className={s.slEditor}>
-          <span className={s.slEditorLabel}>SL-T</span>
+          <span className={s.slEditorLabel}>SL-T</span><span className="text-xs text-(--text-muted)">Saved target</span>
           {Array.from({ length: MAX_SL + 1 }, (_, lvl) => (
             <button key={lvl} aria-label={`Stage ${zone.name} target SL ${lvl}`} className={`${s.slPipBtn} ${lvl === zone.sl_t ? s.slPipSelected : lvl < zone.sl_t ? s.slPipBelow : ""}`} onClick={() => setSLTarget(zone.id, lvl)}>{lvl}</button>
           ))}
         </div>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 4 }}>
-          Equivalent to <span style={{ color: "var(--topo-cyan)" }}>sl_target: {zone.sl_t}</span> in zone config
-        </div>
+        <details style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 4 }}>
+          <summary className="cursor-pointer">Configuration field</summary>
+          <span style={{ color: "var(--topo-cyan)" }}>sl_target: {zone.sl_t}</span>
+        </details>
       </div>
       <div className={s.slAchievedBadge}>
         <div>

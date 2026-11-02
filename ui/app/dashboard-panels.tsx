@@ -4,44 +4,81 @@ import Link from "next/link";
 
 import type {
   DashboardData,
+  Interface,
+  InterfaceState,
   SystemStats,
   TelemetryEvent,
 } from "../lib/api";
 
+import { DemoBadge, TelemetryChart, TelemetryHistory, TelemetryLegend, TelemetryNotice, TelemetryRate } from "../components/TelemetryChart";
+import { useTelemetry } from "../hooks/useTelemetry";
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
+import { runtimeFor } from "../lib/interface-addresses";
+
+export type InterfaceBindings = {
+  configured: Interface[];
+  runtime: InterfaceState[];
+};
+
+export function TrafficHistory() {
+  const incoming = useTelemetry([{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]);
+  const outgoing = useTelemetry([{ metric: "iface.tx_bytes", role: "leaf", group: "role" }]);
+  const sharedFault = !!(incoming?.error ?? incoming?.unavailable) &&
+    incoming?.error === outgoing?.error &&
+    JSON.stringify(incoming?.noticeReasons) === JSON.stringify(outgoing?.noticeReasons);
+  return <div className="mb-3 space-y-2">
+    {sharedFault && <TelemetryNotice read={incoming} />}
+    <p className="text-xs text-(--text-muted)">In · bytes/s</p>
+    <TelemetryHistory title="In bytes/s" read={incoming} hideFault={sharedFault} />
+    <p className="text-xs text-(--text-muted)">Out · bytes/s</p>
+    <TelemetryHistory title="Out bytes/s" read={outgoing} hideFault={sharedFault} />
+    <h4 className="text-xs text-(--text-muted)">Events</h4>
+    <TelemetryChart title="Events" queries={[{ metric: "events.total" }]} />
+    <TelemetryLegend />
+  </div>;
+}
 
 export type ServiceInfo = {
   name: string;
-  active: boolean;
+  state: "unknown" | "active" | "inactive" | "stopped" | "unavailable";
+  active: boolean | null;
   detail: string;
   href: string;
-  sparkline?: number[];
-  errorRate?: number;
 };
 
 export function SetupChecklist({
   counts,
+  interfaceBindings,
   configDirty,
   isAdmin,
 }: {
   counts: DashboardData["counts"] | null | undefined;
+  interfaceBindings: InterfaceBindings | null;
   configDirty: boolean | null;
   isAdmin: boolean;
 }) {
+  const interfaceCount = interfaceBindings?.configured.length ?? 0;
+  const missingBindings = interfaceBindings?.configured.filter((iface) => !runtimeFor(iface, interfaceBindings.runtime)).length ?? 0;
   const steps = [
     {
       title: "Create zones",
       detail: counts && counts.zones > 0 ? `${counts.zones} configured` : "Start with WAN, DMZ, and LAN/OT zones.",
-      complete: !!counts && counts.zones > 0,
+      complete: counts ? counts.zones > 0 : null,
       href: "/zones/",
       cta: (counts?.zones ?? 0) > 0 ? "Review zones" : "Create zones",
     },
     {
       title: "Bind interfaces",
-      detail: counts && counts.interfaces > 0 ? `${counts.interfaces} configured` : "Assign zones to interfaces so policy can attach to ports.",
-      complete: !!counts && counts.interfaces > 0,
+      detail: interfaceBindings === null
+        ? "Interface bindings unknown. Check configured interfaces and live devices."
+        : interfaceCount === 0
+          ? "Assign zones to interfaces so policy can attach to ports."
+          : missingBindings > 0
+            ? `${missingBindings} of ${interfaceCount} configured interfaces not connected to network devices.`
+            : `${interfaceCount} of ${interfaceCount} bound to network devices.`,
+      complete: interfaceBindings === null ? null : interfaceCount > 0 && missingBindings === 0,
       href: "/interfaces/",
       cta: (counts?.interfaces ?? 0) > 0 ? "Review interfaces" : "Bind interfaces",
     },
@@ -50,7 +87,7 @@ export function SetupChecklist({
       detail: counts && (counts.rules + counts.icsRules) > 0
         ? `${counts.rules + counts.icsRules} rules ready`
         : "Use the wizard for a first pass, then tighten with explicit rules.",
-      complete: !!counts && (counts.rules + counts.icsRules) > 0,
+      complete: counts ? (counts.rules + counts.icsRules) > 0 : null,
       href: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "/firewall/" : "/wizard/",
       cta: (counts?.rules ?? 0) + (counts?.icsRules ?? 0) > 0 ? "Review policy" : "Open wizard",
     },
@@ -61,7 +98,7 @@ export function SetupChecklist({
         : configDirty
           ? "Candidate config differs from running. Review and commit to apply."
           : "No pending candidate changes.",
-      complete: configDirty === false,
+      complete: configDirty === null ? null : configDirty === false,
       href: "/config/?tab=diff",
       cta: configDirty ? (isAdmin ? "Review & commit" : "Review diff") : "Open config",
     },
@@ -85,7 +122,7 @@ export function SetupChecklist({
           Open Monitoring
         </Link>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div id="setup-checklist" className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {steps.map((step) => (
           <div
             key={step.title}
@@ -100,7 +137,7 @@ export function SetupChecklist({
                     : ""
                 }`}
               >
-                {step.complete ? "Ready" : "Action"}
+                {step.complete === null ? "Unknown" : step.complete ? "Ready" : "Action"}
               </span>
             </div>
             <p className="mb-3 text-xs text-slate-500">{step.detail}</p>
@@ -125,9 +162,11 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
           key={service.name}
           href={service.href}
           className={`block rounded-lg border p-3 transition-colors hover:border-white/12 ${
-            service.active
-              ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
-              : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
+            service.active === null
+              ? "border-slate-500/30 bg-white/2 hover:bg-white/4"
+              : service.active
+                ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
+                : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
           }`}
         >
           <div
@@ -140,31 +179,12 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
           <div className="text-2xs text-slate-500 mt-0.5 truncate">
             {service.detail}
           </div>
-          {service.sparkline && service.sparkline.length > 0 && (
-            <div className="flex items-end gap-0.5 h-5 mt-2">
-              {service.sparkline.map((value, index) => {
-                const max = Math.max(...service.sparkline!, 1);
-                const height = Math.max(2, Math.round((value / max) * 20));
-                return (
-                  <div
-                    key={index}
-                    className="flex-1 rounded-t-xs transition-all duration-300"
-                    style={{
-                      height: `${height}px`,
-                      background: service.active
-                        ? `rgba(34,197,94,${0.3 + (value / max) * 0.5})`
-                        : "rgba(55,65,81,0.4)",
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )}
-          {service.errorRate !== undefined && service.errorRate > 0 && (
-            <div className="text-2xs text-red-400/70 mt-1 font-mono">
-              {service.errorRate.toFixed(1)} err/min
-            </div>
-          )}
+          <TelemetryChart title={`${service.name} activity`} compact queries={service.name === "IPS"
+            ? [{ metric: "events.class", class: "ids_alert" }]
+            : [{ metric: "service.events", service: service.name === "Proxy" ? "proxy" : service.name.toLowerCase() }]} />
+          {service.name !== "IPS" && <div className="mt-1 text-[10px] text-(--text-muted)">Errors: <TelemetryRate queries={[
+            { metric: "service.errors", service: service.name === "Proxy" ? "proxy" : service.name.toLowerCase() },
+          ]} /></div>}
         </Link>
       ))}
     </div>
@@ -177,13 +197,13 @@ export function TrafficCounter({
   color,
 }: {
   label: string;
-  value: number;
+  value: number | null;
   color: string;
 }) {
   return (
     <div className="rounded-lg border border-white/6 bg-white/2 p-2.5">
       <div className={`text-lg font-bold tabular-nums leading-none ${color}`}>
-        {value.toLocaleString()}
+        {value !== null && Number.isFinite(value) ? value.toLocaleString() : "Unknown"}
       </div>
       <div className="text-2xs text-slate-500 mt-1 uppercase tracking-wider font-mono">
         {label}
@@ -202,7 +222,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
   }
 
   return (
-    <div className="max-h-[180px] overflow-y-auto space-y-0.5 font-mono text-2xs">
+    <div className="max-h-[180px] overflow-auto space-y-0.5 font-mono text-2xs">
       {events.slice(0, 20).map((event) => {
         const level = eventLevel(event);
         const time = event.timestamp
@@ -214,7 +234,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
         return (
           <div
             key={event.id}
-            className="grid grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded-sm hover:bg-white/2 transition-colors"
+            className="grid min-w-[480px] grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded-sm hover:bg-white/2 transition-colors"
           >
             <span className="text-slate-500">{time}</span>
             <span
@@ -225,7 +245,7 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
             <span className="text-slate-500 truncate">
               {event.proto || event.kind}
             </span>
-            <span className="text-slate-300 truncate">{eventMessage(event)}</span>
+            <span className="text-slate-300 truncate"><DemoBadge origin={event.origin} /> {eventMessage(event)}</span>
             <span className="text-slate-600 text-right">{event.srcIp ?? ""}</span>
           </div>
         );
@@ -282,7 +302,7 @@ export function SystemHealthPanel({
   const items: Array<{
     name: string;
     value: string;
-    pct: number;
+    pct: number | null;
     color: string;
   }> = [];
 
@@ -316,8 +336,8 @@ export function SystemHealthPanel({
     items.push({
       name: "Rule Eval",
       value: `${totalRules} rules`,
-      pct: Math.min(100, totalRules * 2),
-      color: totalRules > 40 ? "#f59e0b" : "#22c55e",
+      pct: null,
+      color: "#94a3b8",
     });
   }
 
@@ -330,14 +350,14 @@ export function SystemHealthPanel({
         : stats.container.uptime
           ? `Up ${stats.container.uptime}`
           : "Running",
-      pct: memPct > 0 ? memPct : 25,
+      pct: stats.container.memLimitBytes > 0 && Number.isFinite(memPct) ? memPct : null,
       color: memPct > 85 ? "#ef4444" : memPct > 65 ? "#f59e0b" : "#06b6d4",
     });
   } else if (stats) {
     items.push({
       name: "Go Heap",
       value: `${stats.runtime.heapAllocMB.toFixed(0)} MB`,
-      pct: Math.min(100, (stats.runtime.heapAllocMB / stats.runtime.heapSysMB) * 100),
+      pct: stats.runtime.heapSysMB > 0 ? Math.min(100, (stats.runtime.heapAllocMB / stats.runtime.heapSysMB) * 100) : null,
       color: "#06b6d4",
     });
   }
@@ -347,7 +367,9 @@ export function SystemHealthPanel({
       {stats && (
         <div className="flex justify-between text-2xs font-mono text-slate-500">
           <span>Uptime: {stats.runtime.uptime}</span>
-          <span>{stats.runtime.goroutines} goroutines</span>
+          <span title="Go runtime goroutines">
+            {stats.runtime.goroutines} background task{stats.runtime.goroutines === 1 ? "" : "s"}
+          </span>
         </div>
       )}
 
@@ -359,12 +381,12 @@ export function SystemHealthPanel({
             </span>
             <span className="text-slate-300 tabular-nums">{item.value}</span>
           </div>
-          <div className="h-1 w-full rounded-full bg-white/6">
+          {item.pct !== null && Number.isFinite(item.pct) && <div className="h-1 w-full rounded-full bg-white/6">
             <div
               className="h-1 rounded-full transition-all duration-700"
-              style={{ width: `${Math.max(1, item.pct)}%`, background: item.color }}
+              style={{ width: `${Math.min(100, Math.max(0, item.pct))}%`, background: item.color }}
             />
-          </div>
+          </div>}
         </div>
       ))}
     </div>

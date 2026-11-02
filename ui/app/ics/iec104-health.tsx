@@ -31,7 +31,7 @@ export function iec104HealthIndicator(
   if (health.active) {
     return { status: "healthy", label: "IEC 104 enforcement active" };
   }
-  return { status: "unknown", label: "IEC 104 enforcement inactive", sublabel: "no enforce envelope loaded" };
+  return { status: "unknown", label: "IEC 104 enforcement inactive", sublabel: "No active IEC 104 blocking rules" };
 }
 
 export function IEC104HealthIndicator({ health }: { health: IEC104EnforcementHealth | undefined }) {

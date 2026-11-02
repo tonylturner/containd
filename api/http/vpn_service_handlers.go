@@ -18,6 +18,46 @@ import (
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 )
 
+// Presence belongs to the read representation, not the persisted config.
+type vpnRead struct {
+	WireGuard wireGuardRead `json:"wireguard"`
+	OpenVPN   openVPNRead   `json:"openvpn"`
+}
+
+type wireGuardRead struct {
+	config.WireGuardConfig
+	PrivateKeyConfigured bool `json:"privateKeyConfigured"`
+}
+
+type openVPNRead struct {
+	config.OpenVPNConfig
+	Managed *openVPNManagedRead `json:"managed,omitempty"`
+}
+
+type openVPNManagedRead struct {
+	config.OpenVPNManagedClientConfig
+	CAConfigured       bool `json:"caConfigured"`
+	CertConfigured     bool `json:"certConfigured"`
+	KeyConfigured      bool `json:"keyConfigured"`
+	PasswordConfigured bool `json:"passwordConfigured"`
+}
+
+func redactedVPNRead(v config.VPNConfig) vpnRead {
+	redacted := v.RedactedVPNCopy()
+	out := vpnRead{
+		WireGuard: wireGuardRead{redacted.WireGuard, v.WireGuard.PrivateKey != ""},
+		OpenVPN:   openVPNRead{OpenVPNConfig: redacted.OpenVPN},
+	}
+	if m := v.OpenVPN.Managed; m != nil {
+		out.OpenVPN.Managed = &openVPNManagedRead{
+			OpenVPNManagedClientConfig: *redacted.OpenVPN.Managed,
+			CAConfigured:               m.CA != "", CertConfigured: m.Cert != "",
+			KeyConfigured: m.Key != "", PasswordConfigured: m.Password != "",
+		}
+	}
+	return out
+}
+
 func getVPNHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := readCandidate(c, store)
@@ -25,8 +65,7 @@ func getVPNHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		redacted := cfg.Services.VPN.RedactedVPNCopy()
-		c.JSON(http.StatusOK, redacted)
+		c.JSON(http.StatusOK, redactedVPNRead(cfg.Services.VPN))
 	}
 }
 
@@ -46,7 +85,7 @@ func setVPNHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		auditLog(c, audit.Record{Action: "services.vpn.set", Target: "candidate", Detail: "candidate"})
-		c.JSON(http.StatusOK, cfg.Services.VPN)
+		c.JSON(http.StatusOK, redactedVPNRead(cfg.Services.VPN))
 	}
 }
 
@@ -124,7 +163,7 @@ func uploadOpenVPNProfileHandler(store config.Store) gin.HandlerFunc {
 		}
 		persisted = true
 		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name, Detail: "candidate"})
-		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
+		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": redactedVPNRead(cfg.Services.VPN)})
 	}
 }
 

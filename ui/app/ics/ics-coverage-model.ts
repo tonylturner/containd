@@ -118,7 +118,7 @@ export function describeRuleCoverage(view: ICSCoverageView, ruleId: string): Cov
  * exempted; a runtime fault is marked as a fact about the running engine.
  */
 export function formatReason(reason: ICSCoverageReason): string {
-  let text = reason.runtime ? `Running engine: ${reason.message}` : reason.message;
+  let text = reason.runtime ? `Live inspection: ${reason.message}` : reason.message;
   if (reason.value && !text.includes(reason.value)) text += ` (${reason.value})`;
   if (reason.matches && isExclusionReason(reason)) {
     text += ` \u2014 ${reason.matches} ${reason.matches === 1 ? "connection" : "connections"} exempted since the last apply`;
@@ -159,6 +159,6 @@ export function icsEnforcementIndicator(health: ICSEnforcementHealth | undefined
     case "none":
       return { status: "unknown", label, sublabel: "no ICS protocol rules applied" };
     default:
-      return { status: "unknown", label, sublabel: "engine status unknown" };
+      return { status: "unknown", label, sublabel: "live inspection status unknown" };
   }
 }

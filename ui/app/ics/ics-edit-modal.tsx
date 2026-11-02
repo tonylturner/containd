@@ -55,6 +55,7 @@ export function EditICSModal({
   available,
   rule,
   globalMode,
+  inlineConfigured,
   onClose,
   onSave,
 }: {
@@ -63,6 +64,7 @@ export function EditICSModal({
   available: boolean;
   rule: FirewallRule;
   globalMode?: ICSModeSelection;
+  inlineConfigured?: boolean;
   onClose: () => void;
   /** The predicate to stage; undefined removes it. */
   onSave: (ics: ICSPredicatePatch | undefined, revision: ConfigBase) => Promise<ApiResult<FirewallRule> | null>;
@@ -194,7 +196,7 @@ export function EditICSModal({
                 ))}
               </select>
             </div>
-            {enabled && protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} label="Safety mode" />}
+            {enabled && protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} label="Safety mode" inlineConfigured={inlineConfigured} />}
           </div>
 
           {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
@@ -202,6 +204,7 @@ export function EditICSModal({
             <IEC104Fields draft={iec} onChange={setIec} disabled={!enabled} />
           ) : (
             <>
+            <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.fcLabel}
@@ -294,7 +297,7 @@ export function EditICSModal({
             {protocol === "cip" &&
               "Common: 0x4C(76)=Read Tag, 0x4D(77)=Write Tag, 0x0E(14)=Get Attribute, 0x10(16)=Set Attribute."}
             {isIEC104 &&
-              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
+              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). When blocking is active for this industrial connection, messages that match no industrial rule are blocked and the connection is reset."}
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>

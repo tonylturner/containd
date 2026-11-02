@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { fulfillSeries } from "./fixtures/telemetry";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
@@ -34,7 +35,9 @@ test("trusted CA upload reports the revision the engine applied", async ({ page 
     "/api/v1/system/tls/trusted-ca": { json: { status: "updated", revision: "sha256:abc123" } },
   });
   await uploadCA(page);
-  await expect(page.getByText("Trusted CA bundle applied by the engine (revision sha256:abc123).")).toBeVisible();
+  await expect(page.getByText("Trust certificates are active.")).toBeVisible();
+  await page.getByText("Trust update details", { exact: true }).click();
+  await expect(page.getByText("Revision: sha256:abc123", { exact: true })).toBeVisible();
 });
 
 test("trusted CA stored but not applied is not reported as applied", async ({ page }) => {
@@ -47,10 +50,12 @@ test("trusted CA stored but not applied is not reported as applied", async ({ pa
   await uploadCA(page);
   await expect(
     page.getByRole("status").filter({
-      hasText: "stored (revision sha256:abc123), but the engine did not apply it: trust: engine unavailable",
+      hasText: "Trust certificates saved but not active. Applying configuration retries activation: trust: engine unavailable",
     }),
   ).toBeVisible();
-  await expect(page.getByText(/applied by the engine \(revision/)).toHaveCount(0);
+  await page.getByText("Trust update details", { exact: true }).click();
+  await expect(page.getByText("Revision: sha256:abc123: trust: engine unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Trust certificates are active.", { exact: true })).toHaveCount(0);
 });
 
 test("trusted CA upload without a config store is an error, not stored", async ({ page }) => {
@@ -63,13 +68,14 @@ test("trusted CA upload without a config store is an error, not stored", async (
   await expect(page.getByText(/Trusted CA bundle (stored|applied)/)).toHaveCount(0);
 });
 
-// A reachable engine's antivirus status carries its scan meter.
-async function openServices(page: Page, av: Record<string, unknown>, sparkline: number[]) {
+// Engine status carries lifetime counts; retained scans come from telemetry.
+async function openServices(page: Page, av: Record<string, unknown>, scans: number[]) {
   const meter = {
-    sparkline, count: sparkline.reduce((a, b) => a + b, 0), rate_per_min: 0,
-    errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0,
+    count: scans.reduce((a, b) => a + b, 0), errors_count: 0,
   };
   await mockAPI(page, { "/api/v1/services/status": { json: { faults: [], av: { available: true, ...meter, ...av } } } });
+  await page.route("**/api/v1/telemetry/series?*", route => fulfillSeries(route,
+    new URL(route.request().url()).searchParams.get("metric") === "av.scans" ? scans : []));
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");
   await loaded;
@@ -78,10 +84,12 @@ async function openServices(page: Page, av: Record<string, unknown>, sparkline: 
 
 test("antivirus card shows no fabricated scan series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav", clamav_custom_defs: "/data/clamav/custom" }, []);
+  await expect(page.locator('[data-telemetry="AV scans per minute"]')).toContainText("No traffic recorded yet");
   await expect(page.locator('[title^="AV scans"]')).toHaveCount(0);
 });
 
 test("antivirus card shows a reported scan series", async ({ page }) => {
   await openServices(page, { enabled: true, mode: "clamav" }, [1, 3, 2]);
   await expect(page.locator('[title="AV scans per minute"]')).toHaveCount(1);
+  await expect(page.locator('[data-telemetry="AV scans per minute"]')).toContainText("Rate: 12.0 /min");
 });

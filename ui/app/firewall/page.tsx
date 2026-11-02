@@ -38,12 +38,14 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
 import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 import { DPIConfigSection } from "./firewall-dpi-config";
+import { FirewallEnforcementControl } from "./firewall-enforcement-control";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
 import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ruleset-status";
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
+import { effectiveDefaultAction, type DefaultAction } from "./firewall-default-row";
 import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
@@ -64,10 +66,11 @@ function insertCreatedRule(rows: FirewallRule[], saved: FirewallRule & { index: 
 
 export default function FirewallPage() {
   const configView = useConfigView({ rules: [] as FirewallRule[], zones: [] as Zone[],
+    defaultAction: "unknown" as DefaultAction,
     nat: { enabled: false } as NATConfig, routing: null as RoutingConfig | null,
     dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
   const { readConfig, write, revisionNotice } = configView;
-  const { rules, zones, nat, routing, dpiConfig } = configView.data;
+  const { rules, defaultAction, zones, nat, routing, dpiConfig } = configView.data;
   const viewRevision = configView.state.baseRevision ?? "";
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +83,7 @@ export default function FirewallPage() {
   const shadow = useShadowCounters();
   const health = useHealth();
   const installed = useInstalledRuleset();
+  const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [quickStarting, setQuickStarting] = useState(false);
@@ -134,10 +138,12 @@ export default function FirewallPage() {
   ];
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters()]);
+    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c, candidate] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters(), api.getCandidateConfig()]);
     if (!matchingRevisions(rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot)) { checkLoaded(null); return; }
     if (!checkLoaded(rSnapshot && zSnapshot && nSnapshot && rtSnapshot && dpSnapshot)) return;
-    readConfig({ data: { rules: rSnapshot!.data, zones: zSnapshot!.data, nat: nSnapshot!.data,
+    readConfig({ data: { rules: rSnapshot!.data,
+      defaultAction: matchingRevisions(rSnapshot, candidate) ? effectiveDefaultAction(candidate!.data) : "unknown",
+      zones: zSnapshot!.data, nat: nSnapshot!.data,
       routing: rtSnapshot!.data, dpiConfig: dpSnapshot!.data }, revision: rSnapshot!.revision }, keepEdits);
     setCounters(c);
     if (!keepEdits) {
@@ -331,7 +337,7 @@ export default function FirewallPage() {
     <Shell
       title="Firewall Rules"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isAdmin() && (
             <button
               onClick={quickStartLanWanOutbound}
@@ -358,16 +364,29 @@ export default function FirewallPage() {
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
-      <Card padding="md" className="mb-4">
-        <EnforcementHealthIndicator health={health?.enforcement} />
-        {installed.state === "loaded" && (
-          <>
-            <AppliedRulesetStatus status={installed.status} />
-            <RuleWarningList scope="applied" warnings={installed.status.warnings} />
-          </>
-        )}
-        <InstalledRulesetUnavailable view={installed} />
-      </Card>
+      <div id="enforcement" className="scroll-mt-4">
+        <Card padding="md" className="mb-4">
+          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+            <EnforcementHealthIndicator health={health?.enforcement} />
+            {installed.state === "loaded" && (
+              <>
+                <AppliedRulesetStatus status={installed.status} />
+                <RuleWarningList scope="applied" warnings={installed.status.warnings} />
+              </>
+            )}
+            <InstalledRulesetUnavailable view={installed} />
+            <FirewallEnforcementControl config={dpiConfig} defaultAction={defaultAction}
+              health={health?.enforcement} available={canSave} revision={viewRevision}
+              onStage={(next, expectedRevision) => {
+                if (!isAdmin() || !canSaveNow()) return Promise.resolve({ ok: false, error: "Configuration unavailable. Refresh successfully before saving." });
+                return write((base, view) => base === expectedRevision
+                  ? setDataPlane(base, { ...view.dpiConfig, enforcement: next })
+                  : Promise.resolve({ ok: false as const, error: "Configuration changed since you loaded it. Refresh and review before saving." }),
+                { patch: (view, data) => ({ ...view, dpiConfig: data }) });
+              }} />
+          </div>
+        </Card>
+      </div>
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold text-(--text)">Outbound readiness</div>
@@ -382,7 +401,7 @@ export default function FirewallPage() {
               egress=wan
             </StatusBadge>
             <StatusBadge variant={outboundStatus.natHasLan ? "success" : "warning"} dot>
-              src includes lan/mgmt
+              Source zones include lan/mgmt
             </StatusBadge>
             <StatusBadge variant={outboundStatus.hasAllowLanWan ? "success" : "warning"} dot>
               {"allow lan\u2192wan present"}
@@ -412,12 +431,82 @@ export default function FirewallPage() {
         </div>
       )}
 
+      <div className="min-w-0">
+        <div className="mt-6">
+          {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
+        </div>
+        <FirewallRuleTable
+          available={canSave}
+          revision={viewRevision}
+          onDefaultSaved={() => { setNotice("Default action staged — review changes and commit to apply."); void refresh(); }}
+          rules={rules}
+          defaultAction={canSave ? defaultAction : "unknown"}
+          zones={zones}
+          shadowCounters={shadow.counters}
+          dpiMode={dpiConfig.dpiMode}
+          coverage={coverage.view}
+          counters={counters}
+          onMove={onMove}
+          moving={moving}
+          onEdit={setEditing}
+          onDelete={(id) => {
+            confirm.open({
+              title: "Delete rule?",
+              message: `Are you sure you want to delete rule "${id}"? This action cannot be undone.`,
+              confirmLabel: "Delete",
+              variant: "danger",
+              onConfirm: () => onDelete(id),
+            });
+          }}
+        />
+
+        {isAdmin() && (
+          <div className="mt-4">
+            <button type="button" disabled={!canSave} aria-expanded={showCreate} aria-controls="create-rule-panel" onClick={() => setShowCreate(!showCreate)}
+              className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text)">Create rule</button>
+            <div id="create-rule-panel" hidden={!showCreate}>
+              <CreateRuleForm
+                available={canSave}
+                revision={viewRevision}
+                key={`create-${refreshKey}`}
+                context={rules}
+                zones={zones}
+                forwards={nat.portForwards ?? []}
+                globalMode={dpiConfig.dpiMode}
+                inlineConfigured={canSave ? !!dpiConfig.nfqueueGroup : undefined}
+                tagsInUse={tagsInUse(rules)}
+                onCreate={onCreate}
+              />
+            </div>
+          </div>
+        )}
+
+        {editing && isAdmin() && (
+          <EditRuleModal
+            available={canSave}
+            revision={viewRevision}
+            zones={zones}
+            forwards={nat.portForwards ?? []}
+            rule={rules.find((r) => r.id === editing.id) ?? editing}
+            context={rules}
+            globalMode={dpiConfig.dpiMode}
+            inlineConfigured={canSave ? !!dpiConfig.nfqueueGroup : undefined}
+            tagsInUse={tagsInUse(rules, editing.id)}
+            onClose={() => setEditing(null)}
+            onSave={(patch, revision) => onUpdate(editing.id, patch, revision)}
+          />
+        )}
+      </div>
+      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onSave={update => write((base, view) => setDataPlane(base, update(view.dpiConfig)), { patch: (view, data) => ({ ...view, dpiConfig: data }) })}
+        inlineRequiredForEnforce={rules.some(rule => !!rule.ics?.protocol && rule.ics.mode !== "monitor")}
+        onSaveDraft={configView.writer((base, updated: DataPlaneConfig) => setDataPlane(base, updated), (view, data) => ({ ...view, dpiConfig: data }))} />
+
       <Card padding="lg" className="mt-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-(--text)">nftables ruleset preview</h2>
+            <h2 className="text-sm font-semibold text-(--text)">Generated firewall configuration (nftables)</h2>
             <p className="mt-1 text-xs text-(--text-muted)">
-              Compile the candidate using the engine&apos;s current queue ownership, without applying it.
+              Preview the low-level configuration for your saved changes without activating it.
             </p>
           </div>
           {isAdmin() && (
@@ -437,78 +526,30 @@ export default function FirewallPage() {
         )}
         {rulesetState === "error" && (
           <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Ruleset preview unavailable: {rulesetError}. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
+            Preview unavailable. Check appliance health and saved settings.
+            <p className="mt-2 break-words text-xs">{rulesetError}</p>
           </div>
         )}
         {rulesetPreview?.runtime && (
-          <p className="mt-3 text-xs text-(--text-muted)">
-            {rulesetPreview.runtime.reason}.
-            {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
-          </p>
+          <div className="mt-3 text-xs text-(--text-muted)">
+            <p className="break-words">{rulesetPreview.runtime.reason}.</p>
+            {rulesetPreview.ruleset && <p>Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering.</p>}
+          </div>
         )}
         <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
-            {rulesetPreview.ruleset}
-          </pre>
+          <section aria-label="Advanced" className="mt-4 text-xs text-(--text)">
+            <h3 className="mb-2 font-semibold">Advanced</h3>
+            <details>
+              <summary className="cursor-pointer">Generated ruleset</summary>
+              <pre className="mt-2 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4">
+                {rulesetPreview.ruleset}
+              </pre>
+            </details>
+          </section>
         )}
       </Card>
 
-      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onSave={update => write((base, view) => setDataPlane(base, update(view.dpiConfig)), { patch: (view, data) => ({ ...view, dpiConfig: data }) })}
-        onSaveDraft={configView.writer((base, updated: DataPlaneConfig) => setDataPlane(base, updated), (view, data) => ({ ...view, dpiConfig: data }))} />
-
-      <fieldset disabled={!canSave} className="min-w-0">
-      {isAdmin() && (
-        <CreateRuleForm
-          revision={viewRevision}
-          key={`create-${refreshKey}`}
-          context={rules}
-          zones={zones}
-          forwards={nat.portForwards ?? []}
-          globalMode={dpiConfig.dpiMode}
-          tagsInUse={tagsInUse(rules)}
-          onCreate={onCreate}
-        />
-      )}
-
-      <div className="mt-6">
-        {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
-      </div>
-      <FirewallRuleTable
-        rules={rules}
-        zones={zones}
-        shadowCounters={shadow.counters}
-        dpiMode={dpiConfig.dpiMode}
-        coverage={coverage.view}
-        counters={counters}
-        onMove={onMove}
-        moving={moving}
-        onEdit={setEditing}
-        onDelete={(id) => {
-          confirm.open({
-            title: "Delete rule?",
-            message: `Are you sure you want to delete rule "${id}"? This action cannot be undone.`,
-            confirmLabel: "Delete",
-            variant: "danger",
-            onConfirm: () => onDelete(id),
-          });
-        }}
-      />
-
-      {editing && isAdmin() && (
-        <EditRuleModal
-          revision={viewRevision}
-          zones={zones}
-          forwards={nat.portForwards ?? []}
-          rule={rules.find((r) => r.id === editing.id) ?? editing}
-          context={rules}
-          globalMode={dpiConfig.dpiMode}
-          tagsInUse={tagsInUse(rules, editing.id)}
-          onClose={() => setEditing(null)}
-          onSave={(patch, revision) => onUpdate(editing.id, patch, revision)}
-        />
-      )}
-      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

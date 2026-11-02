@@ -21,8 +21,10 @@ export function EnforcementHealthIndicator({ health }: { health: EnforcementHeal
   if (health.state === "enforcing") return <StatusIndicator status={view.status} label={view.label} />;
   const protection = enforcementDetail(health, status);
   return <div className="flex flex-wrap items-center gap-3">
-    <StatusIndicator status={view.status} label={view.label} sublabel={protection.title} />
+    <StatusIndicator status={view.status} label={view.label}
+      sublabel={status?.state === "protecting" ? "Protection needs attention" : protection.title} />
     {protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
+    {health.reason && <p className="break-words text-xs text-amber">{health.reason}</p>}
     <ProtectionRetry isAdmin={isAdmin()} />
   </div>;
 }

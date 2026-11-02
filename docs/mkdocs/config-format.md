@@ -20,6 +20,64 @@ shows the intentionally disabled mode, which updates the engine's in-memory
 snapshot without installing firewall rules. Interface and service configuration
 can still change.
 
+In Configuration, save changes, review the diff, then use **Commit** to apply
+or **Commit-confirmed** for automatic rollback unless you **Confirm** before
+the deadline. Restoring a backup replaces saved changes, not active settings.
+The policy wizard's **Review & Stage** step also saves for later review and
+commit; it does not activate policy. Configuration tabs and JSON keys retain
+their existing names.
+
+**Review changes** leads with entity summaries, such as firewall rule counts
+and named zone additions.
+Lists with unique `id` keys (or `name` keys, such as zones and interfaces)
+match items by that key rather than their position. Reordering is identified
+separately from additions and removals; a pure reorder does not invent field
+changes. Secret-only changes are identified without showing secret values. **Advanced**
+opens exact field paths, old → new values, the redacted JSON diff and IDS bank fingerprints; the Overview
+tab's **Advanced** section contains the block explorer. **Staged config**
+keeps the raw JSON editor and **Copy running → staged**, and **Running config**
+keeps the committed JSON viewer. **Validate**, next to **Save staged config**,
+checks the current text without staging it or discarding unsaved edits.
+Validation retains omitted or empty VPN secrets from the current candidate,
+just like saving it, so redacted reads can be validated without re-entering
+stored credentials. It does not return those secrets or change the revision.
+
+**Commit** and **Commit-confirmed**, with its seconds field, are together at
+the review in a persistent action bar. **Confirm** is prominent while a server-reported confirmation
+deadline is pending. **Recovery** contains **Rollback** and explains that it
+keeps the newer staged candidate; review that candidate before committing
+again. **Factory reset** is a separate immediate action in **Recovery**:
+type `NUCLEAR`, then confirm. It is revision-guarded, wipes configuration,
+users and audit history, applies appliance defaults and resets the default
+admin login. TLS identity files remain; lab web/API tokens remain valid.
+Back up before resetting. The committed document is not proof of live traffic protection.
+Exports, appliance backups and IDS bank backup/restore remain on Overview.
+
+The shared attention area keeps traffic protection, startup recovery, missing
+activity records and pending settings separate. Failures and unknown states
+remain visible, with retry or repair links; healthy domains need no notice.
+Protection causes stay inline, while **Technical details** contains the
+observation time and identifiers. A successful configuration operation does not
+clear an independent protection or activity-record failure.
+
+Shared button disclosures open when saved non-default values arrive after the
+page loads. Clearing the last such value does not close an editor the operator
+is using, and an unchanged default does not override an explicit open/close
+choice. In Configuration, **Advanced** and **Recovery** remain inspectable
+when configuration reads fail; configuration mutation actions stay disabled.
+
+## Demo and inspection runtime settings
+
+`dataplane.dpiMock` and engine environment variable `CONTAIND_DPI_MOCK` enable
+inspect-all DPI only. They do not generate events or start demo replay.
+Management keeps the separate `auto`/`on`/`off` demo preference in `demo.json`
+beside `config.db`, not in the configuration document. Start and Stop on the
+Dashboard take effect without commit and persist across restarts.
+`CONTAIND_DEMO_CAPTURES` selects the engine's capture directory, default
+`/usr/share/containd/demo`; its manifest and capture hashes must validate.
+See [recorded demo replay](services.md#recorded-demo-replay) for topology,
+pacing, licensing and preference semantics.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema
@@ -253,7 +311,7 @@ Notes:
 - Config backups are stored beside the config DB in `config-backups/` (normally `/data/config-backups/` in Compose) and can be created redacted or full (admin-only for unredacted).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
-  - `enforceTable` names the engine's nftables tables (default `containd`): `inet <enforceTable>` holds temporary blocks and connection revocations, and `inet <enforceTable>_policy` holds the firewall policy. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. It must not be an nft keyword such as `table`, `inet`, `ip`, `accept` or `drop`, which nft cannot address as a table name even quoted; keywords are lowercase, so `Table` is accepted. `containd_dhcp` is reserved for the DHCP redirect table.
+  - `enforceTable` names the engine's nftables tables (default `containd`): `inet <enforceTable>` holds temporary blocks and connection revocations, `inet <enforceTable>_policy` holds the firewall policy, and `inet <enforceTable>_acct` holds routed cross-zone packet and byte counters that survive policy applies. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. It must not be an nft keyword such as `table`, `inet`, `ip`, `accept` or `drop`, which nft cannot address as a table name even quoted; keywords are lowercase, so `Table` is accepted. `containd_dhcp` is reserved for the DHCP redirect table.
 - `routing` configures kernel routing when applying running config:
   - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
     selects main; explicit tables use IDs 1–252.
@@ -456,6 +514,12 @@ candidate edit:
 - `{"clear":true}` clears the stored bundle. Do not combine it with nonblank PEM.
 - A rejected upload leaves the previous file unchanged. Successful replacement
   is atomic, so readers cannot observe a partially written bundle.
+
+System Settings offers **Upload CA bundle** and **Clear**. Clearing requires
+confirmation because outbound TLS to private services may stop working; it
+removes additional trust, not the OS trust store. TLS certificate, key and
+trusted-CA paths are selected separately in **Advanced management access**
+and must be staged and committed.
 
 After storing the bundle, management sends its content and revision
 (`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads

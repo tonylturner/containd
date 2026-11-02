@@ -447,12 +447,17 @@ components:
             icsRules: {type: integer}
         eventStats:
           type: object
+          nullable: true
+          description: Real event counts from both sources over the retained last 24 hours; null on store failure.
           properties:
+            windowSeconds: {type: integer, enum: [86400]}
+            complete: {type: boolean, description: Every bucket from both sources was observed.}
             total: {type: integer}
             idsAlerts: {type: integer}
             modbusWrites: {type: integer}
             avDetections: {type: integer}
             avBlocks: {type: integer}
+        eventStatsError: {type: string}
         services: {type: object}
         user: {type: object}
         lastActivity:
@@ -463,6 +468,7 @@ components:
     Event:
       type: object
       properties:
+        origin: {type: string, enum: [real, demo], description: Omitted means real. Demo events do not enter real counters or syslog.}
         id: {type: string, pattern: '^[0-9]+$', example: '9223372036854775809', description: Exact decimal uint64 event identity}
         flowId: {type: string}
         transportConnectionId:
@@ -517,6 +523,7 @@ components:
     FlowSummary:
       type: object
       properties:
+        origin: {type: string, enum: [real, demo], description: Omitted means real. Demo events do not enter real counters or syslog.}
         flowId: {type: string}
         transportConnectionId:
           type: string
@@ -1929,8 +1936,18 @@ components:
       description: The engine's live antivirus status; the keys beside gate are the applied settings, readiness, counters and the clamd and FreshClam state.
       type: object
       additionalProperties: true
+      required: [available]
+      oneOf:
+      - required: [count, errors_count]
+        properties:
+          available: {type: boolean, enum: [true]}
+      - required: [error]
+        properties:
+          available: {type: boolean, enum: [false]}
       properties:
         available: {type: boolean, description: false when the engine cannot be reached; management-known state and fault remain visible alongside error}
+        count: {type: integer, minimum: 0, description: Lifetime scan count as a JSON number; present when available is true}
+        errors_count: {type: integer, minimum: 0, description: Lifetime scan error count as a JSON number; present when available is true}
         state: {type: string, enum: [faulted], description: Management-known service fault; independent of engine availability}
         fault: {$ref: '#/components/schemas/ServiceFault'}
         error: {type: string}
@@ -2173,7 +2190,7 @@ components:
             iec104: {type: boolean}
             cip: {type: boolean}
           description: 'Unknown keys (true or false) return 400: dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
-        dpiMock: {type: boolean}
+        dpiMock: {type: boolean, description: Inspect all traffic; does not start demo replay.}
         dpiMode: {type: string, enum: ['', monitor, enforce], description: Empty inherits monitor mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
         enforceTable:
@@ -2181,7 +2198,9 @@ components:
           pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,247}$'
           description: >-
             nftables table name (inet family). The engine owns inet <enforceTable> for temporary blocks and
-            connection revocations and inet <enforceTable>_policy for the firewall policy. Empty selects
+            connection revocations, inet <enforceTable>_policy for the firewall policy, and
+            inet <enforceTable>_acct for routed cross-zone packet and byte counters that survive policy
+            applies. Empty selects
             containd; containd_dhcp is reserved for the DHCP redirect table. An nft keyword (for example
             table, inet, ip, accept or drop) is rejected because nft cannot address it as a table name, even
             quoted; keywords are lowercase, so Table is accepted.
@@ -2216,9 +2235,27 @@ components:
         Timestamp: {format: date-time, type: string}
       type: object
     SimulationStatus:
-      properties:
-        running: {type: boolean}
       type: object
+      required: [preference, running, loops, captureSet, capture, error, reason]
+      description: >-
+        Management-owned demo preference, persisted in demo.json beside config.db.
+        An absent file resolves to auto. Auto waits for an observed sampler interval,
+        and stops permanently after any real conduit.bytes delta greater than zero
+        or real engine events.class delta greater than zero for ids_alert,
+        av_detection or av_block (source engine). Interface bytes and other events
+        do not stop auto. This latch persists across restarts independently of
+        chart realActive flags; the stopped reason is real traffic observed. On runs
+        regardless of real traffic; off never runs. An unreadable preference is
+        treated as off with an error. The engine boots stopped and receives demo
+        commands only after successful configuration sync.
+      properties:
+        preference: {type: string, enum: [auto, 'on', 'off']}
+        running: {type: boolean}
+        loops: {type: integer, minimum: 0}
+        captureSet: {type: string}
+        capture: {type: string}
+        error: {type: string, description: Empty on success; includes preference read or engine delivery failures.}
+        reason: {type: string, description: Explains stopped auto or pending delivery/configuration sync.}
     FirewallConfig:
       properties:
         defaultAction: {type: string, enum: ['', ALLOW, DENY], description: Omitted or empty means DENY.}
@@ -2840,6 +2877,43 @@ components:
         openvpn: {$ref: '#/components/schemas/OpenVPNConfig'}
         wireguard: {$ref: '#/components/schemas/WireGuardConfig'}
       type: object
+    VPNRead:
+      type: object
+      required: [wireguard, openvpn]
+      description: VPN endpoint read and stage responses omit stored secret material. Presence indicators are read-only. Full administrator config exports remain separate.
+      properties:
+        wireguard: {$ref: '#/components/schemas/WireGuardRead'}
+        openvpn: {$ref: '#/components/schemas/OpenVPNRead'}
+    WireGuardRead:
+      allOf:
+        - $ref: '#/components/schemas/WireGuardConfig'
+        - type: object
+          required: [privateKeyConfigured]
+          properties:
+            privateKey: {type: string, writeOnly: true}
+            privateKeyConfigured: {type: boolean, readOnly: true}
+      description: privateKey is never returned. Omitted or empty privateKey in a VPN write preserves the stored key.
+    OpenVPNRead:
+      allOf:
+        - $ref: '#/components/schemas/OpenVPNConfig'
+        - type: object
+          properties:
+            managed: {$ref: '#/components/schemas/OpenVPNManagedClientRead'}
+    OpenVPNManagedClientRead:
+      allOf:
+        - $ref: '#/components/schemas/OpenVPNManagedClientConfig'
+        - type: object
+          required: [caConfigured, certConfigured, keyConfigured, passwordConfigured]
+          properties:
+            ca: {type: string, writeOnly: true}
+            cert: {type: string, writeOnly: true}
+            key: {type: string, writeOnly: true}
+            password: {type: string, writeOnly: true}
+            caConfigured: {type: boolean, readOnly: true}
+            certConfigured: {type: boolean, readOnly: true}
+            keyConfigured: {type: boolean, readOnly: true}
+            passwordConfigured: {type: boolean, readOnly: true}
+      description: ca, cert, key and password are never returned. Omitted or empty secrets in a VPN write preserve existing material while managed remains selected. Omitting managed removes the managed object.
     WGPeer:
       properties:
         allowedIPs: {description: IPv4 CIDRs only, items: {type: string}, type: array}
@@ -3078,6 +3152,104 @@ components:
         dstPort: {type: string}
         ttlSeconds: {type: integer, minimum: 0}
       required: [srcIp, dstIp, proto, dstPort]
+    ConduitTraffic:
+      description: >-
+        Current conduit or engine unavailability overrides retained measured
+        history. Disabled enforcement returns state unavailable with reason
+        "enforcement disabled". Only pairs with no real series at all may use
+        current recorded demo coverage. Real series without retained coverage
+        remain unavailable; they are never replaced by demo.
+      oneOf:
+      - type: object
+        required: [state, windowSeconds, packets, bytes, complete, coverage]
+        properties:
+          state: {type: string, enum: [measured]}
+          windowSeconds: {type: integer, enum: [3600]}
+          packets: {type: string, pattern: '^[0-9]+$'}
+          bytes: {type: string, pattern: '^[0-9]+$'}
+          complete: {type: boolean}
+          coverage: {type: string, enum: [routed], description: Routed forwarding that passed policy; excludes bridged L2 and AV/ICAP input-output gating.}
+      - type: object
+        required: [state, windowSeconds, packets, bytes, complete, coverage]
+        properties:
+          state: {type: string, enum: [demo]}
+          windowSeconds: {type: integer, enum: [3600]}
+          packets: {type: string, pattern: '^[0-9]+$'}
+          bytes: {type: string, pattern: '^[0-9]+$'}
+          complete: {type: boolean}
+          coverage: {type: string, enum: [recorded], description: Recorded traffic on an illustrative topology; not measured or routed traffic.}
+      - type: object
+        required: [state]
+        properties:
+          state: {type: string, enum: [none], description: No traffic recorded yet.}
+      - type: object
+        required: [state, reason]
+        properties:
+          state: {type: string, enum: [unavailable]}
+          reason: {type: string}
+    TelemetryPoint:
+      type: object
+      required: [t, q]
+      description: >-
+        observed, partial and reset points carry v, including observed zero.
+        observed points carry d equal to the resolution; partial and reset
+        points carry the observation duration in d. A grouped point whose
+        valued members have different durations is partial and omits d, so
+        no rate is defined. gap points omit both v and d.
+      properties:
+        t: {type: string, format: date-time}
+        v: {type: string, pattern: '^[0-9]+$', description: Exact uint64 count; absent for a gap.}
+        d: {type: integer, minimum: 1, description: Seconds of observation; absent for gaps and grouped counts whose member durations differ. No rate is defined without d.}
+        q: {type: string, enum: [observed, partial, reset, gap]}
+    TelemetrySeriesResponse:
+      type: object
+      required: [metric, unit, origin, range, resolutionSeconds, from, to, realCovered, realActive, collector, series]
+      properties:
+        metric: {type: string}
+        unit: {type: string, enum: [bytes, packets, events, scans]}
+        origin: {type: string, enum: [real, demo]}
+        range: {type: string, enum: [1h, 24h, 30d]}
+        resolutionSeconds: {type: integer, enum: [10, 60, 900]}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        retainedFrom: {type: string, format: date-time}
+        realCovered: {type: boolean, description: Persisted once any real bucket was observed.}
+        realActive: {type: boolean, description: Persisted once any real bucket counted more than zero.}
+        collector:
+          type: object
+          required: [state, droppedSeries]
+          properties:
+            state: {type: string, enum: [running, stalled, unavailable]}
+            lastSampleAt: {type: string, format: date-time}
+            error: {type: string}
+            droppedSeries: {type: string, pattern: '^[0-9]+$'}
+            unavailable:
+              type: array
+              description: >-
+                Sources or series unavailable on the latest tick, replaced
+                every tick and omitted when empty. Only entries relevant to
+                this metric and dimension selection are included, before
+                grouping. Metric prefixes map to sources iface, conduit,
+                proto, events, av and service. Source engine also applies to
+                all metrics except service.* and events.* filtered to
+                source=services. Per-series entries apply to matching metric
+                and dimensions. Retained history does not imply availability now.
+              items:
+                type: object
+                required: [source, reason]
+                properties:
+                  source: {type: string, enum: [engine, iface, conduit, proto, events, av, service]}
+                  metric: {type: string, description: Omitted for a whole-source outage}
+                  dims: {type: object, additionalProperties: {type: string}}
+                  reason: {type: string}
+        series:
+          type: array
+          items:
+            type: object
+            required: [points]
+            properties:
+              dims: {type: object, additionalProperties: {type: string}}
+              points: {type: array, items: {$ref: '#/components/schemas/TelemetryPoint'}}
     ConduitResult:
       type: object
       required: [from, to, traffic, checks]
@@ -3087,7 +3259,7 @@ components:
         state: {type: string}
         ids: {type: string, enum: [enabled, disabled], description: Global IDS setting only; per-conduit inspection and coverage are unknown.}
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
-        traffic: {type: number, nullable: true, description: 'Traffic relative to baseline, or null when not measured. Currently always null; never infer zero traffic from unavailable data.'}
+        traffic: {$ref: '#/components/schemas/ConduitTraffic'}
         rules: {type: array, items: {type: string}}
         gaps: {type: array, items: {type: string}}
         mitre: {type: array, items: {type: string}}
@@ -4602,7 +4774,7 @@ paths:
       summary: Get candidate services vpn settings
       tags: [Services]
       responses:
-        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
+        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNRead'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
       parameters:
       - $ref: '#/components/parameters/IfRevision'
@@ -4617,7 +4789,7 @@ paths:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNRead'}}}, headers: {
               X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -7118,18 +7290,26 @@ paths:
       summary: Inspect simulation
       tags: [Simulation]
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
-          description: Success
+          description: Demo preference and runtime status. Engine failures are reported in error with reason engine unreachable.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationStatus'}
+        '503':
+          description: Management demo controller unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     post:
-      summary: Start or stop synthetic traffic (admin)
+      summary: Start or stop demo replay (admin)
+      description: >-
+        Start persists on; Stop persists off. The preference is saved before
+        engine reconciliation, including when the engine is unreachable. An
+        engine delivery failure returns HTTP 200 with the persisted preference,
+        error "engine unreachable: <detail>" and reason "engine unreachable".
+        A preference write failure returns HTTP 500 and does not deliver a command.
+        Successful preference changes are audited as simulation.start or
+        simulation.stop with target demo.
       tags: [Simulation]
       requestBody:
         required: true
@@ -7141,16 +7321,26 @@ paths:
                 action: {type: string, enum: [start, stop]}
               required: [action]
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
         '200':
-          description: Success
+          description: Preference persisted; runtime status may report an engine delivery error.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SimulationStatus'}
+        '400':
+          description: Invalid action or JSON.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Preference could not be persisted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Management demo controller unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /system/stats:
     get:
       summary: Inspect system stats
@@ -8154,7 +8344,13 @@ paths:
         before upgrade: revoked or expired sessions are rejected. Cookies and
         Bearer headers alone do not authorize upgrades; JWTs in query parameters
         are not accepted. Client sends a command string or {line: string};
-        server sends JSON {output: string, error?: string}.
+        server sends JSON {output: string, error?: string, prompt?: string, status?: string,
+        control?: "status"|"close"}. Send {control: "status"} for an authoritative
+        shared-candidate status refresh (including unknown on failure), with no
+        command execution. The server also refreshes status after commands.
+        exit, quit and logout send control "close" and close only this console,
+        leaving the management session signed in. Status is advisory and never
+        supplies a mutation revision.
       parameters:
       - name: ticket
         in: query
@@ -8200,7 +8396,7 @@ paths:
                 type: object
                 properties:
                   configPath: {type: string}
-                  vpn: {$ref: '#/components/schemas/VPNConfig'}
+                  vpn: {$ref: '#/components/schemas/VPNRead'}
           headers:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
@@ -8433,12 +8629,53 @@ paths:
         in: query
         required: true
         schema: {type: string}
+  /telemetry/series:
+    get:
+      summary: Read retained counter history (viewer)
+      tags: [Monitoring]
+      description: >-
+        Dense completed buckets only; the open bucket is excluded. Missing or expired
+        coverage is gap, never zero. Grouping iface metrics by zone includes leaf
+        interfaces only. Values are exact decimal strings; divide v by d for rates.
+        Grouped points omit d and become partial when members with values have unequal d.
+        Dimension keys are interface/zone/role for iface.*, from/to for conduit.*,
+        protocol for proto.*, source for events.total, source/class for events.class,
+        service for service.*, and none for av.*. Unknown or repeated parameters are rejected.
+      parameters:
+      - {name: metric, in: query, required: true, schema: {type: string, enum: [iface.rx_bytes, iface.tx_bytes, iface.rx_packets, iface.tx_packets, conduit.bytes, conduit.packets, proto.packets, proto.bytes, events.total, events.class, service.events, service.errors, av.scans, av.scan_errors, av.detections]}}
+      - {name: range, in: query, required: true, schema: {type: string, enum: [1h, 24h, 30d]}}
+      - {name: origin, in: query, required: true, schema: {type: string, enum: [real, demo]}}
+      - {name: group, in: query, schema: {type: string}, description: One valid dimension key for this metric.}
+      - {name: interface, in: query, schema: {type: string}}
+      - {name: zone, in: query, schema: {type: string}}
+      - {name: role, in: query, schema: {type: string}}
+      - {name: from, in: query, schema: {type: string}}
+      - {name: to, in: query, schema: {type: string}}
+      - {name: protocol, in: query, schema: {type: string}}
+      - {name: source, in: query, schema: {type: string}}
+      - {name: class, in: query, schema: {type: string}}
+      - {name: service, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: Retained series
+          content: {application/json: {schema: {$ref: '#/components/schemas/TelemetrySeriesResponse'}}}
+        '400':
+          description: Invalid metric, range, origin or dimension
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '503':
+          description: Telemetry store unavailable
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+        '500':
+          description: Counter sum overflow
+          content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
   /services/status:
     get:
       summary: Inspect live services
       tags: [Services]
       description: >-
-        Management service status keyed by service. The av entry is the
+        Management service status keyed by service. Entries retain count and errors_count
+        as lifetime JSON numbers. Rates and sparklines are not status fields;
+        retained history is available from /telemetry/series. The av entry is the
         engine's live antivirus status (ready, db_version, counters) with the
         scanning gate under gate; when the engine cannot be reached it is
         {"available": false, "error": ...}.
@@ -8465,7 +8702,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-                required: [faults]
+                required: [faults, av]
                 properties:
                   faults:
                     type: array

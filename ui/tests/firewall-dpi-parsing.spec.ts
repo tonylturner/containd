@@ -11,10 +11,11 @@ async function openEditor(
   page: Page,
   parsing?: Record<string, "tolerant" | "strict">,
   rejectSave = false,
+  dpiMode: "enforce" | "monitor" = "enforce",
 ) {
   const dataplane = {
     dpiEnabled: true,
-    dpiMode: "enforce",
+    dpiMode,
     dpiIcsProtocols: { dnp3: false },
     dpiProtocols: { http: false },
     nfqueueGroup: 101,
@@ -53,7 +54,7 @@ async function openEditor(
 }
 
 async function configure(page: Page) {
-  await page.getByText("ICS Protocol Decoders", { exact: true })
+  await page.getByText("Industrial protocols", { exact: true })
     .locator("xpath=../..")
     .getByRole("button", { name: "Configure", exact: true }).click();
 }
@@ -64,12 +65,24 @@ function modal(page: Page) {
   });
 }
 
+for (const mode of ["enforce", "monitor"] as const) {
+  test(`${mode}: decoder switches keep their names and strict parsing does not promise monitoring blocks`, async ({ page }) => {
+    await openEditor(page, undefined, false, mode);
+    for (const [, label] of protocols) {
+      await expect(modal(page).getByRole("switch", { name: `${label} decoder`, exact: true })).toBeVisible();
+      await expect(modal(page).getByLabel(`${label} parsing`).locator('option[value="strict"]'))
+        .toHaveText("Treat unrecognized messages as violations (strict)");
+    }
+    await expect(modal(page)).toContainText("Enforce blocks these violations; Monitor reports what would be dropped without blocking.");
+  });
+}
+
 test("missing parsing displays tolerant and saves without synthesizing defaults", async ({ page }) => {
   const { dataplane, saves } = await openEditor(page);
   for (const [, label] of protocols) {
     await expect(modal(page).getByLabel(`${label} parsing`)).toHaveValue("tolerant");
   }
-  await expect(modal(page)).toContainText("Tolerant enforces what is decoded");
+  await expect(modal(page)).toContainText("Inspect supported messages to apply rules");
   await modal(page).getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0]).toEqual(dataplane);

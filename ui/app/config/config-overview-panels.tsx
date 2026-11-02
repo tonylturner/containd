@@ -67,7 +67,7 @@ export function ConfigBackupRecoveryCard({
           className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui outline-hidden"
         />
         <div className="text-xs text-(--text-muted)">
-          Restore replaces the candidate config. Use redacted backups for sharing.
+          Restore replaces saved changes, not active settings. Use redacted backups for sharing.
         </div>
         {canEdit && (
           <button
@@ -233,7 +233,7 @@ export function IDSRulesCard({
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">IDS Rules</div>
           <div className="text-sm text-(--text)">
-            Running IDS bank: {idsRuleCount} committed rules. Restores stage the candidate bank; commit promotes both.
+            {idsRuleCount} committed detection rules. Restored rules are saved for review; commit applies them with the configuration.
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -245,80 +245,6 @@ export function IDSRulesCard({
           </button>
           {canEdit && <IDSRestore revision={revision} onStatus={onStatus} onChanged={onChanged} />}
         </div>
-      </div>
-    </Card>
-  );
-}
-
-export function ConfigActionBar({
-  canEdit,
-  canCommit,
-  canMutate,
-  ttlSeconds,
-  onTtlChange,
-  onCommit,
-  onCommitConfirmed,
-  onConfirmCommit,
-  onRollback,
-}: {
-  canEdit: boolean;
-  canCommit: boolean;
-  canMutate: boolean;
-  ttlSeconds: string;
-  onTtlChange: (value: string) => void;
-  onCommit: () => void;
-  onCommitConfirmed: () => void;
-  onConfirmCommit: () => void;
-  onRollback: () => void;
-}) {
-  return (
-    <Card className="mt-6" padding="md">
-      <div className="flex flex-wrap items-center gap-2">
-        {canEdit && (
-          <button
-            onClick={onCommit}
-            disabled={!canCommit}
-            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
-          >
-            Commit
-          </button>
-        )}
-        <div className="flex items-center gap-2">
-          {canEdit && (
-            <button
-              onClick={onCommitConfirmed}
-              disabled={!canCommit}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
-            >
-              Commit-confirmed
-            </button>
-          )}
-          <input
-            value={ttlSeconds}
-            onChange={(e) => onTtlChange(e.target.value)}
-            disabled={!canEdit}
-            className="w-20 rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui outline-hidden"
-          />
-          <span className="text-xs text-(--text)">seconds</span>
-        </div>
-        {canEdit && (
-          <>
-            <button
-              onClick={onConfirmCommit}
-              disabled={!canMutate}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
-            >
-              Confirm
-            </button>
-            <button
-              onClick={onRollback}
-              disabled={!canMutate}
-              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Rollback
-            </button>
-          </>
-        )}
       </div>
     </Card>
   );

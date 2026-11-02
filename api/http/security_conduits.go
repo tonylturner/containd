@@ -4,13 +4,17 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	wire "github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	history "github.com/tonylturner/containd/pkg/cp/telemetry"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -63,7 +67,7 @@ type conduitResult struct {
 	State          string                          `json:"state"`
 	IDS            string                          `json:"ids"`
 	Proto          []protoEntry                    `json:"proto"`
-	Traffic        *float64                        `json:"traffic"`
+	Traffic        conduitTraffic                  `json:"traffic"`
 	Rules          []string                        `json:"rules"`
 	Gaps           []string                        `json:"gaps"`
 	Mitre          []string                        `json:"mitre"`
@@ -89,7 +93,7 @@ type conduitGlobalState struct {
 	defaultAction config.Action
 }
 
-func securityConduitsHandler(store config.Store) gin.HandlerFunc {
+func securityConduitsHandler(store config.Store, telemetryStore TelemetryStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
@@ -103,7 +107,13 @@ func securityConduitsHandler(store config.Store) gin.HandlerFunc {
 				if from == to {
 					continue
 				}
-				result = append(result, buildConduitResult(cfg, globals, from, to))
+				conduit := buildConduitResult(cfg, globals, from, to)
+				if !cfg.DataPlane.Enforcement {
+					conduit.Traffic = conduitTraffic{State: "unavailable", Reason: "enforcement disabled"}
+				} else {
+					conduit.Traffic = measureConduit(c.Request.Context(), telemetryStore, from, to)
+				}
+				result = append(result, conduit)
 			}
 		}
 		c.JSON(http.StatusOK, result)
@@ -161,7 +171,7 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 		State:          state,
 		IDS:            globals.idsMode,
 		Proto:          nonNilProtoEntries(protos),
-		Traffic:        nil,
+		Traffic:        conduitTraffic{State: "unavailable", Reason: "no retained traffic coverage"},
 		Rules:          nonNilStrings(ruleDescs),
 		Gaps:           nonNilStrings(gaps),
 		Mitre:          nonNilStrings(mitre),
@@ -480,4 +490,95 @@ func containsStr(ss []string, s string) bool {
 // RESET rejects it.
 func denies(a config.Action) bool {
 	return a == config.ActionDeny || a == config.ActionReset
+}
+
+// Conduit counters cover routed forwarding that passed policy only.
+type conduitTraffic struct {
+	State         string `json:"state"`
+	Reason        string `json:"reason,omitempty"`
+	WindowSeconds int    `json:"windowSeconds,omitempty"`
+	Packets       string `json:"packets,omitempty"`
+	Bytes         string `json:"bytes,omitempty"`
+	Complete      *bool  `json:"complete,omitempty"`
+	Coverage      string `json:"coverage,omitempty"`
+}
+
+func measureConduit(ctx context.Context, store TelemetryStore, from, to string) conduitTraffic {
+	unavailable := func(reason string) conduitTraffic { return conduitTraffic{State: "unavailable", Reason: reason} }
+	if store == nil {
+		return unavailable("telemetry store unavailable")
+	}
+	now := time.Now()
+	responses := make([]wire.SeriesResponse, 0, 2)
+	noSeries := true
+	for _, metric := range []wire.Metric{wire.ConduitPackets, wire.ConduitBytes} {
+		resp, err := store.Query(ctx, history.Query{Metric: metric, Range: wire.Range1h, Origin: wire.OriginReal, Filters: map[string]string{"from": from, "to": to}}, now)
+		if err != nil {
+			return unavailable(err.Error())
+		}
+		for _, entry := range resp.Collector.Unavailable {
+			if entry.Source == "conduit" || entry.Source == "engine" {
+				return unavailable(entry.Reason)
+			}
+		}
+		if resp.Collector.State != "running" {
+			return unavailable("telemetry collector " + resp.Collector.State)
+		}
+		noSeries = noSeries && len(resp.Series) == 0
+		responses = append(responses, resp)
+	}
+	state, coverage := "measured", "routed"
+	if noSeries {
+		responses = nil
+		for _, metric := range []wire.Metric{wire.ConduitPackets, wire.ConduitBytes} {
+			resp, err := store.Query(ctx, history.Query{Metric: metric, Range: wire.Range1h, Origin: wire.OriginDemo, Filters: map[string]string{"from": from, "to": to}}, now)
+			if err != nil {
+				return unavailable(err.Error())
+			}
+			if resp.Collector.State != "running" {
+				return unavailable("telemetry collector " + resp.Collector.State)
+			}
+			for _, entry := range resp.Collector.Unavailable {
+				if entry.Source == "conduit" || entry.Source == "engine" {
+					return unavailable(entry.Reason)
+				}
+			}
+			if len(resp.Series) == 0 {
+				return conduitTraffic{State: "none"}
+			}
+			// Only current recorded coverage can stand in for a never-observed pair.
+			for _, series := range resp.Series {
+				if len(series.Points) == 0 || series.Points[len(series.Points)-1].V == nil || series.Points[len(series.Points)-1].Q == wire.QualityGap {
+					return conduitTraffic{State: "none"}
+				}
+			}
+			responses = append(responses, resp)
+		}
+		state, coverage = "demo", "recorded"
+	}
+	result := conduitTraffic{State: state, WindowSeconds: 3600, Coverage: coverage}
+	complete := true
+	for i, resp := range responses {
+		covered := false
+		for _, series := range resp.Series {
+			for _, p := range series.Points {
+				covered = covered || p.V != nil
+			}
+		}
+		if !covered {
+			return unavailable("no retained traffic coverage")
+		}
+		total, full, err := history.Total(resp)
+		if err != nil {
+			return unavailable(err.Error())
+		}
+		complete = complete && full
+		if i == 0 {
+			result.Packets = strconv.FormatUint(total, 10)
+		} else {
+			result.Bytes = strconv.FormatUint(total, 10)
+		}
+	}
+	result.Complete = &complete
+	return result
 }

@@ -52,7 +52,7 @@ Default credentials: `containd` / `containd` -- change on first login.
 
 The SSH server supports two shell modes, controlled by `CONTAIND_SSH_SHELL_MODE` or `set system ssh shell-mode`:
 
-- **`appliance`** (default) -- Drops into the containd CLI. Type `shell` or `bash` to access the underlying Linux shell, `exit` to return.
+- **`appliance`** (default) -- Drops into the containd CLI. Type `shell` to access the underlying Linux shell, `exit` to return.
 - **`linux`** -- Drops into a full bash shell with standard Linux tools (tcpdump, nft, etc.). Type `configure` or `containd cli` to enter the containd CLI, `exit` to return to bash.
 
 Both modes support bidirectional switching. The `linux` mode is useful for lab environments where students need access to industry tools like `tcpdump` alongside the containd CLI.

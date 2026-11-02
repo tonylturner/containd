@@ -23,6 +23,29 @@ and learning are optional, not prerequisites.
   cannot stop the first command. Candidate save, import and commit validate this.
   A global enforce setting with no enforcing ICS rules needs no queue.
 
+### Set up inline inspection
+
+In **Firewall → Deep Packet Inspection → DPI settings → Inline inspection**,
+set **Inline queue (NFQUEUE)** and select **Stage inline inspection**.
+The ICS page's **Set up inline inspection** link and the firewall rule form
+open this control directly. Selecting Enforce without a queue shows the
+prerequisite; global Enforce is not staged when existing rules would need
+that missing queue.
+
+Queue numbers are 1–65535 (recommended: 101). **Packet logging group (NFLOG)**
+is independent, optional, and accepts 0–65535; 0 disables packet logging and
+100 is recommended when logging is needed. The same number in NFLOG and
+NFQUEUE is not a conflict: they are separate kernel subsystems. Do not choose
+a queue already owned by another consumer. The UI cannot reserve or prove
+runtime ownership at staging time; check applied coverage after commit.
+Existing dataplane settings are preserved and writes carry the candidate
+revision precondition. A 412 keeps the draft visible but requires Reload and
+review, not a rebase or automatic retry of the full dataplane document.
+
+Setup alone does not turn on DPI, protocol decoders or firewall enforcement,
+and does not change Monitor into blocking. Review those settings, the candidate
+diff and per-rule coverage; use **Commit-confirmed** to apply safely.
+
 Monitor-only traffic needs DPI, its decoder and capture:
 
 - With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
@@ -76,6 +99,10 @@ on failed apply, and are lost on engine restart. The snapshot ID and `since`
 identify the applied counter lifetime. Before first apply or when the engine is
 unreachable the endpoint returns HTTP 200 with
 `{"available":false,"reason":"..."}`; unavailable never means zero.
+
+Below the small-screen breakpoint, ICS table rows become stacked cards with
+labelled fields. Coverage, shadow matches and Edit remain available without
+scrolling sideways.
 
 ### Upgrade and downgrade
 
@@ -142,6 +169,31 @@ separately. Enabling a decoder does not create a policy rule. For saved
 configurations affected by removed protocol support, see
 [upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
+## ICS inspection workspace
+
+The ICS page leads with **Active inspection**, derived from applied coverage
+and runtime health rather than candidate settings: **Enforcing**, **Partly
+active**, **Monitoring** or **Unknown**. When applied coverage and runtime
+health confirm an empty applied rule set, it says **No ICS rules applied** in
+neutral styling, even if candidate filters are configured. Applied rules
+without enforcing coverage are labelled **Not enforcing**, not partly
+protected. Failed coverage or health reads leave the active state unknown.
+Monitoring is observation only; monitor rules do not protect traffic.
+
+Protocol filters and candidate counts lead into the rule list. **Inspect
+rule** retains **Codes**, **Addresses** and **R/W** (with protocol-specific
+labels when filtered). It opens automatically for saved matching constraints.
+Mode, applied coverage, candidate differences, shadow matches and actions
+remain in the list. **Why?** reveals the full applied and candidate coverage
+reasons; equal candidate coverage is not presented as a pending difference.
+Coverage limitations, failed applies and unavailable counter causes stay
+inline even with details closed.
+
+**Inspection setup** contains **Supported Protocols** and **Quick Start**,
+with a link to Firewall Rules; it opens when no filters are configured.
+**Inspection details** retains healthy firewall and IEC 104 runtime indicators.
+Faults and unavailable states remain visible without opening it.
+
 ## Parsing modes
 
 `dataplane.dpiIcsParsing` sets parsing independently for `modbus`, `dnp3`,
@@ -149,8 +201,32 @@ configurations affected by removed protocol support, see
 An omitted map, omitted key or empty value means tolerant. Unknown protocol
 names and other values are rejected. Existing configurations become tolerant
 without migration. Stage settings in **Firewall → Deep Packet Inspection →
-ICS Protocol Decoders → Configure**, or POST the full candidate dataplane
+Industrial protocols → Configure**, or POST the full candidate dataplane
 document to `/api/v1/dataplane`, then commit to apply.
+
+The **Unrecognized messages** control offers **Inspect supported messages
+(tolerant)** and **Treat unrecognized messages as violations (strict)**. Strict
+violations are blocked in Enforce mode; Monitor reports what would be dropped
+without blocking. These labels do not change the stored `tolerant`/`strict`
+values or enable blocking by themselves.
+The ICS page shows whether inline inspection is configured; its **Technical
+details** retains the NFQUEUE number and capture interfaces. Live protection
+and per-rule coverage remain separate from these saved settings.
+The details open automatically when a nonzero inline queue or any capture
+interfaces are saved; default capture settings stay collapsed.
+The IEC 104 health indicator distinguishes no active blocking rules from a
+healthy active enforcement path.
+If the saved settings cannot be read, their status is **unknown**, including
+after a failed refresh; the page does not imply inspection is disabled or show
+previous queue and interface values as current.
+
+Rule editors separate **Basic matching** from uncommon station, object,
+direction and message selectors under **Advanced protocol fields**. This section opens
+automatically when any of its selectors has a saved restriction, including an
+explicit zero or false value. IEC 104 message types, station address (CA) and
+point addresses (IOA) remain directly visible. Closing the disclosure never
+clears its values. Reasons for limited or unavailable coverage are shown inline,
+including the exact reported fault text.
 
 For example, this fragment selects strict IEC 104 parsing and leaves the other
 protocols tolerant (merge it into the full dataplane document before posting;
@@ -916,8 +992,8 @@ collection. Observation is not authorization, even when the traffic was delivere
    endpoints, direction, wire/logical coordinates, role certainty and coverage.
 3. For a sealed dataset, explicitly **Generate suggestions**. Review the proposed
    endpoint/service and protocol selectors, withheld-reason counts, limitations,
-   and **Certified evidence (frozen)**: positive replay, negative boundary tests,
-   evidence digest and evaluator/generator versions. A rule's **Preview live recent
+   and **Checks on saved evidence**: recorded-traffic tests, boundary tests,
+   evidence checksum and evaluator/generator versions. A rule's **Preview live recent
    evidence** is a separate isolated impact check against recent retained events;
    it does not recertify the frozen suggestion or simulate the whole policy.
 4. IEC 104 requires an explicit authenticated administrator **Review** before

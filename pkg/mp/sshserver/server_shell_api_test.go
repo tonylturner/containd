@@ -368,7 +368,7 @@ func TestLinuxShellReceivesShellAPISocket(t *testing.T) {
 			defer client.Close()
 			tty := openTTY(t, client)
 			if mode == "appliance" {
-				tty.waitFor(t, "containd# ", 1)
+				tty.waitFor(t, "containd(config", 1)
 				tty.send(t, "shell\n")
 				tty.waitFor(t, "shell\r\n", 1)
 			}
@@ -377,7 +377,10 @@ func TestLinuxShellReceivesShellAPISocket(t *testing.T) {
 			socket := regexp.MustCompile(`socket=\[(/[^\]]+)\]`).FindStringSubmatch(tty.output())[1]
 			tty.send(t, "exit\n")
 			if mode == "appliance" {
-				tty.waitFor(t, "containd# ", 2)
+				// Idle redraws are not evidence that the Linux shell
+				// has exited and handed input back to the CLI.
+				tty.waitFor(t, "Returned to configuration CLI; candidate changes remain staged.", 1)
+				tty.waitFor(t, "containd(config", 2)
 				tty.send(t, "exit\n")
 			}
 			if err := tty.session.Wait(); err != nil {

@@ -40,7 +40,9 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	if e.eventStore == nil {
 		return
 	}
-	metrics.DPIEventsTotal.Add(float64(len(evs)))
+	if !e.detached {
+		metrics.DPIEventsTotal.Add(float64(len(evs)))
+	}
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
@@ -169,7 +171,9 @@ func (e *Engine) recordEvaluatedIDSAlerts(state *flow.State, pkt *dpi.ParsedPack
 	if len(alerts) == 0 {
 		return
 	}
-	metrics.IDSAlertsTotal.Add(float64(len(alerts)))
+	if !e.detached {
+		metrics.IDSAlertsTotal.Add(float64(len(alerts)))
+	}
 	e.recordTaggedEvents(state, pkt, alerts)
 }
 
@@ -183,7 +187,7 @@ func (e *Engine) VerdictCache() *VerdictCache {
 
 // Events returns the telemetry event store.
 func (e *Engine) Events() *events.Store {
-	return e.eventStore
+	return e.eventStore.Store()
 }
 
 // Inventory returns the ICS asset inventory.
@@ -270,8 +274,10 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, 
 	ev := e.ruleSnap.Evaluator()
 	action, matched := ev.EvaluateMessage(ctx, !applyDefault)
 	v := verdict.FromRulesAction(action)
-	metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
-	metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()
+	if !e.detached {
+		metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
+		metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()
+	}
 
 	if matched != nil && matched.Log && e.eventStore != nil {
 		attrs := map[string]any{

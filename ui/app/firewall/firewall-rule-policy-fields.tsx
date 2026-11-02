@@ -47,7 +47,7 @@ export function RulePolicyFields({
             <optgroup label="Decides">
               {RULE_ACTIONS.filter((a) => a.decides).map((a) => <option key={a.value} value={a.value}>{a.value}</option>)}
             </optgroup>
-            <optgroup label="Effect (never admits)">
+            <optgroup label="Additional effect (does not allow traffic)">
               {RULE_ACTIONS.filter((a) => !a.decides).map((a) => <option key={a.value} value={a.value}>{a.value}</option>)}
             </optgroup>
           </select>

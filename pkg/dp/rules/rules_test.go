@@ -3,7 +3,26 @@
 
 package rules
 
-import "testing"
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+func TestSnapshotOrderedZonesJSON(t *testing.T) {
+	want := []string{"mgmt", "outside", "plant", "unbound"}
+	raw, err := json.Marshal(Snapshot{Zones: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap Snapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snap.Zones, want) {
+		t.Fatalf("zone order lost over engine wire: %s", raw)
+	}
+}
 
 func TestSnapshotDefaults(t *testing.T) {
 	s := Snapshot{

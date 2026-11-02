@@ -5,7 +5,7 @@ import {
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { failureOf, getJSONResult, postJSONResult, responseRevision, revisionHeaders } from "./api-request";
+import { deleteJSONResult, failureOf, getJSONResult, postJSONResult, responseRevision, revisionHeaders } from "./api-request";
 import { notifyConfigMutation } from "./config-events";
 
 // Public evidence API projections; rule predicates always use FirewallRule.
@@ -161,6 +161,7 @@ function query(values: Record<string, string>) {
   return new URLSearchParams({ limit: "200", ...values }).toString();
 }
 export const learner = {
+  deleteDataset: (id: string) => deleteJSONResult(`${base}/datasets/${encodeURIComponent(id)}`),
   datasets: (cursor = "") =>
     getJSONResult<LearnPage<LearnDataset>>(
       `${base}/datasets?${query({ cursor })}`,

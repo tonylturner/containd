@@ -3,11 +3,25 @@
 
 package events
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/tonylturner/containd/pkg/common/telemetry"
+)
 
 const denyCapacity = 1024
+const demoCapacity = 1024
 
 func (s *Store) appendEvent(ev Event) {
+	s.incrementTelemetryCounts(ev)
+	if ev.Origin == telemetry.OriginDemo {
+		s.retainBinding(ev)
+		if old, overflow := s.demo.push(ev); overflow {
+			s.releaseBinding(old)
+			s.historyTruncated = true
+		}
+		return
+	}
 	s.feedTail++
 	s.feed.push(ev)
 	if isDeny(ev) {
@@ -29,8 +43,9 @@ func isDeny(ev Event) bool {
 	return action == "DENY" || action == "RESET"
 }
 
-// ListTelemetry includes the independent DENY and IEC incident banks. General-store consumers
-// (List, Flows, MatchingEvents and TimeRange) deliberately do not see that bank.
+// ListTelemetry merges demo, general, DENY and IEC incident retention.
+// General-store consumers (List, Flows, MatchingEvents and TimeRange) merge
+// demo and general retention, but deliberately do not see the evidence banks.
 // Each bank has independent overflow; no age expiry or persistence applies.
 func (s *Store) ListTelemetry(limit int) []Event {
 	if s == nil {
@@ -39,6 +54,7 @@ func (s *Store) ListTelemetry(limit int) []Event {
 	s.mu.Lock()
 	candidates := make([]Event, 0, len(s.general.events)+len(s.denies.events))
 	candidates = append(candidates, s.general.events...)
+	candidates = append(candidates, s.demo.events...)
 	candidates = append(candidates, s.denies.events...)
 	for _, group := range s.incidents.groups {
 		candidates = append(candidates, group.events...)
@@ -81,6 +97,9 @@ func SelectTelemetry(candidates []Event, limit int) []Event {
 }
 
 func telemetryPriority(ev Event) int {
+	if ev.Origin == telemetry.OriginDemo {
+		return 3
+	}
 	if ev.Kind == "system.engine.telemetry_error" {
 		return 0
 	}

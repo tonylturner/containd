@@ -150,7 +150,7 @@ func TestProtectionICAPStoppedAfterSuccessfulApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := coordinatedPost(applyRulesHandler(dp, env.g, c), "live-av", string(body)); w.Code != 200 {
+	if w := coordinatedPost(applyRulesHandler(dp, env.g, c, nil), "live-av", string(body)); w.Code != 200 {
 		t.Fatalf("apply: %d %s", w.Code, w.Body)
 	}
 	await := func(check func() bool) {

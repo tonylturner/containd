@@ -80,6 +80,12 @@ RUN addgroup -S clamav \
     && mkdir -p /var/lib/clamav /run/clamav \
     && chown clamav:clamav /var/lib/clamav /run/clamav
 
+# nginx (reverse proxy) is built with --user=nginx; its workers drop to that
+# account, so preflight and start fail with getpwnam("nginx") without it.
+RUN addgroup -S nginx 2>/dev/null || true \
+    && adduser -S -D -H -G nginx -h /var/lib/nginx -s /sbin/nologin nginx 2>/dev/null || true \
+    && id nginx
+
 # Envoy needs libstdc++ which is not pulled in by default.
 COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
@@ -99,10 +105,64 @@ LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.vendor="containd" \
       org.opencontainers.image.authors="https://github.com/tonylturner/containd"
 COPY --from=builder /out/containd /usr/bin/containd
+# Recorded demo inputs: preserve manifest-relative paths; ship fixture licenses,
+# not the generator programs or their software license collections.
+COPY test/demo/manifest.json test/demo/NOTICE /usr/share/containd/demo/
+COPY test/modbus/testdata/bad-layout.pcap \
+    test/modbus/testdata/bad-length.pcap \
+    test/modbus/testdata/diagnostics.pcap \
+    test/modbus/testdata/operations.pcap \
+    test/modbus/testdata/pid-nonzero.pcap \
+    test/modbus/testdata/source502.pcap \
+    test/modbus/testdata/truncation.pcap \
+    test/modbus/testdata/LICENSE \
+    /usr/share/containd/demo/test/modbus/testdata/
+COPY test/dnp3/testdata/class-range.pcap \
+    test/dnp3/testdata/crc-flip.pcap \
+    test/dnp3/testdata/crob.pcap \
+    test/dnp3/testdata/header-crc.pcap \
+    test/dnp3/testdata/iin-error.pcap \
+    test/dnp3/testdata/large-response.pcap \
+    test/dnp3/testdata/link-only.pcap \
+    test/dnp3/testdata/qualifier-tail.pcap \
+    test/dnp3/testdata/startup-integrity.pcap \
+    test/dnp3/testdata/unsolicited.pcap \
+    test/dnp3/testdata/LICENSE \
+    /usr/share/containd/demo/test/dnp3/testdata/
+COPY test/iec104/testdata/edge-addressing.pcap \
+    test/iec104/testdata/malformed.pcap \
+    test/iec104/testdata/sbo-command.pcap \
+    test/iec104/testdata/session-management.pcap \
+    test/iec104/testdata/startup-gi-monitor.pcap \
+    test/iec104/testdata/LICENSE \
+    /usr/share/containd/demo/test/iec104/testdata/
+COPY test/cip/testdata/connected.pcap \
+    test/cip/testdata/explicit.pcap \
+    test/cip/testdata/io.pcap \
+    test/cip/testdata/msp-error.pcap \
+    test/cip/testdata/msp.pcap \
+    test/cip/testdata/msp32.pcap \
+    test/cip/testdata/native-io.pcap \
+    test/cip/testdata/udp-short-mutation.pcap \
+    test/cip/testdata/LICENSE \
+    /usr/share/containd/demo/test/cip/testdata/
+COPY test/it/testdata/dns.pcap \
+    test/it/testdata/http.pcap \
+    test/it/testdata/ntp.pcap \
+    test/it/testdata/rdp.pcap \
+    test/it/testdata/smb.pcap \
+    test/it/testdata/snmp.pcap \
+    test/it/testdata/ssh.pcap \
+    test/it/testdata/tls.pcap \
+    test/it/testdata/LICENSE \
+    /usr/share/containd/demo/test/it/testdata/
 COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui
 COPY --from=datadir --chown=65532:65532 /data /data
 RUN mkdir -p /usr/local/bin && ln -s /usr/bin/containd /usr/local/bin/configure
+COPY build/containd-os-shell.sh /etc/profile.d/containd-os-shell.sh
+# Bash invoked as sh reads ENV for non-login interactive shells.
+ENV ENV=/etc/profile.d/containd-os-shell.sh
 VOLUME /data
 
 EXPOSE 8080

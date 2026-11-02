@@ -15,8 +15,10 @@ import { Shell } from "../../../../components/Shell";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
-import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceHistory } from "../../../../components/TelemetryChart";
 import { InfoTip } from "../../../../components/InfoTip";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 
 export default function DNSPage() {
@@ -105,7 +107,9 @@ export default function DNSPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["dns"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.running}
+        attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
+        updated={status?.last_render} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -127,60 +131,10 @@ export default function DNSPage() {
         </Link>
       </div>
 
-      <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
-        {loading ? (
-          <div className="mt-3">
-            <Skeleton className="h-20 w-full" />
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
-            <div>
-              Installed:{" "}
-              <span className="text-(--text)">
-                {status?.installed ? "yes" : "no"}
-              </span>
-            </div>
-            <div>
-              Running:{" "}
-              <span className="text-(--text)">{status?.running ? "yes" : "no"}</span>
-              {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
-            </div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
-            </div>
-            <div className="md:col-span-2">
-              Config:{" "}
-              <span className="text-(--text)">
-                {status?.config_path ?? "(unknown)"}
-              </span>
-            </div>
-            {status?.last_error ? (
-              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {status.last_error}
-              </div>
-            ) : null}
-            {status?.sparkline?.length ? (
-              <div className="md:col-span-2">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--primary)"
-                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                  title="DNS events per minute"
-                />
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Card>
-
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Resolver</h2>
         <p className="mt-1 text-sm text-(--text)">
-          Configure the embedded Unbound DNS resolver.
+          Configure DNS resolution.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -188,33 +142,33 @@ export default function DNSPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({ ...c, enabled: e.target.checked }))
               }
               className="h-4 w-4"
             />
             Enable DNS resolver
-            <InfoTip label="Runs the Unbound resolver on configured interfaces." />
+            <InfoTip label="Run DNS on the selected interfaces." />
           </label>
 
           <div className="md:col-span-2">
             <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
               Upstream Servers (one per line)
-              <InfoTip label="Forward-only DNS servers used by Unbound for resolution." />
+              <InfoTip label="Upstream DNS servers used for resolution." />
             </label>
             <textarea
               rows={5}
               value={upstreamText}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setText("upstreamServers", e.target.value)}
               placeholder="1.1.1.1\n8.8.8.8"
               className="mt-1 w-full input-industrial"
             />
           </div>
 
-          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3">
-            <summary className="cursor-pointer text-sm text-(--text)">Advanced options</summary>
+          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3" open={(cfg.listenPort ?? 53) !== 53 || (cfg.cacheSizeMB ?? 0) !== 0}>
+            <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced options</span>{((cfg.listenPort ?? 53) !== 53 || (cfg.cacheSizeMB ?? 0) !== 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
                 <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
@@ -224,7 +178,7 @@ export default function DNSPage() {
                 <input
                   type="number"
                   value={cfg.listenPort ?? 53}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
                   }
@@ -240,7 +194,7 @@ export default function DNSPage() {
                 <input
                   type="number"
                   value={cfg.cacheSizeMB ?? 0}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
                   }
@@ -253,7 +207,53 @@ export default function DNSPage() {
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
-      </fieldset>
+      <Card className="mb-4">
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : !status ? (
+          <div role="status" className="mt-3 text-sm text-(--text-muted)">
+            Unknown — live service status unavailable.
+            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
+            <div>
+              Installed:{" "}
+              <span className="text-(--text)">
+                {typeof status?.installed === "boolean" ? (status.installed ? "yes" : "no") : "Unknown"}
+              </span>
+            </div>
+            <div>
+              Running:{" "}
+              <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
+            </div>
+
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {status.last_error}
+              </div>
+            ) : null}
+            <div className="md:col-span-2"><ServiceHistory service="dns" title="DNS events per minute" /></div>
+            <div className="md:col-span-2">
+              <h3 className="text-sm">Troubleshooting</h3>
+              <Disclosure title="Service details" indicator={status.pid === undefined || !status.config_path ? "Some details unknown" : undefined}>
+              <p>Software: Unbound</p>
+              <p>Process ID: {status.pid ?? "Unknown"}</p>
+              <div className="md:col-span-2">
+                Generated settings file:{" "}
+                <span className="text-(--text)">
+                  {status?.config_path ?? "(unknown)"}
+                </span>
+              </div>
+            </Disclosure>
+            </div>
+          </div>
+        )}
+      </Card>
     </Shell>
   );
 }

@@ -373,6 +373,8 @@ test("health indicator names IEC 104 only while an IEC 104 envelope is active", 
   });
   expect(iec104HealthIndicator({ active: false, healthy: false, reason: "" }).sublabel).toBe("no reason reported");
   expect(iec104HealthIndicator({ active: true, healthy: true, reason: "" }).label).toBe("IEC 104 enforcement active");
-  expect(iec104HealthIndicator({ active: false, healthy: true, reason: "" }).label).toBe("IEC 104 enforcement inactive");
+  expect(iec104HealthIndicator({ active: false, healthy: true, reason: "" })).toEqual({
+    status: "unknown", label: "IEC 104 enforcement inactive", sublabel: "No active IEC 104 blocking rules",
+  });
   expect(iec104HealthIndicator(undefined)).toEqual({ status: "unknown", label: "IEC 104 enforcement", sublabel: "status unavailable" });
 });

@@ -15,7 +15,7 @@ export function TopologyAddress({
         <span title={OS_ADDRESS_HINT}>
           <Image
             src={staticAssetURL("/icons/docker.svg")}
-            alt="OS/Docker address"
+            alt="Detected address"
             width={14}
             height={14}
             className="mr-1 inline-block"

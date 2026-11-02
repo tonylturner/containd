@@ -193,7 +193,7 @@ func TestApplyValidatesWithDetectedChronyd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chronyd was not run: %v", err)
 	}
-	if !strings.HasPrefix(string(args), "-p\n-f\n"+filepath.Join(m.BaseDir, ".chrony.conf-")) {
+	if !strings.HasPrefix(string(args), "-p\n-f\n"+filepath.Join(m.BaseDir, ".chrony-")) || !strings.HasSuffix(string(args), ".conf\n") {
 		t.Errorf("chronyd must validate a staged config, args = %q", args)
 	}
 	if status := m.Status(); status["enabled"] != true || status["ntpd_path"] != chronyd || status["last_error"] != "" {

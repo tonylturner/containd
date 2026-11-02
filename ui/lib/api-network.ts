@@ -1,3 +1,4 @@
+import { validConduitTraffic } from "./conduit-traffic";
 import {
   getConfigJSON,
   deleteJSONResult,
@@ -18,14 +19,17 @@ import type {
 } from "./api";
 
 export const networkAPI = {
+  clearAnomalies: () => deleteJSONResult<{ status: string }>("/api/v1/anomalies"),
   listZones: (signal?: AbortSignal) => getConfigJSON<Zone[]>("/api/v1/zones", "list", signal),
   createZone: (expectedRevision: string, z: Zone) => postJSONResult<Zone>("/api/v1/zones", z, expectedRevision),
   updateZone: (expectedRevision: string, name: string, z: Partial<Zone>) =>
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z, expectedRevision),
   deleteZone: (expectedRevision: string, name: string) =>
     deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`, expectedRevision),
-  getSecurityConduits: (signal?: AbortSignal) =>
-    getJSONList<Conduit>("/api/v1/security/conduits", signal),
+  getSecurityConduits: async (signal?: AbortSignal) => {
+    const conduits = await getJSONList<Conduit>("/api/v1/security/conduits", signal);
+    return conduits?.every(c => c && validConduitTraffic(c.traffic)) ? conduits : null;
+  },
 
   listInterfaces: (signal?: AbortSignal) =>
     getConfigJSON<Interface[]>("/api/v1/interfaces", "list", signal),

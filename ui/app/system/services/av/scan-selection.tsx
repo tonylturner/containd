@@ -107,7 +107,7 @@ export function ScanSelectionEditor({ cfg, update, zones, assets, canEdit }: {
     <div className="space-y-6">
       <div>
         <p className="text-xs text-(--text-muted)">
-          The gate intercepts HTTP/1.x on the listed destination ports between the listed zones; excludes win over includes,
+          Selected traffic is scanned using HTTP/1.x on the listed destination ports between the listed zones; excludes win over includes,
           and ports and addresses are the destination after NAT. HTTPS, HTTP/2 and files inside ICS protocols are not scanned.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-(--text)">
@@ -119,13 +119,13 @@ export function ScanSelectionEditor({ cfg, update, zones, assets, canEdit }: {
             <input type="checkbox" checked={cfg.httpUpload ?? false} disabled={disabled} onChange={(e) => update((c) => ({ ...c, httpUpload: e.target.checked }))} className="h-4 w-4" />
             Scan HTTP uploads
           </label>
-          <span className="text-xs text-(--text-muted)">The gate runs only while scanning is enabled, at least one include exists and one direction is scanned.</span>
+          <span className="text-xs text-(--text-muted)">Traffic scanning runs only while scanning is enabled, at least one include exists and one direction is scanned.</span>
         </div>
       </div>
 
       <div>
         <h4 className="text-sm font-semibold text-(--text)">Include</h4>
-        <p className="text-xs text-(--text-muted)">Destination ports are required: single ports or ranges such as 80, 8080, 8000-8099. ICS decoder ports ({icsPorts}) are refused.</p>
+        <p className="text-xs text-(--text-muted)">Destination ports are required: single ports or ranges such as 80, 8080, 8000-8099. Reserved industrial ports ({icsPorts}) cannot be selected.</p>
         <div className="mt-3 space-y-2">
           {include.map((entry, idx) => {
             const conflict = icsPortConflict(entry.destPorts);
@@ -193,11 +193,11 @@ export function ScanSelectionEditor({ cfg, update, zones, assets, canEdit }: {
             onChange={(e) => setScan((s) => ({ ...s, downloadMode: e.target.value as ScanDownloadMode }))}
             className="mt-1 w-full input-industrial"
           >
-            <option value="hold">Hold until the verdict</option>
-            <option value="stream_tail">Stream, hold the tail</option>
+            <option value="hold">Wait for scanning before sending</option>
+            <option value="stream_tail">Send while scanning; hold the final part</option>
           </select>
           <p className="mt-1 text-xs text-(--text-muted)">
-            Stream forwards most of a download before the verdict and resets the connection on a detection; uploads are always held.
+            Sending while scanning forwards most of a download before the result and resets the connection on a detection; uploads are always held.
           </p>
         </div>
       </div>

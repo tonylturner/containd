@@ -53,7 +53,14 @@ export function CustomDefinitions({ defs, defsPath, canEdit, notify, refresh }: 
               className="mt-1 text-sm text-(--text)"
               disabled={!canEdit || uploading}
               onChange={(e) => {
-                if (e.target.files?.length) void upload(e.target.files[0]);
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) confirm.open({
+                  title: "Upload definition",
+                  message: `Upload ${file.name} and reload the scanner now? This acts immediately, independently of Save.`,
+                  confirmLabel: "Upload file",
+                  onConfirm: () => void upload(file),
+                });
               }}
             />
           </label>

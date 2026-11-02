@@ -15,7 +15,7 @@ import {
   groupFilterMatch,
 } from "./ids-shared";
 
-export type IDSPanelFields = { name: string; filter: string; format: string; sigmaText: string };
+export type IDSPanelFields = { description: string; name: string; filter: string; format: string; sigmaText: string };
 type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field" | "editor">;
 
 export function GroupsPanel({
@@ -23,16 +23,19 @@ export function GroupsPanel({
   groups,
   rules,
   canEdit,
+  mutationDisabled = false,
   onUpdate,
 }: {
   form: PanelForm;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
+  mutationDisabled?: boolean;
   onUpdate: (g: RuleGroup[]) => boolean;
 }) {
   const [name, setName] = form.field("name");
   const [filter, setFilter] = form.field("filter");
+  const [description, setDescription] = form.field("description");
 
   const groupStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -56,11 +59,12 @@ export function GroupsPanel({
     }
     const accepted = onUpdate([
       ...groups,
-      { id, name: name.trim(), filter: filter.trim(), enabled: true },
+      { id, name: name.trim(), description: description.trim(), filter: filter.trim(), enabled: true },
     ]);
     if (!accepted) return;
     setName("");
     setFilter("");
+    setDescription("");
   }
 
   function onToggle(id: string) {
@@ -73,42 +77,48 @@ export function GroupsPanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-(--text-muted)">
-        Organize rules into groups by protocol, vendor, or use case. Groups use
-        filter expressions to match rules (e.g.{" "}
-        <code>proto:modbus</code>,{" "}
-        <code>format:suricata</code>,{" "}
-        <code>severity:critical</code>).
-      </p>
+      <p className="text-xs text-(--text-muted)">Organize rules into groups by protocol, vendor, or use case.</p>
+      <details className="rounded-xs border p-3 text-xs">
+        <summary className="cursor-pointer">Advanced group matching</summary>
+        <p>Groups use matching expressions such as <code>proto:modbus</code>, <code>format:suricata</code> and <code>severity:critical</code>.</p>
+      </details>
 
       {canEdit && (
         <Card title="Create group">
           <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-[150px] flex-1">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="ids-group-name" className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
                 Name
               </label>
               <input
+                id="ids-group-name"
+                disabled={mutationDisabled}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. ICS/Modbus"
                 className="input-industrial w-full text-sm"
               />
             </div>
-            <div className="min-w-[200px] flex-1">
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="ids-group-filter" className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
                 Filter
               </label>
               <input
+                id="ids-group-filter"
+                disabled={mutationDisabled}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="proto:modbus"
                 className="input-industrial w-full font-mono text-sm"
               />
             </div>
+            <label className="min-w-0 flex-1 text-xs">
+              Description
+              <input disabled={mutationDisabled} value={description} onChange={e => setDescription(e.target.value)} className="input-industrial mt-1 w-full" />
+            </label>
             <button
               onClick={onCreate}
-              disabled={!name.trim()}
+              disabled={mutationDisabled || !name.trim()}
               className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               Create
@@ -135,6 +145,7 @@ export function GroupsPanel({
             >
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onToggle(g.id)}
                   title={g.enabled ? "Disable group" : "Enable group"}
                   className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${g.enabled ? "bg-emerald-500/30" : "bg-white/10"}`}
@@ -166,6 +177,7 @@ export function GroupsPanel({
               </span>
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onRemove(g.id)}
                   className="text-xs text-red-400 transition-ui hover:text-red-300"
                 >
@@ -239,7 +251,7 @@ export function ImportPanel({
           evaluability and conversion notes before enabling detection.
         </p>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[200px] flex-1">
+          <div className="min-w-0 flex-1">
             <label className="mb-1 block text-xs text-(--text-muted)">
               Rule file
             </label>
@@ -297,19 +309,18 @@ export function ImportPanel({
   );
 }
 
-export function ExportPanel({ ruleCount }: { ruleCount: number }) {
+export function ExportPanel({ ruleCount, onError }: { ruleCount: number; onError: (error: string | null) => void }) {
   const [exporting, setExporting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [refusedCount, setRefusedCount] = useState<number | null>(null);
 
   async function doExport(format: string) {
     setExporting(format);
-    setError(null);
+    onError(null);
     setRefusedCount(null);
     const result = await api.exportIDSRules(format);
     setExporting(null);
     if (!result.ok) {
-      setError(result.error || `Export failed for ${format}.`);
+      onError(result.error || `Export failed for ${format}.`);
     } else {
       setRefusedCount(result.data.refusedCount);
     }
@@ -318,7 +329,7 @@ export function ExportPanel({ ruleCount }: { ruleCount: number }) {
   return (
     <Card title="Export rules">
       <p className="mb-4 text-xs text-(--text-muted)">
-        Download running rules in your chosen format. All formats refuse
+        Export uses active committed rules. Download running rules in your chosen format. All formats refuse
         rules they cannot preserve; the file lists each refusal. Unsaved and
         staged changes are not included.
       </p>
@@ -327,11 +338,6 @@ export function ExportPanel({ ruleCount }: { ruleCount: number }) {
           Downloaded. {refusedCount} rule{refusedCount !== 1 ? "s" : ""} refused.
           {refusedCount > 0 && " Review the refusal comments in the downloaded file."}
         </p>
-      )}
-      {error && (
-        <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-          {error}
-        </div>
       )}
       {ruleCount === 0 && (
         <p className="mb-3 text-sm text-(--text-muted)">
@@ -363,7 +369,7 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
     <div className="space-y-3">
       <p className="text-xs text-(--text-muted)">
         Community rule repositories. Download externally, then import via the
-        Import tab. GPL sets are not shipped.
+        Import control under Add/import rules. GPL sets are not shipped.
       </p>
       {sources.length === 0 ? (
         <EmptyState title="No rule sources" description="Catalog is empty." />
@@ -415,79 +421,6 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-export function EditRuleModal({
-  rule,
-  text,
-  setText,
-  onClose,
-  onSave,
-}: {
-  rule: IDSRule;
-  text: string;
-  setText: (text: string) => void;
-  onClose: () => void;
-  onSave: (r: IDSRule) => void;
-}) {
-  const [err, setErr] = useState<string | null>(null);
-
-  function save() {
-    setErr(null);
-    try {
-      const parsed = JSON.parse(text) as IDSRule;
-      if (!parsed.id) {
-        setErr("Rule must have an id.");
-        return;
-      }
-      onSave(parsed);
-    } catch {
-      setErr("Invalid JSON.");
-    }
-  }
-
-  return (
-    <div className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="animate-fade-in w-full max-w-3xl rounded-xs border bg-(--surface) p-5 shadow-card-lg">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-(--text)">
-            Edit: {rule.id}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-          >
-            Close
-          </button>
-        </div>
-        {err && (
-          <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-            {err}
-          </div>
-        )}
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={16}
-          className="input-industrial w-full font-mono text-xs"
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
-          >
-            Save rule
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

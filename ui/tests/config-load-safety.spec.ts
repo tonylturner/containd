@@ -23,7 +23,7 @@ const data: Record<string, unknown> = {
   "/services/dns": { enabled: false, listenPort: 5353, upstreamServers: ["192.0.2.53"], listenZones: ["lan"], cacheSizeMB: 16 },
   "/services/ntp": { enabled: false, servers: ["ntp.example.test"], intervalSeconds: 90 },
   "/services/syslog": { forwarders: [{ address: "192.0.2.9", port: 6514, proto: "tcp" }], batchSize: 700, flushEvery: 5 },
-  "/services/dhcp": { enabled: false, listenIfaces: ["lan"], leaseSeconds: 900, router: "192.0.2.1", dnsServers: ["192.0.2.53"], domain: "example.test", authoritative: true, pools: [{ iface: "lan", start: "192.0.2.100", end: "192.0.2.200" }], reservations: [{ iface: "lan", mac: "00:11:22:33:44:55", ip: "192.0.2.10" }] },
+  "/services/dhcp": { enabled: false, listenIfaces: ["lan"], leaseSeconds: 900, router: "192.0.2.1", dnsServers: ["192.0.2.53"], domain: "example.test", authoritative: true, pools: [{ iface: "lan", start: "192.0.2.100", end: "192.0.2.200" }], reservations: [{ iface: "lan", mac: "00:11:22:33:44:55", ip: "192.0.2.150" }] },
   "/services/av": { enabled: false, mode: "clamav", failPolicy: "closed", clamav: { freshclamEnabled: false, socket: "/run/clamav/clamd.sock" }, scan: { downloadMode: "hold" } },
   "/services/av/defs": { files: [], path: "/data/clamav" },
   "/services/proxy/forward": { enabled: false, listenPort: 3128, listenZones: ["lan"], allowedDomains: ["example.test"], allowedClients: ["192.0.2.0/24"], upstream: "http://192.0.2.8:3128", logRequests: true },
@@ -110,7 +110,7 @@ const services = [
   { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
   { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
   { name: "DHCP", route: "/dhcp/", path: "/services/dhcp", label: "Enable DHCP server" },
-  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable intrusion detection" },
   { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
   { name: "Forward proxy", route: "/proxies/", path: "/services/proxy/forward", label: "Enabled", index: 0 },
   { name: "Reverse proxy", route: "/proxies/", path: "/services/proxy/reverse", label: "Enabled", index: 1 },
@@ -222,10 +222,15 @@ for (const failure of ["HTTP", "null"] as const) {
     await expect(error).toHaveCount(0);
     await expect(refreshed).toBeVisible();
     const lastRefresh = await refreshed.textContent();
-    await page.getByText("Advanced capture options", { exact: true }).click();
+    const advanced = page.locator("details").filter({
+      has: page.getByText("Advanced capture options", { exact: true }),
+    });
+    // The saved non-default values must open this section after recovery.
+    await expect(advanced).toHaveJSProperty("open", true);
     // The file-prefix input follows its visible label in the advanced section.
     const prefixField = page.locator("label").filter({ hasText: "File prefix" }).locator("..").locator("input");
     await expect(prefixField).toHaveValue("existing");
+    await expect(prefixField).toBeVisible();
     await prefixField.fill("draft");
     failed.add("/pcap/config");
     await page.clock.setFixedTime(new Date("2026-10-31T12:01:00Z"));

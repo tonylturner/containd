@@ -136,10 +136,13 @@ func runCLI(ctx context.Context) error {
 		return err
 	}
 	reg := cli.NewRegistry(nil, api)
-	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
+	cmdCtx := cli.WithLocalFilesystem(cli.WithRole(ctx, string(cli.RoleAdmin)), true)
 
-	prompt := "containd# "
-	fmt.Println("containd CLI. Type 'help' for commands, 'exit' to return to shell. Tab to complete.")
+	entry, role := api.SessionEntry(ctx)
+	fmt.Println(entry)
+	fmt.Println("exit ends this CLI process and returns to its caller. For guided setup, use the SSH wizard. Tab to complete; help lists commands.")
+	defer fmt.Println(cli.SessionExit)
+	prompt := "containd(config?)# "
 
 	// peterh/liner provides line editing + tab completion + history.
 	// It falls back to plain line reading when stdin isn't a TTY (the
@@ -150,13 +153,14 @@ func runCLI(ctx context.Context) error {
 	state := liner.NewLiner()
 	defer state.Close()
 	state.SetCtrlCAborts(true)
+	cmdCtx = cliSecretContext(cmdCtx, interactive, state.PasswordPrompt)
 
 	// Completer: prefix-match against every registered command.
 	// Registry.Commands() returns the list (e.g., "show running-config",
 	// "set firewall rule") and the completer just filters by the
 	// current line. Liner handles single-match auto-fill + multi-match
 	// listing on its own.
-	commands := reg.Commands()
+	commands := append(reg.Commands(), "configure", "exit", "quit", "logout", "help")
 	sort.Strings(commands)
 	state.SetCompleter(func(line string) []string {
 		needle := strings.ToLower(line)
@@ -185,8 +189,23 @@ func runCLI(ctx context.Context) error {
 		}()
 	}
 
-	return runCLILoop(prompt, state.Prompt, state.AppendHistory, func(line string, buf *strings.Builder) error {
-		return reg.ParseAndExecute(cmdCtx, line, buf)
+	return runCLILoop(prompt, func(string) (string, error) {
+		// Liner cannot safely redraw a prompt while editing. Resolve status
+		// before handing it the prompt, with SessionStatus's 250 ms budget.
+		// Invalidating an asynchronous cache after every command meant this
+		// snapshot always preceded the response and only ever displayed '?'.
+		status := api.SessionStatus(ctx)
+		fmt.Println(status.String())
+		return state.Prompt(status.Prompt(role))
+	}, state.AppendHistory, func(line string, buf *strings.Builder) error {
+		if output, handled := cli.SessionConfigure(line); handled {
+			fmt.Fprintln(buf, output)
+			return nil
+		}
+		if strings.EqualFold(line, "help") {
+			fmt.Fprintln(buf, "Session controls: configure names this CLI; exit / quit / logout end this CLI process. Use the SSH wizard for guided setup.")
+		}
+		return cli.SessionCommandError(line, reg.ParseAndExecute(cmdCtx, line, buf))
 	}, interactive, os.Stdout, os.Stderr)
 }
 
@@ -211,7 +230,10 @@ func runCLILoop(
 	for {
 		line, err := readLine(prompt)
 		if err != nil {
-			if errors.Is(err, liner.ErrPromptAborted) || errors.Is(err, io.EOF) {
+			if errors.Is(err, liner.ErrPromptAborted) {
+				continue
+			}
+			if errors.Is(err, io.EOF) {
 				return sessionResult()
 			}
 			return err
@@ -223,13 +245,7 @@ func runCLILoop(
 		appendHistory(line)
 
 		switch strings.ToLower(line) {
-		// Both "exit"/"quit"/"logout" and "shell"/"bash" leave the
-		// containd CLI. The wrapper that launched `containd cli`
-		// (e.g., the SSH appliance shell or RangerDanger's in-app
-		// firewall terminal) drops the operator back into a Linux
-		// shell on return — so `shell` and `bash` are equivalent
-		// to `exit` here, not a separate sub-shell.
-		case "exit", "quit", "logout", "shell", "bash":
+		case "exit", "quit", "logout":
 			return sessionResult()
 		}
 		var buf strings.Builder

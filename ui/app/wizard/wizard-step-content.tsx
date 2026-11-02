@@ -141,7 +141,7 @@ export function WizardStepContent({
             <strong>{lanZone}</strong> to <strong>{wanZone}</strong>
           </p>
           <p>
-            NAT: Enable SNAT masquerade on <strong>{wanZone}</strong> for source
+            Outbound address sharing (SNAT) on <strong>{wanZone}</strong> for source
             zone <strong>{lanZone}</strong>
           </p>
         </div>

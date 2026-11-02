@@ -33,6 +33,11 @@ test("adjacent high event IDs survive page merge, detail and JSON export", async
   await page.getByRole("button", { name: "Load older evidence", exact: true }).click();
   await older;
   for (const id of ids) {
+    const inspection = page.locator(`[id="event-inspection-${id}"]`);
+    const toggle = page.getByRole("button", { name: "Inspect event", exact: true });
+    await toggle.nth(ids.indexOf(id)).focus();
+    await page.keyboard.press("Enter");
+    await expect(inspection).toBeVisible();
     const button = page.getByRole("button", { name: `Event ${id}`, exact: true });
     await expect(button).toHaveCount(1);
     const detail = page.waitForRequest((r) => new URL(r.url()).pathname === `/api/v1/events/${id}`);

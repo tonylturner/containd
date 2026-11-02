@@ -1,0 +1,22 @@
+.tab {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface2);
+  padding: 0.375rem 0.75rem;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.tab[aria-selected="true"] {
+  border-color: var(--amber);
+  background: var(--amber);
+  color: var(--bg);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
