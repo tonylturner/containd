@@ -92,6 +92,34 @@ test("failed event reads leave Dashboard totals and stream unknown, but independ
   await expect(page.getByText("No events yet", { exact: true })).toHaveCount(0);
 });
 
+test("grouped counts without a common duration stay partial without fabricated rates at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, "/", { mutate: (body, url) => {
+    const last = body.series[0].points.at(-1)!;
+    if (body.metric === "iface.rx_bytes" && url.searchParams.get("group") === "role") {
+      last.q = "partial";
+      last.v = "9007199254740993";
+      delete last.d;
+    }
+    if (body.metric === "iface.tx_bytes" && url.searchParams.get("group") === "zone") {
+      last.q = "partial";
+      last.d = 20;
+    }
+  } });
+  const incoming = page.locator('[data-telemetry="In bytes/s"]');
+  await expect(incoming).toContainText("Count: 9,007,199,254,740,993 · Partial bucket — rate unavailable");
+  await expect(incoming).toContainText("Rate: Unknown /s");
+  const point = incoming.locator('[data-quality="partial"]');
+  await expect(point).toHaveAttribute("aria-label", /9007199254740993 counts; duration unavailable; rate unavailable; Partial bucket/);
+  await expect(point.locator("[data-bar]")).toHaveCount(0);
+  await expect(point.locator("[data-count-only]")).toHaveCSS("border-top-style", "dashed");
+  const zone = page.locator('[data-telemetry="it throughput"]');
+  await expect(zone).toContainText("Count: 40 · Partial bucket — rate unavailable");
+  await expect(zone.locator('[data-quality="partial"] [data-bar]')).toHaveCount(0);
+  await expect(page.locator('[data-telemetry="Out bytes/s"]')).toContainText("Rate: 2.0 /s");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
 test("Monitoring protocol totals and Traffic Pulse use retained packet and interface counters, not IDS events", async ({ page }) => {
   await open(page, "/monitoring/");
   const protocols = page.getByRole("region", { name: "Top Protocols", exact: true });

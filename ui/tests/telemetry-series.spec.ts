@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { decimalCounter, parseSeries, responsePoints, sumPoints } from "../lib/api-telemetry";
+import { decimalCounter, parseSeries, pointRate, responsePoints, sumPoints } from "../lib/api-telemetry";
 import { seriesResponse, type WireResponse } from "./fixtures/telemetry";
 
 type Scenario = { mutate?: (body: WireResponse, url: URL) => void; status?: number };
@@ -57,6 +57,17 @@ test("the latest gap is unavailable, never the previous bucket's rate or a zero"
   await expect(chart(page)).not.toContainText("Rate: 60.0");
   await expect(chart(page)).not.toContainText("Rate: 0.0");
   await expect(chart(page).getByRole("img")).toHaveCount(0);
+});
+
+test("a partial error count without duration remains visible without an invented rate", async ({ page }) => {
+  await open(page, { mutate: body => {
+    if (body.metric === "service.errors") {
+      const last = body.series[0].points.at(-1)!;
+      last.q = "partial";
+      delete last.d;
+    }
+  } });
+  await expect(page.getByText("Errors:", { exact: false })).toContainText("Errors: Unknown /min(Partial bucket · Count: 10; rate unavailable)");
 });
 
 for (const state of ["stalled", "unavailable"] as const) {
@@ -193,6 +204,36 @@ test("aggregates both event sources without converting missing coverage to zero"
   const observed = { t, v: BigInt(0), d: 10, q: "observed" as const };
   expect(sumPoints([{ dims: { source: "engine" }, points: [observed] }, { dims: { source: "services" }, points: [{ t, q: "gap" }] }])[0]).toEqual({ t, v: BigInt(0), d: 10, q: "partial" });
   expect(() => sumPoints([{ dims: {}, points: [{ ...observed, v: BigInt("18446744073709551615") }] }, { dims: {}, points: [{ ...observed, v: BigInt(1) }] }])).toThrow("overflow");
+});
+
+test("grouped partial counts can omit duration, but observed and reset buckets cannot", () => {
+  const url = new URL("http://localhost/api/v1/telemetry/series?metric=iface.rx_bytes&group=role&role=leaf&range=1h&origin=real");
+  const body = seriesResponse(url, [10]);
+  const last = body.series[0].points.at(-1)!;
+  last.q = "partial";
+  delete last.d;
+  const parsed = parseSeries(body).series[0].points.at(-1)!;
+  expect(parsed).toEqual({ t: last.t, q: "partial", v: BigInt(10) });
+  expect(pointRate(parsed)).toBeNull();
+  expect(pointRate(parsed, true)).toBeNull();
+  for (const q of ["observed", "reset"] as const) {
+    last.q = q;
+    expect(() => parseSeries(body)).toThrow("duration");
+  }
+});
+
+test("summing members with different or unknown durations retains only a partial count", () => {
+  const t = "2026-11-02T12:00:00Z";
+  const first = { dims: {}, points: [{ t, q: "observed" as const, v: BigInt(10), d: 10 }] };
+  const second = { dims: {}, points: [{ t, q: "reset" as const, v: BigInt(20), d: 20 }] };
+  const combined = sumPoints([first, second])[0];
+  expect(combined).toEqual({ t, q: "partial", v: BigInt(30) });
+  expect(pointRate(combined)).toBeNull();
+  expect(sumPoints([first, { dims: {}, points: [combined] }])[0]).toEqual({ t, q: "partial", v: BigInt(40) });
+  second.points[0].d = 10;
+  const sameDuration = sumPoints([first, second])[0];
+  expect(sameDuration).toEqual({ t, q: "reset", v: BigInt(30), d: 10 });
+  expect(pointRate(sameDuration, true)).toBe(180);
 });
 
 

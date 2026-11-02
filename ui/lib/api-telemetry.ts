@@ -63,9 +63,9 @@ export function parseSeries(value: unknown): SeriesResponse {
         if (p.v !== undefined || p.d !== undefined) throw new Error("Gap contains a value");
         return { t: p.t, q: "gap" };
       }
-      if (typeof p.d !== "number" || !Number.isSafeInteger(p.d) || p.d <= 0 ||
+      if (p.d === undefined ? p.q !== "partial" : typeof p.d !== "number" || !Number.isSafeInteger(p.d) || p.d <= 0 ||
           (p.q === "observed" && p.d !== width)) throw new Error("Invalid observation duration");
-      return { t: p.t, q: p.q as Quality, v: decimalCounter(p.v), d: p.d };
+      return { t: p.t, q: p.q as Quality, v: decimalCounter(p.v), ...(p.d === undefined ? {} : { d: p.d as number }) };
     });
     return { dims: (entry.dims ?? {}) as Record<string, string>, points };
   });
@@ -91,9 +91,11 @@ export function sumPoints(series: Series[]): Point[] {
     if (!covered.length) return { t: first.t, q: "gap" };
     const v = covered.reduce((n, p) => n + p.v!, BigInt(0));
     if (v > uint64Max) throw new Error("Telemetry sum overflow");
-    const q = covered.length !== members.length ? "partial" : members.some(p => p.q === "reset") ? "reset"
+    const d = covered[0].d;
+    const commonDuration = d !== undefined && covered.every(p => p.d === d);
+    const q = !commonDuration || covered.length !== members.length ? "partial" : members.some(p => p.q === "reset") ? "reset"
       : members.some(p => p.q === "partial") ? "partial" : "observed";
-    return { t: first.t, v, d: Math.min(...covered.map(p => p.d!)), q };
+    return { t: first.t, v, ...(commonDuration ? { d } : {}), q };
   });
 }
 

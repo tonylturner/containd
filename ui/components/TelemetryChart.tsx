@@ -46,6 +46,7 @@ export function TelemetryChart({ queries, title, ranges = false, perMinute = fal
       {!compact && <p className="text-xs text-(--text-muted)">Rate: {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
         {showTrend && trend !== null && continuous.length > 1 && <span className="ml-2">Trend: {trend > 0 ? "▲" : trend < 0 ? "▼" : "•"} {Number(trend.toFixed(2))}</span>}
       </p>}
+      {last?.v !== undefined && rate === null && <p className="wrap-anywhere text-xs text-amber">Count: {last.v.toLocaleString()} · Partial bucket — rate unavailable</p>}
     </> : <p className="text-xs text-(--text-muted)">{read.data.some(r => r.realCovered || r.realActive) ? "No observed coverage in this range" : "No traffic recorded yet"}</p>)}
   </div>;
 }
@@ -59,6 +60,7 @@ export function TelemetryRate({ queries, perMinute = true, range = "1h" }: { que
     {rate === null ? "Unknown" : rate.toFixed(1)} /{perMinute ? "min" : "s"}
     {read?.demo && <span className="ml-1 text-amber">Demo data</span>}
     {last && last.q !== "observed" && rate !== null && <span className="ml-1 text-amber">({last.q === "reset" ? "counter reset" : "partial"})</span>}
+    {!read?.error && last?.v !== undefined && rate === null && <span className="ml-1 text-amber">(Partial bucket · Count: {last.v.toLocaleString()}; rate unavailable)</span>}
     {read?.error && <span className="ml-1 text-amber">{read.error}</span>}
   </span>;
 }
