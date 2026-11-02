@@ -101,6 +101,11 @@ verified enforcement. IDS is `enabled` or `disabled` globally, not full or parti
 conduit coverage. Syslog and AV settings likewise do not establish per-conduit
 logging or scanning. Conventional encrypted-service ports are a heuristic only;
 `tlsEnforced` is false because this summary cannot enforce or verify TLS.
+Protocol whitelisting is a conservative all-grants check: a configured pass
+requires a refusing fallback and explicit transport restrictions on every
+zone-matching enforcing ALLOW, including conditional grants. An unrestricted
+host grant cannot be cancelled by a separate TCP/443 grant. Unproved cases
+(including ICS-only grants) remain unknown and never pass automatically.
 `traffic` is an object with `state` (`measured`, `demo`, `none`, or `unavailable`).
 Measured and recorded demo counts, coverage, and unavailable reasons follow the
 [telemetry contract](#retained-counter-history); there is no percent-of-baseline value.

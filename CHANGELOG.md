@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Require protocol restrictions on every matching enforcing ALLOW and a refusing
+  fallback before topology can count protocol whitelisting as a configured pass.
 - Distinguish configured topology checks from heuristics and unknown evidence;
   remove assumed authentication and verification passes. Show global IDS settings
   without claiming conduit coverage.

@@ -90,3 +90,21 @@ test("operator overrides keep their explicit provenance and never claim verifica
   expect(checks.find(c => c.id === "SR-1.1")).toMatchObject({ met: true, auto: false, overridden: true, provenance: "configured" });
   expect(checks.find(c => c.id === "SR-1.1")?.reason).toContain("not independently verified");
 });
+
+test("an unrestricted host ALLOW alongside TCP/443 cannot pass protocol whitelisting", () => {
+  // The API's all-grants check leaves the mixed policy unproved. A listed
+  // HTTPS service alone says nothing about the host's unrestricted grant.
+  const conduit: Conduit = {
+    ...admitted, from: "lan", to: "wan", state: "partial",
+    proto: [{ n: "HTTPS", t: "allowed" }], protoWhitelist: false,
+    rules: ["ALLOW ALL from LAN to WAN", "ALLOW HTTPS from LAN to WAN"],
+    checks: { ...securityChecks, protoWhitelist: {
+      provenance: "unknown",
+      reason: "A matching ALLOW from 192.0.2.1/32 has no explicit transport restriction.",
+    } },
+  };
+  for (const protoWhitelist of [false, true]) {
+    const { checks } = scoreZone(mapZone({ name: "lan" }), [{ ...conduit, protoWhitelist }]);
+    expect(checks.find(c => c.id === "SR-5.4")).toMatchObject({ met: false, provenance: "unknown" });
+  }
+});

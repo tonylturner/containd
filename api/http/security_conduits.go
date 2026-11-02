@@ -154,13 +154,13 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 	matching := matchingConduitRules(cfg.Firewall.Rules, from, to)
 	effective := reachableConduitRules(matching, cfg.DataPlane.DPIMode)
 	state := computeConduitState(effective, globals.defaultAction, from, to, cfg.DataPlane.DPIMode)
-	protos, allPorts, hasProtoRestrictions, hasICSPredicate := conduitProtocols(effective)
+	protos, allPorts, hasICSPredicate := conduitProtocols(effective)
 	defaultDeny := globals.defaultAction == config.ActionDeny || hasExplicitDenyAll(effective, from)
 	encryptedPortHint := conduitEncryptedPortHint(allPorts)
-	protoWhitelist := hasProtoRestrictions
+	protoWhitelist, whitelistEvidence := conduitProtocolWhitelist(matching, globals.defaultAction, cfg.DataPlane.DPIMode)
 	if state == "allow" {
-		// An unrestricted winning grant or ALLOW default is not a service whitelist.
-		encryptedPortHint, protoWhitelist = false, false
+		// An unrestricted summary cannot establish encrypted-only services.
+		encryptedPortHint = false
 	}
 	ruleDescs := conduitRuleDescriptions(matching, from, to)
 	gaps := computeGaps(state, defaultDeny, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
@@ -181,18 +181,50 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 		MFARequired:    false,
 		AuditLogged:    globals.auditLogged,
 		AVEnabled:      globals.avEnabled,
-		Checks:         conduitCheckProvenance(encryptedPortHint),
+		Checks:         conduitCheckProvenance(encryptedPortHint, whitelistEvidence),
 	}
 }
 
-func conduitCheckProvenance(encryptedPortHint bool) map[string]conduitCheckEvidence {
+// Prove a sufficient all-grants condition, not an existential service hint.
+// Considering every zone-matching ALLOW is conservative even when ordered
+// coverage could hide one. Conditional selectors never erase a grant, monitor
+// rules do not grant, and an ALLOW fallback cannot establish a whitelist.
+func conduitProtocolWhitelist(matching []config.Rule, fallback config.Action, mode string) (bool, conduitCheckEvidence) {
+	unknown := func(reason string) (bool, conduitCheckEvidence) {
+		return false, conduitCheckEvidence{"unknown", reason}
+	}
+	if !denies(fallback) {
+		return unknown("Protocol whitelisting is not established: the firewall fallback permits unrestricted protocols.")
+	}
+	hasGrant := false
+	for _, r := range matching {
+		if r.Action != config.ActionAllow || rules.MonitorICS(firewallRuleEntry(r), mode) {
+			continue
+		}
+		hasGrant = true
+		if len(r.Protocols) == 0 {
+			return unknown("Protocol whitelisting is not established: a matching ALLOW has no explicit transport restriction, even if host, identity, schedule or ICS selectors limit it.")
+		}
+		for _, p := range r.Protocols {
+			if err := rules.ValidateProtocol(p.Name, p.Port); err != nil {
+				return unknown("Protocol whitelisting is not established: an ALLOW contains an unsupported protocol selector.")
+			}
+		}
+	}
+	if !hasGrant {
+		return unknown("No enforcing ALLOW grants establish protocol whitelisting on this conduit.")
+	}
+	return true, conduitCheckEvidence{"configured", "The running firewall fallback refuses traffic and every matching enforcing ALLOW has explicit transport restrictions, including conditional grants; not a runtime test."}
+}
+
+func conduitCheckProvenance(encryptedPortHint bool, whitelistEvidence conduitCheckEvidence) map[string]conduitCheckEvidence {
 	tlsReason := "Port selection cannot verify encryption or TLS enforcement."
 	if encryptedPortHint {
 		tlsReason = "Only conventional encrypted-service ports are listed; this does not verify encryption or enforce TLS."
 	}
 	return map[string]conduitCheckEvidence{
 		"defaultDeny":    {"configured", "Derived from the running firewall default and explicit catch-all refusal rules; not a runtime test."},
-		"protoWhitelist": {"configured", "Derived from reachable protocol-restricted grants in running policy; not a runtime test."},
+		"protoWhitelist": whitelistEvidence,
 		"tlsEnforced":    {"heuristic", tlsReason},
 		"ids":            {"heuristic", "The global IDS enabled flag does not establish evaluable rules, inspection or coverage on this conduit."},
 		"mfaRequired":    {"unknown", "No conduit MFA evidence is available."},
@@ -213,10 +245,9 @@ func matchingConduitRules(rules []config.Rule, from, to string) []config.Rule {
 	return matching
 }
 
-func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool, bool) {
+func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool) {
 	var protos []protoEntry
 	allPorts := make(map[int]bool)
-	hasProtoRestrictions := false
 	hasICSPredicate := false
 	for _, r := range matching {
 		if r.Action != config.ActionAllow {
@@ -228,10 +259,9 @@ func conduitProtocols(matching []config.Rule) ([]protoEntry, map[int]bool, bool,
 		if len(r.Protocols) == 0 {
 			continue
 		}
-		hasProtoRestrictions = true
 		protos = append(protos, protocolEntriesForRule(r, hasICSPredicate, allPorts)...)
 	}
-	return protos, allPorts, hasProtoRestrictions, hasICSPredicate
+	return protos, allPorts, hasICSPredicate
 }
 
 func protocolEntriesForRule(r config.Rule, hasICSPredicate bool, allPorts map[int]bool) []protoEntry {
