@@ -23,6 +23,29 @@ and learning are optional, not prerequisites.
   cannot stop the first command. Candidate save, import and commit validate this.
   A global enforce setting with no enforcing ICS rules needs no queue.
 
+### Set up inline inspection
+
+In **Firewall → Deep Packet Inspection → DPI settings → Inline inspection**,
+set **Inline queue (NFQUEUE)** and select **Stage inline inspection**.
+The ICS page's **Set up inline inspection** link and the firewall rule form
+open this control directly. Selecting Enforce without a queue shows the
+prerequisite; global Enforce is not staged when existing rules would need
+that missing queue.
+
+Queue numbers are 1–65535 (recommended: 101). **Packet logging group (NFLOG)**
+is independent, optional, and accepts 0–65535; 0 disables packet logging and
+100 is recommended when logging is needed. The same number in NFLOG and
+NFQUEUE is not a conflict: they are separate kernel subsystems. Do not choose
+a queue already owned by another consumer. The UI cannot reserve or prove
+runtime ownership at staging time; check applied coverage after commit.
+Existing dataplane settings are preserved and writes carry the candidate
+revision precondition. A 412 keeps the draft visible but requires Reload and
+review, not a rebase or automatic retry of the full dataplane document.
+
+Setup alone does not turn on DPI, protocol decoders or firewall enforcement,
+and does not change Monitor into blocking. Review those settings, the candidate
+diff and per-rule coverage; use **Commit-confirmed** to apply safely.
+
 Monitor-only traffic needs DPI, its decoder and capture:
 
 - With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
@@ -76,6 +99,10 @@ on failed apply, and are lost on engine restart. The snapshot ID and `since`
 identify the applied counter lifetime. Before first apply or when the engine is
 unreachable the endpoint returns HTTP 200 with
 `{"available":false,"reason":"..."}`; unavailable never means zero.
+
+Below the small-screen breakpoint, ICS table rows become stacked cards with
+labelled fields. Coverage, shadow matches and Edit remain available without
+scrolling sideways.
 
 ### Upgrade and downgrade
 

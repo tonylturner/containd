@@ -1,0 +1,54 @@
+/* Preserve one semantic table; make every row and action readable on phones. */
+@media (width < 40rem) {
+  .table,
+  .table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ruleRow {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ruleRow > td {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ruleRow > :first-child,
+  .ruleRow > [data-label="Coverage"],
+  .ruleRow > [data-label="Shadow matches"],
+  .ruleRow > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .ruleRow > [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .ruleRow > :last-child {
+    text-align: left;
+  }
+
+  .table tbody > tr:not(.ruleRow),
+  .table tbody > tr:not(.ruleRow) > td {
+    display: block;
+    min-width: 0;
+  }
+}

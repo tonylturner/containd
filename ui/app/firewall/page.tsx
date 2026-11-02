@@ -437,6 +437,8 @@ export default function FirewallPage() {
         </div>
         <FirewallRuleTable
           available={canSave}
+          revision={viewRevision}
+          onDefaultSaved={() => { setNotice("Default action staged — review changes and commit to apply."); void refresh(); }}
           rules={rules}
           defaultAction={canSave ? defaultAction : "unknown"}
           zones={zones}
@@ -471,6 +473,7 @@ export default function FirewallPage() {
                 zones={zones}
                 forwards={nat.portForwards ?? []}
                 globalMode={dpiConfig.dpiMode}
+                inlineConfigured={canSave ? !!dpiConfig.nfqueueGroup : undefined}
                 tagsInUse={tagsInUse(rules)}
                 onCreate={onCreate}
               />
@@ -487,6 +490,7 @@ export default function FirewallPage() {
             rule={rules.find((r) => r.id === editing.id) ?? editing}
             context={rules}
             globalMode={dpiConfig.dpiMode}
+            inlineConfigured={canSave ? !!dpiConfig.nfqueueGroup : undefined}
             tagsInUse={tagsInUse(rules, editing.id)}
             onClose={() => setEditing(null)}
             onSave={(patch, revision) => onUpdate(editing.id, patch, revision)}
@@ -494,6 +498,7 @@ export default function FirewallPage() {
         )}
       </div>
       <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onSave={update => write((base, view) => setDataPlane(base, update(view.dpiConfig)), { patch: (view, data) => ({ ...view, dpiConfig: data }) })}
+        inlineRequiredForEnforce={rules.some(rule => !!rule.ics?.protocol && rule.ics.mode !== "monitor")}
         onSaveDraft={configView.writer((base, updated: DataPlaneConfig) => setDataPlane(base, updated), (view, data) => ({ ...view, dpiConfig: data }))} />
 
       <Card padding="lg" className="mt-6">

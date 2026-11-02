@@ -70,8 +70,13 @@ rule is reported in the ruleset warnings
   already observed. ICS rules in effective enforce mode are therefore rejected
   at validation while `nfqueueGroup` is 0; use monitor mode with AF_PACKET.
 - **NFQUEUE** holds selected packets for userspace verdicts. Set the candidate
-  dataplane's `nfqueueGroup` to a nonzero queue (for example 101), preserve the
-  rest of the dataplane settings, and commit. The queue and rules must be active
+  dataplane's `nfqueueGroup` to a nonzero queue (for example 101) in
+  **Firewall → DPI settings → Inline inspection** and select
+  **Stage inline inspection**. This preserves the rest of the dataplane settings.
+  Review the diff and use **Commit-confirmed** to apply. Optional packet
+  logging is separate from the inline queue; see
+  [inline inspection setup](ics-dpi.md#set-up-inline-inspection).
+  The queue and rules must be active
   on the routed packet path. A denied command is dropped inline; later packets
   of that TCP incarnation keep dropping even after the verdict cache expires.
   After the drop completes, the engine sends a best-effort RST to each peer

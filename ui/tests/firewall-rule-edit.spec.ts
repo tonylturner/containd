@@ -94,7 +94,7 @@ test("editing a rule with any protocol does not add a TCP restriction", async ({
   expect(seen.patches[0]).toMatchObject({ protocols: [] });
 });
 
-test("multi-value controls describe removing the first match rather than selecting Any", async ({ page }) => {
+test("multi-value controls remove exactly the selected match", async ({ page }) => {
   const multi = {
     ...rule, ics: undefined,
     sourceZones: ["it", "engineering"],
@@ -104,11 +104,8 @@ test("multi-value controls describe removing the first match rather than selecti
   const seen = await openFirewall(page, [multi]);
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   const form = editor(page, multi.id);
-  for (const label of ["Remove first source zone (keep remaining)", "Remove first destination zone (keep remaining)", "Remove first protocol (keep remaining)"]) {
-    const control = form.locator("select").filter({ hasText: label });
-    await expect(control).toHaveCount(1);
-    await control.selectOption("");
-    await expect(control.locator("option:checked")).toHaveText(label);
+  for (const label of ["Remove source zone 1", "Remove dest zone 1", "Remove protocol 1"]) {
+    await form.getByRole("button", { name: label, exact: true }).click();
   }
   await form.getByRole("button", { name: "Save changes" }).click();
   await expect.poll(() => seen.patches.length).toBe(1);
@@ -124,8 +121,8 @@ test("clearing rule fields in the editor clears them", async ({ page }) => {
   const form = editor(page, "plc-write");
   await form.getByPlaceholder("description").fill("");
   await form.getByLabel("Log hits").uncheck();
-  await form.locator("select").filter({ hasText: "Source zone (any)" }).selectOption("");
-  await form.locator("select").filter({ hasText: "Dest zone (any)" }).selectOption("");
+  await form.getByRole("button", { name: "Remove source zone 1", exact: true }).click();
+  await form.getByRole("button", { name: "Remove dest zone 1", exact: true }).click();
   await form.getByPlaceholder("sources CIDR (csv)").fill("");
   await form.getByPlaceholder("destinations CIDR (csv)").fill(" ");
   await form.getByLabel("Identities").fill("");

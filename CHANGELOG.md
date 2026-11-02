@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Firewall admins can stage the default action with consequence warnings,
+  configure inline inspection from DPI settings, and edit every zone and
+  protocol entry without raw JSON. ICS rule rows stack on phones with actions
+  and inspection setup reachable without horizontal scrolling.
+
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator
   links directly to enforcement status.
