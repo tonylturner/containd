@@ -22,7 +22,13 @@
   remains a gap. This store does not retain event payloads. Management must be
   running to collect history.
 - Events marked `origin: demo` are labelled demonstration records. They never
-  charge real counter history and are never exported to syslog.
+  charge real counter history or Prometheus metrics, never enter learner or
+  inventory evidence, and are never exported to syslog. Demo events come from
+  [recorded capture replay](services.md#recorded-demo-replay), including flagged
+  mutated negative fixtures, on an illustrative topology. Identification events
+  are not replayed. Demo would-deny is an operator ICS rule evaluated in monitor
+  mode, not an enforced drop. `CONTAIND_DPI_MOCK` enables inspect-all only, not
+  demo replay; `CONTAIND_DEMO_CAPTURES` selects the replay assets.
 - `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
 File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
@@ -272,8 +278,9 @@ The dashboard shows all four First-Run Checklist tasks, including completed
 ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
 System Health stay visible alongside attention and failure notices. Open
 Monitoring for live investigation. The header holds the SIM toggle; simulation
-controls act immediately, not on commit. CLI Console opens on demand below
-the panels.
+controls act immediately, not on commit. Start saves `on`, Stop saves `off`
+across restarts, and `auto` stops once real traffic has been observed. CLI Console
+opens on demand below the panels.
 
 Events keeps timestamps, endpoints, activity and protection evidence visible.
 Advanced event filters holds exact IDs, protocol, decision, outcome, time and

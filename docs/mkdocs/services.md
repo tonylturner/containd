@@ -160,10 +160,11 @@ with its reason. A series that ended, such as a zone whose interfaces moved
 away, shows **No current data**.
 
 Demo data appears only while the collector is running, no current source is
-unavailable, the metric has no real activity, every real series has coverage in
-its latest bucket, and the latest demo bucket has coverage. It is labelled
-**Demo data**. Current source failures show their reasons beside retained real
-history and never permit demo fallback. Once real
+unavailable, the metric has no real activity, no existing real series ends in
+a gap, and the latest demo bucket has coverage. A response with no real series
+is eligible. It is labelled **Demo data**, with the note “Recorded captures on
+an illustrative topology”. Current source failures show their reasons beside
+retained real history and never permit demo fallback. Once real
 activity exists, charts use real history. Demo events have a **Demo** badge in
 Event Stream, Recent Alerts, Events, and alert/event inspection. If neither
 history exists, charts say **No traffic recorded yet**. A real-source gap never
@@ -172,11 +173,84 @@ to an individual service or interface filter.
 
 Security conduit traffic reports measured bytes and packets for routed traffic
 that passed policy in the last hour, with incomplete coverage labelled. Matrix
-heat is relative to the largest measured conduit, not a baseline percentage.
+heat is relative to the largest displayed byte count, not a baseline percentage.
+A never-observed pair may instead show **Demo** and **recorded demo traffic**
+(`coverage: recorded`), not measured or routed traffic. If neither origin has
+coverage, it shows **No traffic recorded yet**.
 Current conduit or engine failures make measurements unavailable with their
 reason, even when measured history remains. Disabling enforcement reports
 **enforcement disabled** until accounting is available again. Logical interface RX/TX reports
 the latest retained packet rate, not event-count estimates.
+
+## Recorded demo replay
+
+On a fresh installation, management automatically replays the bundled recorded
+ICS and IT packet captures through the real protocol decoders and detection
+chain. These are recorded captures on an **illustrative topology**, not packets
+measured on your networks. Replay is detached: it never transmits frames,
+changes firewall enforcement, or injects packets onto lab interfaces.
+
+| Capture family | Client role → zone | Server role → zone |
+|---|---|---|
+| ICS (Modbus, DNP3, IEC 104, CIP) | master/HMI → `dmz` | outstation/PLC → `lan` |
+| IT | client → `lan` | server → `wan` |
+
+Zone names resolve against running configuration. When a default name is
+missing, replay uses the first non-`mgmt` zones in configuration order. A capture
+whose endpoints resolve to the same zone contributes no conduit traffic.
+Zone k in configuration order uses `198.18.k.0/24`, from the RFC 2544 benchmarking
+range. Client hosts use `.10`, server hosts `.20`, and extra hosts `.21` onward.
+Each zone has a pseudo-interface `demo:<zone>` with role `leaf`; these names do
+not create kernel interfaces. Addresses are rewritten from the capture and
+client ephemeral ports shift each loop to keep flows separate. Original
+addresses remain in the manifest for provenance.
+
+Replay preserves packet order and payloads. Each recorded inter-packet gap is
+clamped to 100 ms–5 s, with a 10 s pause between captures. One loop visits every
+capture in manifest order. Injection timestamps use the current time. Some
+negative fixtures were recorded and then edited; these carry `mutated: true`
+in the manifest and are not claimed as unmodified network observations.
+
+### Start, Stop and automatic replay
+
+The Dashboard **SIM** toggle acts immediately, without a configuration commit.
+Start saves `on`; Stop saves `off` and persists across management and engine
+restarts. Start remains available after an automatic stop or replay error.
+Management stores the preference in `demo.json` beside `config.db`:
+
+- `auto`: run until real traffic is observed in retained telemetry history,
+  then stop with reason **real traffic observed**. The real-activity latch is
+  persistent, so restarting does not re-enable automatic replay.
+- `on`: run regardless of real traffic; charts still prefer real history once
+  their metric has real activity.
+- `off`: do not run.
+
+When the preference file is absent, installations with no operator config commit
+start at `auto`; previously configured installations start at `off`. The resolved
+preference is saved. The engine itself boots stopped; management reconciles the
+preference after synchronizing running configuration, including after an engine
+restart. A delivery failure does not discard a saved preference. The status line
+shows the replaying capture, a stopped reason or error, and that Stop persists.
+
+`CONTAIND_DEMO_CAPTURES` selects the runtime asset directory (default
+`/usr/share/containd/demo`), containing `manifest.json` and its captures. Missing
+files or SHA-256 mismatches stop replay and surface **demo captures unavailable**;
+no random-event substitute is generated. The source manifest is
+`test/demo/manifest.json`. Fixture data is licensed Apache-2.0; the image includes
+fixture LICENSE files and a NOTICE naming the capture generators. Generator
+program licenses are separate from the fixture-data license; generator GPL texts
+are not packaged as fixture licenses.
+
+Demo records have `origin: demo`, separate retained counters and bounded event
+storage. They never enter syslog, learner/inventory evidence, real counters,
+Prometheus `/metrics`, or real rule counters. Identification events are not part
+of demo replay. **Would-deny** means the operator's ICS firewall rules evaluated
+in monitor mode, retaining rule IDs and actions—not a live packet drop. Operator
+IDS rules, parsing modes and signatures apply to the detached replay; an
+any-address monitor IEC 104 envelope is supplied when none is configured.
+
+`CONTAIND_DPI_MOCK` (and `dataplane.dpiMock`) only enables inspect-all DPI;
+it does not start demo replay. Leave it disabled for normal traffic inspection.
 
 ## Runtime metrics
 

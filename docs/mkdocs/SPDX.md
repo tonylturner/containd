@@ -33,6 +33,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 | nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Installed as Wolfi `nftables` in both mgmt and engine images. |
 | ClamAV | Antivirus scanning (ICAP pipeline) | GPL-2.0-only | Embedded `clamd`/`freshclam` binaries; executed as separate processes, not linked into `containd`. |
 | tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
+| Recorded demo capture fixtures | Bundled ICS and IT replay corpus | Apache-2.0 | Fixture LICENSE files and generator NOTICE ship with the assets; [replay provenance and limits](services.md#recorded-demo-replay). |
 | React Flow | Topology UI | MIT | Used for topology/graph screens in the UI. |
 | Wolfi base (`cgr.dev/chainguard/wolfi-base`) | Minimal glibc runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 

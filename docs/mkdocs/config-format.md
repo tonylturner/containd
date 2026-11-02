@@ -66,6 +66,18 @@ is using, and an unchanged default does not override an explicit open/close
 choice. In Configuration, **Advanced** and **Recovery** remain inspectable
 when configuration reads fail; configuration mutation actions stay disabled.
 
+## Demo and inspection runtime settings
+
+`dataplane.dpiMock` and engine environment variable `CONTAIND_DPI_MOCK` enable
+inspect-all DPI only. They do not generate events or start demo replay.
+Management keeps the separate `auto`/`on`/`off` demo preference in `demo.json`
+beside `config.db`, not in the configuration document. Start and Stop on the
+Dashboard take effect without commit and persist across restarts.
+`CONTAIND_DEMO_CAPTURES` selects the engine's capture directory, default
+`/usr/share/containd/demo`; its manifest and capture hashes must validate.
+See [recorded demo replay](services.md#recorded-demo-replay) for topology,
+pacing, licensing and preference semantics.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema

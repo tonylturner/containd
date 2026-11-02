@@ -1,3 +1,6 @@
+import { simulationStatus } from "./fixtures/simulation";
+import path from "node:path";
+import type { SimulationStatus } from "../lib/api-console";
 import { expect, test, type Page } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 import type { Conduit, TelemetryEvent } from "../lib/api";
@@ -5,7 +8,7 @@ import { observation } from "./fixtures/protection-api";
 import { manyUnavailableReasons, seriesResponse, type WireResponse } from "./fixtures/telemetry";
 
 const demoEvent: TelemetryEvent = { id: "9007199254740993", flowId: "f1", proto: "ids", kind: "alert", origin: "demo", timestamp: "2026-11-02T12:00:00Z", attributes: { message: "Demo alert" } };
-type Scenario = { eventsFailed?: boolean; totalsFailed?: boolean; conduit?: Conduit["traffic"]; mutate?: (body: WireResponse, url: URL) => void; conduitsFailed?: boolean; reverseBytes?: string };
+type Scenario = { simulation?: Partial<SimulationStatus>; eventsFailed?: boolean; totalsFailed?: boolean; conduit?: Conduit["traffic"]; mutate?: (body: WireResponse, url: URL) => void; conduitsFailed?: boolean; reverseBytes?: string };
 async function open(page: Page, path: string, scenario: Scenario = {}) {
   const requests: URL[] = [];
   const config = { zones: [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }], interfaces: [{ name: "lan", device: "eth9", zone: "it", addresses: ["192.0.2.1/24"] }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } };
@@ -44,8 +47,8 @@ async function open(page: Page, path: string, scenario: Scenario = {}) {
     if (p === "/api/v1/interfaces") body = config.interfaces;
     if (p === "/api/v1/interfaces/state") body = [{ name: "eth9", up: true, addrs: ["192.0.2.1/24"] }];
     if (p === "/api/v1/routing/os") body = { routes: [] };
-    if (p === "/api/v1/simulation") body = { running: false };
-    if (p === "/api/v1/health") body = { status: "ok", enforcement: { state: "disabled" } };
+    if (p === "/api/v1/simulation") body = simulationStatus(scenario.simulation);
+    if (p === "/api/v1/health") body = { status: "ok", enforcement: { state: "enforcing" } };
     if (p === "/api/v1/dataplane/protection") body = observation();
     if (p === "/api/v1/services/status") body = { faults: [], av: { available: false, error: "scanner offline" } };
     if (p === "/api/v1/security/conduits") {
@@ -60,6 +63,71 @@ async function open(page: Page, path: string, scenario: Scenario = {}) {
   await page.goto(path);
   await loaded;
   return requests;
+}
+
+for (const width of [1280, 390]) {
+  test(`fresh Dashboard shows recorded demo and keeps its layout at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 1280 ? 800 : 844 });
+    await open(page, "/", {
+      simulation: { preference: "auto", running: true, loops: 3, captureSet: "containd-demo/1", capture: "modbus/operations.pcap" },
+      mutate: body => {
+        body.realActive = false;
+        body.realCovered = false;
+        if (body.origin === "real" || body.metric.startsWith("service.") || body.metric.startsWith("av.")) body.series = [];
+      },
+    });
+    for (const title of ["In bytes/s", "Out bytes/s", "Events", "it throughput"]) {
+      const chart = page.locator(`[data-telemetry="${title}"]`);
+      await expect(chart.getByText("Demo data", { exact: true })).toBeVisible();
+      await expect(chart).toContainText("Recorded captures on an illustrative topology");
+    }
+    await expect(page.getByTitle("Stop traffic simulation")).toBeVisible();
+    await expect(page.locator("[data-simulation-status]")).toContainText("Replaying modbus/operations.pcap · 3 loops completed · Stop persists");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.locator('[data-telemetry="In bytes/s"]').scrollIntoViewIfNeeded();
+    const filename = `dashboard-demo-${width}.png`;
+    await page.screenshot({ path: process.env.TELEMETRY_SCREENSHOT_DIR ? path.join(process.env.TELEMETRY_SCREENSHOT_DIR, filename) : testInfo.outputPath(filename), fullPage: false });
+  });
+
+  test(`conduit recorded demo is labelled without measured claims at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 1280 ? 800 : 844 });
+    await open(page, "/topology/", { conduit: { state: "demo", coverage: "recorded", windowSeconds: 3600, bytes: "12345", packets: "50", complete: false } });
+    await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+    const cell = page.getByRole("button", { name: "Inspect IT to OT", exact: true });
+    await expect(cell.getByText("Demo", { exact: true })).toBeVisible();
+    await cell.click();
+    const inspector = page.getByRole("region", { name: "Conduit details", exact: true });
+    await expect(inspector.getByText("Demo", { exact: true })).toBeVisible();
+    await expect(inspector).toContainText("recorded demo traffic on an illustrative topology");
+    await expect(inspector).toContainText("12,345 bytes · 50 packets · Partial coverage");
+    await expect(inspector).not.toContainText(/measured|routed/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const filename = `conduit-demo-${width}.png`;
+    await page.screenshot({ path: process.env.TELEMETRY_SCREENSHOT_DIR ? path.join(process.env.TELEMETRY_SCREENSHOT_DIR, filename) : testInfo.outputPath(filename), fullPage: false });
+  });
+}
+
+test("conduit none is not unavailable or measured zero", async ({ page }) => {
+  await open(page, "/topology/", { conduit: { state: "none" } });
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  const cell = page.getByRole("button", { name: "Inspect IT to OT", exact: true });
+  await expect(cell).toContainText("No traffic recorded yet");
+  await cell.click();
+  const inspector = page.getByRole("region", { name: "Conduit details", exact: true });
+  await expect(inspector).toContainText("No traffic recorded yet");
+  await expect(inspector).not.toContainText(/Unavailable|0 bytes|Demo|routed/);
+});
+
+for (const simulation of [
+  { preference: "auto" as const, reason: "real traffic observed" },
+  { preference: "on" as const, error: "demo captures unavailable: manifest missing" },
+  { preference: "off" as const, error: "engine unreachable", reason: "engine unreachable" },
+]) {
+  test(`simulation status explains ${simulation.reason || simulation.error}`, async ({ page }) => {
+    await open(page, "/", { simulation });
+    await expect(page.locator("[data-simulation-status]")).toContainText(simulation.error || "Demo auto stopped: real traffic observed");
+    await expect(page.getByTitle("Start traffic simulation")).toBeVisible();
+  });
 }
 
 for (const width of [1280, 390]) {

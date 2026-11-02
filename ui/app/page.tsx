@@ -38,6 +38,8 @@ const Console = dynamic(
 import { Skeleton } from "../components/Skeleton";
 import { ServiceTelemetryAttention } from "./dashboard-service-attention";
 import { useHealth } from "../hooks/useHealth";
+import type { SimulationStatus } from "../lib/api-console";
+import { simulationDescription } from "../lib/simulation-status";
 
 // ── Main Dashboard ─────────────────────────────────────────────────────
 
@@ -59,7 +61,8 @@ export default function Home() {
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const clock = now === null ? "" : new Date(now).toLocaleTimeString("en-US", { hour12: false });
-  const [simRunning, setSimRunning] = useState<boolean | null>(null);
+  const [simulation, setSimulation] = useState<SimulationStatus | null>(null);
+  const simRunning = simulation?.running ?? null;
   const [simUnavailable, setSimUnavailable] = useState(false);
   const [flowsUnavailable, setFlowsUnavailable] = useState(false);
   const [simToggling, setSimToggling] = useState(false);
@@ -86,7 +89,7 @@ export default function Home() {
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => { setStats(r); setStatsUnavailable(r === null); }).catch(() => { if (!signal.aborted) { setStats(null); setStatsUnavailable(true); } });
       api.getServicesStatus(signal).then(setServicesStatus).catch(() => { if (!signal.aborted) setServicesStatus(null); });
-      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
+      api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimulation(r); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimulation(null); } });
       api.diffConfig().then(snapshot => (snapshot?.data ?? null)).then((r) => {
         if (!r) { setConfigDirty(null); return; }
         const running = JSON.stringify(r.running ?? null);
@@ -112,7 +115,7 @@ export default function Home() {
         ? await api.stopSimulation()
         : await api.startSimulation();
       setSimUnavailable(r === null);
-      setSimRunning(r?.running ?? null);
+      setSimulation(r);
     } finally {
       setSimToggling(false);
     }
@@ -121,7 +124,7 @@ export default function Home() {
   async function retrySimulation() {
     const result = await api.getSimulationStatus();
     setSimUnavailable(result === null);
-    setSimRunning(result?.running ?? null);
+    setSimulation(result);
   }
 
   async function retryFlows() {
@@ -217,6 +220,7 @@ export default function Home() {
           <span className="tabular-nums">{clock}</span>
         </div>
       </div>
+      {simulation && <p role="status" data-simulation-status className={`mb-4 wrap-anywhere text-xs ${simulation.error ? "text-amber" : "text-(--text-muted)"}`}>{simulationDescription(simulation)}</p>}
 
       <SetupChecklist
         counts={data?.counts}

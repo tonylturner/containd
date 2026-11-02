@@ -18,7 +18,7 @@ function unavailableNotice(responses: SeriesResponse[]): Pick<TelemetryRead, "er
     noticeReasons: lead ? [lead, ...reasons] : undefined,
   };
 }
-async function read(queries: SeriesQuery[], range: TelemetryRange): Promise<TelemetryRead> {
+export async function readTelemetry(queries: SeriesQuery[], range: TelemetryRange): Promise<TelemetryRead> {
   const real = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "real")));
   const notice = unavailableNotice(real);
   // Retained real history is still useful, but current failures always outrank demo.
@@ -28,7 +28,7 @@ async function read(queries: SeriesQuery[], range: TelemetryRange): Promise<Tele
       (quiet && real.some(r => r.series.some(s => (s.points.at(-1)?.q ?? "gap") === "gap")))) {
     return { data: real, demo: false, noCurrentData: true };
   }
-  if (quiet && real.every(r => r.series.length > 0)) {
+  if (quiet) {
     const demo = await Promise.all(queries.map(q => getTelemetrySeries(q, range, "demo")));
     const demoNotice = unavailableNotice(demo);
     if (demoNotice.error || demoNotice.unavailable) return { data: real, demo: false, ...demoNotice };
@@ -48,7 +48,7 @@ export function useTelemetry(queries: SeriesQuery[], range: TelemetryRange = "1h
       try {
         let promise = pending.get(key);
         if (!promise) {
-          promise = read(qs, window).finally(() => pending.delete(key));
+          promise = readTelemetry(qs, window).finally(() => pending.delete(key));
           pending.set(key, promise);
         }
         const result = await promise;

@@ -1,3 +1,4 @@
+import { simulationStatus } from "./fixtures/simulation";
 import { expect, test } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 
@@ -71,7 +72,7 @@ test("simulation failure is unknown, not stopped, and Retry recovers", async ({ 
   let unavailable = true;
   await page.route("**/api/v1/simulation", (route) => route.fulfill(unavailable
     ? { status: 503, json: { error: "engine simulation unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
-    : { json: { running: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    : { json: simulationStatus(), headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/");
   const state = page.getByRole("status").filter({ hasText: "Simulation unavailable" });
   await expect(state).toBeVisible();

@@ -48,15 +48,34 @@ The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 ## Monitoring Availability
 
 Flows, protocol/top-talker statistics, anomalies, learner evidence and suggestion
-generation/staging, signatures and matches, interface runtime state and simulation
+generation/staging, signatures and matches, interface runtime state
 return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
 when the required engine capability is missing or its call fails. The same
-convention applies to anomaly clears, learner dataset deletion, signature writes
-and simulation control: unavailable operations never report a successful clear or change.
+convention applies to anomaly clears, learner dataset deletion and signature writes:
+unavailable operations never report a successful clear or change. Simulation
+preference persistence and engine delivery are reported separately below.
 A reachable backend with no observations still returns `200` with an empty
-list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulation
-returns `200` with `running: false`.
+list (learner pages use `{items: [], nextCursor?}`).
 Retry unavailable requests rather than interpreting them as empty or stopped.
+
+## Simulation
+
+`GET /api/v1/simulation` returns `preference` (`auto`, `on`, `off`), `running`,
+`loops` (completed manifest loops), `captureSet`, `capture`, `error`, and `reason`.
+`POST /api/v1/simulation` (admin) accepts `{"action":"start"}` or
+`{"action":"stop"}`, saves `on` or `off`, reconciles delivery to the engine,
+and returns the same status shape. The saved preference persists even if the
+engine is unreachable: check `error` and `reason`, not just the HTTP status.
+A stopped `auto` reports `reason: "real traffic observed"`; delivery failure
+reports `engine unreachable`. A replay asset fault reports **demo captures
+unavailable**. Start/Stop audit actions are `simulation.start` / `simulation.stop`,
+with target `demo`.
+
+Replay uses recorded captures through detached real decoders, not generated
+random events. `CONTAIND_DPI_MOCK` enables inspect-all only, not replay.
+`CONTAIND_DEMO_CAPTURES` selects the capture directory. See
+[recorded demo replay](services.md#recorded-demo-replay) for defaults, topology,
+pacing and isolation from real counters, learner and syslog.
 
 ## Security Conduits
 
@@ -787,10 +806,13 @@ reports unavailable storage, and 500 reports aggregation overflow.
 The dashboard's `eventStats` covers the last 24 hours of real events from both
 sources, with `windowSeconds: 86400` and `complete` only when every bucket was
 observed. Store failures return `eventStats: null` and `eventStatsError`.
-Conduit `traffic` is either measured packets/bytes (decimal strings), a
-3600-second window, `complete` and `coverage: routed`, or `state: unavailable`
-with a reason. Current conduit or engine outages override retained measured
-history; disabling enforcement returns `unavailable` with reason
+Conduit `traffic` reports `state: measured` with packets/bytes (decimal strings),
+a 3600-second window, `complete` and `coverage: routed`; `state: demo` has the
+same counts/window fields but `coverage: recorded`, meaning recorded demo
+traffic on an illustrative topology. Only a never-observed real pair may use
+demo, not a gapped pair. With no coverage it returns `state: none` (No traffic
+recorded yet). `state: unavailable` carries a reason and outranks demo.
+Current conduit or engine outages override retained measured history; disabling enforcement returns `unavailable` with reason
 `enforcement disabled`. Its scope is routed traffic that passed policy, not bridged L2
 or AV/ICAP input-output gating; it is not a percentage of a baseline.
 

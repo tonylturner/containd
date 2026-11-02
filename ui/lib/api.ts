@@ -183,7 +183,9 @@ export type Conduit = {
   state: "allow" | "block" | "partial" | "unmodeled";
   ids: "full" | "partial" | "none";
   proto: ConduitProto[];
-  traffic: { state: "measured"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "routed" } | { state: "unavailable"; reason: string };
+  traffic: { state: "measured"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "routed" }
+    | { state: "demo"; windowSeconds: number; packets: string; bytes: string; complete: boolean; coverage: "recorded" }
+    | { state: "none" } | { state: "unavailable"; reason: string };
   rules: string[];
   gaps: string[];
   mitre: string[];

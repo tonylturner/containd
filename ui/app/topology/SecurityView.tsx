@@ -1,5 +1,6 @@
 "use client";
 
+import { DemoBadge } from "../../components/TelemetryChart";
 import { decimalCounter } from "../../lib/api-telemetry";
 import { trafficDescription } from "../../lib/conduit-traffic";
 import { revisionError } from "../../lib/config-revision";
@@ -60,7 +61,7 @@ export default function SecurityView() {
   useConfigRefresh(fetchData);
 
   const maxTraffic = conduits.reduce((max, c) => {
-    const bytes = c.traffic.state === "measured" ? decimalCounter(c.traffic.bytes) : BigInt(0);
+    const bytes = (c.traffic.state === "measured" || c.traffic.state === "demo") ? decimalCounter(c.traffic.bytes) : BigInt(0);
     return bytes > max ? bytes : max;
   }, BigInt(1));
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
@@ -176,7 +177,7 @@ export default function SecurityView() {
               <span key={z.id} className={s.targetGap} style={{ color: slColor(z.sl_a, z.sl_t) }}>{z.name} SL{z.sl_a}/{z.sl_t}</span>
             ))}
           </div>
-          <div className={s.matrixSubtitle}>Saved target: zone targets are candidate settings; Live: conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>
+          <div className={s.matrixSubtitle}>Saved target: zone targets are candidate settings; Traffic: measured observations or labelled recorded demo traffic. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>
 
         </div>
 
@@ -308,11 +309,11 @@ export default function SecurityView() {
                         <div className={s.cellAccent} />
                         {gaps.length > 0 && <div className={s.cellFindings}><div className={s.findingDot} style={{ background: "var(--amber)" }} /></div>}
                         <div className={s.cellBody}>
-                          <div className={s.cellState}>{cd.state === "unmodeled" ? "NONE" : cd.state.toUpperCase()}</div>
+                          <div className={s.cellState}>{cd.state === "unmodeled" ? "NONE" : cd.state.toUpperCase()}{cd.traffic.state === "demo" && <span title="recorded demo traffic on an illustrative topology"><DemoBadge origin="demo" /></span>}</div>
                           <div className={s.cellProto}>{topProtos}</div>
                         </div>
                         <div className={`${s.cellIds} ${idsClass}`}>{idsText}</div>
-                        {cd.traffic.state === "measured" ? <div className={s.cellTraffic} title={trafficDescription(cd.traffic)} style={{ background: volColor, opacity: Number(decimalCounter(cd.traffic.bytes)) / Number(maxTraffic), borderTop: cd.traffic.complete ? undefined : "1px dashed var(--amber)" }} /> : <span className="text-[8px] text-amber" title={cd.traffic.reason}>Traffic unavailable</span>}
+                        {cd.traffic.state === "measured" || cd.traffic.state === "demo" ? <div className={s.cellTraffic} title={trafficDescription(cd.traffic)} style={{ background: volColor, opacity: Number(decimalCounter(cd.traffic.bytes)) / Number(maxTraffic), borderTop: cd.traffic.complete ? undefined : "1px dashed var(--amber)" }} /> : <span className="text-[8px] text-amber" title={trafficDescription(cd.traffic)}>{cd.traffic.state === "none" ? "No traffic recorded yet" : "Traffic unavailable"}</span>}
                       </button>
                     );
                   })}
@@ -399,7 +400,8 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
         <DR k="From" v={fromZ.name} vc={fromZ.color} />
         <DR k="To" v={toZ.name} vc={toZ.color} />
         <DR k="IDS coverage" v={idsLabel[conduit.ids]} vc={idsColor[conduit.ids]} />
-        <DR k="Source" v="routed traffic that passed policy, last hour" />
+        {conduit.traffic.state === "demo" && <p className="text-xs text-(--text-muted)"><DemoBadge origin="demo" /> recorded demo traffic on an illustrative topology</p>}
+        <DR k="Source" v={conduit.traffic.state === "demo" ? "recorded demo traffic, last hour" : conduit.traffic.state === "none" ? "No traffic recorded yet" : "routed traffic that passed policy, last hour"} />
         <DR k="Traffic" v={trafficDescription(conduit.traffic)} />
       </div>
 
