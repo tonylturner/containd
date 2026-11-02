@@ -133,6 +133,7 @@ func newIECDir(isn uint32) *iecDir {
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
+	detached      bool
 	mu            sync.Mutex
 	zones         *zoneCache // the engine's
 	now           func() time.Time

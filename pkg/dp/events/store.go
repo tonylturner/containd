@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,6 +84,8 @@ type Store struct {
 
 	mu               sync.Mutex
 	general          eventRing
+	demo             eventRing
+	demoAborted      abortedSet
 	denies           eventRing
 	incidents        incidentBank
 	historyTruncated bool
@@ -114,6 +117,7 @@ func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 		epoch:             newFeedEpoch(),
 		feed:              eventRing{capacity: capacity},
 		general:           eventRing{capacity: capacity},
+		demo:              eventRing{capacity: demoCapacity},
 		denies:            eventRing{capacity: denyCapacity},
 		telemetryCounters: newEventTelemetryCounters(),
 	}
@@ -236,6 +240,10 @@ func (s *Store) spillEvent(ev Event) {
 
 // Record converts DPI events into normalized events and appends them.
 func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event) {
+	s.record(state, pkt, in, "")
+}
+
+func (s *Store) record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event, origin telemetry.Origin) {
 	if s == nil || len(in) == 0 {
 		return
 	}
@@ -245,6 +253,7 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 		id := s.idBase + s.nextID.Add(1)
 		out := Event{
 			ID:                    id,
+			Origin:                origin,
 			FlowID:                ev.FlowID,
 			TransportConnectionID: ev.TransportConnectionID,
 			CorrelationStatus:     ev.CorrelationStatus,
@@ -301,18 +310,17 @@ func (s *Store) List(limit int) []Event {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := len(s.general.events)
-	if n == 0 {
+	candidates := s.generalEvents()
+	if len(candidates) == 0 {
 		return nil
 	}
-	if limit > n {
-		limit = n
+	for i, j := 0, len(candidates)-1; i < j; i, j = i+1, j-1 {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
 	}
-	out := make([]Event, 0, limit)
-	for i := n - 1; i >= 0 && len(out) < limit; i-- {
-		out = append(out, s.general.at(i))
+	if limit > len(candidates) {
+		limit = len(candidates)
 	}
-	return out
+	return candidates[:limit]
 }
 
 // MatchingEvents returns events from the store that match the given predicate.
@@ -325,9 +333,9 @@ func (s *Store) MatchingEvents(predicate func(Event) bool) []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []Event
-	for i := range s.general.events {
-		if predicate(s.general.at(i)) {
-			out = append(out, s.general.at(i))
+	for _, ev := range s.generalEvents() {
+		if predicate(ev) {
+			out = append(out, ev)
 			if len(out) >= maxResults {
 				break
 			}
@@ -343,7 +351,7 @@ func (s *Store) Len() int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.general.events)
+	return len(s.general.events) + len(s.demo.events)
 }
 
 // TimeRange returns the timestamps of the oldest and newest events in the store.
@@ -354,17 +362,12 @@ func (s *Store) TimeRange() (oldest, newest time.Time) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.general.events) == 0 {
-		return
-	}
-	oldest = s.general.at(0).Timestamp
-	newest = s.general.at(0).Timestamp
-	for i := 1; i < len(s.general.events); i++ {
-		if s.general.at(i).Timestamp.Before(oldest) {
-			oldest = s.general.at(i).Timestamp
+	for i, ev := range s.generalEvents() {
+		if i == 0 || ev.Timestamp.Before(oldest) {
+			oldest = ev.Timestamp
 		}
-		if s.general.at(i).Timestamp.After(newest) {
-			newest = s.general.at(i).Timestamp
+		if i == 0 || ev.Timestamp.After(newest) {
+			newest = ev.Timestamp
 		}
 	}
 	return
@@ -380,17 +383,16 @@ func (s *Store) Flows(limit int) []FlowSummary {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.general.events) == 0 {
+	if len(s.general.events)+len(s.demo.events) == 0 {
 		return nil
 	}
 	byFlow := map[string]*FlowSummary{}
 	mixedIDs := map[string]bool{}
 	tags := map[string]labelSet{}
 	var order []string
-	for i := range s.general.events {
-		ev := s.general.at(i)
+	for _, ev := range s.generalEvents() {
 		key, sessionID := flowGroup(ev)
-		if sessionID != "" && s.aborted.has(sessionID) {
+		if sessionID != "" && s.abortedFor(ev.Origin).has(sessionID) {
 			continue
 		}
 		f, ok := byFlow[key]
@@ -415,9 +417,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			byFlow[key] = f
 			order = append(order, key)
 		}
-		if ev.Origin != telemetry.OriginDemo {
-			// A mixed-origin flow remains real; only flows made entirely of
-			// demo events are labelled demo.
+		if groupOrigin(ev.Origin) == telemetry.OriginReal {
 			f.Origin = ""
 		}
 		if f.CorrelationStatus != ev.CorrelationStatus {
@@ -458,6 +458,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		}
 	}
 	s.aborted.prune(s.general)
+	s.demoAborted.prune(s.demo)
 	out := make([]FlowSummary, 0, len(byFlow))
 	for _, k := range order {
 		f := *byFlow[k]
@@ -468,7 +469,6 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		f.Tags = tags[k].sorted()
 		out = append(out, f)
 	}
-	// no sorting needed for v1; caller can sort.
 	if limit <= 0 || limit > len(out) {
 		return out
 	}
@@ -478,10 +478,39 @@ func (s *Store) Flows(limit int) []FlowSummary {
 // MarkAborted hides the flow group of an aborted IEC104 incarnation. Its
 // events stay in List.
 func (s *Store) MarkAborted(sessionID string) {
+	s.markAborted(sessionID, "")
+}
+
+func (s *Store) markAborted(sessionID string, origin telemetry.Origin) {
 	if s == nil || sessionID == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.aborted.add(sessionID, s.general)
+	if origin == telemetry.OriginDemo {
+		s.demoAborted.add(sessionID, s.demo)
+	} else {
+		s.aborted.add(sessionID, s.general)
+	}
+}
+
+// generalEvents merges independent retention banks in oldest-first time order.
+// The caller holds mu.
+func (s *Store) generalEvents() []Event {
+	out := make([]Event, 0, len(s.general.events)+len(s.demo.events))
+	for i := range s.general.events {
+		out = append(out, s.general.at(i))
+	}
+	if len(s.demo.events) != 0 {
+		out = append(out, s.demo.events...)
+		sort.SliceStable(out, func(i, j int) bool { return newer(out[j], out[i]) })
+	}
+	return out
+}
+
+func (s *Store) abortedFor(origin telemetry.Origin) *abortedSet {
+	if origin == telemetry.OriginDemo {
+		return &s.demoAborted
+	}
+	return &s.aborted
 }

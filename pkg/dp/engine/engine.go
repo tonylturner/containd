@@ -70,7 +70,8 @@ type Engine struct {
 	applier               enforce.Applier
 	updater               enforce.Updater
 	dpiMgr                *dpi.Manager
-	eventStore            *events.Store
+	eventStore            *events.Writer
+	detached              bool
 	rulesetStatus         atomic.Pointer[RulesetStatus]
 	inspectAll            bool
 	dpiEnabled            bool // master DPI on/off
@@ -254,10 +255,11 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
 	e.counters.tracker.Store(e.stats)
-	e.eventStore = cfg.Events
-	if e.eventStore == nil {
-		e.eventStore = events.NewStore(4096)
+	store := cfg.Events
+	if store == nil {
+		store = events.NewStore(4096)
 	}
+	e.eventStore = store.Writer("")
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.initIEC(cfg)
@@ -631,8 +633,10 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 		e.policyMu.RLock()
 		defer e.policyMu.RUnlock()
 	}
-	metrics.PacketsTotal.Inc()
-	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	if !e.detached {
+		metrics.PacketsTotal.Inc()
+		metrics.BytesTotal.Add(float64(len(pkt.Payload)))
+	}
 	if pkt.Invalid != "" {
 		return invalidPacketDecision(pkt)
 	}
@@ -768,7 +772,9 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 		}
 		e.tcpISNs[key.MapKey()] = pkt.TCP.Seq
 	}
-	metrics.FlowsActive.Inc()
+	if !e.detached {
+		metrics.FlowsActive.Inc()
+	}
 	return state, forgotten
 }
 
@@ -799,7 +805,9 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	delete(e.tcpISNs, index)
 	delete(e.transportISNs, index)
 	delete(e.transportCoverage, st)
-	metrics.FlowsActive.Dec()
+	if !e.detached {
+		metrics.FlowsActive.Dec()
+	}
 	return st
 }
 
@@ -816,7 +824,9 @@ func (e *Engine) sweepFlows(now time.Time) {
 			delete(e.tcpISNs, k)
 			delete(e.transportISNs, k)
 			delete(e.transportCoverage, st)
-			metrics.FlowsActive.Dec()
+			if !e.detached {
+				metrics.FlowsActive.Dec()
+			}
 			if st != nil {
 				expired = append(expired, st)
 			}

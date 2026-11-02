@@ -76,7 +76,7 @@ func TestPreviewRulePredicates(t *testing.T) {
 }
 
 func previewWithQueue(queueID int, bindings []rules.IdentityBinding, entry rules.Entry, evs ...events.Event) PreviewRuleResponse {
-	e := &Engine{eventStore: events.NewStore(10)}
+	e := &Engine{eventStore: events.NewStore(10).Writer("")}
 	if queueID > 0 {
 		e.compiler = enforce.NewCompilerWithSettings(enforce.CompilerSettings{NFQueueGroup: uint16(queueID)}, nil)
 	}

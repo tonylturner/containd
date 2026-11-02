@@ -26,7 +26,7 @@ func replyPredicateParity(t *testing.T, proto string, attrs map[string]any, entr
 	ev.FlowID, ev.Kind = key.Hash(), eventfields.KindResponse
 	ev.SrcIP, ev.DstIP, ev.SrcPort, ev.DstPort = key.SrcIP.String(), key.DstIP.String(), key.SrcPort, key.DstPort
 	snap := &rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{entry}}
-	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(10)}
+	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(10).Writer("")}
 	e.ruleSnap.Store(snap)
 	encoded, err := json.Marshal(ev)
 	if err != nil {

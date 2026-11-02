@@ -69,6 +69,9 @@ func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (ses
 
 // sendRST sends one reset. A failure makes enforcement unhealthy.
 func (t *iecTable) sendRST(r session.Reset) error {
+	if t.detached {
+		return errDetachedAuthority
+	}
 	err := errInjectorUnavailable
 	if t.injector != nil {
 		err = t.injector.SendRST(r)
