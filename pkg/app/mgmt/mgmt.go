@@ -249,33 +249,12 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return fail(err)
 	}
 
-	// Repair stale interface.device bindings before the HTTP server begins
-	// serving traffic. Without this, mgmtAccessHandler reads the stored
-	// config with device fields pointing at kernel devices the OS may have
-	// renumbered across container restarts — leading to false 403s on the
-	// very first API call from the management plane.
-	//
-	// Blank the device fields on default-named logical interfaces first so
-	// AutoBindDefaultInterfaceDevices reliably re-runs subnet-match
-	// assignment. The "shouldRepair" gate inside autobind only triggers
-	// when bindings are blank OR match the legacy eth0..ethN index pattern;
-	// docker-shuffled bindings look neither, so without blanking, the
-	// scrambled state survives. Subnet-based reassignment is the
-	// authoritative determinism source (see CONTAIND_AUTO_*_SUBNET env vars
-	// + assignBySubnet); we're not changing that, just making sure it runs.
+	// Repair only default-interface bindings contradicted by current kernel
+	// discovery before the HTTP server begins serving traffic. Existing
+	// bindings with no contrary address evidence remain operator authority.
 	if cfg != nil {
 		repaired, repairErr := config.Repair(context.Background(), stores.store, func(next *config.Config) error {
-			// Keep the old bindings if discovery cannot produce a replacement.
-			devices := make([]string, len(next.Interfaces))
-			for i := range next.Interfaces {
-				devices[i] = next.Interfaces[i].Device
-			}
-			blankDefaultInterfaceDevicesExcept(next, r)
-			if !httpapi.AutoBindDefaultInterfaceDevicesReserved(next, r) {
-				for i := range next.Interfaces {
-					next.Interfaces[i].Device = devices[i]
-				}
-			}
+			httpapi.RepairDefaultInterfaceDevicesReserved(next, r)
 			return nil
 		})
 		if repairErr != nil {
@@ -304,40 +283,6 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 	stores.bootEvent = event
 	stores.bootEvents = events
 	return stores, cfg, nil
-}
-
-// blankDefaultInterfaceDevices clears the Device field on each default
-// logical interface (wan/dmz/lan1..lan6) so the subsequent
-// AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
-// Non-default interfaces (custom user-named) are left untouched.
-func blankDefaultInterfaceDevices(cfg *config.Config) { blankDefaultInterfaceDevicesExcept(cfg, nil) }
-
-func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservation) {
-	if cfg == nil {
-		return
-	}
-	defaults := map[string]struct{}{}
-	for _, name := range config.DefaultPhysicalInterfaces() {
-		defaults[name] = struct{}{}
-	}
-	// A matching device name alone is not ownership after NIC renumbering:
-	// an addressed default row may now point at the reserved NIC by accident.
-	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
-	for i := range cfg.Interfaces {
-		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
-			// Structural validity alone cannot establish ownership: on a
-			// partial appliance an unaddressed ordinary row may now carry the
-			// reserved NIC's old ethN name. Explicit subnet authority wins.
-			subnet := httpapi.DefaultInterfaceSubnetOverride(cfg.Interfaces[i].Name)
-			_, network, err := net.ParseCIDR(subnet)
-			if subnet == "" || err == nil && network.Contains(net.IP(r.Local.Addr().AsSlice())) {
-				continue
-			}
-		}
-		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
-			cfg.Interfaces[i].Device = ""
-		}
-	}
 }
 
 func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {
