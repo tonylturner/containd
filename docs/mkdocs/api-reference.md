@@ -62,8 +62,11 @@ Retry unavailable requests rather than interpreting them as empty or stopped.
 
 WireGuard supports IPv4-only tunnel addresses (`addressCIDR`), peer `allowedIPs`
 and endpoint addresses. Endpoint hostnames must resolve to IPv4 at runtime.
-IPv6 addresses in these fields are rejected when saving configuration, even
-while WireGuard is disabled. Other IPv6 interface and firewall features are unchanged.
+New or edited WireGuard settings must use IPv4, including when disabled.
+Previously stored unsupported settings remain visible and are quarantined;
+unchanged faults may be carried through unrelated edits. See
+[Service faults](services.md#service-faults).
+Other IPv6 interface and firewall features are unchanged.
 
 ## Simulation
 
