@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { certUploadNotice, tlsView, type TLSRow } from "../app/system/settings/tls-view";
+import { certUploadNotice, tlsPolicyRows, tlsView, type TLSRow } from "../app/system/settings/tls-view";
 import type { ProfileValueSource } from "../lib/api";
 
 // Model tests: no page, no server.
@@ -11,6 +11,7 @@ const saved = {
   httpEnabledSource: "default" as ProfileValueSource,
   httpsEnabledSource: "default" as ProfileValueSource,
   hstsEnabled: true, hstsEnabledSource: "default" as ProfileValueSource,
+  secureCookies: "https-only" as const, secureCookiesSource: "default" as const,
   certFile: "/etc/tls/server.crt", keyFile: "/etc/tls/server.key",
   certSubject: "CN=saved", certNotAfter: "2027-01-01T00:00:00Z",
   certDnsNames: ["saved.example"], certIps: ["192.0.2.20"],
@@ -27,6 +28,10 @@ const served = {
 };
 const iso = (v: string | undefined) => v ?? "—";
 const rows = (list: TLSRow[]) => Object.fromEntries(list.map((r) => [r.label, r.value]));
+
+test("cookie policy stays unknown until TLS status is loaded", () => {
+  expect(rows(tlsPolicyRows(null))["Secure cookies"]).toBe("—");
+});
 
 test("listeners and files served now equal to the next start show once", () => {
   const view = tlsView({ ...saved, ...bound, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);

@@ -28,6 +28,9 @@ import (
 
 type tlsInfoResponse struct {
 	config.TLSProfileFields
+	// SecureCookies is the auth cookie policy, not a flag for this request.
+	SecureCookies       string `json:"secureCookies"`
+	SecureCookiesSource string `json:"secureCookiesSource"`
 	// HTTPListenAddr, HTTPSListenAddr, HTTPEnabled and HTTPSEnabled are the
 	// listeners management binds when it next starts with this
 	// configuration.
@@ -105,6 +108,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			ServedCertFile:       cleanFilePath(served.CertFile),
 			ServedKeyFile:        cleanFilePath(served.KeyFile),
 		}
+		resp.SecureCookies, resp.SecureCookiesSource = secureCookiesPolicy()
 
 		var leaf *x509.Certificate
 		if served.TLS != nil {

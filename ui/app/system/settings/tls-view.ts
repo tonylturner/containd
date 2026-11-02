@@ -1,4 +1,4 @@
-import type { ApiResult, DeploymentProfile, ProfileValueSource, TLSCertUpload, TLSInfo } from "../../../lib/api";
+import type { ApiResult, ProfileValueSource, TLSCertUpload, TLSInfo } from "../../../lib/api";
 
 export type TLSRow = { label: string; value: string };
 
@@ -7,14 +7,15 @@ function effectiveValue(value: boolean, source: ProfileValueSource, saved?: bool
   return `${state} · source: ${source}${saved !== undefined ? ` · saved: ${saved ? "enabled" : "disabled"}` : ""}`;
 }
 
-/** Do not infer training cookie flags from the browser's URL: the server may
- * override them, and neither health nor TLS status reports that override. */
-export function tlsPolicyRows(info: TLSInfo | null, profile?: DeploymentProfile): TLSRow[] {
+const secureCookieLabels = { always: "Always", "https-only": "HTTPS only", never: "Never" };
+
+/** Cookie policy comes from TLS status, never the browser URL or health. */
+export function tlsPolicyRows(info: TLSInfo | null): TLSRow[] {
   return [
     { label: "HTTP enabled (next start)", value: info ? effectiveValue(info.httpEnabled, info.httpEnabledSource, info.httpEnabledSaved) : "—" },
     { label: "HTTPS enabled (next start)", value: info ? effectiveValue(info.httpsEnabled, info.httpsEnabledSource, info.httpsEnabledSaved) : "—" },
     { label: "HSTS", value: info ? effectiveValue(info.hstsEnabled, info.hstsEnabledSource, info.hstsEnabledSaved) : "—" },
-    { label: "Secure cookies", value: profile === "strict" ? "Enabled · source: profile" : "Not reported by API" },
+    { label: "Secure cookies", value: info ? `${secureCookieLabels[info.secureCookies]} · source: ${info.secureCookiesSource}` : "—" },
   ];
 }
 

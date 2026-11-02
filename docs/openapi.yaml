@@ -2775,7 +2775,7 @@ components:
           maximum: 36500
           description: "Rotate host keys at this age in days; 0 disables rotation. Running settings are checked every minute."
         listenAddr: {type: string}
-        shellMode: {type: string, enum: ['', appliance, linux], description: 'What an interactive SSH login opens. Empty means appliance. A non-empty CONTAIND_SSH_SHELL_MODE overrides it; SSH reads it at startup.'}
+        shellMode: {type: string, enum: ['', appliance, linux], description: 'What an interactive SSH login opens. Empty means appliance. Training permits a non-empty CONTAIND_SSH_SHELL_MODE override; SSH reads it at startup. Strict forces appliance mode and refuses Linux shell access.'}
       type: object
     ScheduleConfig:
       description: >-
@@ -3078,7 +3078,7 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
-      required: [managed, httpEnabled, httpEnabledSource, httpsEnabled, httpsEnabledSource, hstsEnabled, hstsEnabledSource]
+      required: [managed, httpEnabled, httpEnabledSource, httpsEnabled, httpsEnabledSource, hstsEnabled, hstsEnabledSource, secureCookies, secureCookiesSource]
       description: >-
         The listen addresses and enabled flags are those management binds when it
         starts with the profile-projected saved configuration. Strict disables
@@ -3120,6 +3120,19 @@ components:
         hstsEnabled: {type: boolean}
         hstsEnabledSource: {type: string, enum: [profile, config, default]}
         hstsEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; false is preserved'}
+        secureCookies:
+          type: string
+          enum: [always, https-only, never]
+          description: >-
+            Request-independent auth cookie Secure policy, not the flag on this
+            request. Strict always reports always. Training defaults to https-only
+            (Secure only when the request uses TLS). A trimmed nonempty
+            CONTAIND_COOKIE_SECURE selects always for 1 or case-insensitive true,
+            otherwise never. This uses the server request TLS state, not forwarded headers.
+        secureCookiesSource:
+          type: string
+          enum: [profile, environment, default]
+          description: 'Strict always reports profile, even with an environment override; training reports environment for a trimmed nonempty CONTAIND_COOKIE_SECURE, otherwise default'
         servedCertFingerprintSHA256: {type: string, description: 'SHA-256 of the bound served leaf DER, uppercase colon-separated hex; last-good identity on reload failure, absent when unavailable'}
         certFingerprintSHA256: {type: string, description: 'SHA-256 of the configured next-start leaf DER, uppercase colon-separated hex; absent when its validated identity is unavailable'}
         boundHttpListenAddr: {type: string, description: 'Address of the bound HTTP listener; absent when none is bound'}

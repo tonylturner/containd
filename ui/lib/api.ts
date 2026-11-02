@@ -475,6 +475,9 @@ export type TLSInfo = {
   hstsEnabled: boolean;
   hstsEnabledSource: ProfileValueSource;
   hstsEnabledSaved?: boolean;
+  /** Request-independent auth cookie policy, not this request's Secure flag. */
+  secureCookies: "always" | "https-only" | "never";
+  secureCookiesSource: "profile" | "environment" | "default";
   /** Listeners management has bound now; absent when not bound. */
   boundHttpListenAddr?: string;
   boundHttpsListenAddr?: string;
