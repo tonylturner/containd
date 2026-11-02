@@ -189,15 +189,15 @@ func runCLI(ctx context.Context) error {
 		}()
 	}
 
-	statusPoller := cli.NewSessionStatusPoller(ctx, api)
-	defer statusPoller.Close()
 	return runCLILoop(prompt, func(string) (string, error) {
-		status := statusPoller.Snapshot()
+		// Liner cannot safely redraw a prompt while editing. Resolve status
+		// before handing it the prompt, with SessionStatus's 250 ms budget.
+		// Invalidating an asynchronous cache after every command meant this
+		// snapshot always preceded the response and only ever displayed '?'.
+		status := api.SessionStatus(ctx)
 		fmt.Println(status.String())
 		return state.Prompt(status.Prompt(role))
 	}, state.AppendHistory, func(line string, buf *strings.Builder) error {
-		statusPoller.SyncToken(api)
-		defer statusPoller.Refresh(api)
 		if output, handled := cli.SessionConfigure(line); handled {
 			fmt.Fprintln(buf, output)
 			return nil

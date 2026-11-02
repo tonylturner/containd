@@ -347,6 +347,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The executable CLI resolves shared-candidate status before each prompt within
+  a 250 ms request budget, instead of repeatedly displaying a refreshing unknown
+  prompt even when the management API is healthy.
 - The engine keeps watching kernel interface, address and route changes after
   an interrupted system call instead of stopping until restart; drift was
   otherwise repaired only by the 10-second periodic reconcile.
