@@ -155,9 +155,11 @@ uses interface throughput, while Top Protocols counts inspected packets over the
 last hour. Recent-event list counts are not retained traffic totals. Failed event
 reads are unavailable, not zero.
 
-While the collector is running with no current source failures, every real
-member's latest bucket has coverage and a metric has no real activity, demo
-history with a covered latest bucket is labelled **Demo data**. Once real
+Demo data appears only while the collector is running, no current source is
+unavailable, the metric has no real activity, every real series has coverage in
+its latest bucket, and the latest demo bucket has coverage. It is labelled
+**Demo data**. Current source failures show their reasons beside retained real
+history and never permit demo fallback. Once real
 activity exists, charts use real history. Demo events have a **Demo** badge in
 Event Stream, Recent Alerts, Events, and alert/event inspection. If neither
 history exists, charts say **No traffic recorded yet**. A real-source gap never
