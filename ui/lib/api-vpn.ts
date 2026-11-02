@@ -20,6 +20,7 @@ export type WireGuardConfig = {
   listenInterfaces?: string[];
   addressCIDR?: string;
   privateKey?: string;
+  privateKeyConfigured?: boolean;
   peers?: WGPeer[];
 };
 
@@ -40,6 +41,10 @@ export type OpenVPNManagedClientConfig = {
   ca?: string;
   cert?: string;
   key?: string;
+  caConfigured?: boolean;
+  certConfigured?: boolean;
+  keyConfigured?: boolean;
+  passwordConfigured?: boolean;
 };
 
 export type OpenVPNManagedServerConfig = {
