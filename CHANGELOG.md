@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- The appliance keeps counter history in a new SQLite file, `/data/telemetry.db`
+  (`CONTAIND_TELEMETRY_DB`), capped at 64 MiB: 10 s points for 1 hour, 1 minute
+  for 24 hours and 15 minutes for 30 days. History starts empty after the upgrade.
+- API: `GET /api/v1/services/status` no longer returns `sparkline`,
+  `errors_sparkline`, `rate_per_min` or `errors_rate_per_min`; read history from
+  `GET /api/v1/telemetry/series`. `/api/v1/dashboard` `eventStats` now covers the
+  last 24 hours from retained counters, with `windowSeconds` and `complete`; it is
+  `null` with `eventStatsError` when history is unavailable, never zero.
+  `/api/v1/security/conduits` `traffic` is now an object: measured packets and
+  bytes for the last hour, or `unavailable` with a reason.
+- The engine owns a third nftables table, `inet <enforceTable>_acct`. It only
+  counts traffic and never drops or accepts.
+
+### Added
+
+- Charts show retained history of real counters: interface throughput per zone
+  (Dashboard Traffic, Zone Status, Monitoring, Topology), events, services and
+  antivirus. A missed sample shows as a gap, a counter restart as a reset mark,
+  and a failed read as unavailable, never as zero.
+- Conduits show measured routed traffic between zones that passed policy, from
+  per-zone-pair kernel counters. "% of baseline" is gone.
+- `GET /api/v1/telemetry/series` returns retained counter history.
+- Events carry `origin: "demo"` when the traffic simulator made them. The UI
+  marks them Demo; they are never sent to syslog or counted as real. On a fresh
+  install, charts show labelled demo data until real data arrives.
+
 ## [0.1.38] - 2026-11-01
 
 ### Upgrade notes
