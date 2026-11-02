@@ -187,7 +187,7 @@ export default function SecurityView() {
               <button key={JSON.stringify([conduit.from, conduit.to])} className="rounded-xs border px-2 py-1 text-(--amber)"
                 aria-controls="conduit-inspector" aria-expanded={panelOpen && selected?.from === conduit.from && selected?.to === conduit.to}
                 onClick={event => selectCell(conduit.from, conduit.to, event.currentTarget)}>
-                {allZones.find(zone => zone.id === conduit.from)?.name || conduit.from} → {allZones.find(zone => zone.id === conduit.to)?.name || conduit.to}: {conduit.gaps.length} gaps
+                {allZones.find(zone => zone.id === conduit.from)?.name || conduit.from} → {allZones.find(zone => zone.id === conduit.to)?.name || conduit.to}: {conduit.gaps.length} {conduit.gaps.length === 1 ? "gap" : "gaps"}
               </button>
             ))}
           </div>

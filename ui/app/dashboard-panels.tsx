@@ -10,7 +10,8 @@ import type {
   TelemetryEvent,
 } from "../lib/api";
 
-import { DemoBadge, TelemetryChart, TelemetryRate } from "../components/TelemetryChart";
+import { DemoBadge, TelemetryChart, TelemetryHistory, TelemetryLegend, TelemetryNotice, TelemetryRate } from "../components/TelemetryChart";
+import { useTelemetry } from "../hooks/useTelemetry";
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
@@ -20,6 +21,24 @@ export type InterfaceBindings = {
   configured: Interface[];
   runtime: InterfaceState[];
 };
+
+export function TrafficHistory() {
+  const incoming = useTelemetry([{ metric: "iface.rx_bytes", role: "leaf", group: "role" }]);
+  const outgoing = useTelemetry([{ metric: "iface.tx_bytes", role: "leaf", group: "role" }]);
+  const sharedFault = !!(incoming?.error ?? incoming?.unavailable) &&
+    incoming?.error === outgoing?.error &&
+    JSON.stringify(incoming?.noticeReasons) === JSON.stringify(outgoing?.noticeReasons);
+  return <div className="mb-3 space-y-2">
+    {sharedFault && <TelemetryNotice read={incoming} />}
+    <p className="text-xs text-(--text-muted)">In · bytes/s</p>
+    <TelemetryHistory title="In bytes/s" read={incoming} hideFault={sharedFault} />
+    <p className="text-xs text-(--text-muted)">Out · bytes/s</p>
+    <TelemetryHistory title="Out bytes/s" read={outgoing} hideFault={sharedFault} />
+    <h4 className="text-xs text-(--text-muted)">Events</h4>
+    <TelemetryChart title="Events" queries={[{ metric: "events.total" }]} />
+    <TelemetryLegend />
+  </div>;
+}
 
 export type ServiceInfo = {
   name: string;

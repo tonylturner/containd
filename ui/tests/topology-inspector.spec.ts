@@ -69,7 +69,7 @@ test("security gaps and conduit inspector are keyboard reachable with distinct s
   await expect(page.getByText("Automated checks tag requirements from observed policy; not a standards assessment.", { exact: false })).toBeVisible();
   await inspector.getByRole("button", { name: "Hide detail panel" }).click();
   await expect(cell).toBeFocused();
-  await expect(page.getByRole("button", { name: "IT → OT: 1 gaps", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "IT → OT: 1 gap", exact: true })).toBeVisible();
 });
 
 test("logical graph node opens its inspector with Enter", async ({ page }) => {

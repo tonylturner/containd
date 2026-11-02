@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { decimalCounter, parseSeries, pointRate, responsePoints, sumPoints } from "../lib/api-telemetry";
-import { seriesResponse, type WireResponse } from "./fixtures/telemetry";
+import { manyUnavailableReasons, seriesResponse, type WireResponse } from "./fixtures/telemetry";
 
 type Scenario = { mutate?: (body: WireResponse, url: URL) => void; status?: number };
 async function open(page: Page, scenario: Scenario = {}, path = "/system/services/dns/") {
@@ -51,12 +51,19 @@ test("gaps are breaks, observed zero has no height floor, and a reset is marked"
   await expect(history).toContainText("Rate: 30.0 /min"); // 10 / 20 seconds, not 10 / 10.
 });
 
-test("the latest gap is unavailable, never the previous bucket's rate or a zero", async ({ page }) => {
+test("an ended series has muted No current data, never the previous bucket's rate, zero or demo", async ({ page }) => {
   await open(page, { mutate: body => { const p = body.series[0].points.at(-1)!; delete p.v; delete p.d; p.q = "gap"; } });
-  await expect(chart(page)).toContainText("Telemetry unavailable: latest real bucket is a gap");
+  const notice = chart(page).getByRole("status");
+  await expect(notice).toHaveText("No current data");
+  await expect(notice).toHaveClass(/text-\(--text-muted\)/);
+  await expect(notice).not.toHaveClass(/text-amber/);
+  await expect(page.getByText("Errors:", { exact: false })).toContainText("No current data");
+  await expect(chart(page)).toContainText("Rate: Unknown /min");
+  await expect(chart(page)).not.toContainText("unavailable");
+  await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   await expect(chart(page)).not.toContainText("Rate: 60.0");
   await expect(chart(page)).not.toContainText("Rate: 0.0");
-  await expect(chart(page).getByRole("img")).toHaveCount(0);
+  await expect(chart(page).getByRole("img")).toBeVisible(); // Retained history remains useful.
 });
 
 test("a partial error count without duration remains visible without an invented rate", async ({ page }) => {
@@ -144,8 +151,9 @@ for (const active of [false, true]) {
         { source: "engine", reason: "engine connection refused" },
       ];
     } });
-    const reason = "Telemetry unavailable: enforcement disabled; engine connection refused";
+    const reason = "Telemetry unavailable: enforcement disabled (+1 more)";
     await expect(chart(page).getByRole("status")).toHaveText(reason);
+    await expect(chart(page).getByRole("status")).toHaveAttribute("title", "Telemetry unavailable: enforcement disabled\nengine connection refused");
     await expect(chart(page).getByRole("img")).toBeVisible();
     await expect(chart(page).locator('[data-value="20"]')).toHaveCount(1);
     await expect(chart(page)).toContainText("Rate: Unknown /min");
@@ -177,8 +185,8 @@ test("a running collector with no real activity cannot mask the latest real gap 
   const demoReads = requests.filter(url => url.searchParams.get("origin") === "demo").length;
   gap = true;
   await page.clock.fastForward(10_000);
-  await expect(chart(page)).toContainText("Telemetry unavailable: latest real bucket is a gap");
-  await expect(chart(page).getByRole("img")).toHaveCount(0);
+  await expect(chart(page)).toContainText("No current data");
+  await expect(chart(page).getByRole("img")).toBeVisible();
   await expect(page.getByText("Demo data", { exact: true })).toHaveCount(0);
   expect(requests.filter(url => url.searchParams.get("origin") === "demo")).toHaveLength(demoReads);
   gap = false;
@@ -312,10 +320,32 @@ test("a missing metric in a combined zone chart is partial, never a complete zer
   expect(responsePoints([rx, tx]).at(-1)).toEqual({ ...rx.series[0].points.at(-1), q: "partial" });
 });
 
-test("collector failure notices wrap at 390px without hiding the fault", async ({ page }) => {
+test("collector failure notices fit one line at 390px with the full fault on demand", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const message = `store-write-failed-${"x".repeat(200)}`;
   await open(page, { mutate: body => { body.collector.state = "stalled"; body.collector.error = message; } });
   await expect(chart(page)).toContainText(`Collector stalled: ${message}`);
+  await expect(chart(page).getByRole("status")).toHaveAttribute("title", `Collector stalled: ${message}`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("chart and rate notices deduplicate many reasons and expose the full list on demand", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, { mutate: body => { body.collector.unavailable = manyUnavailableReasons("service"); } });
+  const summary = "Telemetry unavailable: interface eth1: statistics unreadable: permission denied (+7 more)";
+  for (const notice of [chart(page).getByRole("status"), page.getByText("Errors:", { exact: false }).getByRole("status")]) {
+    await expect(notice).toHaveText(summary);
+    const details = await notice.getAttribute("title");
+    for (const { reason } of manyUnavailableReasons()) expect(details).toContain(reason);
+    expect(details?.split("\n")).toHaveLength(8);
+    expect((await notice.boundingBox())!.height).toBe(16);
+    const toggle = notice.getByRole("button");
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    for (const { reason } of manyUnavailableReasons()) await expect(notice.locator("[data-telemetry-details]")).toContainText(reason);
+    await page.keyboard.press("Space");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
