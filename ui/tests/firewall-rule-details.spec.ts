@@ -118,7 +118,9 @@ test("failed background refresh keeps editor diagnostics and dismissal available
   await failRefresh(page, true);
   await expect(editor.getByPlaceholder("description", { exact: true })).toBeDisabled();
   await expect(editor.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
-  for (const name of ["All saved matching values", "Technical details"]) {
+  await expect(editor.getByLabel("Source zone 2", { exact: true })).toBeVisible();
+  await expect(editor.getByLabel("Source zone 2", { exact: true })).toBeDisabled();
+  for (const name of ["Technical details"]) {
     const summary = editor.getByText(name, { exact: true });
     await expect(summary.locator("xpath=ancestor::fieldset[@disabled]")).toHaveCount(0);
     await summary.click();

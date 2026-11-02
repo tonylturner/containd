@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { mockLearner, openDataset } from "./fixtures/learner";
+import { mockLearner, openDataset, suggestionRow } from "./fixtures/learner";
 
 test("a saved suggestion receipt does not claim a live activation state", async ({ page }) => {
   const state = await mockLearner(page);
   state.suggestions[0].status = "staged";
   await openDataset(page);
-  const suggestion = page.getByRole("article", { name: "Suggestion modbus-1", exact: true });
-  await expect(suggestion.getByText(/Saved—activation not verified/)).toBeVisible();
+  const suggestion = suggestionRow(page, "modbus-1");
+  await expect(suggestion.getByText("Already staged; activation not verified.", { exact: true })).toBeVisible();
   await expect(suggestion).not.toContainText("not active yet");
 });
 
@@ -31,8 +31,8 @@ test("collection disclosures retain exact destination, checksums and unknown rea
     await expect(collection.getByText(raw, { exact: true })).toBeVisible();
   }
   await review.getByRole("button", { name: "Generate suggestions", exact: true }).click();
-  const reason = review.getByRole("listitem").filter({ hasText: "Unrecognized reason: 7" });
-  await expect(reason.getByText("Unrecognized reason: 7", { exact: true })).toBeVisible();
+  const reason = review.getByRole("listitem").filter({ hasText: "Unrecognized reason (future_reason_code): 7" });
+  await expect(reason.getByText("Unrecognized reason (future_reason_code): 7", { exact: true })).toBeVisible();
   await expect(reason.getByText("future_reason_code", { exact: true })).not.toBeVisible();
   await reason.locator("summary").click();
   await expect(reason.getByText("future_reason_code", { exact: true })).toBeVisible();

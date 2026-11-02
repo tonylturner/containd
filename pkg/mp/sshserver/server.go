@@ -313,6 +313,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 }
 
 func (s *Server) handleSession(ctx context.Context, username, remote string, reg *cli.Registry, ch ssh.Channel, in <-chan *ssh.Request) {
+	ctx = cli.WithLocalFilesystem(ctx, true)
 	defer func() {
 		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
 			conn.close()
@@ -424,12 +425,31 @@ func (s *Server) isLinuxShellMode() bool {
 // client requested none; the shell command needs it.
 func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw *sessionIO, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
-	prompt := "containd# "
-	// Gentle bootstrap hint.
-	writeTTY(rw, "Type 'menu' for setup/diagnostics, or 'help'.\n")
+	ctx = newInteractiveSession(s, ctx, username, rw, reader, reg).secretContext(pr != nil)
+	api := &cli.API{BaseURL: s.opts.BaseURL, Client: s.opts.APIClient}
+	if conn := connectionFromContext(ctx); conn != nil {
+		api.Client = s.connectionClient(conn)
+	}
+	entry, role := api.SessionEntry(ctx)
+	statusPoller := cli.NewSessionStatusPoller(ctx, api)
+	defer statusPoller.Close()
+	writeTTY(rw, entry+"\nshell opens the Linux OS shell; exit disconnects SSH. menu and wizard are available here. Type help for commands.\n")
+	defer writeTTY(rw, cli.SessionExit+"\nSSH disconnecting.\n")
 	for {
-		_, _ = io.WriteString(rw, "\r"+prompt)
-		line, ok := readLineInteractive(reader, rw)
+		status := statusPoller.Snapshot()
+		writeTTY(rw, status.String()+"\n")
+		_, _ = io.WriteString(rw, "\r"+status.Prompt(role))
+		typing := false
+		rw.status = statusPoller.Updates()
+		rw.refresh = func() {
+			status = statusPoller.Snapshot()
+			// Never erase partially entered input. Its next prompt uses fresh status.
+			if !typing {
+				writeTTY(rw, "\r\x1b[2K"+status.String()+"\n"+status.Prompt(role))
+			}
+		}
+		line, ok := readTerminalLineProgress(reader, rw, true, func(nonempty bool) { typing = nonempty })
+		rw.status, rw.refresh = nil, nil
 		if !ok {
 			return
 		}
@@ -441,12 +461,17 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		if line == "" {
 			continue
 		}
+		if output, handled := cli.SessionConfigure(line); handled {
+			writeTTY(rw, output+"\n")
+			continue
+		}
 		switch strings.ToLower(line) {
 		case "exit", "quit", "logout":
 			return
-		case "shell", "bash":
+		case "shell":
 			if pr != nil {
 				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
+				statusPoller.Refresh(api)
 				continue
 			}
 			writeTTY(rw, "The Linux shell needs a terminal: reconnect with an interactive ssh session (not ssh -T).\n")
@@ -455,16 +480,22 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 			if s.runMenu(ctx, username, rw, reader, reg) {
 				return
 			}
+			statusPoller.Refresh(api)
 			continue
 		case "diagnostics", "diag":
 			s.runDiagnosticsMenu(ctx, rw, reader, reg)
 			continue
-		case "wizard", "configure":
+		case "wizard":
 			s.runWizard(ctx, username, rw, reader, reg)
+			statusPoller.Refresh(api)
 			continue
 		}
 		var buf strings.Builder
-		err := reg.ParseAndExecute(ctx, line, &buf)
+		err := cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
+		statusPoller.Refresh(api)
+		if strings.EqualFold(line, "help") {
+			buf.WriteString("\nSSH controls: configure names this CLI; shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
+		}
 		if s.opts.AuditStore != nil {
 			rec := audit.Record{
 				Actor:  username,

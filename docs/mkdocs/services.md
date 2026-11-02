@@ -197,6 +197,12 @@ do not fill missing series with zero in alerts or dashboards.
 - Requests for ineligible addresses receive DHCPNAK only in authoritative mode; otherwise the server stays silent. SELECTING requests naming this server use the same eligibility checks. DISCOVER never receives DHCPNAK, including when the pool is exhausted.
 - Authority is limited to directly attached configured interfaces whose pool lies in the interface IPv4 subnet. Requests relayed from another subnet or selecting another server receive no reply. Do not enable authority on networks managed by another DHCP server.
 - Reservations are enforced by MAC and emit `service.dhcp.reservation.*` events.
+- The DHCP page picks listen interfaces from configured interfaces and edits
+  pools as interface/start/end rows. Reservations use interface/MAC/IP rows;
+  hostnames are observed in leases, not configurable reservation fields.
+  Saved interface names absent from the configured list remain selectable.
+  **Save** validates rows and stages the same configuration arrays; review and
+  commit to apply. Lease, DNS and domain options remain under **Advanced options**.
 
 ## VPN
 
@@ -212,6 +218,50 @@ do not fill missing series with zero in alerts or dashboards.
   Connection status clears on a soft restart or process exit. Server startup
   still requires the initialization marker within five seconds before
   acknowledging its loaded revocation list.
+
+### WireGuard keys and peers
+
+The VPN page edits peers as rows: name, public key, allowed IPs (CIDRs), optional
+endpoint and keepalive seconds. **Peers (JSON)** remains under **Advanced peer
+settings** and edits the same list. Add, remove and edit operations stage only
+when you select **Save**; commit applies them.
+
+A stored private key shows **Private key configured — Replace**, without
+revealing it. **Generate key pair** uses WebCrypto X25519 in the browser; it is
+hidden with an explanation when unsupported. Only the private key is submitted
+in the staged write, not in a URL or browser storage. Replacing the server key
+requires updating clients. A successful Save clears each submitted secret field
+even if you edit peers while it is pending. A newer replacement entered during
+that request remains an unsaved draft; failed saves retain the draft for review.
+This applies to the WireGuard private key and managed OpenVPN CA, certificate,
+private key and password.
+
+Client downloads require a known server public key (generated in this editor or
+from live tunnel status) and a server endpoint with port entered in the download
+helper. The endpoint helper is not persisted. **Download client config** produces
+a template, not an issued credential: enter the matching client's private key
+locally, then review its address and routes before use. The peer's allowed IPs
+supply its proposed client addresses, and the server tunnel CIDR supplies the
+initial route; routed networks may need different addresses or additional routes.
+The server peer endpoint is not the server's public endpoint. Downloads never
+include the server private key. A live public key describes the applied server,
+which may differ from staged settings; commit and verify it before connecting.
+
+### VPN secret-presence metadata
+
+`GET /api/v1/services/vpn`, successful VPN stage responses and the VPN object in
+profile-upload responses omit stored secret values. `wireguard.privateKeyConfigured`
+is always a boolean. When `openvpn.managed` exists it always includes boolean
+`caConfigured`, `certConfigured`, `keyConfigured` and `passwordConfigured`.
+These are read-only presence indicators, not proof that a tunnel is running.
+Managed OpenVPN fields show configured material without requiring it again.
+
+Writes retain existing WireGuard keys when `privateKey` is omitted or empty.
+When both old and new managed OpenVPN objects exist, omitted or empty CA,
+certificate, key and password fields retain their stored values. To replace a
+secret, supply a nonempty replacement. Omitting `managed` removes the entire
+managed client configuration; it does not retain that object. These VPN writes
+stage the candidate with the revision precondition; they never auto-commit.
 
 ### OpenVPN (managed client)
 
@@ -493,6 +543,16 @@ ClamAV mode:
   While AV is enabled, staging rejects any other value, including cron syntax.
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
+- An omitted scanner mode means **Local scanner (ClamAV)**, including its
+  readiness and definition-update controls. Unrelated saves leave an omitted
+  mode omitted; selecting a scanner explicitly saves that choice.
+  A missing-database fault offers
+  **Update definitions** beside the cause. Both this and **Run definition update**
+  request confirmation and act immediately, independently of **Save**.
+  Definition uploads and deletion also require confirmation.
+- If staging scan selections reports `needs dataplane.enforcement`, follow
+  the link to the Firewall enforcement control, stage enforcement, then retry
+  the AV save. Review both changes and commit to apply; the link changes no settings.
 - `POST /api/v1/services/av/update` queues an immediate run on the same schedule and
   returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
 - Custom definitions are ClamAV database files (`.ndb`, `.hdb`, `.ldb`,
@@ -543,6 +603,8 @@ Scanning:
   limit, so new definitions or another socket never reuse old verdicts.
   ICAP verdicts are never cached because the server may decide by direction,
   HTTP headers and endpoints.
+  **Cache TTL (seconds)** edits the cache duration, including fractional seconds;
+  the API stores `cacheTtl` in nanoseconds. Zero selects the default 10 minutes.
 - ICAP is a generic RFC 3507 backend with exactly one server and no
   failover. Uploads go as `REQMOD` with the request head, downloads as
   `RESPMOD` with the request and response heads. The request head is sent
@@ -580,7 +642,37 @@ the `gate` object above.
   - `set proxy forward <on|off> [port] [zone...]`
   - `set proxy reverse <on|off>`
 - On commit/rollback, `containd mgmt` renders daemon configs to the services directory (`CONTAIND_SERVICES_DIR` or `/data/services`): `envoy-forward.yaml` and `nginx-reverse.conf`.
-- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. It validates the generated Nginx config with `nginx -t` before restart, tracks last start/error timestamps, and exposes the `/api/v1/services/status` view consumed by `show services status`.
+- Management includes optional supervision that starts/stops Envoy/Nginx if binaries are present. Before publishing, it validates the staged configs with `envoy --mode validate` and `nginx -t` when those binaries are installed. Staged filenames retain their `.yaml` or `.conf` extension so each daemon uses the correct parser. Management tracks last start/error timestamps and exposes the `/api/v1/services/status` view consumed by `show services status`.
+
+### Reverse sites and TLS
+
+On **Proxies**, **Add** puts a new site in the local list. **Edit** loads an
+existing site's name, listen port, backends, hostnames, description and TLS
+settings; **Update site** changes that local list and **Cancel edit** discards
+the form edits. **Save** stages the list into the candidate with its loaded
+revision. Review and commit to apply; none of these form actions uploads
+certificates or starts a listener immediately.
+
+**Site TLS** opens automatically for a site with TLS enabled or a saved
+certificate reference. Enable TLS and enter `certRef` as a filename stem,
+not a file path: 1–128 ASCII letters, digits, underscores or hyphens, beginning
+with a letter or digit. For reference `plant-web`, externally provision
+`plant-web.crt` and `plant-web.key` in `/data/certs` on the management service
+host (or the directory set by `CONTAIND_CERTS_DIR`). The files must contain a
+matching PEM certificate/private-key pair, and every certificate in the chain
+must be currently valid. Files and resolved symlinks must stay inside that
+directory and be readable by the service. A container deployment needs these
+files in its mounted storage.
+
+There is no proxy-certificate upload API or web form. **System Settings**
+certificate upload replaces the management HTTPS identity, not a proxy site's
+certificate. A reference alone cannot provision the files. Missing, expired,
+not-yet-valid or mismatched material rejects application rather than falling
+back to plaintext.
+
+Proxy faults lead with a short cause summary. **Technical details** retains the
+exact reported diagnostic output, including generated configuration when the
+daemon includes it; it is not a separate generated-file or log download.
 
 ## Auth/SSH
 - Auth uses JWT cookie sessions by default with admin/view roles.

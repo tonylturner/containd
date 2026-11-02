@@ -13,6 +13,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
@@ -29,6 +30,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -135,6 +137,107 @@ func TestCLICompleteHandlerSuggestsConfigAwareArgs(t *testing.T) {
 	}
 }
 
+func TestCLIExecuteRefusesSecretInput(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
+	for _, role := range []string{"admin", "view"} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) { c.Set(ctxRoleKey, role) })
+		router.POST("/execute", cliExecuteHandler(&mockStore{cfg: config.DefaultConfig()}))
+		for _, line := range []string{"create user bob", "reset user password bob"} {
+			rec := httptest.NewRecorder()
+			body, err := json.Marshal(map[string]string{"line": line})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			// The console constructs a loopback API client, but must refuse
+			// secret entry before dispatching any account API request.
+			req.Header.Set("Authorization", "Bearer test")
+			router.ServeHTTP(rec, req)
+			var result struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			want := cli.ErrWebSecretInput.Error()
+			if role == "view" {
+				command := strings.TrimSuffix(line, " bob")
+				want = cli.ErrPermissionDenied.Error() + ": " + command + " requires admin"
+			}
+			if rec.Code != http.StatusOK || result.Error != want {
+				t.Fatalf("role=%s line=%s status=%d error=%s", role, line, rec.Code, result.Error)
+			}
+		}
+	}
+}
+
+func TestCLIExecuteRefusesFilesystem(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
+	root := t.TempDir()
+	path := filepath.Join(root, "credential")
+	if err := os.WriteFile(path, []byte("PRIVATE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "download")
+	for _, role := range []string{"admin", "view"} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) { c.Set(ctxRoleKey, role) })
+		store := &mockStore{cfg: config.DefaultConfig()}
+		router.POST("/api/v1/cli/execute", cliExecuteHandler(store))
+		for _, command := range []string{
+			"download backup id " + target,
+			"download openvpn client id " + target,
+			"set vpn wireguard private-key-file " + path,
+			"set vpn openvpn client password-file " + path,
+			"set vpn openvpn client ca-file " + path,
+			"set vpn openvpn client cert-file " + path,
+			"set vpn openvpn client key-file " + path,
+			"import config " + path,
+			"analyze pcap " + path,
+			"convert sigma " + path,
+			"diag capture lo 1 " + target,
+		} {
+			t.Run(role+"/"+strings.Fields(command)[0]+"/"+command, func(t *testing.T) {
+				before, err := json.Marshal(store.cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := json.Marshal(map[string]string{"line": command})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/cli/execute", bytes.NewReader(body))
+				// A web request must not inherit a trusted caller's filesystem access.
+				req = req.WithContext(cli.WithLocalFilesystem(req.Context(), true))
+				req.Header.Set("Authorization", "Bearer test")
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				var result struct{ Output, Error string }
+				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				want := cli.ErrLocalFilesystemUnavailable.Error()
+				if role == "view" && !strings.HasPrefix(command, "convert sigma ") {
+					want = cli.ErrPermissionDenied.Error()
+				}
+				if rec.Code != http.StatusOK || !strings.HasPrefix(result.Error, want) || result.Output != "" {
+					t.Fatalf("status=%d result=%+v", rec.Code, result)
+				}
+				after, err := json.Marshal(store.cfg)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("refused file command changed candidate: %v", err)
+				}
+			})
+		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("web command wrote a file: %v", err)
+	}
+}
+
 func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
@@ -165,8 +268,50 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	if err := conn.ReadJSON(&greeting); err != nil {
 		t.Fatalf("read greeting: %v", err)
 	}
-	if !strings.Contains(greeting.Output, "containd in-app CLI") {
+	if !strings.Contains(greeting.Output, "Configuration CLI") {
 		t.Fatalf("unexpected greeting: %+v", greeting)
+	}
+
+	for _, line := range []string{"create user bob", "reset user password bob"} {
+		if err := conn.WriteJSON(map[string]string{"line": line}); err != nil {
+			t.Fatal(err)
+		}
+		var refusal struct {
+			Output string `json:"output"`
+			Error  string `json:"error"`
+		}
+		if err := conn.ReadJSON(&refusal); err != nil {
+			t.Fatal(err)
+		}
+		if refusal.Error != cli.ErrWebSecretInput.Error() || refusal.Output != "" {
+			t.Fatalf("web password input: %+v", refusal)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "credential")
+	if err := os.WriteFile(path, []byte("PRIVATE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "download")
+	for _, line := range []string{
+		fmt.Sprintf("download backup id %q", target),
+		fmt.Sprintf("download openvpn client id %q", target),
+		fmt.Sprintf("set vpn wireguard private-key-file %q", path),
+		fmt.Sprintf("set vpn openvpn client password-file %q", path),
+	} {
+		if err := conn.WriteJSON(map[string]string{"line": line}); err != nil {
+			t.Fatal(err)
+		}
+		var refusal struct{ Output, Error string }
+		if err := conn.ReadJSON(&refusal); err != nil {
+			t.Fatal(err)
+		}
+		if refusal.Error != cli.ErrLocalFilesystemUnavailable.Error() || refusal.Output != "" {
+			t.Fatalf("web filesystem access: %+v", refusal)
+		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("websocket command wrote a file: %v", err)
 	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"line":"show version"}`)); err != nil {
@@ -196,6 +341,51 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	}
 	if cmdResp.Error != "" || !strings.Contains(cmdResp.Output, "status") {
 		t.Fatalf("ticket-authenticated loopback command: %+v", cmdResp)
+	}
+
+	// Mode errors must not execute Linux tools or terminate the console.
+	if err := conn.WriteJSON(map[string]string{"line": "configure"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&cmdResp); err != nil {
+		t.Fatal(err)
+	}
+	if cmdResp.Error != "" || !strings.Contains(cmdResp.Output, "Already in configuration CLI") {
+		t.Fatal(cmdResp)
+	}
+	if err := conn.WriteJSON(map[string]string{"line": "pwd"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&cmdResp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmdResp.Error, "not Linux") {
+		t.Fatal(cmdResp)
+	}
+	if err := conn.WriteJSON(map[string]string{"control": "status"}); err != nil {
+		t.Fatal(err)
+	}
+	var state struct{ Control, Prompt, Status string }
+	if err := conn.ReadJSON(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Control != "status" || !strings.Contains(state.Prompt, "(config") || !strings.Contains(state.Status, "Shared candidate") {
+		t.Fatal(state)
+	}
+	if err := conn.WriteJSON(map[string]string{"line": "exit"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Control != "close" {
+		t.Fatal(state)
+	}
+	// Closing the command runner must not revoke its management session.
+	rec = httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/auth/me", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("console exit logged out management: %d", rec.Code)
 	}
 }
 
@@ -294,6 +484,26 @@ func TestConsoleTLSVerificationAndRotation(t *testing.T) {
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.Copy(io.Discard, r.Body); err != nil {
 			t.Errorf("read body: %v", err)
+			return
+		}
+		if r.URL.Path != "/api/v1/health" {
+			wantToken := "Bearer console-secret"
+			if calls.Load() >= 3 {
+				wantToken = "Bearer console-renewed"
+			}
+			if r.Header.Get("Authorization") != wantToken {
+				t.Errorf("status/identity lost refreshed token: %v", r.Header)
+			}
+			switch r.URL.Path {
+			case "/api/v1/auth/me":
+				_, _ = io.WriteString(w, `{"username":"operator","role":"admin"}`)
+			case "/api/v1/config":
+				_, _ = io.WriteString(w, `{"system":{"hostname":"appliance"}}`)
+			case "/api/v1/config/diff":
+				_, _ = io.WriteString(w, `{"changed":false,"pendingConfirm":null}`)
+			default:
+				t.Errorf("unexpected request: %s", r.URL.Path)
+			}
 			return
 		}
 		n := calls.Add(1)

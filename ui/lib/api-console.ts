@@ -9,6 +9,12 @@ import type {
   TelemetryEvent,
 } from "./api";
 
+/** Session controls are explicit protocol fields, never parsed from terminal text. */
+export type CLIWebSocketResponse = {
+  output?: string; error?: string; control?: "close" | "status";
+  prompt?: string; status?: string;
+};
+
 export type EventQuery = {
   session?: string; flow?: string; kind?: string; protocol?: string;
   decision?: string; verdict?: string; since?: string; cursor?: string;

@@ -20,12 +20,12 @@ async function review(page: Page, running: Record<string, unknown>, candidate: R
 
 test("pure firewall reorder shows one order line and no invented field changes", async ({ page }) => {
   await review(page, { firewall: { rules } }, { firewall: { rules: [rules[1], rules[2], rules[0]] } });
-  const summary = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const summary = page.getByRole("region", { name: "Firewall field changes", exact: true });
   await expect(summary.locator("dd")).toHaveText(["Order changed: r6-rule-2, r6-rule-3, r6-rule-1"]);
   await expect(summary.locator('[aria-label="Old value"], [aria-label="New value"]')).toHaveCount(0);
   const advanced = page.getByRole("button", { name: "Advanced", exact: true });
-  await expect(advanced).toHaveAttribute("aria-expanded", "false");
-  await advanced.click();
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
   const raw = page.getByRole("region", { name: "Firewall JSON changes", exact: true });
   await expect(raw).toBeVisible();
   await expect(raw.getByText('"id": "r6-rule-1",', { exact: true })).toHaveCount(2);
@@ -40,7 +40,8 @@ test("pure firewall reorder shows one order line and no invented field changes",
 test("reorder plus one field edit stays attached to the firewall rule identity", async ({ page }) => {
   const edited = { id: rules[0].id, description: rules[0].description, action: rules[0].action };
   await review(page, { firewall: { rules } }, { firewall: { rules: [rules[1], rules[2], edited] } });
-  const summary = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const summary = page.getByRole("region", { name: "Firewall field changes", exact: true });
   await expect(summary.locator("dt")).toHaveText(["firewall.rules", "firewall rule r6-rule-1: log"]);
   await expect(summary.locator("dd").first()).toHaveText("Order changed: r6-rule-2, r6-rule-3, r6-rule-1");
   await expect(summary.locator('[aria-label="Old value"]')).toHaveText("true");
@@ -52,12 +53,13 @@ test("added and removed entries are explicit and secret values remain hidden", a
     { firewall: { rules: [rules[0]] }, services: { vpn: { wireguard: { privateKey: "old redacted placeholder" } } } },
     { firewall: { rules: [rules[1]] }, services: { vpn: { wireguard: { privateKey: "new redacted placeholder" } } } },
   );
-  const firewall = page.getByRole("region", { name: "Firewall changes", exact: true });
+  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  const firewall = page.getByRole("region", { name: "Firewall field changes", exact: true });
   await expect(firewall.locator("dt")).toContainText(["firewall.rules", "firewall rule r6-rule-2"]);
   await expect(firewall.getByText("Added", { exact: true })).toBeVisible();
   await expect(firewall.getByText("Removed", { exact: true })).toBeVisible();
   await expect(firewall.getByText("firewall rule r6-rule-1: log", { exact: true })).toBeVisible();
-  const services = page.getByRole("region", { name: "Services changes", exact: true });
+  const services = page.getByRole("region", { name: "Services field changes", exact: true });
   await expect(services.getByText("Secret value changed (hidden).", { exact: true })).toBeVisible();
   await expect(services).not.toContainText("redacted placeholder");
   await expect(services.locator('[aria-label="Old value"], [aria-label="New value"]')).toHaveCount(0);
@@ -67,7 +69,8 @@ for (const [section, label] of [["zones", "Zones"], ["interfaces", "Interfaces"]
   test(`${section} match by name rather than array index`, async ({ page }) => {
     const items = [{ name: "lan", description: "Internal" }, { name: "wan", description: "External" }];
     await review(page, { [section]: items }, { [section]: [items[1], items[0]] });
-    const summary = page.getByRole("region", { name: `${label} changes`, exact: true });
+    await page.getByRole("button", { name: "Advanced", exact: true }).click();
+    const summary = page.getByRole("region", { name: `${label} field changes`, exact: true });
     await expect(summary.locator("dd")).toHaveText(["Order changed: wan, lan"]);
     await expect(summary.locator('[aria-label="Old value"]')).toHaveCount(0);
   });

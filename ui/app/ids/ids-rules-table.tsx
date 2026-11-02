@@ -22,6 +22,7 @@ export function RulesTable({
   rules,
   canEdit,
   mutationDisabled = false,
+  editDisabled = mutationDisabled,
   onEdit,
   onDelete,
   onBulkDelete,
@@ -31,6 +32,7 @@ export function RulesTable({
   rules: IDSRule[];
   canEdit: boolean;
   mutationDisabled?: boolean;
+  editDisabled?: boolean;
   onEdit: (r: IDSRule) => void;
   onDelete: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
@@ -246,7 +248,7 @@ export function RulesTable({
       )}
 
       {someSelected && canEdit && (
-        <div className="mb-3 flex items-center gap-2 rounded-xs border px-3 py-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xs border px-3 py-2">
           <span className="tabular-nums text-xs">
             {selected.size} selected
           </span>
@@ -349,7 +351,7 @@ export function RulesTable({
                   dir={sortDir}
                   onSort={doSort}
                 />
-                <th className="px-4 py-2.5 text-right text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim)">
+                <th className="sticky right-0 bg-(--surface) px-4 py-2.5 text-right text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim)">
                   Actions
                 </th>
               </tr>
@@ -439,11 +441,11 @@ export function RulesTable({
                         {r.severity || "low"}
                       </StatusBadge>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                    <td className="sticky right-0 whitespace-nowrap bg-(--surface) px-4 py-2.5 text-right">
                       {canEdit && (
                         <>
                           <button
-                            disabled={mutationDisabled}
+                            disabled={editDisabled}
                             onClick={() => onEdit(r)}
                             className="mr-1.5 rounded-xs border bg-(--surface2) px-2 py-0.5 text-[11px] transition-ui"
                           >
@@ -499,16 +501,16 @@ function SortHeader({
   return (
     <th
       className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim) transition-ui hover:text-(--text)"
-      onClick={() => onSort(sortKey)}
+      aria-sort={active ? dir === "asc" ? "ascending" : "descending" : "none"}
     >
-      <span className="inline-flex items-center gap-1">
+      <button type="button" onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1">
         {label}
         {active && (
           <span className="text-(--amber)">
             {dir === "asc" ? "\u25B2" : "\u25BC"}
           </span>
         )}
-      </span>
+      </button>
     </th>
   );
 }

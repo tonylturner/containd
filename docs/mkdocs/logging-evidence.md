@@ -44,12 +44,20 @@ cannot generate new suggestions; collect new evidence instead.
 
 The selected Dataset review stays above the retained Evidence datasets list.
 Collection details retains its full ID, checksums and reader/configuration
-versions. Review leads with service descriptions, proposed rule scopes and
-**Checks passed**, **Needs review** or **Not eligible**; these are bounded checks,
-not proof that traffic is safe. Checks on saved evidence retains replay and
-boundary results, limitations, raw versions, digests and counterexamples.
+versions. Review uses a compact table with service descriptions, exact
+address/service scope and **Checks passed**, **Needs review** or **Not eligible**;
+these are bounded checks, not proof that traffic is safe. **Inspect suggestion**
+expands approval controls, proposed rules and evidence. Checks on saved evidence
+retains replay and boundary results, limitations, raw versions, digests and
+counterexamples.
 Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
 visible. Import statistics and content identifications remain available below.
+Withheld reasons explain why a relation cannot be generated and what to check or
+collect next; unknown codes remain visible as **Unrecognized reason (code)**.
+Administrators can **Delete dataset** from Evidence datasets after confirmation.
+Deletion is immediate, requires a sealed dataset and removes its observations and
+dependent suggestions/proofs. Stop a collecting watch first. It does not remove
+already staged rules or the original PCAP file, and requires no commit.
 Missing, invalid or zero-value evidence timestamps display **Unknown**; this
 does not change expiration checks or staging eligibility.
 **Inspect service authority** and its pagination remain available during staging;
@@ -249,13 +257,12 @@ session history.
 
 ## Triage in the web UI
 
-The dashboard leads with attention items and the next setup task. The First-Run
-Checklist collapses once all four tasks are complete, and you can reopen it.
-Traffic and System Health stay visible; Dashboard details holds Network Pulse,
-Zone Status, Service Health and Event Stream. Open Monitoring for live
-investigation. Tools holds SIM and CLI Console. Simulation controls act
-immediately, not on commit, and an active simulation stays indicated while Tools
-is closed.
+The dashboard shows all four First-Run Checklist tasks, including completed
+ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
+System Health stay visible alongside attention and failure notices. Open
+Monitoring for live investigation. The header holds the SIM toggle; simulation
+controls act immediately, not on commit. CLI Console opens on demand below
+the panels.
 
 Events keeps timestamps, endpoints, activity and protection evidence visible.
 Advanced event filters holds exact IDs, protocol, decision, outcome, time and

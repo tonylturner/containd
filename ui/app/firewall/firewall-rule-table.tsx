@@ -71,6 +71,8 @@ function RuleIndicators({ rule, dpiMode, shadowCounters }: {
 /** The firewall page's rule list. */
 export function FirewallRuleTable({
   available,
+  revision,
+  onDefaultSaved,
   rules,
   defaultAction,
   zones,
@@ -84,6 +86,8 @@ export function FirewallRuleTable({
   moving,
 }: {
   available: boolean;
+  revision: string;
+  onDefaultSaved: () => void;
   rules: FirewallRule[];
   defaultAction: DefaultAction;
   zones: Zone[];
@@ -206,7 +210,7 @@ export function FirewallRuleTable({
                   </tr>
                 </Fragment>
               ))}
-              <FirewallDefaultRow action={defaultAction} />
+              <FirewallDefaultRow action={defaultAction} available={available} revision={revision} onSaved={onDefaultSaved} />
             </tbody>
           </table>
         </div>

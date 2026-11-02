@@ -59,11 +59,15 @@ export function fieldChanges(before: unknown, after: unknown, path: string, item
   const label = item ? `${item.label}: ${path.slice(item.root.length + 1)}` : path;
   // Match field names, not item identifiers, and never print secret placeholders.
   if (/password|secret|privateKey|presharedKey|token|credential/i.test(path)) return [{ kind: "secret", label }];
-  if ((Array.isArray(before) || before === undefined) && (Array.isArray(after) || after === undefined)) {
+  if ((Array.isArray(before) || before == null) && (Array.isArray(after) || after == null)) {
     const old = before ?? [];
     const next = after ?? [];
     const key = identityKey(old, next);
     if (key) return keyedChanges(old, next, key, path, label);
+    if (old.length || next.length) {
+      return Array.from({ length: Math.max(old.length, next.length) }, (_, index) =>
+        fieldChanges(old[index], next[index], `${path}.${index}`, item)).flat();
+    }
   }
   if (record(before) || record(after)) {
     const old = record(before) ? before : {};

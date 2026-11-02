@@ -39,7 +39,9 @@ var cliCompletionHandlers = map[string]cliCompletionFunc{
 	"set interface vlan":       completeSetInterfaceVLAN,
 	"assign interfaces":        completeAssignInterfaces,
 	"set firewall rule":        completeSetFirewallRule,
-	"add firewall rule":        completeSetFirewallRule,
+	"set firewall ics-rule":    completeSetFirewallICSRule,
+	"add firewall rule":        completeAddFirewallRule,
+	"add firewall ics-rule":    completeAddFirewallICSRule,
 	"move firewall rule":       completeMoveFirewallRule,
 	"delete firewall rule":     completeDeleteFirewallRule,
 	"set port-forward add":     completePortForwardAdd,
@@ -92,8 +94,10 @@ var cliUsageHintHandlers = map[string]cliUsageHintFunc{
 	"set interface bind":                     staticArgHints(1, "<os_iface>"),
 	"set interface bridge":                   staticArgHints(2, "<members_csv>"),
 	"set interface vlan":                     staticArgHints(3, "<vlan_id>"),
-	"set firewall rule":                      staticArgHints(0, "<id>", 1, "ALLOW", "DENY"),
+	"set firewall rule":                      usageSetFirewallRule,
+	"set firewall ics-rule":                  usageSetFirewallICSRule,
 	"add firewall rule":                      staticArgHints(0, "<id>", 1, "ALLOW", "DENY"),
+	"add firewall ics-rule":                  completeAddFirewallICSRule,
 	"move firewall rule":                     staticArgHints(0, "<id>", 1, "top", "bottom", "before", "after", 2, "<id>"),
 	"delete firewall rule":                   staticArgHints(0, "<id>"),
 	"set port-forward add":                   usagePortForwardAdd,
@@ -255,12 +259,165 @@ func completeAssignInterfaces(ctx cliCompletionContext) []string {
 	return append([]string{"auto"}, ifaceAssignHints(ctx.ifaces)...)
 }
 
+var firewallRuleFieldHints = map[string][]string{
+	"--action":            {"ALLOW", "DENY", "RESET", "RATE_LIMIT", "TAG"},
+	"--description":       {"<text>"},
+	"--tag":               {"<text>"},
+	"--src-zone":          {"<zones_csv>"},
+	"--source-zones":      {"<zones_csv>"},
+	"--dst-zone":          {"<zones_csv>"},
+	"--dest-zones":        {"<zones_csv>"},
+	"--sources":           {"<cidrs_csv>"},
+	"--destinations":      {"<cidrs_csv>"},
+	"--protocols":         {"<name[:port],...>"},
+	"--identities":        {"<identities_csv>"},
+	"--via-forwards":      {"<forward_ids_csv>"},
+	"--log":               {"true", "false"},
+	"--rate-limit":        {"none", "<pps[:burst]>"},
+	"--schedule":          {"none"},
+	"--schedule-days":     {"<days_csv>"},
+	"--schedule-start":    {"<HH:MM>"},
+	"--schedule-end":      {"<HH:MM>"},
+	"--schedule-timezone": {"<timezone>"},
+}
+
+var firewallICSFieldHints = map[string][]string{
+	"--ics-protocol":       {"modbus", "dnp3", "cip", "iec104"},
+	"--function-code":      {"<codes_csv>"},
+	"--object-classes":     {"<classes_csv>"},
+	"--unit-id":            {"<0..255>"},
+	"--addresses":          {"<ranges_csv>"},
+	"--read-only":          {"true", "false"},
+	"--write-only":         {"true", "false"},
+	"--mode":               {"monitor", "enforce"},
+	"--type-ids":           {"<type_ids_csv>"},
+	"--classes":            {"monitor", "control", "system", "unknown"},
+	"--ca":                 {"<addresses_csv>"},
+	"--ioa":                {"<ranges_csv>"},
+	"--direction":          {"request", "response"},
+	"--masters":            {"<stations_csv>"},
+	"--outstations":        {"<stations_csv>"},
+	"--groups":             {"<groups_csv>"},
+	"--variations":         {"<variations_csv>"},
+	"--instances":          {"<instances_csv>"},
+	"--attributes":         {"<attributes_csv>"},
+	"--tags":               {"<paths_csv>"},
+	"--cot":                {"<causes_csv>"},
+	"--originators":        {"<addresses_csv>"},
+	"--negative":           {"true", "false"},
+	"--test":               {"true", "false"},
+	"--select-execute":     {"select", "execute"},
+	"--command-states":     {"<states_csv>"},
+	"--command-qualifiers": {"<qualifiers_csv>"},
+}
+
 func completeSetFirewallRule(ctx cliCompletionContext) []string {
+	return completeFirewallRuleEdit(ctx, false)
+}
+
+func completeSetFirewallICSRule(ctx cliCompletionContext) []string {
+	return completeFirewallRuleEdit(ctx, true)
+}
+
+func completeFirewallRuleEdit(ctx cliCompletionContext, ics bool) []string {
+	if ctx.argIndex == 0 {
+		return ctx.rules
+	}
+	if ctx.argIndex < 0 {
+		return nil
+	}
+	// Edits are <id> followed by flag/value pairs, including quoted empty values.
+	if ctx.argIndex%2 == 1 {
+		flags := make([]string, 0, len(firewallRuleFieldHints)+len(firewallICSFieldHints))
+		for flag := range firewallRuleFieldHints {
+			flags = append(flags, flag)
+		}
+		if ics {
+			for flag := range firewallICSFieldHints {
+				flags = append(flags, flag)
+			}
+		}
+		return flags
+	}
+	if ctx.argIndex >= len(ctx.args) {
+		return nil
+	}
+	return firewallRuleValueHints(ctx, ctx.args[ctx.argIndex-1], ics)
+}
+
+func firewallRuleValueHints(ctx cliCompletionContext, flag string, ics bool) []string {
+	switch flag {
+	case "--src-zone", "--source-zones", "--dst-zone", "--dest-zones":
+		if len(ctx.zones) > 0 {
+			return ctx.zones
+		}
+	case "--via-forwards":
+		if len(ctx.portForwards) > 0 {
+			return ctx.portForwards
+		}
+	}
+	if hints, ok := firewallRuleFieldHints[flag]; ok {
+		return hints
+	}
+	if ics {
+		return firewallICSFieldHints[flag]
+	}
+	return nil
+}
+
+func usageSetFirewallRule(ctx cliCompletionContext) []string {
+	if ctx.argIndex == 0 {
+		return []string{"<id>"}
+	}
+	return completeFirewallRuleEdit(ctx, false)
+}
+
+func usageSetFirewallICSRule(ctx cliCompletionContext) []string {
+	if ctx.argIndex == 0 {
+		return []string{"<id>"}
+	}
+	return completeFirewallRuleEdit(ctx, true)
+}
+
+func completeAddFirewallICSRule(ctx cliCompletionContext) []string {
+	switch ctx.argIndex {
+	case 0:
+		return []string{"<id>"}
+	case 1:
+		return []string{"ALLOW", "DENY"}
+	case 2:
+		return firewallICSFieldHints["--ics-protocol"]
+	}
+	if ctx.argIndex < 3 {
+		return nil
+	}
+	if ctx.argIndex <= len(ctx.args) {
+		flag := ctx.args[ctx.argIndex-1]
+		if flag != "--read-only" && flag != "--write-only" && strings.HasPrefix(flag, "--") {
+			if flag == "--src-zone" || flag == "--dst-zone" {
+				return firewallRuleValueHints(ctx, flag, true)
+			}
+			if flag != "--ics-protocol" {
+				return firewallICSFieldHints[flag]
+			}
+			return nil
+		}
+	}
+	flags := []string{"--src-zone", "--dst-zone"}
+	for flag := range firewallICSFieldHints {
+		if flag != "--ics-protocol" {
+			flags = append(flags, flag)
+		}
+	}
+	return flags
+}
+
+func completeAddFirewallRule(ctx cliCompletionContext) []string {
 	switch {
 	case ctx.argIndex >= 3 && (ctx.prev == "before" || ctx.prev == "after"):
 		return ctx.rules
 	case ctx.argIndex == 0:
-		return ctx.rules
+		return []string{"<id>"}
 	case ctx.argIndex == 1:
 		return []string{"ALLOW", "DENY", "allow", "deny"}
 	case ctx.argIndex == 2 || ctx.argIndex == 3:

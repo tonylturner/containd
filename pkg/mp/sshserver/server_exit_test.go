@@ -53,7 +53,7 @@ func TestSessionsSendExitStatus(t *testing.T) {
 		}
 	}
 
-	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd# ") {
+	if out := runShell(t, client, "exit\n"); !strings.Contains(out, "containd(config") {
 		t.Fatalf("CLI did not open: %q", out)
 	}
 }

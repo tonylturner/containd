@@ -19,6 +19,7 @@ import { validateCIDRList, validateIP } from "../../lib/validate";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import entityStyles from "./entity-table.module.css";
 import { chipClass, InterfaceRow } from "./interface-row";
 import { NetworkSetup } from "./network-setup";
 import { BootFaultStatus } from "./boot-fault-notice";
@@ -346,7 +347,7 @@ export default function InterfacesPage() {
         </div>
       )}
       <div className="mt-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
-        <table className="w-full text-sm">
+        <table aria-label="Configured interfaces" className={`w-full text-sm ${entityStyles.entities}`}>
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Name</th>

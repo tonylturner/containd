@@ -116,7 +116,7 @@ every password change for every user, on every path, with the same reason:
 - `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`.
 - `POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` return
   403, also for admins.
-- The SSH console's "Reset admin password" option and the setup wizard's
+- The SSH console's "Change your password (immediate)" option and the setup wizard's
   password step print the reason and change nothing. The wizard continues with
   its other steps.
 - Seeding the default admin at first boot and after a factory reset is not a

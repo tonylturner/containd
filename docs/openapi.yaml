@@ -2840,6 +2840,43 @@ components:
         openvpn: {$ref: '#/components/schemas/OpenVPNConfig'}
         wireguard: {$ref: '#/components/schemas/WireGuardConfig'}
       type: object
+    VPNRead:
+      type: object
+      required: [wireguard, openvpn]
+      description: VPN endpoint read and stage responses omit stored secret material. Presence indicators are read-only. Full administrator config exports remain separate.
+      properties:
+        wireguard: {$ref: '#/components/schemas/WireGuardRead'}
+        openvpn: {$ref: '#/components/schemas/OpenVPNRead'}
+    WireGuardRead:
+      allOf:
+        - $ref: '#/components/schemas/WireGuardConfig'
+        - type: object
+          required: [privateKeyConfigured]
+          properties:
+            privateKey: {type: string, writeOnly: true}
+            privateKeyConfigured: {type: boolean, readOnly: true}
+      description: privateKey is never returned. Omitted or empty privateKey in a VPN write preserves the stored key.
+    OpenVPNRead:
+      allOf:
+        - $ref: '#/components/schemas/OpenVPNConfig'
+        - type: object
+          properties:
+            managed: {$ref: '#/components/schemas/OpenVPNManagedClientRead'}
+    OpenVPNManagedClientRead:
+      allOf:
+        - $ref: '#/components/schemas/OpenVPNManagedClientConfig'
+        - type: object
+          required: [caConfigured, certConfigured, keyConfigured, passwordConfigured]
+          properties:
+            ca: {type: string, writeOnly: true}
+            cert: {type: string, writeOnly: true}
+            key: {type: string, writeOnly: true}
+            password: {type: string, writeOnly: true}
+            caConfigured: {type: boolean, readOnly: true}
+            certConfigured: {type: boolean, readOnly: true}
+            keyConfigured: {type: boolean, readOnly: true}
+            passwordConfigured: {type: boolean, readOnly: true}
+      description: ca, cert, key and password are never returned. Omitted or empty secrets in a VPN write preserve existing material while managed remains selected. Omitting managed removes the managed object.
     WGPeer:
       properties:
         allowedIPs: {items: {type: string}, type: array}
@@ -4584,7 +4621,7 @@ paths:
       summary: Get candidate services vpn settings
       tags: [Services]
       responses:
-        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
+        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNRead'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
       parameters:
       - $ref: '#/components/parameters/IfRevision'
@@ -4599,7 +4636,7 @@ paths:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {
+        "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNRead'}}}, headers: {
               X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -8132,7 +8169,13 @@ paths:
         before upgrade: revoked or expired sessions are rejected. Cookies and
         Bearer headers alone do not authorize upgrades; JWTs in query parameters
         are not accepted. Client sends a command string or {line: string};
-        server sends JSON {output: string, error?: string}.
+        server sends JSON {output: string, error?: string, prompt?: string, status?: string,
+        control?: "status"|"close"}. Send {control: "status"} for an authoritative
+        shared-candidate status refresh (including unknown on failure), with no
+        command execution. The server also refreshes status after commands.
+        exit, quit and logout send control "close" and close only this console,
+        leaving the management session signed in. Status is advisory and never
+        supplies a mutation revision.
       parameters:
       - name: ticket
         in: query
@@ -8178,7 +8221,7 @@ paths:
                 type: object
                 properties:
                   configPath: {type: string}
-                  vpn: {$ref: '#/components/schemas/VPNConfig'}
+                  vpn: {$ref: '#/components/schemas/VPNRead'}
           headers:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}

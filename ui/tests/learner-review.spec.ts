@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
-import { mockLearner, openDataset, suggestion } from "./fixtures/learner";
+import { mockLearner, openDataset, suggestion, inspectSuggestion, suggestionRow } from "./fixtures/learner";
 
 const pending = "Saved changes are not active yet.";
 
@@ -28,17 +28,14 @@ test("selection starts empty, Generate is explicit, scope and frozen proof are v
     .click();
   await expect(
     page.getByText(
-      "IEC command withheld: value not expressible: 3",
+      "IEC 104 command value cannot be expressed exactly. Review the command value and author policy manually.: 3",
       { exact: true },
     ),
   ).toBeVisible();
   await expect(
     page.getByLabel("Select modbus-1", { exact: true }),
   ).not.toBeChecked();
-  const modbus = page.getByRole("article", {
-    name: "Suggestion modbus-1",
-    exact: true,
-  });
+  const modbus = await inspectSuggestion(page, "modbus-1");
   const emptyStage = page.getByRole("button", {
     name: "Stage 0 selected",
     exact: true,
@@ -82,12 +79,9 @@ test("IEC requires separate admin review and then deliberate selection", async (
 }) => {
   const state = await mockLearner(page);
   await openDataset(page);
-  const iec = page.getByRole("article", {
-    name: "Suggestion iec-1",
-    exact: true,
-  });
+  const iec = await inspectSuggestion(page, "iec-1");
   await expect(
-    iec.getByRole("checkbox", { name: "Select iec-1", exact: true }),
+    suggestionRow(page, "iec-1").getByRole("checkbox", { name: "Select iec-1", exact: true }),
   ).toBeDisabled();
   await expect(iec).toContainText("monitor, never enforce");
   await expect(iec.getByLabel("Proposed rules")).toContainText("execute state SCS 1 (on) QU 0");
@@ -102,10 +96,10 @@ test("IEC requires separate admin review and then deliberate selection", async (
     .getByRole("button", { name: "Review", exact: true })
     .click();
   await expect(
-    iec.getByRole("checkbox", { name: "Select iec-1", exact: true }),
+    suggestionRow(page, "iec-1").getByRole("checkbox", { name: "Select iec-1", exact: true }),
   ).toBeEnabled();
   await expect(
-    iec.getByRole("checkbox", { name: "Select iec-1", exact: true }),
+    suggestionRow(page, "iec-1").getByRole("checkbox", { name: "Select iec-1", exact: true }),
   ).not.toBeChecked();
   expect(state.writes).toEqual([
     {
@@ -117,6 +111,7 @@ test("IEC requires separate admin review and then deliberate selection", async (
       },
     },
   ]);
+  await inspectSuggestion(page, "iec-1");
   await expect(iec).toContainText("COT 6 OA 0 P/N=0 T=0");
   await expect(iec.getByLabel("Proposed rules")).toContainText("state SCS 1 (on) QU 0");
 });
@@ -127,12 +122,9 @@ test("wire-coordinate approval cannot be replaced by selection", async ({
   const state = await mockLearner(page);
   state.suggestions[0].content.requiresCoordinateReview = true;
   await openDataset(page);
-  const modbus = page.getByRole("article", {
-    name: "Suggestion modbus-1",
-    exact: true,
-  });
+  const modbus = await inspectSuggestion(page, "modbus-1");
   await expect(
-    modbus.getByLabel("Select modbus-1", { exact: true }),
+    suggestionRow(page, "modbus-1").getByLabel("Select modbus-1", { exact: true }),
   ).toBeDisabled();
   await expect(
     modbus.getByRole("button", { name: "Review and approve" }),
@@ -148,7 +140,7 @@ test("wire-coordinate approval cannot be replaced by selection", async ({
     .getByRole("button", { name: "Review", exact: true })
     .click();
   await expect(
-    modbus.getByLabel("Select modbus-1", { exact: true }),
+    suggestionRow(page, "modbus-1").getByLabel("Select modbus-1", { exact: true }),
   ).toBeEnabled();
   expect(state.writes[0].body.coordinateApproved).toBe(true);
 });
@@ -185,8 +177,8 @@ test("409 is atomic: keeps selections but drops the receipt and unchecks changed
     },
   });
   await expect(
-    page.getByRole("article", { name: "Suggestion modbus-1", exact: true }),
-  ).toContainText("Suggestion version 3");
+    suggestionRow(page, "modbus-1"),
+  ).toContainText("Revision 3");
   await expect(
     page.getByRole("button", { name: "Stage 1 selected", exact: true }),
   ).toBeEnabled();
@@ -240,6 +232,7 @@ test("viewer reads proof and authority but has no mutation or selection actions"
 }) => {
   const state = await mockLearner(page, "view");
   await openDataset(page);
+  await inspectSuggestion(page, "modbus-1");
   await expect(
     page
       .locator("summary")
@@ -368,10 +361,7 @@ test("collapsed certification keeps failures and every limitation visible", asyn
   ];
   suggestion.content.withheld = ["Unexpressible values withheld."];
   await openDataset(page);
-  const modbus = page.getByRole("article", {
-    name: "Suggestion modbus-1",
-    exact: true,
-  });
+  const modbus = await inspectSuggestion(page, "modbus-1");
   const evidence = modbus.getByLabel("Frozen certification");
   await expect(evidence).toHaveJSProperty("open", false);
   const summary = evidence.locator("summary");
@@ -382,12 +372,12 @@ test("collapsed certification keeps failures and every limitation visible", asyn
   for (const text of [
     "1 replay failure(s).",
     ...suggestion.content.limits,
-    ...suggestion.content.withheld,
+    ...suggestion.content.withheld.map(code => `Unrecognized reason (${code})`),
   ]) {
     await expect(warnings).toContainText(text);
   }
   await expect(
-    modbus.getByLabel("Select modbus-1", { exact: true }),
+    suggestionRow(page, "modbus-1").getByLabel("Select modbus-1", { exact: true }),
   ).toBeDisabled();
 });
 
@@ -701,7 +691,7 @@ for (const [name, time] of [["zero", "0001-01-01T00:00:00Z"], ["missing", ""], [
     await openDataset(page);
     await expect(page.getByLabel("Dataset review", { exact: true })).toContainText("Created Unknown · expires Unknown");
     await expect(page.getByLabel("Dataset list").getByRole("row").filter({ hasText: "capture-1" }).getByText("Unknown", { exact: true })).toBeVisible();
-    const modbus = page.getByRole("article", { name: "Suggestion modbus-1", exact: true });
+    const modbus = await inspectSuggestion(page, "modbus-1");
     await expect(modbus.getByText("Expires Unknown", { exact: true })).toBeVisible();
     await expect(modbus).toContainText("Reviewed by admin at Unknown");
     const proof = modbus.getByLabel("Frozen certification", { exact: true });
@@ -710,7 +700,7 @@ for (const [name, time] of [["zero", "0001-01-01T00:00:00Z"], ["missing", ""], [
     await expect(page.getByRole("button", { name: "Stage 0 selected", exact: true })).toBeDisabled();
     if (name === "zero") {
       await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
-      await expect(modbus.getByRole("checkbox")).toBeDisabled();
+      await expect(suggestionRow(page, "modbus-1").getByRole("checkbox")).toBeDisabled();
     }
     if (time) await expect(page.getByRole("status", { name: "Abnormally stopped watches" })).toContainText("stopped Unknown");
     await page.getByRole("tab", { name: "Watch live", exact: true }).click();

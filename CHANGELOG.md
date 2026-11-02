@@ -7,10 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-11-01
+
+### Upgrade notes
+
+- No configuration schema change. Upgrade in place; the management API, CLI
+  and web UI ship together in one image.
+- API: VPN reads add read-only secret-presence fields
+  (`wireguard.privateKeyConfigured` and `openvpn.managed.*Configured`); stored
+  secrets are still never returned. The CLI WebSocket adds session-control and
+  status messages.
+- CLI: `set firewall rule` and `set firewall ics-rule` now edit an existing
+  rule; use `add firewall rule` / `add firewall ics-rule` to create one. Over
+  SSH, `configure` no longer starts the setup wizard; use `wizard`. In the
+  local CLI, `shell` and `bash` no longer exit the CLI.
+- Automatic antivirus definition updates were already off wherever
+  `clamav.freshclamEnabled` was never saved, although the UI showed them as
+  on. The UI now shows them as off. Turn them on explicitly if you want
+  FreshClam updates.
+
+### Added
+
+- Firewall admins can stage the default action with consequence warnings,
+  configure inline inspection from DPI settings, and edit every zone and
+  protocol entry without raw JSON. ICS rule rows stack on phones with actions
+  and inspection setup reachable without horizontal scrolling.
+- VPN peer rows, browser X25519 server-key generation and client configuration
+  templates, with secret-presence indicators for WireGuard and managed OpenVPN.
+- System Settings now stages management and SSH access settings and TLS paths,
+  and confirms trusted-CA clearing. Configuration adds non-mutating Validate,
+  guarded factory reset, entity-first reviews and persistent commit actions.
+- User creation returns to the new account with Require MFA available, including
+  on narrow screens; template preview and staging retain their request semantics
+  through a dedicated API module.
+- Zones support consequence metadata and assets support hostnames in create/edit
+  forms; passive inventory clearing and learner dataset deletion are confirmed
+  immediate actions.
+- Network tables keep actions visible on phones; NAT clarifies staged saves, and
+  PCAP suggestions use compact review rows with expandable evidence and actionable
+  withholding explanations.
+- CLI policy editors now stage existing firewall/ICS rule updates, default
+  action, DPI settings and capture groups, zone consequence, asset hostnames,
+  and ICS template preview/apply with revision checks. `add firewall ics-rule`
+  creates rules; `set firewall rule` and `set firewall ics-rule` now only edit.
+- The appliance CLI can stage focused DNS, NTP, DHCP pool/reservation, antivirus
+  scanning, VPN, proxy site/TLS, syslog batching and IDS enable/group edits,
+  preserving unspecified settings and candidate revision checks. VPN credentials
+  are read from appliance-local files instead of command-line secret values.
+- The CLI provides confirmed immediate backup, OpenVPN credential, connection
+  revocation, protection retry, antivirus update and managed capture operations,
+  plus account listing, deletion and MFA requirements. Admins can create users
+  and reset passwords through confirmed, hidden prompts in the interactive local
+  or SSH appliance CLI; web and piped consoles refuse secret input. Full
+  configuration export is explicit and admin-only; imports preserve file bytes
+  for strict API validation.
+- IEC 104 anomaly details offer confirmed, immediate clearing of detected
+  anomalies and tracking state, without deleting historical alert events.
+- CLI file arguments (downloads, imports, credential files) work in local and SSH
+  appliance CLI sessions and name appliance-local paths; the web console refuses
+  them. Downloads require admin access.
+- `configure` now consistently names the configuration CLI; use SSH `wizard`
+  for guided setup.
+- Configuration consoles identify configuration versus immediate Linux OS modes,
+  show authoritative shared-candidate status and commit-confirmation deadlines,
+  and close the web console without logging out of management. SSH setup shows
+  the shared diff before commit and offers an explicit Back to CLI menu choice.
+  Local `shell` / `bash` no longer silently exit; only SSH `shell` opens Linux,
+  while `bash` is an ordinary unknown CLI command.
+- Administrators can stage firewall enforcement on or off from the Firewall
+  status card, with confirmation and a review link; the dashboard's FW indicator
+  links directly to enforcement status.
+
 ### Changed
 
+- DHCP uses interface pickers and validated pool/reservation rows; IDS offers
+  common rule fields, advanced JSON editing, one staged rule save and group descriptions.
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
-  focus retained after moves. A read-only Default row always shows the
+  focus retained after moves. A Default row always shows the
   candidate policy's fallback action for traffic no allow, deny or reject rule
   decides. It warns when that action is ALLOW and shows unknown when the action
   cannot be read coherently.
@@ -44,12 +117,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     detail into Troubleshooting. IDS leads with the rules list and one
     add/import flow; groups and export are secondary.
   - Events, alerts, flows and sessions show triage columns first, with full
-    detail in a keyboard-accessible inspector. The dashboard leads with
-    attention and the next setup task; the completed checklist collapses,
-    and simulation and the CLI sit under Tools.
+    detail in a keyboard-accessible inspector.
 
 ### Fixed
 
+- The reverse proxy starts in the packaged image. The image now has the
+  `nginx` account its workers run as; before, every reverse-proxy commit failed
+  preflight with `getpwnam("nginx") failed`.
+- Configuration validation restores redacted secrets the same way staging does,
+  so a candidate with a managed OpenVPN client no longer fails validation with
+  "ca is required".
+- Antivirus default-local mode exposes confirmed definition updates beside missing
+  databases, links enforcement refusals to Firewall, and adds a cache-duration control.
+- VPN reads and stage responses redact stored secrets without falsely reporting
+  configured key and certificate material as missing.
+- Proxy preflight preserves daemon configuration filename extensions so Envoy
+  reads generated YAML correctly. Proxies shows concise faults with exact output
+  under Technical details and supports editing reverse sites, TLS certificate
+  references and descriptions with explicit certificate provisioning guidance.
 - Editing a firewall rule with several zones or protocols no longer keeps only
   the first of each.
 - DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown
@@ -265,6 +350,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The executable CLI resolves shared-candidate status before each prompt within
+  a 250 ms request budget, instead of repeatedly displaying a refreshing unknown
+  prompt even when the management API is healthy.
 - The engine keeps watching kernel interface, address and route changes after
   an interrupted system call instead of stopping until restart; drift was
   otherwise repaired only by the 10-second periodic reconcile.
@@ -2454,7 +2542,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.37...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.38...HEAD
+[0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35

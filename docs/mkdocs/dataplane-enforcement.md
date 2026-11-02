@@ -9,8 +9,14 @@ network privileges (including `CAP_NET_ADMIN`) are required; packet capture also
 needs the privileges supplied by the supported container deployment.
 
 The engine defaults `CONTAIND_ENFORCE_ENABLED` to false at startup. Running
-configuration controls subsequent applies through `dataplane.enforcement`; set
-that field to true in candidate and commit for kernel rule application. Starting
+configuration controls subsequent applies through `dataplane.enforcement`.
+On the **Firewall Rules** page, administrators use **Enable enforcement** or
+**Disable enforcement** in the status card. Confirmation stages only that setting;
+**Review changes** opens the configuration diff. Review the candidate rules and
+Default action, then use **Commit-confirmed** to apply with a recovery window.
+When the candidate and live health differ, the card shows the staged direction
+instead of another toggle. An unreadable candidate cannot be changed here;
+view-only users see status only. Starting
 capture or seeing decoded events does not prove that firewall policy is installed. Review the ruleset preview and engine status
 through `GET /api/v1/dataplane/ruleset` and check for apply errors. Any
 authenticated user can read the installed ruleset's status, without the ruleset
@@ -26,7 +32,7 @@ the namespace, such as Docker's embedded DNS rules or the DHCP redirect table
 `inet containd_dhcp`, are left untouched. Everything else in
 `inet <enforceTable>`, such as the policy chains and sets an older containd
 version kept there, is removed on the next apply; flow blocks from an older
-version carry over with their remaining timeout. Disabling enforcement deletes
+version carry over with their remaining timeout. Committing disabled enforcement deletes
 the tables the running engine installed, and the ruleset status then reports
 no installed ruleset. Renaming the table replaces the old
 tables with the new ones on the next apply. A table name starts with a letter
@@ -64,8 +70,13 @@ rule is reported in the ruleset warnings
   already observed. ICS rules in effective enforce mode are therefore rejected
   at validation while `nfqueueGroup` is 0; use monitor mode with AF_PACKET.
 - **NFQUEUE** holds selected packets for userspace verdicts. Set the candidate
-  dataplane's `nfqueueGroup` to a nonzero queue (for example 101), preserve the
-  rest of the dataplane settings, and commit. The queue and rules must be active
+  dataplane's `nfqueueGroup` to a nonzero queue (for example 101) in
+  **Firewall → DPI settings → Inline inspection** and select
+  **Stage inline inspection**. This preserves the rest of the dataplane settings.
+  Review the diff and use **Commit-confirmed** to apply. Optional packet
+  logging is separate from the inline queue; see
+  [inline inspection setup](ics-dpi.md#set-up-inline-inspection).
+  The queue and rules must be active
   on the routed packet path. A denied command is dropped inline; later packets
   of that TCP incarnation keep dropping even after the verdict cache expires.
   After the drop completes, the engine sends a best-effort RST to each peer

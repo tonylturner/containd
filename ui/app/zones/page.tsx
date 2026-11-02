@@ -1,5 +1,6 @@
 "use client";
 
+import entityStyles from "../interfaces/entity-table.module.css";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { upsertRow } from "../../lib/config-editor";
@@ -11,7 +12,7 @@ import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from 
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Zone, type Conduit } from "../../lib/api";
@@ -33,11 +34,12 @@ export default function ZonesPage() {
   const rowsDraft = useConfigEditor<Zone[]>([], false);
   const { cfg: zones, readConfig: adoptRows } = rowsDraft;
   const [conduits, setConduits] = useState<Conduit[]>([]);
-  const form = useConfigForm({ name: "", alias: "", description: "", slTarget: 0 });
+  const form = useConfigForm({ name: "", alias: "", description: "", consequence: "", slTarget: 0 });
   const { readConfig: refreshForm } = form;
   const [name, setName] = form.field("name");
   const [alias, setAlias] = form.field("alias");
   const [description, setDescription] = form.field("description");
+  const [consequence, setConsequence] = form.field("consequence");
   const [slTarget, setSlTarget] = form.field("slTarget");
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -68,8 +70,9 @@ export default function ZonesPage() {
       name,
       alias: alias.trim() || undefined,
       description: description.trim() || undefined,
+      consequence: consequence.trim() || undefined,
       slTarget: slTarget || undefined,
-    }), ["name", "alias", "description", "slTarget"], { targets: [rowsDraft.collection((rows, data: Zone) => upsertRow(rows, data, row => row.name))] });
+    }), ["name", "alias", "description", "consequence", "slTarget"], { targets: [rowsDraft.collection((rows, data: Zone) => upsertRow(rows, data, row => row.name))] });
     setSaving(false);
     if (!result.ok) {
       setError(revisionError(result));
@@ -102,15 +105,16 @@ export default function ZonesPage() {
   }
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
-    if (!canSaveNow()) return;
+    if (!canSaveNow()) return false;
     setError(null);
     const result = await rowsDraft.write(base => api.updateZone(base, zoneName, patch), { patch: (rows, data) => upsertRow(rows, data, row => row.name), prefixes: [`${JSON.stringify(zoneName)}.`] });
     if (!result.ok) {
       setError(revisionError(result));
-      return;
+      return false;
     }
     toast("Zone staged — commit to apply.", "success");
     refresh();
+    return true;
   }
 
   const table = useTableControls(zones, {
@@ -202,6 +206,9 @@ export default function ZonesPage() {
               className="w-full input-industrial"
             />
           </div>
+          <label className="text-sm">Consequence
+            <input value={consequence} onChange={e => setConsequence(e.target.value)} disabled={!isAdmin()} className="mt-1 w-full input-industrial" />
+          </label>
           <div>
             <label htmlFor="zone-slt" className="sr-only">Security Level Target</label>
             <select
@@ -246,12 +253,13 @@ export default function ZonesPage() {
           </div>
 
           <div className="mt-3 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
-            <table className="w-full text-sm">
+            <table aria-label="Zones" className={`w-full text-sm ${entityStyles.entities}`}>
               <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
                 <tr>
                   <SortableHeader label="Name" sortKey="name" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
+                  <th className="px-4 py-3">Consequence</th>
                   <th className="px-4 py-3 text-center whitespace-nowrap">SL-T</th>
                   <th className="px-4 py-3 text-center whitespace-nowrap">Check-based SL</th>
                   <th className="px-4 py-3 text-right">Actions</th>
@@ -260,7 +268,7 @@ export default function ZonesPage() {
               <tbody>
                 {table.data.length === 0 && (
                   <tr>
-                    <td className="px-4 py-4 text-(--text-muted)" colSpan={6}>
+                    <td className="px-4 py-4 text-(--text-muted)" colSpan={7}>
                       No zones match your search.
                     </td>
                   </tr>
@@ -312,13 +320,20 @@ function ZoneRow({
   zone: Zone;
   conduits: Conduit[];
   onDelete: (name: string) => void;
-  onUpdate: (name: string, patch: Partial<Zone>) => void;
+  onUpdate: (name: string, patch: Partial<Zone>) => Promise<boolean>;
   canEdit: boolean;
 }) {
   const [desc, setDesc] = draft.field(`${JSON.stringify(zone.name)}.desc`, zone.description ?? "");
   const [alias, setAlias] = draft.field(`${JSON.stringify(zone.name)}.alias`, zone.alias ?? "");
   const [editSlt, setEditSlt] = draft.field(`${JSON.stringify(zone.name)}.editSlt`, zone.slTarget ?? 0);
+  const [consequence, setConsequence] = draft.field(`${JSON.stringify(zone.name)}.consequence`, zone.consequence ?? "");
   const [editing, setEditing] = useState(false);
+  const editVersion = useRef(0);
+
+  function editField<T>(setValue: (value: T) => void, value: T) {
+    editVersion.current++;
+    setValue(value);
+  }
 
   // Compute check-based SL from conduit data
   const zv = mapZone(zone);
@@ -327,12 +342,12 @@ function ZoneRow({
 
   return (
     <tr className="table-row-hover border-t transition-ui">
-      <td className="px-4 py-3 font-medium text-(--text)">{zone.name}</td>
-      <td className="px-4 py-3">
+      <td data-label="Name" className="px-4 py-3 font-medium text-(--text)">{zone.name}</td>
+      <td data-label="Alias" className="px-4 py-3">
         {editing ? (
           <input
             value={alias}
-            onChange={(e) => setAlias(e.target.value)}
+            onChange={(e) => editField(setAlias, e.target.value)}
             disabled={!canEdit}
             className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
@@ -340,11 +355,11 @@ function ZoneRow({
           <span className="text-(--text)">{zone.alias || "\u2014"}</span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td data-label="Description" className="px-4 py-3">
         {editing ? (
           <input
             value={desc}
-            onChange={(e) => setDesc(e.target.value)}
+            onChange={(e) => editField(setDesc, e.target.value)}
             disabled={!canEdit}
             className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
@@ -352,11 +367,14 @@ function ZoneRow({
           <span className="text-(--text)">{zone.description || "\u2014"}</span>
         )}
       </td>
-      <td className="px-4 py-3 text-center">
+      <td data-label="Consequence" className="px-4 py-3">
+        {editing ? <input aria-label="Consequence" value={consequence} onChange={e => editField(setConsequence, e.target.value)} disabled={!canEdit} className="w-full input-industrial" /> : zone.consequence || "—"}
+      </td>
+      <td data-label="SL-T" className="px-4 py-3 text-center">
         {editing ? (
           <select
             value={editSlt}
-            onChange={(e) => setEditSlt(Number(e.target.value))}
+            onChange={(e) => editField(setEditSlt, Number(e.target.value))}
             disabled={!canEdit}
             className="rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
@@ -370,20 +388,22 @@ function ZoneRow({
           <SLBadge value={sl_t} color="var(--amber)" />
         )}
       </td>
-      <td className="px-4 py-3 text-center">
+      <td data-label="Check-based SL" className="px-4 py-3 text-center">
         <SLBadge value={sl_a} color={slColor(sl_a, sl_t)} />
       </td>
-      <td className="px-4 py-3 text-right">
+      <td data-label="Actions" className="px-4 py-3 text-right">
         {editing ? (
           <div className="inline-flex gap-2">
             <button
-              onClick={() => {
-                onUpdate(zone.name, {
+              onClick={async () => {
+                const submittedVersion = editVersion.current;
+                const saved = await onUpdate(zone.name, {
                   alias: alias.trim() || undefined,
                   description: desc.trim() || undefined,
+                  consequence: consequence.trim(),
                   slTarget: editSlt,
                 });
-                setEditing(false);
+                if (saved && editVersion.current === submittedVersion) setEditing(false);
               }}
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
@@ -391,8 +411,10 @@ function ZoneRow({
             </button>
             <button
               onClick={() => {
+                editVersion.current++;
                 setDesc(zone.description ?? "");
                 setAlias(zone.alias ?? "");
+                setConsequence(zone.consequence ?? "");
                 setEditSlt(zone.slTarget ?? 0);
                 setEditing(false);
               }}

@@ -104,7 +104,11 @@ func validateDaemonPaths(paths ...string) error {
 
 // stageDaemonFile writes an exclusively created sibling, never the active path.
 func stageDaemonFile(path string, data []byte, mode os.FileMode) (string, error) {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	// Some daemons select their parser from the extension (not the contents).
+	// Keep that extension last while validating an unpublished sibling.
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	f, err := os.CreateTemp(filepath.Dir(path), "."+strings.TrimSuffix(base, ext)+"-*"+ext)
 	if err != nil {
 		return "", err
 	}

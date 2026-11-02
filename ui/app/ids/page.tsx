@@ -22,9 +22,9 @@ import {
   useConfirm,
 } from "../../components/ConfirmDialog";
 import { Disclosure } from "../../components/Disclosure";
+import { EditRuleModal } from "./ids-rule-editor";
 import { RulesTable } from "./ids-rules-table";
 import {
-  EditRuleModal,
   ExportPanel,
   GroupsPanel,
   ImportPanel,
@@ -40,10 +40,12 @@ export default function IDSPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] }, false);
   const { conflictProps, editor, cfg: ids, setCfg: setIds, readConfig: adoptConfig, write, writeRefresh, text, setText, clearText } = draft;
-  const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
+  const panelForm = useConfigForm<IDSPanelFields>({ description: "", name: "", filter: "", format: "", sigmaText: "" });
   const { readConfig: refreshForm } = panelForm;
   const refreshId = useRef(0);
   const rulesButton = useRef<HTMLButtonElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [savingRule, setSavingRule] = useState(false);
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -76,7 +78,9 @@ export default function IDSPage() {
     if (!canEdit || !canSave || importPending || draft.stale) return;
     setError(null);
     // The modal is not submitted by the page Save button.
+    setSaving(true);
     const saved = await write((base, submitted) => api.setIDS(base, submitted), { replace: data => data, raw: {} });
+    setSaving(false);
     if (!saved.ok) { setError(revisionError(saved)); return; }
     flashSuccess("IDS rules staged — commit to apply.");
   }
@@ -176,7 +180,7 @@ export default function IDSPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} disabled={!canSave || importPending || draft.stale} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+            <button onClick={onSave} disabled={!canSave || importPending || draft.stale || saving || !!editing} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               Save
             </button>
           )}
@@ -190,7 +194,7 @@ export default function IDSPage() {
       )}
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...panelForm.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
-      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
+      {!editing && <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
 
@@ -207,7 +211,8 @@ export default function IDSPage() {
       </div>
 
       <button ref={rulesButton} type="button" onClick={() => setActiveTab("rules")} className="mb-3 text-sm font-semibold">Rules <span className="text-(--text-muted)">{rules.length.toLocaleString()}</span></button>
-      <RulesTable mutationDisabled={!canSave} rules={rules} canEdit={canEdit} onEdit={setEditing} onDelete={onDelete}
+      <RulesTable mutationDisabled={!canSave || saving || importPending || draft.stale} editDisabled={!canSave || importPending || draft.stale}
+        rules={rules} canEdit={canEdit} onEdit={rule => { setSuccess(null); setEditing(rule); }} onDelete={onDelete}
         onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
 
       <h2 className="mt-6 text-base font-semibold">Add/import rules</h2>
@@ -231,7 +236,7 @@ export default function IDSPage() {
       </div>
       <h2 className="mt-6 text-base font-semibold">Manage groups</h2>
       <Disclosure title="Groups" defaultOpen={groups.length > 0} indicator={`${groups.length} group${groups.length !== 1 ? "s" : ""}${groups.length ? " · non-default settings" : ""}`}>
-        <GroupsPanel mutationDisabled={!canSave} form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
+        <GroupsPanel mutationDisabled={!canSave || saving || importPending || draft.stale} form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
           onUpdate={(g) => {
             if (!canCombinePanel()) return false;
             setIds((prev) => ({ ...prev, ruleGroups: g }));
@@ -252,14 +257,31 @@ export default function IDSPage() {
       </div>
 
       {editing && canEdit && (
-        <EditRuleModal mutationDisabled={!canSave} rule={editing}
+        <EditRuleModal mutationDisabled={!canSave || savingRule || importPending || draft.stale} busy={savingRule} saveDisabled={saving} rule={editing} saveError={error || loadError} success={success}
+          notice={<ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />}
           text={text(`rule.${editing.id}`, JSON.stringify(editing, null, 2))}
-          setText={(value) => setText(`rule.${editing.id}`, value)}
-          onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={(newRule) => {
-          setIds((prev) => ({ ...prev, rules: (prev.rules ?? []).map((r) => r.id === editing.id ? newRule : r) }));
-          clearText(`rule.${editing.id}`);
-          setEditing(null);
-        }} />
+          setText={(value) => { setSuccess(null); setText(`rule.${editing.id}`, value); }}
+          onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={async (newRule) => {
+            if (!canSave || saving || importPending || draft.stale) return;
+            if (newRule.id !== editing.id && rules.some(r => r.id === newRule.id)) {
+              setError("A rule with that ID already exists.");
+              return;
+            }
+            setSaving(true);
+            setSavingRule(true);
+            setError(null);
+            const result = await write((base, submitted) => api.setIDS(base, {
+              ...submitted, rules: (submitted.rules ?? []).map(r => r.id === editing.id ? newRule : r),
+            }), { replace: data => data });
+            setSaving(false);
+            setSavingRule(false);
+            if (!result.ok) { setError(revisionError(result)); return; }
+            if (result.adopted && result.unchanged) {
+              clearText(`rule.${editing.id}`);
+              setEditing(null);
+            }
+            flashSuccess("IDS rules staged — commit to apply. No additional Save is needed.");
+          }} />
       )}
       <ConfirmDialog {...confirm.props} />
     </Shell>

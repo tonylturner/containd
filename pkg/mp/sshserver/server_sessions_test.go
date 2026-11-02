@@ -102,7 +102,12 @@ func TestFactoryResetDisconnectsSSHAfterResult(t *testing.T) {
 				} else if !strings.Contains(text, "Factory reset complete.") {
 					t.Fatalf("result lost before disconnect: %q", text)
 				}
-				if strings.Count(text, "containd# ") != 1 {
+				// Idle status updates may redraw the initial CLI prompt.
+				// No prompt or queued command may appear after reset.
+				resetPrompt := strings.Index(text, "Type NUCLEAR to confirm factory reset:")
+				if resetPrompt < 0 || !strings.Contains(text[:resetPrompt], "containd(config") ||
+					strings.Contains(text[resetPrompt:], "containd(config") ||
+					strings.Contains(text[resetPrompt:], "show version") {
 					t.Fatalf("reset returned to REPL: %q", text)
 				}
 				otherExited := make(chan error, 1)

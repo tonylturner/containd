@@ -114,18 +114,30 @@ test("retry accelerates a degraded observation for ten seconds without retrying 
   await openProtection(page);
   await page.clock.pauseAt(Date.now() + 1_000);
   const notice = page.getByRole("status", { name: "Traffic protection" });
+  await notice.getByRole("button", { name: "Technical details", exact: true }).click();
+  const observedAt = notice.locator("time");
+  await expect(observedAt).toHaveAttribute("datetime", "2026-10-31T12:00:00Z");
   const before = mock.reads;
+  const retryObservedAt = "2026-10-31T12:00:01Z";
+  mock.status = observation({ state: "degraded", retryable: true, observedAt: retryObservedAt });
   await notice.getByRole("button", { name: "Retry protection" }).click();
   await expect.poll(() => mock.reads).toBe(before + 1);
   await expect(notice).toContainText("Retry requested; checking protection.");
+  await expect(observedAt).toHaveAttribute("datetime", retryObservedAt);
   for (let i = 1; i <= 5; i++) {
+    const nextObservedAt = `2026-10-31T12:00:0${i + 1}Z`;
+    mock.status = observation({ state: "degraded", retryable: true, observedAt: nextObservedAt });
     await page.clock.runFor(2_000);
     await expect.poll(() => mock.reads).toBe(before + 1 + i);
+    await expect(observedAt).toHaveAttribute("datetime", nextObservedAt);
   }
   await page.clock.runFor(29_000);
   expect(mock.reads).toBe(before + 6);
+  const finalObservedAt = "2026-10-31T12:00:07Z";
+  mock.status = observation({ state: "degraded", retryable: true, observedAt: finalObservedAt });
   await page.clock.runFor(1_000);
   await expect.poll(() => mock.reads).toBe(before + 7);
+  await expect(observedAt).toHaveAttribute("datetime", finalObservedAt);
   expect(mock.retries).toHaveLength(1);
 });
 
@@ -196,27 +208,44 @@ test("pending polls at two seconds; commit accelerates otherwise slow polling fo
   const mock = await protectionAPI(page, observation({ state: "pending" }));
   await openProtection(page, "/ics/");
   await page.clock.pauseAt(Date.now() + 1_000);
+  const notice = page.getByRole("status", { name: "Traffic protection" });
+  await notice.getByRole("button", { name: "Technical details", exact: true }).click();
+  const observedAt = notice.locator("time");
+  await expect(observedAt).toHaveAttribute("datetime", "2026-10-31T12:00:00Z");
+  const setObservation = (state: "pending" | "protecting" | "degraded", sequence: number) => {
+    const nextObservedAt = `2026-10-31T12:00:0${sequence}Z`;
+    mock.status = observation({ state, retryable: state === "degraded", observedAt: nextObservedAt });
+    return nextObservedAt;
+  };
   const tick = async (ms: number, expected: number) => {
     await page.clock.runFor(ms);
     await expect.poll(() => mock.reads).toBe(expected);
-    // Let the response settle and schedule the next timeout on the paused clock.
     await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(mock.status && (mock.status as { state: string }).state === "protecting" ? 0 : 1);
   };
   const base = mock.reads;
+  const firstObservedAt = setObservation("pending", 1);
   await tick(2_000, base + 1);
-  mock.status = observation();
+  await expect(observedAt).toHaveAttribute("datetime", firstObservedAt);
+  setObservation("protecting", 2);
   await tick(2_000, base + 2);
   await page.clock.runFor(10_000);
   expect(mock.reads).toBe(base + 2);
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
   expect(mock.reads).toBe(base + 2);
+  const committedObservedAt = setObservation("degraded", 3);
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
   await expect.poll(() => mock.reads).toBe(base + 3);
-  await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
-  for (let i = 1; i <= 5; i++) await tick(2_000, base + 3 + i);
+  await expect(observedAt).toHaveAttribute("datetime", committedObservedAt);
+  for (let i = 1; i <= 5; i++) {
+    const nextObservedAt = setObservation("degraded", i + 3);
+    await tick(2_000, base + 3 + i);
+    await expect(observedAt).toHaveAttribute("datetime", nextObservedAt);
+  }
   await page.clock.runFor(29_000);
   expect(mock.reads).toBe(base + 8);
+  const finalObservedAt = setObservation("degraded", 9);
   await tick(1_000, base + 9);
+  await expect(observedAt).toHaveAttribute("datetime", finalObservedAt);
 });
 
 test("malformed observations are never verified protecting", () => {

@@ -221,6 +221,22 @@ bind availability is a runtime check.
 
 ## Management listener INPUT
 
+In System Settings, **Advanced management access** edits hostname, HTTP/HTTPS
+listeners, redirect and HSTS, TLS/trusted-CA paths, and SSH listener,
+authentication, authorized-key directory, banner, rotation and shell mode.
+**Save management access** validates and stages a revision-guarded candidate;
+it never commits automatically. Server refusals, including reservation and
+administrator-key lockout checks, appear inline and keep your edits. Disabling
+SSH passwords requires an enrolled administrator key accepted by the server.
+If another operator changes the candidate, saving stops until you **Reload**.
+Reload discards your management edits and loads the latest complete candidate;
+re-enter your changes before saving so other operators' staged settings survive.
+Use **Review changes**, then **Commit-confirmed** when changing access.
+Listener addresses and SSH shell mode take effect after a management restart.
+Environment overrides take precedence over saved values; the form shows saved
+intent, while Management HTTPS reports bound listeners. Paths name files inside
+the appliance; selecting a path does not upload a certificate or key.
+
 The compiled INPUT chain admits each management listener on the port
 management binds for it, on the interfaces whose access grants it. The address
 comes from `CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR` or

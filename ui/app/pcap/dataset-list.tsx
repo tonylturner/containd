@@ -22,20 +22,36 @@ export function DatasetList({
   datasets,
   selectedId,
   onOpen,
+  onDelete,
+  busy,
 }: {
   datasets: LearnDataset[];
   selectedId?: string;
   onOpen: (dataset: LearnDataset) => void;
+  onDelete?: (dataset: LearnDataset) => void;
+  busy: boolean;
 }) {
   function openButton(dataset: LearnDataset) {
     return (
-      <button
-        className={`${secondaryButton} max-w-full break-all text-left`}
-        aria-pressed={selectedId === dataset.id}
-        onClick={() => onOpen(dataset)}
-      >
-        Open {dataset.id}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          className={`${secondaryButton} max-w-full break-all text-left`}
+          aria-pressed={selectedId === dataset.id}
+          onClick={() => onOpen(dataset)}
+        >
+          Open {dataset.id}
+        </button>
+        {onDelete && (
+          <button
+            className={`${secondaryButton} max-w-full break-all text-left`}
+            disabled={busy || dataset.state !== "sealed"}
+            title={dataset.state !== "sealed" ? "Only sealed datasets can be deleted. Stop collection first." : undefined}
+            onClick={() => onDelete(dataset)}
+          >
+            Delete dataset {dataset.id}
+          </button>
+        )}
+      </div>
     );
   }
 

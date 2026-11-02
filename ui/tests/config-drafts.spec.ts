@@ -207,8 +207,8 @@ test("a row reversion to its derived value remains explicit while its save is ou
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
-  await row.getByRole("button", { name: "Edit", exact: true }).click();
   const alias = row.getByRole("textbox").first();
+  await expect(alias).toHaveValue("Submitted");
   await alias.fill("Original");
   await announce(page, "/zones");
   const refreshed = page.waitForResponse(read("/zones"));
@@ -283,8 +283,11 @@ test("IDS retains a rule modal draft through a staged save and a deleted server 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
-  const field = page.locator("textarea");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Edit JSON", exact: true }).click();
+  const field = dialog.getByRole("textbox", { name: "Rule JSON", exact: true });
   await field.fill('{"id":"test-rule", "title":');
+  await expect(dialog.getByRole("button", { name: "Save rule", exact: true })).toBeDisabled();
   server.change("/ids/rules", { enabled: true, rules: [] });
   await announce(page, "/ids/rules");
   await expect(field).toHaveValue('{"id":"test-rule", "title":');
@@ -293,6 +296,9 @@ test("IDS retains a rule modal draft through a staged save and a deleted server 
   const refreshed = page.waitForResponse(read("/ids/rules"));
   release();
   await refreshed;
+  await expect(dialog.getByRole("status").filter({ hasText: "IDS rules staged — commit to apply." })).toBeVisible();
+  await expect(dialog.getByText("Edits made after that submission are not included.", { exact: true })).toBeVisible();
+  expect(server.writes).toHaveLength(1);
   await expect(field).toHaveValue('{"id":"test-rule", "title":');
 });
 
@@ -322,7 +328,7 @@ for (const item of [
     await announce(page, item.path, CONFIG_STAGED);
     await rowField.fill(item.name === "Identities" ? "supervisor" : "Saved row");
     await reviewConflict(page, server, row.getByRole("button", { name: "Save", exact: true }));
-    if (item.name !== "Identities") await row.getByRole("button", { name: "Edit", exact: true }).click();
+    if (item.name === "Interfaces") await row.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(rowField).toHaveValue(item.name === "Identities" ? "supervisor" : "Saved row");
     await Promise.all([
       page.waitForResponse(read(item.path)),
@@ -417,7 +423,7 @@ test("a row save keeps later typing and another deleted row's draft, including d
   server.hold = new Promise<void>((resolve) => { release = resolve; });
   await row("lan").getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => server.writes.length).toBe(1);
-  await row("lan").getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(row("lan").getByRole("textbox").first()).toHaveValue("lan draft");
   await row("lan").getByRole("textbox").first().fill("later typing");
   server.change("/zones", [{ name: "lan" }]);
   await announce(page, "/zones");
@@ -507,7 +513,7 @@ test("NAT does not silently replace a chosen ingress zone removed by a refresh",
   await announce(page, "/firewall/nat");
   await expect(ingress).toHaveValue("lan");
   await expect(ingress.getByRole("option", { selected: true })).toHaveText("ingress:lan (no longer on server)");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Stage port forward", exact: true }).click();
   await expect(page.getByText("Ingress zone is no longer available. Choose a configured zone.", { exact: true })).toBeVisible();
   expect(server.writes).toHaveLength(0);
 });
@@ -589,7 +595,8 @@ test("Firewall creation keeps failed submissions and later typing, independently
   const sources = form.getByPlaceholder("sources CIDR (csv)");
   await id.fill("new-rule");
   await sources.fill("192.0.2.0/24, ");
-  const sourceZone = form.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
+  await form.getByRole("button", { name: "Add source zone", exact: true }).click();
+  const sourceZone = form.getByRole("combobox", { name: "Source zone 1", exact: true });
   await sourceZone.selectOption("lan");
   server.change("/zones", [{ name: "wan" }]);
   server.change("/firewall/rules", [draftRule]);

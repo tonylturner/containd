@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockLearner, openDataset } from "./fixtures/learner";
+import { mockLearner, openDataset, inspectSuggestion, suggestionRow } from "./fixtures/learner";
 
 for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
   test(`connections outside localized ${gap} can generate certified suggestions`, async ({
@@ -41,14 +41,11 @@ for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
     expect(state.writes).toEqual([
       { path: "/learn/generate", body: { datasetId: state.datasets[0].id } },
     ]);
-    const modbus = page.getByRole("article", {
-      name: "Suggestion modbus-1",
-      exact: true,
-    });
+    const modbus = await inspectSuggestion(page, "modbus-1");
     await expect(modbus.getByLabel("Certification warnings")).toContainText(
       `Collection limitation: ${gap}`,
     );
-    const select = modbus.getByLabel("Select modbus-1", { exact: true });
+    const select = suggestionRow(page, "modbus-1").getByLabel("Select modbus-1", { exact: true });
     await expect(select).toBeEnabled();
     await expect(select).not.toBeChecked();
     await expect(
@@ -85,8 +82,8 @@ test("unlocalized loss yields no suggestions and explains withheld parents", asy
   await generated;
   await expect(review.getByRole("status").filter({ hasText: "Generation complete:" }))
     .toContainText("0 certified suggestion(s). Nothing selected.");
-  await expect(review.getByRole("listitem").filter({ hasText: "Connection excluded: collection loss may hide observations: 24" }))
-    .toContainText("Connection excluded: collection loss may hide observations");
+  await expect(review.getByRole("listitem").filter({ hasText: "Collection loss may hide operations. Resolve capture drops and collect complete evidence again.: 24" }))
+    .toContainText("Collection loss may hide operations. Resolve capture drops and collect complete evidence again.");
   await expect(page.getByRole("article", { name: "Suggestion modbus-1", exact: true }))
     .toHaveCount(0);
   await expect(review.getByRole("button", { name: "Stage 0 selected", exact: true }))

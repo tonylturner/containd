@@ -43,6 +43,9 @@ import {
 import { OpenVPNEditorCard } from "./vpn-openvpn-editor";
 import { VPNRuntimeStatusCard } from "./vpn-runtime-status";
 import { WireGuardRuntimeCard } from "./vpn-wireguard-runtime";
+import { WireGuardKeyEditor } from "./vpn-wireguard-key";
+import { WireGuardPeerEditor, parsePeers } from "./vpn-wireguard-peers";
+import { scrubSubmittedVPNSecrets } from "./vpn-secret-draft";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -53,6 +56,7 @@ export default function VPNPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor(() => normalize(null), false);
+  const [generatedKey, setGeneratedKey] = useState<{ publicKey: string; revision?: string } | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,11 @@ export default function VPNPage() {
   const { readConfig: refreshClient } = clientForm;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const peersText = text("peers", JSON.stringify(cfg.wireguard.peers ?? [], null, 2));
+  const draftPeers = useMemo(() => {
+    try { return parsePeers(peersText); } catch { return null; }
+  }, [peersText]);
+  const generatedPublicKey = generatedKey?.revision === editor.baseRevision ? generatedKey?.publicKey : undefined;
 
   const wireguardIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.wireguard.enabled) return [];
@@ -82,8 +91,8 @@ export default function VPNPage() {
     if (!hasNonEmptyString(cfg.wireguard.interface)) out.push({ field: "wireguard.interface", severity: "required", message: "Interface name is required (e.g. wg0)." });
     if (!cfg.wireguard.listenPort || cfg.wireguard.listenPort <= 0) out.push({ field: "wireguard.listenPort", severity: "required", message: "Listen port must be set." });
     if (!hasNonEmptyString(cfg.wireguard.addressCIDR)) out.push({ field: "wireguard.addressCIDR", severity: "required", message: "Tunnel address CIDR is required (e.g. 10.8.0.1/24)." });
-    if (!hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
-    if (!cfg.wireguard.peers?.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
+    if (!cfg.wireguard.privateKeyConfigured && !hasNonEmptyString(cfg.wireguard.privateKey)) out.push({ field: "wireguard.privateKey", severity: "required", message: "Private key is required to bring up a WireGuard server." });
+    if (draftPeers && !draftPeers.length) out.push({ field: "wireguard.peers", severity: "recommended", message: "Add at least one peer so clients can connect." });
     if ((cfg.wireguard.listenInterfaces ?? []).length > 0 && hasNonEmptyString(cfg.wireguard.listenZone)) {
       out.push({
         field: "wireguard.listenTargets",
@@ -92,7 +101,7 @@ export default function VPNPage() {
       });
     }
     return out;
-  }, [cfg.wireguard]);
+  }, [cfg.wireguard, draftPeers]);
 
   const openvpnIssues = useMemo<FieldIssue[]>(() => {
     if (!cfg.openvpn.enabled) return [];
@@ -104,9 +113,9 @@ export default function VPNPage() {
         if (!hasNonEmptyString(m.remote)) out.push({ field: "openvpn.managed.remote", severity: "required", message: "Remote is required (VPN gateway hostname/IP)." });
         if (!m.port || m.port <= 0) out.push({ field: "openvpn.managed.port", severity: "required", message: "Port must be set." });
         if (!hasNonEmptyString(m.proto)) out.push({ field: "openvpn.managed.proto", severity: "required", message: "Protocol must be set (udp/tcp)." });
-        if (!hasLikelyPEM(m.ca)) out.push({ field: "openvpn.managed.ca", severity: "required", message: "CA certificate (PEM) is required." });
-        if (!hasLikelyPEM(m.cert)) out.push({ field: "openvpn.managed.cert", severity: "required", message: "Client certificate (PEM) is required." });
-        if (!hasLikelyPEM(m.key)) out.push({ field: "openvpn.managed.key", severity: "required", message: "Client key (PEM) is required." });
+        if (!m.caConfigured && !hasLikelyPEM(m.ca)) out.push({ field: "openvpn.managed.ca", severity: "required", message: "CA certificate (PEM) is required." });
+        if (!m.certConfigured && !hasLikelyPEM(m.cert)) out.push({ field: "openvpn.managed.cert", severity: "required", message: "Client certificate (PEM) is required." });
+        if (!m.keyConfigured && !hasLikelyPEM(m.key)) out.push({ field: "openvpn.managed.key", severity: "required", message: "Client key (PEM) is required." });
       } else {
         if (!hasNonEmptyString(cfg.openvpn.configPath)) out.push({ field: "openvpn.configPath", severity: "required", message: "Config Path is required when not using managed config." });
       }
@@ -196,7 +205,6 @@ export default function VPNPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const peersText = text("peers", JSON.stringify(cfg.wireguard.peers ?? [], null, 2));
   const peerNameByKey = useMemo(() => {
     const out = new Map<string, string>();
     for (const p of cfg.wireguard.peers ?? []) {
@@ -223,8 +231,14 @@ export default function VPNPage() {
     setError(null);
     let peers;
     try {
-      peers = JSON.parse(peersText);
-      if (!Array.isArray(peers)) throw new Error("Peers must be a JSON array.");
+      peers = parsePeers(peersText);
+      for (const peer of peers) {
+        if (!peer.publicKey.trim()) throw new Error("Peer public key is required.");
+        if (peer.allowedIPs?.some(ip => !ip.trim())) throw new Error("Peer allowed IPs cannot include empty entries.");
+        if (peer.persistentKeepalive !== undefined && (!Number.isInteger(peer.persistentKeepalive) || peer.persistentKeepalive < 0)) {
+          throw new Error("Peer keepalive must be a nonnegative whole number of seconds.");
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid peers JSON.");
       return;
@@ -250,17 +264,22 @@ export default function VPNPage() {
         pushRoutes: text("pushRoutes", (openvpn.server.pushRoutes ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
       };
     }
-    const saved = await write(base => api.setVPN(base, {
+    const submitted = {
       ...cfg,
       wireguard: { ...cfg.wireguard, peers },
       openvpn,
-    }), { replace: data => normalize(data) });
+    };
+    const saved = await write(base => api.setVPN(base, submitted), { replace: data => normalize(data) });
     setSaveState(saved.ok ? "saved" : revisionError(saved) === null ? "idle" : "error");
     if (!saved.ok) {
       const msg = revisionError(saved);
       setError(msg);
       if (msg) toast(msg, "error");
     } else {
+      setCfg(current => scrubSubmittedVPNSecrets(current, submitted));
+      if (saved.adopted && saved.unchanged) {
+        setGeneratedKey(current => current ? { ...current, revision: saved.revision } : null);
+      }
       toast(saved.warning ? `VPN staged — commit to apply. Warning: ${saved.warning}` : "VPN staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -426,7 +445,7 @@ export default function VPNPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+        <div className="relative min-w-0 overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
           <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -445,8 +464,8 @@ export default function VPNPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge tone={wireguardFaulted ? "warn" : cfg.wireguard.enabled ? "ok" : "off"}>
-                {wireguardFaulted ? "faulted" : cfg.wireguard.enabled ? "enabled" : "disabled"}
+              <Badge tone={wireguardFaulted ? "warn" : !canSave ? "info" : cfg.wireguard.enabled ? "ok" : "off"}>
+                {wireguardFaulted ? "faulted" : !canSave ? "Unknown" : cfg.wireguard.enabled ? "enabled" : "disabled"}
               </Badge>
               <Badge
                 tone={interfaceStateStatus === "unavailable" ? "warn" : runtime?.up ? "ok" : runtime ? "warn" : "off"}
@@ -582,35 +601,16 @@ export default function VPNPage() {
               />
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                Private Key (base64)
-                <InfoTip label="Server private key. Stored in config; export redaction handled elsewhere." />
-              </label>
-              <input
-                value={cfg.wireguard.privateKey ?? ""}
-                disabled={!canEdit || !canSave}
-                onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, privateKey: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
-                placeholder="(leave blank to set later)"
-              />
-            </div>
-
-            <details className="rounded-xs border p-3" open={(cfg.wireguard.peers?.length ?? 0) > 0}>
-              <summary className="cursor-pointer text-sm"><span>Advanced peer settings</span>{((cfg.wireguard.peers?.length ?? 0) > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
-              <label htmlFor="wireguard-peers" className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                Peers (JSON)
-                <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
-              </label>
-              <textarea
-                id="wireguard-peers"
-                rows={8}
-                value={peersText}
-                disabled={!canEdit || !canSave}
-                onChange={(e) => setText("peers", e.target.value)}
-                className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
-              />
-            </details>
+            <WireGuardKeyEditor value={cfg.wireguard.privateKey ?? ""}
+              configured={cfg.wireguard.privateKeyConfigured === true} disabled={!canEdit || !canSave}
+              onChange={(privateKey, publicKey) => {
+                setGeneratedKey(publicKey ? { publicKey, revision: editor.baseRevision } : null);
+                setCfg(c => ({ ...c, wireguard: { ...c.wireguard, privateKey } }));
+              }} />
+            <WireGuardPeerEditor value={peersText} onChange={value => setText("peers", value)}
+              disabled={!canEdit || !canSave}
+              serverPublicKey={generatedPublicKey ?? (cfg.wireguard.privateKey ? undefined : wgStatus?.publicKey)}
+              serverAddress={cfg.wireguard.addressCIDR} />
           </div>
         </div>
 
@@ -636,7 +636,9 @@ export default function VPNPage() {
           newClientName={newClientName}
           setNewClientName={setNewClientName}
           uploadOpenVPNProfile={uploadOpenVPNProfile}
-          createClient={createClient}
+          createClient={async () => {
+            confirm.open({ title: "Create client credential?", message: "Issue a credential immediately using the active server? This is independent of Save and cannot be undone; revoke it if no longer needed.", confirmLabel: "Create", onConfirm: () => { void createClient(); } });
+          }}
           downloadClient={downloadClient}
           revokeClient={revokeClient}
         />

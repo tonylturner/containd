@@ -43,6 +43,7 @@ import { ICSCoverageCell } from "./ics-coverage";
 import { Disclosure } from "../../components/Disclosure";
 import { ICSInspectionStatus } from "./ics-inspection-status";
 import { ShadowCountersCell, ShadowCountersNote, useShadowCounters } from "./ics-shadow-counters";
+import styles from "./ics-rule-table.module.css";
 import { useICSCoverage } from "./use-ics-coverage";
 
 /* -- Page ----------------------------------------------------------------- */
@@ -189,9 +190,9 @@ export default function ICSPolicyPage() {
       <RulePrecedenceNote />
       <ShadowCountersNote counters={shadow.counters} />
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
-        <table className="w-full text-sm">
-          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-            <tr>
+        <table role="table" className={`${styles.table} w-full text-sm`}>
+          <thead role="rowgroup" className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
+            <tr role="row">
               <th className="px-4 py-3">Rule</th>
               <th className="px-4 py-3">Zones</th>
               <th className="px-4 py-3">Protocol</th>
@@ -201,9 +202,9 @@ export default function ICSPolicyPage() {
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {icsRules.length === 0 && (
-              <tr>
+              <tr role="row">
                 <td className="px-4 py-8" colSpan={7}>
                   <EmptyState
                     title={`No ICS filters${filterProto !== "all" ? ` for ${protoMeta(filterProto).label}` : ""} configured`}
@@ -221,16 +222,16 @@ export default function ICSPolicyPage() {
               </tr>
             )}
             {icsRules.map((r) => (
-              <tr key={r.id} className="border-t table-row-hover transition-ui">
-                <td aria-label={r.id} className="px-4 py-3 font-mono text-xs text-(--text)">
+              <tr role="row" key={r.id} className={`${styles.ruleRow} border-t table-row-hover transition-ui`}>
+                <td role="cell" data-label="Rule" aria-label={r.id} className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.id}
                   {r.ics && <ICSRuleDetails ics={r.ics} filterProto={filterProto} />}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td role="cell" data-label="Zones" className="px-4 py-3 text-(--text)">
                   {(r.sourceZones ?? []).join(", ") || "any"} &rarr;{" "}
                   {(r.destZones ?? []).join(", ") || "any"}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td role="cell" data-label="Protocol" className="px-4 py-3 text-(--text)">
                   <StatusBadge variant="neutral">
                     {protoMeta(r.ics?.protocol ?? "").label}
                   </StatusBadge>
@@ -240,19 +241,19 @@ export default function ICSPolicyPage() {
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td role="cell" data-label="Mode" className="px-4 py-3 text-(--text)">
                   <StatusBadge variant="neutral">
                     {formatICSMode(r.ics?.mode, dpiConfig.dpiMode).label}
                   </StatusBadge>
                   {formatICSMode(r.ics?.mode, dpiConfig.dpiMode).effectiveMode === "monitor" && (
-                    <p className="mt-1 text-xs text-(--text-muted)">Observation only</p>
+                    <p className="mt-1 text-xs text-(--text-muted)">Observation only — non-blocking</p>
                   )}
                 </td>
-                <td className="px-4 py-3 text-(--text)">
+                <td role="cell" data-label="Coverage" className="px-4 py-3 text-(--text)">
                   <ICSCoverageCell view={coverage.view} ruleId={r.id} compact />
                 </td>
-                <td className="px-4 py-3"><ShadowCountersCell rule={r} globalMode={dpiConfig.dpiMode} counters={shadow.counters} /></td>
-                <td className="px-4 py-3 text-right">
+                <td role="cell" data-label="Shadow matches" className="px-4 py-3"><ShadowCountersCell rule={r} globalMode={dpiConfig.dpiMode} counters={shadow.counters} /></td>
+                <td role="cell" data-label="Actions" className="px-4 py-3 text-right">
                   {canEdit && (
                     isSupportedICSProtocol(r.ics?.protocol ?? "") ? (
                       <button
@@ -294,6 +295,7 @@ export default function ICSPolicyPage() {
             ? "Inline inspection configured"
             : "Monitor only \u2014 inline inspection is not configured"}
         </div>
+        {canSave && !queueGroup && <Link href="/firewall/#inline-inspection" className="mt-2 inline-block text-xs font-semibold text-(--amber) underline">Set up inline inspection</Link>}
         {canSave && <div className="mt-2">
           <Disclosure title="Technical details"
             defaultOpen={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0}
@@ -307,7 +309,7 @@ export default function ICSPolicyPage() {
           </Disclosure>
         </div>}
         <div className="mt-2">
-          <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
+          <Link href="/firewall/#inline-inspection" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
             Configure DPI in Firewall Rules &rarr;
           </Link>
         </div>
@@ -348,6 +350,7 @@ export default function ICSPolicyPage() {
           rule={rules.find((r) => r.id === editing.id) ?? editing}
           context={rules}
           globalMode={dpiConfig.dpiMode}
+          inlineConfigured={canSave ? queueGroup > 0 : undefined}
           onClose={() => setEditing(null)}
           onSave={(ics, revision) => onSave(editing.id, ics, revision)}
         />

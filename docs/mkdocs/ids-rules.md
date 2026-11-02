@@ -6,14 +6,27 @@ They are not firewall `ALLOW`/`DENY` rules or automatic IPS actions.
 ## Rule workspace
 
 The **Rules** list comes first and stays visible while using the other tools.
-Search, filters, sorting, pagination, selection, bulk actions and JSON editing
-remain in the list. **Add/import rules** has the **Import** control for both
+Search, filters, sorting, pagination, selection, bulk actions and **Edit**
+remain in the list. **Edit** opens common rule fields: ID, title, description,
+message, protocol, event kind, severity, enablement, addresses and ports, and a
+single event-field condition with a typed value. **Edit JSON** is the advanced
+path for compound/list conditions, labels, content matches, YARA strings and
+other metadata; unedited fields are preserved in either path.
+**Save rule** stages the rule and any other current IDS page edits in one
+revision-guarded save. No additional page **Save** is needed. Review and commit
+to apply. Toggle, deletion, group and Sigma conversion edits still use page **Save**.
+You can start a new rule draft while a page save is pending, but cannot submit
+a second save until the first finishes. The earlier save cannot acknowledge
+that newer draft. If a dialog stays open after a successful save, its success
+notice remains visible inside the dialog.
+**Add/import rules** has the **Import** control for both
 file import and **Convert & Add** of pasted Sigma YAML. Opening it performs no
 import, selection, save or commit.
 
 **Manage groups** contains the **Groups** disclosure. Saved groups open it by
 default; a count remains visible when closed. The **Filter** text field preserves
 the exact matching expression, with syntax help in **Advanced group matching**.
+The group form also saves an optional **Description**, shown beside saved groups.
 **Export** and **Sources** are secondary tools below the list. At export the UI
 states **Export uses active committed rules**: candidate changes are not included.
 If a configuration refresh fails, retained rules, group details, filters,

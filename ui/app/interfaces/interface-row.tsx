@@ -99,8 +99,8 @@ export function InterfaceRow({
   return (
     <>
       <tr className="border-t table-row-hover transition-ui">
-        <td className="px-4 py-3">{iface.name}</td>
-        <td className="px-4 py-3">
+        <td data-label="Name" className="px-4 py-3">{iface.name}</td>
+        <td data-label="Alias" className="px-4 py-3">
           {editing ? (
             <input
               value={alias}
@@ -113,7 +113,7 @@ export function InterfaceRow({
             <span className="text-(--text)">{iface.alias || "—"}</span>
           )}
         </td>
-        <td className="px-4 py-3">
+        <td data-label="Device" className="px-4 py-3">
           {editing ? (
             <input
               value={device}
@@ -131,14 +131,14 @@ export function InterfaceRow({
             {iface.gateway ? " · Gateway set" : ""}
           </p>
         </td>
-        <td className="px-4 py-3">
+        <td data-label="Link" className="px-4 py-3">
           {runtime ? (
             <span className={chipClass(runtime.up)}>{runtime.up ? "up" : "down"}</span>
           ) : (
             <span className="text-(--text-muted)">—</span>
           )}
         </td>
-        <td className="px-4 py-3">
+        <td data-label="Zone" className="px-4 py-3">
           {editing ? (
             <select
               value={zone}
@@ -157,7 +157,7 @@ export function InterfaceRow({
             <span className="text-(--text)">{zoneDisplay}</span>
           )}
         </td>
-        <td className="px-4 py-3">
+        <td data-label="Addresses" className="px-4 py-3">
           {editing ? (
             <div className="space-y-2">
               <select
@@ -251,7 +251,7 @@ export function InterfaceRow({
             </span>
           )}
         </td>
-        <td className="px-4 py-3 text-right">
+        <td data-label="Actions" className="px-4 py-3 text-right">
           <div className="flex flex-wrap justify-end gap-2">
             <button ref={inspectButton} type="button" aria-expanded={expanded} aria-controls={detailId}
               onClick={() => setInspecting(!expanded)} disabled={editing}

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type {
   LearnDataset,
   LearnSuggestion,
@@ -283,6 +283,28 @@ export async function openDataset(page: Page) {
     .getByRole("button", { name: "Open capture-1", exact: true })
     .click();
   await page
-    .getByRole("article", { name: "Suggestion modbus-1", exact: true })
+    .getByRole("table", { name: "Suggestion review", exact: true })
     .waitFor();
+  await page.getByRole("article", {
+    name: "Suggestion modbus-1", exact: true, includeHidden: true,
+  }).waitFor({ state: "attached" });
+}
+
+export function suggestionRow(page: Page, id: string) {
+  return page.getByRole("table", { name: "Suggestion review", exact: true })
+    .getByRole("row")
+    .filter({ has: page.getByRole("checkbox", { name: `Select ${id}`, exact: true }) });
+}
+
+export async function inspectSuggestion(page: Page, id: string) {
+  const article = page.getByRole("article", {
+    name: `Suggestion ${id}`, exact: true, includeHidden: true,
+  });
+  const detailId = await page.locator("tr").filter({ has: article }).getAttribute("id");
+  const inspect = page.getByRole("button", { name: "Inspect suggestion", exact: true })
+    .and(page.locator(`[aria-controls="${detailId}"]`));
+  if (await inspect.getAttribute("aria-expanded") === "false") await inspect.click();
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await expect(article).toBeVisible();
+  return article;
 }
