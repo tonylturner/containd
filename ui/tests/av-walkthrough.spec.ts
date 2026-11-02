@@ -47,8 +47,22 @@ test("cache duration loads and stages nanoseconds with a revision precondition",
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0].body.cacheTtl).toBe(2250000000);
-  expect(writes[0].body.mode).toBe("clamav");
+  expect(writes[0].body).not.toHaveProperty("mode");
   expect(writes[0].base).toBe("0123456789abcdef.1");
+});
+
+test("choosing a scanner mode explicitly persists it", async ({ page }) => {
+  const writes = await setup(page);
+  const mode = page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Local scanner (ClamAV)", exact: true }) });
+  await expect(mode).toHaveValue("clamav");
+  await mode.selectOption("icap");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0].body.mode).toBe("icap");
+  await mode.selectOption("clamav");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1].body.mode).toBe("clamav");
 });
 
 test("negative cache duration is refused before staging", async ({ page }) => {

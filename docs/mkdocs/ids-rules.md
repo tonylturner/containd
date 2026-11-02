@@ -15,6 +15,10 @@ other metadata; unedited fields are preserved in either path.
 **Save rule** stages the rule and any other current IDS page edits in one
 revision-guarded save. No additional page **Save** is needed. Review and commit
 to apply. Toggle, deletion, group and Sigma conversion edits still use page **Save**.
+You can start a new rule draft while a page save is pending, but cannot submit
+a second save until the first finishes. The earlier save cannot acknowledge
+that newer draft. If a dialog stays open after a successful save, its success
+notice remains visible inside the dialog.
 **Add/import rules** has the **Import** control for both
 file import and **Convert & Add** of pasted Sigma YAML. Opening it performs no
 import, selection, save or commit.

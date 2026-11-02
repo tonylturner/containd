@@ -540,7 +540,9 @@ ClamAV mode:
   A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
 - An omitted scanner mode means **Local scanner (ClamAV)**, including its
-  readiness and definition-update controls. A missing-database fault offers
+  readiness and definition-update controls. Unrelated saves leave an omitted
+  mode omitted; selecting a scanner explicitly saves that choice.
+  A missing-database fault offers
   **Update definitions** beside the cause. Both this and **Run definition update**
   request confirmation and act immediately, independently of **Save**.
   Definition uploads and deletion also require confirmation.
