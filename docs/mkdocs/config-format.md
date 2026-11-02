@@ -28,7 +28,11 @@ commit; it does not activate policy. Configuration tabs and JSON keys retain
 their existing names.
 
 **Review changes** leads with changed sections and their old → new values.
-Secret-only changes are identified without showing secret values. **Advanced**
+Lists with unique `id` keys (or `name` keys, such as zones and interfaces)
+match items by that key rather than their position. Reordering shows one
+**Order changed** line, followed by any added or removed items and field
+changes labelled with the item's key. A pure reorder does not invent field
+changes. Secret-only changes are identified without showing secret values. **Advanced**
 opens the exact redacted JSON diff and IDS bank fingerprints; the Overview
 tab's **Advanced** section contains the block explorer. **Staged config**
 keeps the raw JSON editor and **Copy running → staged**, and **Running config**
