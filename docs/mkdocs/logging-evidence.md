@@ -279,8 +279,10 @@ ones. Network Pulse, Zone Status, Service Health, Traffic, Event Stream and
 System Health stay visible alongside attention and failure notices. Open
 Monitoring for live investigation. The header holds the SIM toggle; simulation
 controls act immediately, not on commit. Start saves `on`, Stop saves `off`
-across restarts, and `auto` stops once real traffic has been observed. CLI Console
-opens on demand below the panels.
+across restarts. `auto` stops for good once the firewall forwards traffic between
+zones or raises a real IDS alert or antivirus detection or block; interface
+chatter and other events do not stop it. CLI Console opens on demand below the
+panels.
 
 Events keeps timestamps, endpoints, activity and protection evidence visible.
 Advanced event filters holds exact IDs, protocol, decision, outcome, time and

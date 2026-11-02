@@ -235,8 +235,8 @@ real work (status reason **waiting for telemetry interval** until then), so an
 upgraded appliance that already forwards traffic never starts replay. Each
 chart still prefers its own real data: Traffic and Zone Status show real
 interface bytes as soon as they exist, while Events, Protocols and conduits can
-show demo until their own metric has real activity. The engine itself boots stopped; management reconciles the
-preference after synchronizing running configuration, including after an engine
+show demo until their own metric has real activity. The engine itself boots
+stopped; management reconciles the preference after synchronizing running configuration, including after an engine
 restart. A delivery failure does not discard a saved preference. The status line
 shows the replaying capture, a stopped reason or error, and that Stop persists.
 
