@@ -1,5 +1,7 @@
 "use client";
 
+import { withheldReason } from "./withheld-reasons";
+import entityStyles from "../interfaces/entity-table.module.css";
 import { LearnerSteps } from "./learner-steps";
 import { revisionError } from "../../lib/config-revision";
 
@@ -39,20 +41,11 @@ export function ReasonCounts({
 }: {
   counts: Record<string, number> | null;
 }) {
-  const labels: Record<string, string> = {
-    iec104_value: "IEC command withheld: value not expressible",
-    iec104_qualifier: "IEC command withheld: qualifier not expressible",
-    iec104_sbo_sequence: "IEC command withheld: select-before-operate sequence",
-    cip_observation_only: "CIP observations only; no actionable rules",
-    nonstandard_port: "Nonstandard service: observation only",
-    replay_failed: "Recorded-traffic check failed",
-    collection_loss: "Connection excluded: collection loss may hide observations",
-  };
   return (
     <ul className="mt-2 space-y-1 break-words text-xs">
       {Object.entries(counts ?? {}).map(([reason, count]) => (
         <li key={reason}>
-          <span>{labels[reason] || "Unrecognized reason"}: {count}</span>
+          <span>{withheldReason(reason)}: {count}</span>
           <details className="mt-1">
             <summary className="cursor-pointer">Technical details</summary>
             <code>{reason}</code>
@@ -411,47 +404,60 @@ export function DatasetReview({
             relations are withheld, never broadened.
           </p>
         )}
-        {(suggestions?.items ?? []).map((s) => (
-          <SuggestionReview
-            now={now}
-            key={`${s.id}:${s.revision}`}
-            suggestion={s}
-            checked={selected.get(s.id) === s.revision && selectable(s, now)}
-            changedSinceSelected={selected.has(s.id) && selected.get(s.id) !== s.revision}
-            canEdit={canEdit}
-            busy={busy || !!receipt}
-            onToggle={() =>
-              setSelected((prev) => {
-                const next = new Map(prev);
-                if (next.get(s.id) === s.revision) next.delete(s.id);
-                else next.set(s.id, s.revision);
-                return next;
-              })
-            }
-            onReview={(approve, coordinates) =>
-              confirm.open({
-                title: approve ? "Review suggestion" : "Reject suggestion",
-                message: `Record ${approve ? "approval" : "rejection"} of revision ${s.revision}? This does not select or stage any rule.`,
-                confirmLabel: approve ? "Review" : "Reject",
-                onConfirm: () =>
-                  void run(async () => {
-                    const result = await learner.review(
-                      { id: s.id, revision: s.revision },
-                      approve,
-                      coordinates,
-                    );
-                    await refresh();
-                    dataOf(result);
-                    setNotice(
-                      approve
-                        ? "Review recorded. Select the suggestion separately to stage it."
-                        : "Suggestion rejected.",
-                    );
-                  }),
-              })
-            }
-          />
-        ))}
+        {!!suggestions?.items?.length && (
+          <table aria-label="Suggestion review" className={`mt-4 w-full text-left text-sm ${entityStyles.entities}`}>
+            <thead>
+              <tr>
+                {["Service / scope", "Review status", "Selection", "Evidence"].map(label => (
+                  <th key={label} className="p-2">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(suggestions?.items ?? []).map((s) => (
+                <SuggestionReview
+                  now={now}
+                  key={`${s.id}:${s.revision}`}
+                  suggestion={s}
+                  checked={selected.get(s.id) === s.revision && selectable(s, now)}
+                  changedSinceSelected={selected.has(s.id) && selected.get(s.id) !== s.revision}
+                  canEdit={canEdit}
+                  busy={busy || !!receipt}
+                  onToggle={() =>
+                    setSelected((prev) => {
+                      const next = new Map(prev);
+                      if (next.get(s.id) === s.revision) next.delete(s.id);
+                      else next.set(s.id, s.revision);
+                      return next;
+                    })
+                  }
+                  onReview={(approve, coordinates) =>
+                    confirm.open({
+                      title: approve ? "Review suggestion" : "Reject suggestion",
+                      message: `Record ${approve ? "approval" : "rejection"} of revision ${s.revision}? This does not select or stage any rule.`,
+                      confirmLabel: approve ? "Review" : "Reject",
+                      onConfirm: () =>
+                        void run(async () => {
+                          const result = await learner.review(
+                            { id: s.id, revision: s.revision },
+                            approve,
+                            coordinates,
+                          );
+                          await refresh();
+                          dataOf(result);
+                          setNotice(
+                            approve
+                              ? "Review recorded. Select the suggestion separately to stage it."
+                              : "Suggestion rejected.",
+                          );
+                        }),
+                    })
+                  }
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
         {suggestions?.nextCursor && (
           <button
             className={secondaryButton}

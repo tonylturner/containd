@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User creation returns to the new account with Require MFA available, including
   on narrow screens; template preview and staging retain their request semantics
   through a dedicated API module.
+- Zones support consequence metadata and assets support hostnames in create/edit
+  forms; passive inventory clearing and learner dataset deletion are confirmed
+  immediate actions.
+- Network tables keep actions visible on phones; NAT clarifies staged saves, and
+  PCAP suggestions use compact review rows with expandable evidence and actionable
+  withholding explanations.
 
 - Administrators can stage firewall enforcement on or off from the Firewall
   status card, with confirmation and a review link; the dashboard's FW indicator

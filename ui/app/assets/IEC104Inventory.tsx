@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { api, type IEC104Inventory as Inventory } from "../../lib/api";
+import { useCallback, useState, type ReactNode } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
+import { api, isAdmin, type IEC104Inventory as Inventory } from "../../lib/api";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -30,18 +32,38 @@ function InventoryContent() {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">("loading");
 
-  useEffect(() => {
-    let active = true;
-    api.getIEC104Inventory().then(({ data }) => {
-      if (!active) return;
-      setInventory(data);
-      setState(data ? "ready" : "unavailable");
-    });
-    return () => { active = false; };
-  }, []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const confirm = useConfirm();
+  const { refresh } = useAsyncRefresh(useCallback(async () => {
+    const { data } = await api.getIEC104Inventory();
+    setInventory(data);
+    setState(data ? "ready" : "unavailable");
+  }, []));
 
   return (
     <Card title="Passive IEC 104 inventory" className="mt-6">
+      <ConfirmDialog {...confirm.props} />
+      {isAdmin() && <button className="mb-3 rounded-xs border px-3 py-1.5 text-sm" disabled={busy} onClick={() => confirm.open({
+        title: "Clear observed inventory?",
+        message: "Immediately clear all passive inventory, including IEC 104 stations, points and overflow counters. Configured assets and learner datasets are unchanged. New traffic can repopulate inventory. This cannot be undone and does not require a commit.",
+        confirmLabel: "Clear inventory",
+        variant: "danger",
+        onConfirm: async () => {
+          setBusy(true);
+          setError("");
+          setNotice("");
+          const result = await api.clearInventory();
+          if (result.ok) {
+            setNotice("Observed inventory cleared immediately. Configured assets and learner datasets are unchanged.");
+            await refresh();
+          } else setError(result.error);
+          setBusy(false);
+        },
+      })}>Clear inventory (immediate)</button>}
+      {error && <p role="alert" className="mb-3 text-sm text-(--red)">{error}</p>}
+      {notice && <p role="status" className="mb-3 text-sm">{notice}</p>}
       <p className="mb-4 text-sm text-(--text)">
         Observed controlling clients and controlled servers. Separate from configured assets and the learner; never generates auto-ALLOW rules.
       </p>
