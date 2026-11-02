@@ -458,9 +458,10 @@ Admins replace the managed identity with
 `POST /api/v1/system/tls/cert`, sending `{"certPEM":"...","keyPEM":"..."}`.
 The leaf certificate must include at least one DNS or IP subject alternative
 name (SAN); a common name alone is not sufficient. An upload without a DNS or
-IP SAN returns HTTP 400 and leaves the existing bundle unchanged. For example,
-add a SAN when generating a certificate with
-`-addext 'subjectAltName=DNS:<name>,IP:<addr>'`.
+IP SAN, or with a validity window outside the appliance's current UTC time,
+returns HTTP 400 and leaves the existing bundle unchanged. The error includes
+`NotBefore`, `NotAfter` and the current UTC time. For example, add a SAN when
+generating a certificate with `-addext 'subjectAltName=DNS:<name>,IP:<addr>'`.
 
 The pair is validated and published with one durable atomic rename; the listener
 reads the bundle once at each reload. Failures before rename preserve the old
@@ -477,6 +478,17 @@ that lacks a DNS or IP SAN. Training continues serving an existing SAN-less
 identity and logs a warning with the replacement guidance; TLS status reports
 it in `certificateWarning`. A SAN-less certificate encountered on reload does
 not replace the last-good identity and is reported in `reloadError`.
+
+An expired or not-yet-valid certificate does not prevent management from
+starting in either profile: boot logs a warning naming the file, validity
+window and current UTC time, and TLS status reports it in `certificateWarning`.
+The bound listener may continue to serve that identity, but the loopback TLS
+client reports an explicit validity-window error to callers such as the local
+CLI's health command.
+Replacing it through upload requires a certificate currently within its
+validity window. An invalid certificate encountered on reload does not replace
+the last-good identity and is reported in `reloadError`; replacing it with a
+currently valid certificate recovers normally.
 
 Handshakes check each file's device/inode, size and modification time. Unchanged
 files are not reread or reparsed, including invalid replacements: status keeps
@@ -497,8 +509,9 @@ its containing directory read-only into containd, not the replaceable file inode
 and have the operator replace the bundle atomically in that directory. Separate
 certificate and key files are also accepted, but cannot guarantee atomic
 rotation: a mismatched or unreadable replacement keeps the last-good pair in
-memory. With no valid pair at start, training disables HTTPS and logs the reason;
-strict refuses startup instead of falling back to HTTP. containd never
+memory. With no readable, parseable matching pair at start, training disables
+HTTPS and logs the reason; strict refuses startup instead of falling back to
+HTTP. containd never
 self-signs external paths. Changing source paths requires restart.
 
 `GET /api/v1/system/tls` describes configured and bound files (both file fields
@@ -516,8 +529,9 @@ disabling certificate verification.
 
 The loopback HTTPS client performs ordinary certificate validity checks as well
 as leaf pinning. An expired stored certificate can still be served and does not
-by itself prevent strict startup, but the health check and local CLI fail their
-loopback TLS connection until a valid certificate is installed.
+by itself prevent strict startup, but loopback API calls such as the local CLI's
+health command fail with `NotBefore`, `NotAfter` and the current UTC time until
+a currently valid certificate is installed.
 
 Strict overrides saved HTTP, HTTPS and HSTS enablement without rewriting saved
 intent. TLS status includes `httpEnabledSource`, `httpsEnabledSource`,

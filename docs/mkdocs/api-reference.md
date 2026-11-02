@@ -529,8 +529,10 @@ differ after a rejected reload. Fingerprints are uppercase colon-separated
 SHA-256 DER hashes. Strict disables HTTP and forces HTTPS, HSTS and Secure
 cookies. There is no `/system/ssh` route; use CLI `show system ssh`.
 `certificateWarning` identifies a served or configured management certificate
-without a DNS or IP SAN, including how to add one; `reloadError` remains
-reserved for a rejected certificate reload.
+without a DNS or IP SAN, including how to add one, or outside its validity
+window, including `NotBefore`, `NotAfter` and the current UTC time.
+`reloadError` reports a rejected certificate reload, including an invalid
+validity window; the last-good identity remains served.
 
 TLS status always includes `secureCookies` (`always`, `https-only` or `never`)
 and `secureCookiesSource` (`profile`, `environment` or `default`). These describe

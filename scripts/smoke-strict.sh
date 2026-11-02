@@ -570,6 +570,55 @@ new_fp=$(openssl x509 -in "$scratch/identity.pem" -noout -fingerprint -sha256)
 jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp' "$scratch/body" >/dev/null
 logs >"$scratch/rotation.log"
 grep -F "management TLS certificate sha256=${new_fp#*=}" "$scratch/rotation.log" >/dev/null
+read -r expired_start expired_end expired_not_before expired_not_after <<<"$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+
+now = datetime.now(timezone.utc).replace(microsecond=0)
+start, end = now - timedelta(hours=2), now - timedelta(hours=1)
+print(start.strftime("%Y%m%d%H%M%SZ"), end.strftime("%Y%m%d%H%M%SZ"),
+      start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+)"
+mkdir -p "$scratch/expired-certs/newcerts"
+: >"$scratch/expired-certs/index.txt"
+printf '1000\n' >"$scratch/expired-certs/serial"
+openssl req -new -newkey rsa:2048 -nodes -subj /CN=expired-strict-smoke \
+  -addext 'subjectAltName=DNS:expired-strict-smoke,IP:127.0.0.1' \
+  -keyout "$scratch/expired-certs/expired.key" -out "$scratch/expired-certs/expired.csr" \
+  >"$scratch/expired-certs/req.log" 2>&1
+cat >"$scratch/expired-certs/ca.cnf" <<EOF
+[ ca ]
+default_ca = local
+[ local ]
+database = $scratch/expired-certs/index.txt
+new_certs_dir = $scratch/expired-certs/newcerts
+serial = $scratch/expired-certs/serial
+private_key = $scratch/expired-certs/expired.key
+certificate = $scratch/expired-certs/unused.crt
+default_md = sha256
+policy = policy_any
+copy_extensions = copy
+[ policy_any ]
+commonName = supplied
+[ server ]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+EOF
+openssl ca -selfsign -batch -config "$scratch/expired-certs/ca.cnf" \
+  -in "$scratch/expired-certs/expired.csr" -keyfile "$scratch/expired-certs/expired.key" \
+  -startdate "$expired_start" -enddate "$expired_end" -extensions server \
+  -out "$scratch/expired-certs/expired.crt" >"$scratch/expired-certs/ca.log" 2>&1
+jq -n --rawfile cert "$scratch/expired-certs/expired.crt" \
+  --rawfile key "$scratch/expired-certs/expired.key" '{certPEM:$cert,keyPEM:$key}' \
+  >"$scratch/expired-upload.json"
+expect 400 system/tls/cert -H 'Content-Type: application/json' --data-binary @"$scratch/expired-upload.json"
+jq -e --arg before "$expired_not_before" --arg after "$expired_not_after" \
+  '.error | contains("has expired") and contains("NotBefore="+$before) and contains("NotAfter="+$after) and contains("current UTC time=")' \
+  "$scratch/body" >/dev/null || fail 'expired certificate upload error omitted its validity dates or current time'
+expect 200 system/tls
+jq -e --arg fp "${new_fp#*=}" '.servedCertFingerprintSHA256 == $fp and .certFingerprintSHA256 == $fp' \
+  "$scratch/body" >/dev/null || fail 'expired certificate upload changed the served or configured identity'
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=strict-cn-only -keyout "$scratch/cn-only.key" -out "$scratch/cn-only.crt" >"$scratch/cn-only-openssl.log" 2>&1
 jq -n --rawfile cert "$scratch/cn-only.crt" --rawfile key "$scratch/cn-only.key" '{certPEM:$cert,keyPEM:$key}' >"$scratch/cn-only-upload.json"
 expect 400 system/tls/cert -H 'Content-Type: application/json' --data-binary @"$scratch/cn-only-upload.json"

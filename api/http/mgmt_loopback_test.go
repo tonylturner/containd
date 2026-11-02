@@ -3,16 +3,20 @@
 package httpapi
 
 import (
+	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -96,6 +100,51 @@ func TestLoopbackManagementAPIRefusesHTTPRedirect(t *testing.T) {
 	}
 	if !errors.Is(err, errLoopbackRedirect) || leaked.Load() != 0 {
 		t.Fatalf("redirect: %v, leaked calls %d", err, leaked.Load())
+	}
+}
+
+func TestLoopbackHTTPSFailureNamesExpiredCertificateValidity(t *testing.T) {
+	now := time.Now().UTC()
+	cert, key := generateTestCertPEMWithValidity(t, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	path := filepath.Join(t.TempDir(), "server.pem")
+	if err := mgmttls.Publish(path, []byte(cert), []byte(key)); err != nil {
+		t.Fatal(err)
+	}
+	loader := mgmttls.NewLoader(path, path)
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	leaf := loader.LastLeaf()
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.TLS = &tls.Config{GetCertificate: loader.GetCertificate}
+	server.StartTLS()
+	defer server.Close()
+
+	bound := config.ManagementListeners{HTTPS: config.ManagementListener{
+		Addr: server.Listener.Addr().String(), Enabled: true,
+	}}
+	bindConsoleTest(t, bound)
+	recordServed(t, ServedManagement{CertFile: path, KeyFile: path, TLS: loader})
+	baseURL, client, err := LoopbackManagementAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Do(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "has expired") ||
+		!strings.Contains(err.Error(), "NotBefore="+leaf.NotBefore.UTC().Format(time.RFC3339Nano)) ||
+		!strings.Contains(err.Error(), "NotAfter="+leaf.NotAfter.UTC().Format(time.RFC3339Nano)) ||
+		!strings.Contains(err.Error(), "current UTC time=") {
+		t.Fatalf("loopback TLS error omitted certificate validity: %v", err)
 	}
 }
 

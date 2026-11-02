@@ -206,6 +206,9 @@ func leafTLSConfig(leaf *x509.Certificate) (*tls.Config, error) {
 	} else {
 		return nil, errors.New("management TLS certificate has no DNS or IP subject alternative name")
 	}
+	if err := mgmttls.ValidateValidity(leaf, time.Now()); err != nil {
+		return nil, err
+	}
 	roots := x509.NewCertPool()
 	roots.AddCert(leaf)
 	return &tls.Config{

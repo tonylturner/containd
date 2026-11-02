@@ -34,6 +34,12 @@ func checkManagementTLSSubjectAltName(
 	return nil
 }
 
+func warnManagementTLSValidity(logger *zap.SugaredLogger, certFile string, leaf *x509.Certificate) {
+	if err := mgmttls.ValidateValidity(leaf, time.Now()); err != nil {
+		logger.Warnf("management TLS certificate %q: %v", certFile, err)
+	}
+}
+
 func recordProfileBoot(logger *zap.SugaredLogger, store audit.Store, overrides []config.ProfileOverride) error {
 	var changes []string
 	for _, override := range overrides {

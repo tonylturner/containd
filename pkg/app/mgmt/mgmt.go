@@ -389,6 +389,7 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	if err != nil {
 		return listenerCfg, strictHTTPSError(err)
 	}
+	warnManagementTLSValidity(logger, tlsCert, pair.Leaf)
 	if err := checkManagementTLSSubjectAltName(logger, tlsCert, pair.Leaf, profile.IsStrict()); err != nil {
 		return listenerCfg, strictHTTPSError(err)
 	}

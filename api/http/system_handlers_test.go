@@ -4,19 +4,60 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+func generateTestCertPEMWithValidity(t *testing.T, notBefore, notAfter time.Time) (string, string) {
+	return generateTestCertPEMWithValidityAndDNS(t, []string{"localhost"}, notBefore, notAfter)
+}
+
+func generateTestCertPEMWithValidityAndDNS(
+	t *testing.T, dnsNames []string, notBefore, notAfter time.Time,
+) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(9001),
+		Subject:      pkix.Name{CommonName: "management-test"},
+		DNSNames:     dnsNames,
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+}
 
 func TestTLSInfoReportsManagedUploadMode(t *testing.T) {
 	cert, key := generateTestCertPEM(t)
@@ -174,6 +215,71 @@ func TestTLSUploadRejectsSANlessCertificateWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestTLSUploadRejectsCertificatesOutsideValidityWindowWithoutWriting(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name                string
+		notBefore, notAfter time.Time
+		reason              string
+	}{
+		{
+			name: "expired", notBefore: now.Add(-2 * time.Hour), notAfter: now.Add(-time.Hour),
+			reason: "has expired",
+		},
+		{
+			name: "not yet valid", notBefore: now.Add(time.Hour), notAfter: now.Add(2 * time.Hour),
+			reason: "not yet valid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.DefaultConfig()
+			path, _ := mgmttls.IdentityFilesIn(cfg, dir)
+			oldCert, oldKey := generateTestCertPEM(t)
+			if err := mgmttls.Publish(path, []byte(oldCert), []byte(oldKey)); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cert, key := generateTestCertPEMWithValidity(t, tc.notBefore, tc.notAfter)
+			pair, err := mgmttls.ParseBundle([]byte(cert + "\n" + key))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(setTLSCertRequest{CertPEM: cert, KeyPEM: key})
+			if err != nil {
+				t.Fatal(err)
+			}
+			router := gin.New()
+			router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: cfg}, dir))
+			rec := httptest.NewRecorder()
+			serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			notBefore := pair.Leaf.NotBefore.UTC().Format(time.RFC3339Nano)
+			notAfter := pair.Leaf.NotAfter.UTC().Format(time.RFC3339Nano)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(response.Error, tc.reason) ||
+				!strings.Contains(response.Error, "NotBefore="+notBefore) ||
+				!strings.Contains(response.Error, "NotAfter="+notAfter) ||
+				!strings.Contains(response.Error, "current UTC time=") {
+				t.Fatalf("invalid validity window response: %d %s", rec.Code, rec.Body)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("rejected upload changed the managed identity: %v", err)
+			}
+		})
+	}
+}
+
 func TestTLSStatusWarnsAboutLegacySANlessCertificate(t *testing.T) {
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
@@ -205,5 +311,72 @@ func TestTLSStatusWarnsAboutLegacySANlessCertificate(t *testing.T) {
 		!strings.Contains(response.CertificateWarning, "subject alternative name") ||
 		!strings.Contains(response.CertificateWarning, "-addext") || response.ReloadError != "" {
 		t.Fatalf("legacy TLS status did not show a distinct compatibility warning: %d %+v", rec.Code, response)
+	}
+}
+
+func TestTLSStatusWarnsAboutCertificateOutsideValidityWindow(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	now := time.Now().UTC()
+	cert, key := generateTestCertPEMWithValidity(t, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "server.pem")
+	if err := mgmttls.Publish(certPath, []byte(cert), []byte(key)); err != nil {
+		t.Fatal(err)
+	}
+	loader := mgmttls.NewLoader(certPath, certPath)
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile, cfg.System.Mgmt.TLSKeyFile = certPath, certPath
+	recordServed(t, ServedManagement{CertFile: certPath, KeyFile: certPath, TLS: loader})
+	router := gin.New()
+	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+	var response tlsInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(response.CertificateWarning, certPath) ||
+		!strings.Contains(response.CertificateWarning, "has expired") ||
+		!strings.Contains(response.CertificateWarning, "NotBefore=") ||
+		!strings.Contains(response.CertificateWarning, "NotAfter=") ||
+		!strings.Contains(response.CertificateWarning, "current UTC time=") {
+		t.Fatalf("expired certificate warning missing validity details: %d %+v", rec.Code, response)
+	}
+}
+
+func TestTLSStatusCombinesSANAndValidityWarnings(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	now := time.Now().UTC()
+	cert, key := generateTestCertPEMWithValidityAndDNS(t, nil, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "server.pem")
+	if err := mgmttls.Publish(certPath, []byte(cert), []byte(key)); err != nil {
+		t.Fatal(err)
+	}
+	loader := mgmttls.NewLoader(certPath, certPath)
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile, cfg.System.Mgmt.TLSKeyFile = certPath, certPath
+	recordServed(t, ServedManagement{CertFile: certPath, KeyFile: certPath, TLS: loader})
+	router := gin.New()
+	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+	var response tlsInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(response.CertificateWarning, "subject alternative name") ||
+		!strings.Contains(response.CertificateWarning, "has expired") ||
+		strings.Count(response.CertificateWarning, "subject alternative name") != 1 ||
+		strings.Count(response.CertificateWarning, "has expired") != 1 {
+		t.Fatalf("certificate warnings were missing or duplicated: %q", response.CertificateWarning)
 	}
 }
