@@ -29,20 +29,21 @@ var (
 // returns a *FactorLockedError while that limit locks the code check. Lab mode
 // verifies the code without a limit, and without recording or refusing reuse.
 func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin accept totp: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	result := acceptTOTP(ctx, tx, id, code, now)
+	defer tx.close()
+	result := acceptTOTP(ctx, tx.Tx, id, code, now)
 	if result != nil {
 		if _, _, refused := Refusal(result); !refused {
 			return result
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit accept totp: %w", err)
 	}
+	tx.close()
 	return result
 }
 

@@ -20,14 +20,14 @@ import (
 
 // A failed SQLite COMMIT can leave a transaction open in the driver after
 // database/sql has marked its Tx done. Keep its connection reserved so it can
-// be rolled back on failure rather than returning uncommitted credentials to
-// the pool.
-type bootstrapTx struct {
+// be rolled back on failure rather than returning an open transaction to the
+// pool.
+type mutationTx struct {
 	*sql.Tx
 	conn *sql.Conn
 }
 
-func (s *SQLiteStore) beginBootstrapTx(ctx context.Context) (*bootstrapTx, error) {
+func (s *SQLiteStore) beginMutationTx(ctx context.Context) (*mutationTx, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -37,15 +37,15 @@ func (s *SQLiteStore) beginBootstrapTx(ctx context.Context) (*bootstrapTx, error
 		_ = conn.Close()
 		return nil, err
 	}
-	return &bootstrapTx{Tx: tx, conn: conn}, nil
+	return &mutationTx{Tx: tx, conn: conn}, nil
 }
 
-func (tx *bootstrapTx) close() {
+func (tx *mutationTx) close() {
 	_ = tx.Rollback()
 	_ = tx.conn.Close()
 }
 
-func (tx *bootstrapTx) commit(ctx context.Context) error {
+func (tx *mutationTx) commit(ctx context.Context) error {
 	err := tx.Commit()
 	if err != nil {
 		if _, rollbackErr := tx.conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`); rollbackErr != nil {
@@ -166,7 +166,7 @@ RETURNING generation`, u.ID, reason, now).Scan(&generation)
 // setPasswordHash retires any outstanding issuance together with the credential
 // change, including when an operator changes back to the training profile.
 func (s *SQLiteStore) setPasswordHash(ctx context.Context, id, hash string) error {
-	tx, err := s.beginBootstrapTx(ctx)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin set password: %w", err)
 	}

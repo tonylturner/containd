@@ -19,11 +19,11 @@ var ErrMFAChallenge = errors.New("invalid, used or expired MFA challenge; start 
 // CreateMFAChallenge binds a nonce to the credential state actually authenticated
 // by the caller, not a later password/role/TOTP state read after authentication.
 func (s *SQLiteStore) CreateMFAChallenge(ctx context.Context, u *StoredUser, purpose string, expires time.Time) (string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.close()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM mfa_challenges WHERE expires_at<=?`, time.Now().Unix()); err != nil {
 		return "", err
 	}
@@ -36,9 +36,10 @@ func (s *SQLiteStore) CreateMFAChallenge(ctx context.Context, u *StoredUser, pur
 	if n, _ := res.RowsAffected(); n == 0 {
 		return "", ErrMFAChallenge
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return "", err
 	}
+	tx.close()
 	return id, nil
 }
 
@@ -53,25 +54,27 @@ func invalidateChallenges(ctx context.Context, tx *sql.Tx, id string) error {
 
 // challengeTx reserves the writer before checking the durable nonce, preventing
 // a concurrent redemption or credential mutation from interleaving with it.
-func (s *SQLiteStore) challengeTx(ctx context.Context, id, userID, purpose string, now time.Time) (*sql.Tx, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *SQLiteStore) challengeTx(ctx context.Context, id, userID, purpose string, now time.Time) (*mutationTx, error) {
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM mfa_challenges WHERE expires_at<=?`, now.Unix()); err != nil {
-		_ = tx.Rollback()
+		tx.close()
 		return nil, err
 	}
 	var found int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM mfa_challenges c JOIN users u ON u.id=c.user_id WHERE c.id=? AND c.user_id=? AND c.purpose=? AND c.credential_version=u.credential_version`, id, userID, purpose).Scan(&found)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := tx.Commit(); err != nil {
+			if err := tx.commit(ctx); err != nil {
+				tx.close()
 				return nil, err
 			}
+			tx.close()
 			return nil, ErrMFAChallenge
 		}
-		_ = tx.Rollback()
+		tx.close()
 		return nil, err
 	}
 	return tx, nil
@@ -84,8 +87,8 @@ func (s *SQLiteStore) RedeemLoginMFA(ctx context.Context, id, userID, code strin
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	result := acceptTOTP(ctx, tx, userID, code, now)
+	defer tx.close()
+	result := acceptTOTP(ctx, tx.Tx, userID, code, now)
 	if result != nil {
 		if _, _, refused := Refusal(result); !refused {
 			return result
@@ -93,9 +96,10 @@ func (s *SQLiteStore) RedeemLoginMFA(ctx context.Context, id, userID, code strin
 	} else if _, err := tx.ExecContext(ctx, `DELETE FROM mfa_challenges WHERE id=?`, id); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit MFA login: %w", err)
 	}
+	tx.close()
 	return result
 }
 
@@ -106,7 +110,7 @@ func (s *SQLiteStore) RedeemEnrollMFA(ctx context.Context, id, userID, secret, c
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.close()
 	u, err := getByID(ctx, tx, userID)
 	if err != nil {
 		return err
@@ -118,13 +122,14 @@ func (s *SQLiteStore) RedeemEnrollMFA(ctx context.Context, id, userID, secret, c
 	if !ok {
 		return ErrInvalidTOTP
 	}
-	revoked, err := updateCredentialTx(ctx, tx, "enable totp", userID, FactorTOTP, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=?, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, step, now.Unix(), userID)
+	revoked, err := updateCredentialTx(ctx, tx.Tx, "enable totp", userID, FactorTOTP, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=?, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, step, now.Unix(), userID)
 	if err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return err
 	}
+	tx.close()
 	s.revocations.publish(revoked)
 	return nil
 }
