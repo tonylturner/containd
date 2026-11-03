@@ -103,8 +103,7 @@ func main() {
 	case "cli":
 		err = runCLI(ctx)
 	case "healthcheck":
-		err = runHealthcheck()
-		if err != nil {
+		if healthcheckCommand(runHealthcheck, os.Stderr) != 0 {
 			os.Exit(1)
 		}
 		return
@@ -119,6 +118,14 @@ func main() {
 		slog.Error("fatal error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func healthcheckCommand(check func() error, stderr io.Writer) int {
+	if err := check(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
 }
 
 // runHealthcheck asks the management this container runs for its health,
