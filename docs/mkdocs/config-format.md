@@ -48,8 +48,10 @@ deadline is pending. **Recovery** contains **Rollback** and explains that it
 keeps the newer staged candidate; review that candidate before committing
 again. **Factory reset** is a separate immediate action in **Recovery**:
 type `NUCLEAR`, then confirm. It is revision-guarded, wipes configuration,
-users and audit history, applies appliance defaults and resets the default
-admin login. TLS identity files remain; lab web/API tokens remain valid.
+users and audit history, applies appliance defaults and resets the admin
+login: training restores the default credentials; strict issues a new one-time
+password (see [Deployment profiles](deployment-profiles.md)). TLS identity
+files remain; in lab mode, lab web/API tokens remain valid.
 Back up before resetting. The committed document is not proof of live traffic protection.
 Exports, appliance backups and IDS bank backup/restore remain on Overview.
 
