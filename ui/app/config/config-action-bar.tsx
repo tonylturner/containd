@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Card } from "../../components/Card";
 import { Disclosure } from "../../components/Disclosure";
+import { factoryResetLoginGuidance } from "../../lib/recovery-guidance";
+import type { DeploymentProfile } from "../../lib/api";
 
 export function ConfigActionBar({
   canEdit,
   canCommit,
   canMutate,
+  profile,
+  labMode,
   showReview,
   pendingConfirm,
   ttlSeconds,
@@ -19,6 +23,8 @@ export function ConfigActionBar({
   canEdit: boolean;
   canCommit: boolean;
   canMutate: boolean;
+  profile?: DeploymentProfile;
+  labMode?: boolean;
   showReview: boolean;
   pendingConfirm: boolean;
   ttlSeconds: string;
@@ -90,7 +96,7 @@ export function ConfigActionBar({
               </button>
             </div>}
             {canEdit && <div className="mt-4 grid gap-2 border-t pt-3 text-sm">
-              <p>Factory reset immediately applies appliance defaults, wipes configuration, users and audit history, and resets the default admin login. Sessions are revoked; lab tokens remain valid. TLS identity files are preserved. Back up first. This is not a staged edit.</p>
+              <p>Factory reset immediately applies appliance defaults, wipes configuration, users and audit history, and resets the admin login. Sessions are revoked. {factoryResetLoginGuidance(profile, labMode)} TLS identity files are preserved. Back up first. This is not a staged edit.</p>
               <label className="grid gap-1">Type NUCLEAR to allow factory reset
                 <input aria-label="Factory reset confirmation" autoComplete="off" value={resetWord}
                   onChange={e => setResetWord(e.target.value)} className="w-full input-industrial" />

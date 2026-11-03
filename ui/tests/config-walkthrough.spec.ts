@@ -98,31 +98,53 @@ for (const conflict of [false, true]) {
   });
 }
 
-for (const profile of ["training", "strict", "unknown"] as const) {
-  test(`factory reset confirmation uses ${profile} recovery guidance`, async ({ page }) => {
+for (const [profile, labMode] of [
+  ["training", false],
+  ["training", true],
+  ["strict", false],
+  ["unknown", false],
+] as const) {
+  test(`factory reset recovery guidance uses ${profile}${labMode ? " with lab mode" : ""}`, async ({ page }) => {
     await setup(page);
     await page.route("**/api/v1/auth/me", route => route.fulfill({
-      json: { id: "admin-1", username: "containd", role: "admin", labMode: false, ...(profile === "unknown" ? {} : { profile }) },
+      json: { id: "admin-1", username: "containd", role: "admin", labMode, ...(profile === "unknown" ? {} : { profile }) },
       headers: { "X-Containd-Revision": revision },
     }));
     await page.goto("/config/?tab=diff");
     await page.getByRole("button", { name: "Recovery", exact: true }).click();
+    const recovery = page.getByText(/Factory reset immediately applies appliance defaults/);
     await page.getByLabel("Factory reset confirmation", { exact: true }).fill("NUCLEAR");
     await page.getByRole("button", { name: "Factory reset", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     if (profile === "training") {
       await expect(dialog).toContainText("Log in afterwards with the default credentials.");
+      await expect(recovery).toContainText("Log in afterwards with the default credentials.");
+      if (labMode) {
+        await expect(dialog).toContainText("Lab web/API tokens remain valid.");
+        await expect(recovery).toContainText("Lab web/API tokens remain valid.");
+      } else {
+        await expect(dialog).not.toContainText("Lab web/API tokens remain valid");
+        await expect(recovery).not.toContainText("Lab web/API tokens remain valid");
+      }
     } else if (profile === "strict") {
       await expect(dialog).toContainText("one-time password printed to the container log");
-      await expect(dialog).toContainText("<users-db-directory>/bootstrap/admin-password");
+      await expect(dialog).toContainText("bootstrap/admin-password in the data directory (next to users.db)");
       await expect(dialog).toContainText("a password change is required at first login");
       await expect(dialog).not.toContainText("default credentials");
       await expect(dialog).not.toContainText("Lab web/API tokens remain valid");
+      await expect(recovery).toContainText("one-time password printed to the container log");
+      await expect(recovery).toContainText("bootstrap/admin-password in the data directory (next to users.db)");
+      await expect(recovery).toContainText("a password change is required at first login");
+      await expect(recovery).not.toContainText("default credentials");
+      await expect(recovery).not.toContainText("Lab web/API tokens remain valid");
     } else {
       await expect(dialog).toContainText("After reset, follow the sign-in instructions for this deployment.");
       await expect(dialog).not.toContainText("default credentials");
       await expect(dialog).not.toContainText("Lab web/API tokens remain valid");
+      await expect(recovery).toContainText("After reset, follow the sign-in instructions for this deployment.");
+      await expect(recovery).not.toContainText("default credentials");
+      await expect(recovery).not.toContainText("Lab web/API tokens remain valid");
     }
   });
 }

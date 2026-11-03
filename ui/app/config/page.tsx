@@ -12,6 +12,7 @@ import { useCallback, Suspense, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle, type User } from "../../lib/api";
+import { factoryResetLoginGuidance } from "../../lib/recovery-guidance";
 import { ConfigDiffBlocks } from "./config-diff-blocks";
 import { ConfigChangeSummary } from "./config-change-summary";
 import { ConfigActionBar } from "./config-action-bar";
@@ -150,11 +151,7 @@ function ConfigPage() {
   function doFactoryReset() {
     if (!canEdit || !canSaveNow() || !diffRevision) return;
     dialogOpen.current = true;
-    const loginGuidance = me?.profile === "strict"
-      ? "Log in afterwards with the new one-time password printed to the container log and written to <users-db-directory>/bootstrap/admin-password; a password change is required at first login."
-      : me?.profile === "training"
-        ? `Log in afterwards with the default credentials.${me.labMode === true ? " Lab web/API tokens remain valid." : ""}`
-        : "After reset, follow the sign-in instructions for this deployment.";
+    const loginGuidance = factoryResetLoginGuidance(me?.profile, me?.labMode);
     confirm.open({
       title: "Factory reset appliance", variant: "danger", confirmLabel: "Reset now",
       message: `This immediately wipes configuration, users and audit history and applies appliance defaults. It cannot be undone. ${loginGuidance}`,
@@ -397,6 +394,8 @@ function ConfigPage() {
       canEdit={canEdit}
       canMutate={canSave && !!diffRevision && !diffView.stale}
       canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
+      profile={me?.profile}
+      labMode={me?.labMode}
       ttlSeconds={ttlSeconds}
       onTtlChange={setTtlSeconds}
       onCommit={doCommit}
@@ -576,6 +575,8 @@ function ConfigPage() {
             canEdit={canEdit}
             canMutate={canSave && !!diffRevision && !diffView.stale}
             canCommit={false}
+            profile={me?.profile}
+            labMode={me?.labMode}
             ttlSeconds={ttlSeconds}
             onTtlChange={setTtlSeconds}
             onCommit={doCommit}
