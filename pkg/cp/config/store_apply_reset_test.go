@@ -73,7 +73,7 @@ func TestApplyResetRestoresStateAndCanceledCaller(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			calls := 0
-			err = testApplyReset(store, ctx, DefaultConfig(), func(ctx context.Context, previous, next *Config) error {
+			err = testApplyReset(store, ctx, DefaultConfig(), func(ctx context.Context, previous, next *RunningSnapshot) error {
 				calls++
 				if calls == 1 {
 					if previous.System.Hostname != "running" || next.System.Hostname != DefaultConfig().System.Hostname {
@@ -122,13 +122,13 @@ func TestApplyResetClearsHistoryAndBank(t *testing.T) {
 	if err := store.SetManagementBootFault(ctx, "old fault"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetRuntimeApplyFault(ctx, "old fault"); err != nil {
+	if err := store.SetRuntimeApplyFault(ctx, runningState(t, store).RunningRevision, "old fault"); err != nil {
 		t.Fatal(err)
 	}
 	defaults := DefaultConfig()
 	defaults.IDS.Rules = []IDSRule{}
 	calls := 0
-	if err := testApplyReset(store, ctx, defaults, func(_ context.Context, _, next *Config) error {
+	if err := testApplyReset(store, ctx, defaults, func(_ context.Context, _, next *RunningSnapshot) error {
 		calls++
 		if len(next.IDS.Rules) != 0 {
 			t.Fatalf("reset retained IDS bank: %+v", next.IDS.Rules)
@@ -157,7 +157,7 @@ func TestApplyResetRejectsInvalidDefaults(t *testing.T) {
 	invalid := DefaultConfig()
 	invalid.System.Hostname = strings.Repeat("x", 256)
 	for _, cfg := range []*Config{nil, invalid} {
-		err := testApplyReset(store, context.Background(), cfg, func(context.Context, *Config, *Config) error {
+		err := testApplyReset(store, context.Background(), cfg, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 			t.Fatal("invalid defaults reached runtime apply")
 			return nil
 		})
@@ -181,7 +181,7 @@ func TestConfigWipeTransactionFailurePreservesStateAndTimer(t *testing.T) {
 				t.Fatal(err)
 			}
 			if reset {
-				err = testApplyReset(store, context.Background(), DefaultConfig(), func(context.Context, *Config, *Config) error {
+				err = testApplyReset(store, context.Background(), DefaultConfig(), func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 					t.Fatal("failed reset transaction reached runtime apply")
 					return nil
 				})

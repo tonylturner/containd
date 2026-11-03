@@ -21,7 +21,8 @@ type Lease struct {
 }
 
 type Manager struct {
-	OnEvent func(kind string, attrs map[string]any)
+	delivery delivery
+	OnEvent  func(kind string, attrs map[string]any)
 }
 
 func NewManager() *Manager { return &Manager{} }
@@ -33,7 +34,7 @@ func (m *Manager) SetOnEvent(fn func(kind string, attrs map[string]any)) {
 	m.OnEvent = fn
 }
 
-func (m *Manager) Apply(ctx context.Context, cfg config.DHCPConfig, ifaces []config.Interface) error {
+func (m *Manager) apply(ctx context.Context, cfg config.DHCPConfig, ifaces []config.Interface) error {
 	_ = ctx
 	_ = cfg
 	_ = ifaces
@@ -44,4 +45,10 @@ func (m *Manager) Leases() []Lease { return nil }
 
 func (m *Manager) Status() map[string]any {
 	return map[string]any{"enabled": false, "note": "dhcpd not supported on this platform"}
+}
+
+func (m *Manager) runtimeReady() bool { return false }
+
+func (m *Manager) runtimeStopped() bool {
+	return false
 }

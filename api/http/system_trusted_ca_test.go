@@ -62,7 +62,7 @@ func TestTrustedCAUpload(t *testing.T) {
 	store := &mockStore{cfg: cfg}
 	router := gin.New()
 	engine := &mockEngine{}
-	router.POST("/upload", trustedCAUploadHandler(store, engine, dir))
+	router.POST("/upload", testRuntimeHandler(t, store, engine, nil, trustedCAUploadHandler(store, engine, dir)))
 	chain := trustedCATestChain(t)
 	leaf, _ := generateTestCertPEM(t)
 	post := func(body string, want int, message string) {
@@ -115,7 +115,7 @@ func TestTrustedCAUpload(t *testing.T) {
 	// A bundle the engine cannot apply is stored, and the response says so
 	// with its revision and a warning instead of reporting it applied.
 	engine.trustErr = errors.New("dial tcp: connection refused")
-	stored := func(router *gin.Engine, body, wantRevision, wantWarning string) {
+	stored := func(router *gin.Engine, body, wantRevision string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
@@ -127,7 +127,7 @@ func TestTrustedCAUpload(t *testing.T) {
 		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
 			t.Fatalf("stored upload: %d %s", rec.Code, rec.Body)
 		}
-		want := []string{"trust: " + wantWarning}
+		want := []string{"trust: owner acknowledgement pending"}
 		if got.Status != "stored" || got.Revision != wantRevision || !slices.Equal(got.Warnings, want) {
 			t.Fatalf("stored upload = %+v, want stored %s with warnings %q", got, wantRevision, want)
 		}
@@ -135,13 +135,13 @@ func TestTrustedCAUpload(t *testing.T) {
 			t.Fatalf("X-Containd-Warnings = %q, want %q", header, want)
 		}
 	}
-	stored(router, encode(setTrustedCARequest{PEM: chain}), trust.Revision(string(original)), "dial tcp: connection refused")
+	stored(router, encode(setTrustedCARequest{PEM: chain}), trust.Revision(string(original)))
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
 		t.Fatalf("bundle not saved when the engine failed: %q, %v", got, err)
 	}
 	noEngine := gin.New()
-	noEngine.POST("/upload", trustedCAUploadHandler(store, nil, dir))
-	stored(noEngine, `{"clear":true}`, trust.NoRevision, "engine unavailable")
+	noEngine.POST("/upload", testRuntimeHandler(t, store, nil, nil, trustedCAUploadHandler(store, nil, dir)))
+	stored(noEngine, `{"clear":true}`, trust.NoRevision)
 
 	// Only a missing config store is unavailable; nothing is stored then.
 	engine.trustErr = nil
@@ -161,7 +161,8 @@ func TestTrustedCAUploadStorageBoundary(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.System.Mgmt.TrustedCAFile = filepath.Join(t.TempDir(), "ca.pem")
 	router := gin.New()
-	router.POST("/upload", setTrustedCAHandler(&mockStore{cfg: cfg}, &mockEngine{}))
+	store, engine := &mockStore{cfg: cfg}, &mockEngine{}
+	router.POST("/upload", testRuntimeHandler(t, store, engine, nil, setTrustedCAHandler(store, engine)))
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "must be under /data") {

@@ -33,7 +33,7 @@ func TestICSSelectorCreateCommitReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &stageEngine{mockEngine: &mockEngine{}}
-	server := NewServerWithEngine(store, nil, engine)
+	server := newTestServerWithEngine(store, nil, engine)
 	predicates := []config.ICSPredicate{
 		{Protocol: "modbus", FunctionCode: []uint8{0}, UnitID: new(uint8(0)), Addresses: []string{"0"}},
 		{Protocol: "iec104", TypeIDs: []int{45}, Classes: []string{"control"}, CA: []uint16{0},

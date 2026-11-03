@@ -7,6 +7,7 @@ import (
 	"context"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	httpapi "github.com/tonylturner/containd/api/http"
@@ -83,6 +84,63 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestStartupPreservesConsistentBindingAndRunningRevision(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.db")
+	t.Setenv("CONTAIND_CONFIG_DB", path)
+	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))
+	t.Setenv("CONTAIND_USERS_DB", filepath.Join(dir, "users.db"))
+	for _, name := range config.DefaultPhysicalInterfaces() {
+		t.Setenv("CONTAIND_AUTO_"+strings.ToUpper(name)+"_SUBNET", "")
+		t.Setenv("CONTAIND_"+strings.ToUpper(name)+"_SUBNET", "")
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil || len(ifaces) == 0 {
+		t.Fatalf("discover host interface for binding test: interfaces=%v err=%v", ifaces, err)
+	}
+	device := ifaces[0].Name
+
+	ctx := context.Background()
+	initial := config.DefaultConfig()
+	initial.Interfaces = []config.Interface{{Name: "wan", Zone: "wan", Device: device}}
+	store, err := config.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDefaultConfig(zap.NewNop().Sugar(), store); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.store.Close()
+	defer stores.auditStore.Close()
+	defer stores.userStore.Close()
+
+	after, err := stores.store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.RunningRevision != before.RunningRevision {
+		t.Fatalf("boot repair changed running revision: %q -> %q; device=%q before=%+v after=%+v", before.RunningRevision, after.RunningRevision, device, before.Running.Interfaces, running.Interfaces)
+	}
+	if len(running.Interfaces) != 1 || running.Interfaces[0].Device != device {
+		t.Fatalf("boot repair changed a present, uncontradicted binding: %+v", running.Interfaces)
+	}
+}
+
 // Exercise the real startup autobinder against a local, IPv4-bearing device.
 // This needs no network mutation, privileged access or fixed host device names.
 func startupRepairDevice(t *testing.T, initial *config.Config) string {
@@ -104,7 +162,6 @@ func startupRepairDevice(t *testing.T, initial *config.Config) string {
 			t.Setenv("CONTAIND_AUTO_WAN_SUBNET", subnet.String())
 			probe := *initial
 			probe.Interfaces = append([]config.Interface(nil), initial.Interfaces...)
-			blankDefaultInterfaceDevices(&probe)
 			if httpapi.AutoBindDefaultInterfaceDevices(&probe) {
 				return probe.Interfaces[0].Device
 			}

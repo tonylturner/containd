@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bind runtime convergence to committed running generations, with authenticated
+  desired/applied/protecting revisions, per-owner outcomes and `ready`. Retry
+  outstanding owners without replaying healthy services; adopt unchanged live
+  runtime only after owner confirmation. VPN/proxy apply or teardown gates ready;
+  DNS/NTP/syslog/DHCP faults remain visible and retryable without gating it.
+  Degraded logging/scheduling is not ready. Commit/rollback/reset results add
+  `runningRevision`; protection retry requires `{bootId, applyId, desiredRevision}`
+  (CLI: `retry protection <boot-id> <apply-id> <desired-revision> CONFIRM`).
+  SIGHUP reloads referenced material through its owners, and trust uploads report
+  `updated` only with matching owner proof (`stored` means durable but pending).
+  The UI shows desired, installed and protecting revisions, keeps non-gating
+  service faults visible, and separates "Configuration committed" from live
+  readiness. Smoke scripts change policy through revision-checked management
+  saves and explicit commits instead of direct engine applies.
+
+- Keep consistent default-interface bindings across restarts: boot repair
+  changes only missing devices or devices whose current addresses contradict
+  the saved addresses or subnet authority.
+- Report a disabled AV scanner as `off`, not permanently pending. The UI no
+  longer warns or polls fast for off or quietly converging optional services,
+  and the config review actions sit in a reserved footer that cannot cover
+  content; long commit revisions wrap.
+
 - Keep large IDS import results compact with evaluability and conversion-note
   counts, at most 20 attention rows, and a dismiss action.
 - Require protocol restrictions on every matching enforcing ALLOW and a refusing

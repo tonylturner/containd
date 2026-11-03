@@ -1,10 +1,12 @@
+import { observation, runtimeResult, subsystem } from "./fixtures/protection-api";
+import { mkdir } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures/topology-test";
 import type { ConfigDiff } from "../lib/api-config";
 import { mockLearner, openDataset, suggestion } from "./fixtures/learner";
 import { securityChecks } from "./fixtures/security";
 
-async function setup(page: Page) {
+async function setup(page: Page, runningRevision = "running-a") {
   const state = { dirty: false, offline: false, reject: false, reads: 0, writes: [] as { path: string; body: any }[], zones: [{ name: "lan" }], ids: { enabled: false, rules: [{ id: "keep-me", name: "Keep me", type: "suricata", enabled: true }] } };
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request();
@@ -26,7 +28,7 @@ async function setup(page: Page) {
       }
       else if (path === "/pcap/config") state.dirty = true;
       if (["/zones", "/ids/rules", "/pcap/config"].includes(path)) headers["X-Containd-Config"] = "staged";
-      return route.fulfill({ json: path === "/ids/rules" ? state.ids : body ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(headers) } });
+      return route.fulfill({ json: path.startsWith("/config/commit") ? { ...runtimeResult(), runningRevision } : path === "/ids/rules" ? state.ids : body ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(headers) } });
     }
     if (path === "/config/diff") {
       state.reads++;
@@ -55,7 +57,18 @@ async function setup(page: Page) {
 const pending = "Saved changes are not active yet.";
 
 test("successful zone mutation immediately refreshes global status; commit refreshes editors", async ({ page }) => {
-  const state = await setup(page);
+  const runningRevision = "0123456789abcdef".repeat(4);
+  const state = await setup(page, runningRevision);
+  const protection = observation({ subsystems: [subsystem({
+    name: "scanner", owner: "engine", operation: "stop", required: false, state: "off",
+    fault: null, reason: "scanner disabled", retryable: false, nextRetryAt: null,
+  })] });
+  await page.route("**/api/v1/dataplane/protection", route => route.fulfill({ json: protection }));
+  await page.route("**/api/v1/health", route => route.fulfill({ json: {
+    status: "ok", component: "mgmt", evidence: { state: "ok" },
+    enforcement: { state: "enforcing", reason: "" }, protection: { state: "protecting", applyId: "apply-a" },
+    managementRecovery: { state: "inactive", reason: "" },
+  } }));
   await page.goto("/zones/");
   await expect.poll(() => state.reads).toBeGreaterThan(0);
   await expect(page.getByText(pending, { exact: true })).toHaveCount(0);
@@ -67,6 +80,25 @@ test("successful zone mutation immediately refreshes global status; commit refre
   await page.getByRole("button", { name: "Commit", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect(page.getByText(pending, { exact: true })).toHaveCount(0);
+  const committed = page.getByText(`Configuration committed — ${runningRevision}. Warning: test apply warning`, { exact: true });
+  await expect(committed).toBeVisible();
+  const dir = process.env.CONFIG_FIX_SCREENSHOTS_DIR;
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(committed).toBeVisible();
+      const statusBox = await committed.boundingBox();
+      const actionBar = page.getByRole("button", { name: "Commit", exact: true }).locator("xpath=../..");
+      const actionBox = await actionBar.boundingBox();
+      expect(statusBox).not.toBeNull();
+      expect(actionBox).not.toBeNull();
+      expect(statusBox!.y + statusBox!.height).toBeLessThanOrEqual(actionBox!.y);
+      expect(await committed.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await page.screenshot({ path: `${dir}/config-commit-settled-${viewport.width}.png`, animations: "disabled" });
+    }
+  }
   expect(state.writes.map((w) => w.path)).toEqual(["/zones", "/config/commit"]);
 });
 
@@ -99,7 +131,7 @@ test("editors consume both events and status bar leads to reviewed commit-confir
   await page.getByRole("link", { name: "Review diff", exact: true }).click();
   await page.getByRole("button", { name: "Commit-confirmed", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Start timer", exact: true }).click();
-  await expect(page.getByText("Commit-confirmed started (60s). Warning: test apply warning", { exact: true })).toBeVisible();
+  await expect(page.getByText("Configuration committed — running-a. Auto-rollback in 60s unless confirmed. Warning: test apply warning", { exact: true })).toBeVisible();
   expect(state.writes.at(-1)).toEqual({ path: "/config/commit_confirmed", body: { ttl_seconds: 60 } });
 });
 

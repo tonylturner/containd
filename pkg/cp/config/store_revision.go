@@ -4,7 +4,6 @@ package config
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -42,6 +41,8 @@ type ConfigSnapshot struct {
 	Revision           Revision
 	IDSRules           []IDSRule
 	PendingConfirm     *PendingConfirm
+	RunningRevision    RunningRevision
+	Transition         *TransitionGuard
 }
 
 // PendingConfirm is server-owned commit-confirmed state.
@@ -53,6 +54,15 @@ func readRevision(ctx context.Context, db configReader) (Revision, error) {
 	var epoch string
 	var counter int64
 	err := db.QueryRowContext(ctx, `SELECT epoch, counter FROM config_revision WHERE id = 1`).Scan(&epoch, &counter)
+	return Revision(fmt.Sprintf("%s.%d", epoch, counter)), err
+}
+
+// nextRevisionTx labels metadata written by the transaction before its CAS
+// increment. The caller holds the SQLite write lock until commitRevisionTx.
+func nextRevisionTx(ctx context.Context, tx *sql.Tx) (Revision, error) {
+	var epoch string
+	var counter int64
+	err := tx.QueryRowContext(ctx, `SELECT epoch, counter + 1 FROM config_revision WHERE id = 1`).Scan(&epoch, &counter)
 	return Revision(fmt.Sprintf("%s.%d", epoch, counter)), err
 }
 
@@ -116,13 +126,20 @@ func (s *SQLiteStore) ReadSnapshot(ctx context.Context, kind SnapshotKind, withB
 			return result, err
 		}
 	}
-	if kind == SnapshotPair {
-		pending, pendingErr := loadPendingFrom(ctx, tx)
-		if pendingErr != nil && !errors.Is(pendingErr, ErrNotFound) {
-			return result, pendingErr
+	if kind == SnapshotRunning || kind == SnapshotPair {
+		if result.Running != nil {
+			result.RunningRevision, err = readRunningIdentity(ctx, tx, configKeyRunning)
+			if err != nil {
+				return result, err
+			}
 		}
-		if pending != nil {
-			result.PendingConfirm = &PendingConfirm{Deadline: time.Unix(0, pending.DeadlineUnix).UTC()}
+		result.PendingConfirm, err = readPendingConfirm(ctx, tx)
+		if err != nil {
+			return result, err
+		}
+		result.Transition, err = readTransitionGuard(ctx, tx)
+		if err != nil {
+			return result, err
 		}
 	}
 	if kind == SnapshotIDS {
@@ -136,7 +153,7 @@ func (s *SQLiteStore) ReadSnapshot(ctx context.Context, kind SnapshotKind, withB
 
 // loadRunningRevisionLocked prevents runtime apply from accidentally loading a
 // different handle's subsequently committed running document.
-func (s *SQLiteStore) loadRunningRevisionLocked(ctx context.Context) (*Config, Revision, error) {
+func (s *SQLiteStore) loadRunningRevisionLocked(ctx context.Context) (*RunningSnapshot, Revision, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, "", err
@@ -146,7 +163,7 @@ func (s *SQLiteStore) loadRunningRevisionLocked(ctx context.Context) (*Config, R
 	if err != nil {
 		return nil, "", err
 	}
-	cfg, err := loadRunningFrom(ctx, tx)
+	cfg, err := readLabelledRunning(ctx, tx)
 	if err != nil {
 		return nil, "", err
 	}

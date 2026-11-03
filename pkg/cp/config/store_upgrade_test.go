@@ -44,6 +44,7 @@ func TestLegacySnapshotsKeepDeployedBank(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			markLegacyIdentity(t, s)
 			var path string
 			if err := s.db.QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&path); err != nil {
 				t.Fatal(err)
@@ -144,6 +145,7 @@ func TestUnversionedEmbeddedBankIsPreserved(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO configs VALUES (?, ?, 123)`, configKeyPrevious, string(raw)); err != nil {
 		t.Fatal(err)
 	}
+	markLegacyIdentity(t, s)
 	s = reopenSnapshotStore(t, s)
 	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)

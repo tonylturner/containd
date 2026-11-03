@@ -17,11 +17,12 @@ import (
 
 func TestTelemetryDenySurvivesRebuildAndWrap(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, testProtectionCoordinator(t, dp))
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine}, c)
 	deny := dp.Events().Append(dpevents.Event{Kind: "firewall.rule.hit", Timestamp: time.Unix(1, 123), SrcIP: "192.0.2.1", DstIP: "192.0.2.2", DstPort: 2404, Attributes: map[string]any{"action": "DENY"}})
-	postConfig(t, h, `{"dpiEnabled":false}`)
+	postConfig(t, c, h, `{"dpiEnabled":false}`)
 	dp.waitStart(t)
-	postConfig(t, h, `{"dpiEnabled":true}`)
+	postConfig(t, c, h, `{"dpiEnabled":true}`)
 	dp.waitStart(t)
 	for i := 0; i < 5000; i++ {
 		dp.Events().Append(dpevents.Event{Timestamp: time.Now(), FlowID: "new"})

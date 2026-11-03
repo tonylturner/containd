@@ -89,13 +89,13 @@ func TestProtectionConfigureAdoptsRunAcrossApplyIDsThenObservesLoss(t *testing.T
 				if mode == "parsing-only" && id == "B" {
 					body = `{"enforcement":true,"nfqueueGroup":101,"dpiEnabled":true,"dpiMode":"monitor","dpiIcsParsing":{"modbus":"strict"}}`
 				}
-				if w := coordinatedPost(conf, id, body); w.Code != 200 {
+				if w := coordinatedPost(c, conf, id, body); w.Code != 200 {
 					t.Fatalf("Configure(%s): %d %s", id, w.Code, w.Body)
 				}
 				if err := dp.waitStart(t); err != nil {
 					t.Fatal(err)
 				}
-				if w := coordinatedPost(apply, id, string(snap)); w.Code != 200 {
+				if w := coordinatedPost(c, apply, id, string(snap)); w.Code != 200 {
 					t.Fatalf("ApplyRules(%s): %d %s", id, w.Code, w.Body)
 				}
 				if st := dp.Protection(); st.State != "protecting" || st.ApplyID != id || st.InstalledApplyID != id {

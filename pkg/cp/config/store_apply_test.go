@@ -40,7 +40,7 @@ func TestApplyChangePreservesPreviousPendingAndCanceledCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Second, func(ctx context.Context, previous, next *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Second, func(ctx context.Context, previous, next *RunningSnapshot) error {
 		calls++
 		if calls == 1 {
 			cancel()
@@ -82,7 +82,10 @@ func TestApplyChangeReportsRestoreFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = testApplyChange(store, ctx, ChangeCommit, 0, func(context.Context, *Config, *Config) error { calls++; return errors.New("apply failed") })
+	err = testApplyChange(store, ctx, ChangeCommit, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
+		calls++
+		return errors.New("apply failed")
+	})
 	var failure *ApplyError
 	if !errors.As(err, &failure) || failure.RestoreError == nil || failure.ReapplyError == nil || calls != 1 {
 		t.Fatalf("missing recovery failure: %v calls=%d", err, calls)
@@ -111,7 +114,7 @@ func TestFailedConfirmedApplyCannotExpireAfterRestoration(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Millisecond, func(context.Context, *Config, *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Millisecond, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 		calls++
 		if calls == 1 {
 			time.Sleep(10 * time.Millisecond)
@@ -161,7 +164,7 @@ func TestApplyChangeFromRecoveryDoesNotReapplyRefusedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var applied []string
-	err = testApplyChange(store, ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommit, 0, func(_ context.Context, _, next *RunningSnapshot) error {
 		applied = append(applied, next.System.Hostname)
 		return errors.New("apply failed")
 	})

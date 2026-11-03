@@ -207,6 +207,7 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) error {
 	// Use background context so envoy outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(context.Background(), m.EnvoyPath, "-c", configPath, "--log-level", "info")
+	cmd.Env = append(os.Environ(), trafficOwnerTag(m.BaseDir, "forward-proxy"))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -280,6 +281,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) error {
 	// Use background context so nginx outlives the API request that triggered it.
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(context.Background(), m.NginxPath, "-c", configPath, "-g", "daemon off;")
+	cmd.Env = append(os.Environ(), trafficOwnerTag(m.BaseDir, "reverse-proxy"))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

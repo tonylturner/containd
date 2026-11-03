@@ -303,15 +303,83 @@ components:
         reason: {type: string, description: "Fixed sanitized summary when unhealthy, else empty"}
       example: {active: true, healthy: true, reason: ""}
 
+    ProtectionToken:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: Opaque equality-only identity; never sortable or interchangeable with whole-state CAS.
+
+    ProtectionAcknowledgement:
+      type: object
+      nullable: true
+      required: [bootId, applyId, runningRevision, mode, operation]
+      description: Owner completion or positive readback; null means unverified. Stop proves absence, not just a disabled setting.
+      properties:
+        bootId: {$ref: '#/components/schemas/ProtectionToken'}
+        applyId: {$ref: '#/components/schemas/ProtectionToken'}
+        runningRevision: {type: string, description: 'Running generation, or recovery:<bootId> in recovery mode'}
+        mode: {type: string, enum: [normal, recovery]}
+        operation: {type: string, enum: [apply, stop]}
+        trustRevision: {type: string, description: 'Trust-owner proof of sha256:<hex>, or none for verified clear; omitted for other owners'}
+
+    ProtectionFault:
+      type: object
+      nullable: true
+      required: [kind, reason]
+      description: Sanitized owner fault; null when no fault is reported, not itself proof of readiness.
+      properties:
+        kind: {type: string, enum: [config, render, delivery, unknown]}
+        reason: {type: string, description: Sanitized owner diagnostic; never a raw service response}
+
+    ProtectionSubsystem:
+      type: object
+      required: [name, owner, desiredRevision, operation, state, acknowledged, fault, reason, attempt, nextRetryAt, observedAt, retryable, required]
+      description: >
+        Original desired obligation, even when effective policy quarantines it.
+        Config/render faults require input repair; delivery faults can retry.
+        Required is server-derived, never caller-selected. Missing proof is unknown.
+      properties:
+        name: {type: string, description: 'config, nft, interfaces, routing, forwarding, nfqueue:<group>, iec-envelope, scan-gate, scanner, trust, openvpn, wireguard, forward-proxy, reverse-proxy, av, dns, ntp, syslog or dhcp'}
+        owner: {type: string, enum: [engine, management]}
+        desiredRevision: {type: string, description: Desired running generation; empty when unknown}
+        operation: {type: string, enum: [apply, stop, ''], description: Empty when no operation is known}
+        state: {type: string, enum: [pending, ready, failed, off, unknown]}
+        acknowledged: {$ref: '#/components/schemas/ProtectionAcknowledgement'}
+        fault: {$ref: '#/components/schemas/ProtectionFault'}
+        reason: {type: string}
+        attempt: {type: integer, minimum: 0}
+        nextRetryAt: {type: string, format: date-time, nullable: true}
+        observedAt: {type: string, format: date-time}
+        retryable: {type: boolean}
+        required: {type: boolean, readOnly: true}
+        desiredTrustRevision: {type: string, description: 'Trust subsystem only; sha256:<hex> or none, omitted when unknown'}
+
     ProtectionStatus:
       type: object
-      required: [bootId, applyId, installedApplyId, state, retryable, observedAt, components, effects]
+      required: [bootId, applyId, installedApplyId, runningRevision, mode, installed, desiredRevision, appliedRevision, protectingRevision, ready, subsystems, state, retryable, observedAt, components, effects]
+      description: >
+        Revision-bound authenticated aggregate with raw engine IDs/components/effects.
+        Ready requires current owner proof, installed desired policy and clean logging/scheduling.
+        DNS, NTP, syslog and DHCP faults remain visible and retryable but never gate ready.
+        Missing telemetry never substitutes planned IDs or infers packet effects.
       properties:
         bootId: {type: string, description: Engine process identity; empty when unknown}
         applyId: {type: string, maxLength: 64, description: Opaque runtime application identity; empty before first apply}
         installedApplyId: {type: string, description: Application whose nft policy is installed; empty if none}
         state: {type: string, enum: [pending, protecting, degraded, failed, disabled, unknown]}
-        retryable: {type: boolean}
+        runningRevision: {type: string, description: Engine-observed target; empty when unknown, distinct from desiredRevision}
+        mode: {type: string, enum: [normal, recovery, ''], description: Engine-observed apply mode; empty when unknown}
+        installed: {$ref: '#/components/schemas/ProtectionAcknowledgement'}
+        desiredRevision: {type: string, nullable: true, description: Committed desired running generation; null without a desired document}
+        appliedRevision: {type: string, nullable: true, description: Owner-proven installed policy generation; may be older than desired, null if unverified}
+        protectingRevision: {type: string, nullable: true, description: Desired generation verified protecting now; null unless ready}
+        ready: {type: boolean, description: False for required pending/faulted/unknown owners, recovery, disabled enforcement, uncertainty or degraded logging/scheduling}
+        subsystems:
+          type: array
+          description: Always an array; requested disabled traffic services require verified teardown.
+          items: {$ref: '#/components/schemas/ProtectionSubsystem'}
+        retryable: {type: boolean, description: Raw engine observation only; inspect subsystem retryable and faults for service work}
         observedAt: {type: string, format: date-time}
         components:
           type: array
@@ -337,11 +405,12 @@ components:
 
     RuntimeApplyResponse:
       type: object
-      required: [status, applyId, protection]
+      required: [status, runningRevision, applyId, protection]
       description: Synchronous apply succeeded, not a certificate of asynchronous readiness. Missing or mismatched telemetry is unknown and never undoes the transaction.
       properties:
         status: {type: string}
-        applyId: {type: string, maxLength: 64}
+        runningRevision: {$ref: '#/components/schemas/ProtectionToken'}
+        applyId: {type: string, maxLength: 64, description: Attempt identity even when engine telemetry is missing}
         protection: {$ref: '#/components/schemas/ProtectionStatus'}
 
     EnforcementHealth:
@@ -3887,9 +3956,10 @@ components:
             format: date-time
     FactoryResetResponse:
       type: object
-      required: [status, applyId, protection]
+      required: [status, runningRevision, applyId, protection]
       properties:
-        applyId: {type: string, maxLength: 64}
+        runningRevision: {$ref: '#/components/schemas/ProtectionToken'}
+        applyId: {type: string, maxLength: 64, description: Attempt identity even when engine telemetry is missing}
         protection: {$ref: '#/components/schemas/ProtectionStatus'}
         status:
           type: string
@@ -3900,7 +3970,7 @@ components:
           type: string
         warnings:
           type: array
-          description: Auxiliary apply or audit cleanup failures; nonempty means runtime convergence is incomplete.
+          description: Delivery or cleanup diagnostics, not readiness proof; inspect the protection aggregate for runtime convergence.
           items: {type: string}
   parameters:
     IfRevision:
@@ -4444,8 +4514,8 @@ paths:
         failed reapply leaves synchronization uncertain and is exposed in health.
         With dataplane.enforcement enabled, 200 means nft rules were installed;
         intentionally disabled enforcement only applies the in-memory snapshot.
-        Auxiliary infrastructure errors may still produce warning headers;
-        management service-apply failures are fatal and trigger recovery too.
+        Owner delivery faults may still produce warning headers and remain outstanding;
+        a warning is not owner proof and does not by itself trigger compensation.
         Recovery success certifies the firewall snapshot, not every network or
         service side effect. A non-2xx does not guarantee the live firewall is
         unchanged; after a disconnect, read running, candidate and health before
@@ -4482,7 +4552,8 @@ paths:
         Validates the whole config and replaces the candidate with it. It never
         changes running or activates anything: the data plane keeps its current
         policy until POST /config/commit. After importing, commit and then check
-        GET /health enforcement and iec104Enforcement. Never use import as a
+        GET /dataplane/protection for revision-bound readiness. GET /health is
+        sanitized liveness/enforcement telemetry, not a readiness certificate. Never use import as a
         fallback activation step after a failed commit. Validation is the same
         as for a candidate, including the immutable reserved management path.
         Reservation conflicts are 400 errors naming the field; running and
@@ -7681,25 +7752,33 @@ paths:
           description: No engine with ruleset preview support is configured; no ruleset returned
   /dataplane/protection:
     get:
-      summary: Observe engine protection (any authenticated user)
+      summary: Observe revision-bound protection (any authenticated user)
       tags: [DataPlane]
       responses:
         '200':
-          description: Current engine-owned observation; unknown if telemetry is missing or stale
+          description: Collected observation, including unknown or not-ready results
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProtectionStatus'}
         '401': {description: Authentication required}
-        '502': {description: 'Engine protection status unavailable: upstream failure'}
-        '503': {description: Engine unavailable}
+        '502':
+          description: Collection failed, including an unavailable engine; aggregate is unknown and not ready
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProtectionStatus'}
+        '503': {description: Runtime coordinator unavailable}
   /dataplane/protection/retry:
     post:
-      summary: Retry failed protection consumers (admin)
+      summary: Retry outstanding protection consumers and service owners (admin)
       description: >
-        Audited as dataplane.protection.retry. Send the bootId and applyId from
-        the observation reviewed by the operator. The engine atomically rejects
-        superseded or non-retryable observations. This is not a new configuration
-        apply and keeps its applyId; no configuration revision is required.
+        Audited as dataplane.protection.retry. Send exactly bootId, applyId and
+        desiredRevision from the authenticated observation reviewed by the operator.
+        Stale or uncertain targets fail with protection_superseded; refresh instead
+        of retrying a different target. Acceptance coalesces outstanding work and
+        does not wait for an engine round trip or certify completion. Service-owner
+        retries preserve healthy AV, WireGuard and DHCP owners. The raw engine
+        retryable bit does not decide whether service work exists. No CAS header
+        is required or acknowledged; this operation does not save configuration.
       tags: [DataPlane]
       requestBody:
         required: true
@@ -7707,31 +7786,34 @@ paths:
           application/json:
             schema:
               type: object
-              required: [bootId, applyId]
+              additionalProperties: false
+              required: [bootId, applyId, desiredRevision]
               properties:
-                bootId: {type: string, minLength: 1}
-                applyId: {type: string, minLength: 1, maxLength: 64}
+                bootId: {$ref: '#/components/schemas/ProtectionToken'}
+                applyId: {$ref: '#/components/schemas/ProtectionToken'}
+                desiredRevision: {$ref: '#/components/schemas/ProtectionToken'}
       responses:
         '202':
-          description: Retry accepted, not a readiness certificate
+          description: Retry queued, not a readiness certificate
           content:
             application/json:
               schema:
                 type: object
-                required: [status, applyId]
+                required: [status, applyId, desiredRevision]
                 properties:
                   status: {type: string, enum: [retrying]}
-                  applyId: {type: string}
-        '400': {description: Invalid body or identity}
+                  applyId: {$ref: '#/components/schemas/ProtectionToken'}
+                  desiredRevision: {$ref: '#/components/schemas/ProtectionToken'}
+        '400': {description: Missing or invalid tokens, unknown properties, extra JSON or invalid body}
         '401': {description: Authentication required}
         '403': {description: Admin role required}
         '409':
-          description: protection_superseded or protection_not_retryable
+          description: Stale or uncertain target; code protection_superseded
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
-        '502': {description: Engine protection retry unavailable}
-        '503': {description: Engine unavailable}
+        '502': {description: Coordinator retry failed}
+        '503': {description: Runtime coordinator unavailable}
 
   /dataplane/ruleset/status:
     get:
@@ -7827,9 +7909,9 @@ paths:
         bundle under /data. The running trustedCAFile setting selects its path;
         the default is /data/tls/trusted_ca.pem. The stored content and its
         revision are then sent to the engine, whose ICAP-over-TLS and FreshClam
-        clients trust the system roots plus this bundle. Every config apply
-        sends the bundle again, so a bundle the engine could not apply is
-        retried by the next commit.
+        clients trust the system roots plus this bundle. Outstanding trust delivery
+        is retried automatically; owner proof must match this bundle revision and
+        the current runtime target. Transport success alone is not proof.
       tags: [System]
       requestBody:
         required: true
@@ -7839,9 +7921,10 @@ paths:
       responses:
         '200':
           description: >-
-            Bundle stored or cleared. Status updated means the engine applied
-            it; status stored means the engine is unavailable or did not apply
-            it, and warnings say why.
+            Bundle durably stored or cleared. Status updated requires matching
+            trust-owner acknowledgement. Status stored means acknowledgement is
+            pending, with warnings ["trust: owner acknowledgement pending"] and
+            the same X-Containd-Warnings diagnostic.
           headers:
             X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
           content:
@@ -7855,7 +7938,7 @@ paths:
                   warnings:
                     type: array
                     items: {type: string}
-                    description: Why the engine did not apply the stored bundle; empty when status is updated
+                    description: Owner acknowledgement pending diagnostic; empty when status is updated
         '400':
           description: Invalid JSON, empty or invalid CA bundle, conflicting clear and PEM, or path outside /data
           content:

@@ -82,7 +82,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 
 func TestRemovedProtocolSignature(t *testing.T) {
 	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
-	server := NewServerWithEngine(&mockStore{}, nil, eng)
+	server := newTestServerWithEngine(&mockStore{}, nil, eng)
 	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		sig := signatures.Signature{ID: "bad", Protocol: name, Conditions: []signatures.Condition{{Field: "kind", Op: "equals", Value: "request"}}}
 		rec := requestStage(t, server, "POST", "/signatures", sig)

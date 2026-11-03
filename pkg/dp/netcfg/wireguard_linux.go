@@ -137,23 +137,11 @@ func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
 		return err
 	}
 
-	// Replace IPv4 addresses on the WireGuard interface (we "own" this interface).
-	if addrs, err := listAddrs(nic.Index, unix.AF_INET); err == nil {
-		for _, a := range addrs {
-			_ = delAddr(nic.Index, a)
-		}
-	}
-	if strings.TrimSpace(cfg.AddressCIDR) != "" {
-		ipnet, err := parseAddressCIDR(cfg.AddressCIDR)
-		if err != nil || ipnet == nil {
-			return fmt.Errorf("wireguard: invalid addressCIDR %q", cfg.AddressCIDR)
-		}
-		if err := addAddr(nic.Index, ipnet); err != nil {
-			return fmt.Errorf("wireguard: add addr %s %s: %w", ifName, ipnet.String(), err)
-		}
+	if err := replaceWireGuardAddresses(nic.Index, cfg.AddressCIDR, listAddrs, delAddr, addAddr); err != nil {
+		return fmt.Errorf("wireguard: addresses on %s: %w", ifName, err)
 	}
 
-	// Add routes for peer AllowedIPs (best-effort; duplicates ignored).
+	// Add routes for peer AllowedIPs; existing routes are accepted.
 	for _, p := range cfg.Peers {
 		for _, cidr := range p.AllowedIPs {
 			cidr = strings.TrimSpace(cidr)

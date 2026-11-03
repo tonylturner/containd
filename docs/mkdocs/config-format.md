@@ -80,9 +80,9 @@ pacing, licensing and preference semantics.
 
 ## Concurrent edits
 
-Configuration revisions are transport metadata, not JSON fields or schema
-versions. Every configuration read returns `X-Containd-Revision` from the same
-snapshot as its document. Keep that opaque string with your draft and send it
+Whole-state CAS revisions are transport metadata, not configuration JSON
+fields or schema versions. Every configuration read returns `X-Containd-Revision`
+from the same snapshot as its document. Keep that opaque string with your draft and send it
 as `X-Containd-If-Revision` when saving or importing. Successful writes return
 their resulting revision; staged sequences must chain those acknowledgements.
 
@@ -96,6 +96,34 @@ restores running but retains a newer candidate, and returns a fresh revision.
 Reset and apply compensation also never reuse old tokens. A no-op boot repair
 does not invalidate drafts. See the
 [API client contract](api-reference.md#orchestrator-client-contract).
+
+## Running generations and runtime readiness
+
+`runningRevision` is a separately persisted, opaque identity for committed
+running configuration and its resolved IDS bank. It is independent of the
+whole-state `X-Containd-Revision` CAS token and runtime `applyId`; none can be
+substituted for another or sorted to establish time. Candidate edits and
+confirmation can change CAS without changing the running generation. A rollback,
+reset or compensating restoration assigns a fresh generation even if the content
+matches an earlier snapshot. Reopening unchanged storage preserves its identity;
+legacy storage receives identities after content migrations, not from CAS.
+
+Commit/commit-confirmed, rollback and reset success bodies return
+`runningRevision`, `applyId` and `protection`. Confirm does not replay runtime.
+Committed storage remains readable during delivery; reading it is not a runtime
+readiness certificate. A durable transition guard preserves uncertainty across
+restart rather than blindly certifying or replaying an incomplete restoration.
+Failed commits still attempt immediate synchronous restoration and reapply;
+inspect both recovery outcomes and correct unresolved uncertainty.
+
+The authenticated [protection observation](api-reference.md#protection-observations)
+separates **Desired configuration**, **Policy installed** and **Protecting now**.
+Null installed/protecting revisions mean **Not verified**. Candidate saves do not
+retarget protection, and HTTP success alone never means `ready`. Owner retries
+continue on the same engine boot without repeatedly applying healthy services;
+non-gating service failures stay visible even when traffic protection is ready.
+Referenced file bytes have their own material lifecycle, not a new running
+revision on each edit; explicit `SIGHUP` reload consumes changed material.
 
 ## Stored service faults
 
@@ -524,11 +552,14 @@ and must be staged and committed.
 After storing the bundle, management sends its content and revision
 (`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads
 management's file. Every successful upload returns `200` with the stored
-`revision`. Status `updated` means the engine applied it. Status `stored` means
-the engine is unavailable or rejected it: the bundle stays stored, `warnings`
-and the `X-Containd-Warnings` header say why, and every commit, rollback, boot
-replay and `SIGHUP` reload sends it again. `503` means the config store is
-unavailable and nothing was stored.
+`revision`. Status `updated` requires a matching trust-owner acknowledgement,
+not merely transport success. Status `stored` means the bytes are durable but
+owner confirmation is pending; `warnings` and `X-Containd-Warnings` contain
+`trust: owner acknowledgement pending`. Outstanding trust delivery is retried
+automatically, and configuration apply/reload also reconciles it. The trust
+subsystem publishes desired and acknowledged bundle revisions separately from
+the running generation. `503` means the config store is unavailable and nothing
+was stored.
 
 The engine's antivirus clients trust the system roots plus this bundle:
 

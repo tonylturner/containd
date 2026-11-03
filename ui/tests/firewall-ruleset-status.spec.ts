@@ -70,15 +70,20 @@ const degradedStatus = {
 };
 
 for (const path of ["/firewall/", "/ics/"]) {
-  test(`${path} shows degraded enforcement in amber with protection's reason`, async ({ page }) => {
+  test(`${path} keeps protection detail in the banner and enforcement facts in the card`, async ({ page }) => {
     await mockAPI(page, {
       enforcement: { state: "degraded", reason: "health summary without component detail" },
       protection: observation({ state: "degraded", retryable: true }),
     });
     await open(page, path);
     const indicator = page.getByRole("status", { name: "Firewall enforcement degraded: degraded" });
-    await expect(indicator).toContainText("Rule-hit logging unavailable");
-    await expect(indicator).not.toContainText("health summary without component detail");
+    const banner = page.getByRole("status", { name: "Traffic protection" });
+    await expect(banner).toContainText("Rule-hit logging unavailable");
+    await expect(banner).toContainText("Firewall rules are active");
+    await expect(page.getByText("Rule-hit logging unavailable", { exact: true })).toHaveCount(1);
+    await expect(indicator.locator("..")).not.toContainText("Rule-hit logging unavailable");
+    await expect(indicator.locator("..")).not.toContainText("Check appliance health");
+    await expect(indicator.locator("..").getByText("health summary without component detail", { exact: true })).toBeVisible();
     await expect(indicator.locator("span[aria-hidden]")).toHaveClass(/bg-\(--amber\)/);
   });
 }
@@ -89,9 +94,14 @@ for (const [state, label, status] of [
   ["unavailable", "Firewall enforcement unavailable", "error"],
 ] as const) {
   test(`enforcement ${state} is labelled`, async ({ page }) => {
-    await mockAPI(page, { enforcement: { state, reason: "" } });
+    await mockAPI(page, { enforcement: { state, reason: "" }, protection: observation({ state: state === "enforcing" ? "protecting" : "disabled" }) });
     await open(page, "/firewall/");
     await expect(page.getByRole("status", { name: `${label}: ${status}` })).toBeVisible();
+    if (state === "disabled") {
+      await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
+      await expect(page.getByText("Protection disabled", { exact: true })).toBeVisible();
+      await expect(page.getByText("Enable enforcement to protect traffic.", { exact: true })).toBeVisible();
+    }
   });
 }
 
@@ -152,7 +162,7 @@ test("a healthy installed ruleset reads quietly", async ({ page }) => {
 });
 
 test("the ICS page shows nothing extra while the installed ruleset is healthy", async ({ page }) => {
-  await mockAPI(page, { enforcement: { state: "enforcing", reason: "" } });
+  await mockAPI(page, { enforcement: { state: "enforcing", reason: "" }, protection: observation() });
   await open(page, "/ics/");
   const details = page.getByRole("button", { name: "Inspection details", exact: true });
   await expect(details).toHaveAttribute("aria-expanded", "false");

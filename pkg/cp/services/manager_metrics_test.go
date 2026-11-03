@@ -2,7 +2,6 @@
 package services
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -66,7 +65,7 @@ func TestServiceGaugesOmitUnobservedEngineState(t *testing.T) {
 			DHCP: config.DHCPConfig{Enabled: enabled},
 			VPN:  config.VPNConfig{WireGuard: config.WireGuardConfig{Enabled: enabled}},
 		}
-		if _, warnings := m.ApplyEffective(context.Background(), cfg, nil); len(warnings) != 0 {
+		if _, warnings := applyManagerTest(t, m, cfg, nil); len(warnings) != 0 {
 			t.Fatal(warnings)
 		}
 		assertServiceGaugeUnknown(t, "dhcp", "wireguard", "vpn")
@@ -110,7 +109,7 @@ func TestServiceFaultsDoNotInventRuntimeObservations(t *testing.T) {
 	}
 	m.SeedFaults(initial)
 	assertServiceGaugeUnknown(t, "dhcp", "wireguard", "av", "vpn")
-	m.ApplyEffective(context.Background(), config.ServicesConfig{}, initial)
+	applyManagerTest(t, m, config.ServicesConfig{}, initial)
 	assertServiceGaugeUnknown(t, "dhcp", "wireguard", "av", "vpn")
 	// An engine-owned observation must not be overwritten by management faults.
 	metrics.ServicesRunning.WithLabelValues("av").Set(1)

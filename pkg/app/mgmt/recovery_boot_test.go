@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,8 @@ func recordingEngine(t *testing.T) (*httptest.Server, <-chan recordedEngineCall)
 			err = json.NewDecoder(r.Body).Decode(&call.dp)
 		case "/internal/apply_rules":
 			err = json.NewDecoder(r.Body).Decode(&call.snapshot)
+		default:
+			_, err = io.Copy(io.Discard, r.Body)
 		}
 		if err != nil {
 			t.Error(err)
@@ -186,7 +189,7 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 	}
 
 	srv, calls := recordingEngine(t)
-	stop := startEngineSync(ctx, zap.NewNop().Sugar(), stores.store, engineapi.NewHTTPClient(srv.URL), nil)
+	stop := startTestConvergence(t, ctx, stores.store, engineapi.NewHTTPClient(srv.URL))
 	defer stop()
 	recovery, before := nextRuleset(t, calls)
 	var paths []string
@@ -197,7 +200,7 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 			dp = &call.dp
 		}
 	}
-	if !reflect.DeepEqual(paths, []string{"/health", "/internal/config"}) {
+	if !reflect.DeepEqual(paths, []string{"/health", "/internal/ruleset_status", "/internal/config"}) {
 		t.Fatalf("recovery pushed stored runtime state: %v", paths)
 	}
 	if dp == nil || !dp.Enforcement || len(dp.CaptureInterfaces) != 0 || dp.DPIEnabled || dp.NFQueueGroup != 0 {
@@ -385,7 +388,7 @@ func TestUnsupportedICSAddressesBootIntoRecovery(t *testing.T) {
 			}
 
 			srv, calls := recordingEngine(t)
-			stop := startEngineSync(ctx, zap.NewNop().Sugar(), stores.store, engineapi.NewHTTPClient(srv.URL), nil)
+			stop := startTestConvergence(t, ctx, stores.store, engineapi.NewHTTPClient(srv.URL))
 			defer stop()
 			recovery, before := nextRuleset(t, calls)
 			var paths []string
@@ -396,7 +399,7 @@ func TestUnsupportedICSAddressesBootIntoRecovery(t *testing.T) {
 					dp = &call.dp
 				}
 			}
-			if !reflect.DeepEqual(paths, []string{"/health", "/internal/config"}) {
+			if !reflect.DeepEqual(paths, []string{"/health", "/internal/ruleset_status", "/internal/config"}) {
 				t.Fatalf("recovery replayed stored runtime state: %v", paths)
 			}
 			if dp == nil || !dp.Enforcement || len(dp.CaptureInterfaces) != 0 || dp.DPIEnabled || dp.NFQueueGroup != 0 {

@@ -70,8 +70,8 @@ func TestDHCPListenFaultReplayAndStatus(t *testing.T) {
 		name  string
 		apply func(context.Context, config.Store, EngineClient, ServicesApplier) ([]string, error)
 	}{
-		{"boot", ApplyBootConfig},
-		{"reconnect", ApplyRunningConfig},
+		{"boot", replayTestConfig},
+		{"reconnect", replayTestConfig},
 	} {
 		t.Run(replay.name, func(t *testing.T) {
 			engine := &mockEngine{}
@@ -79,7 +79,7 @@ func TestDHCPListenFaultReplayAndStatus(t *testing.T) {
 			if err != nil || !engine.applied || engine.snap.Default != rules.ActionAllow || !engine.lastDP.Enforcement {
 				t.Fatalf("DHCP fault blocked stored firewall replay: %v %v", err, warnings)
 			}
-			if !slices.Contains(warnings, "dhcp: quarantined") || engine.lastSvc.DHCP.Enabled || manager.DHCP.Current().Enabled {
+			if !slices.Contains(warnings, "dhcp: service configuration rejected") || engine.lastSvc.DHCP.Enabled || manager.DHCP.Current().Enabled {
 				t.Fatalf("DHCP was not quarantined: %+v %v", engine.lastSvc.DHCP, warnings)
 			}
 			if !engine.lastSvc.NTP.Enabled || !manager.NTP.Current().Enabled {
@@ -133,7 +133,7 @@ func TestDHCPListenNameWriteValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			engine := &mockEngine{}
-			server := NewServerWithEngine(store, nil, engine)
+			server := newTestServerWithEngine(store, nil, engine)
 			path := "/services/dhcp"
 			var body any = config.DHCPConfig{Enabled: true, ListenIfaces: []string{tc.nextName}}
 			if tc.unrelated {

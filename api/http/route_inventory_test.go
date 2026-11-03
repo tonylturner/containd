@@ -13,16 +13,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
 type routeInventoryServices struct{}
 
-func (s routeInventoryServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (s routeInventoryServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 
 func (s routeInventoryServices) Status() any { return map[string]any{} }
@@ -196,4 +199,7 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 	}
 }
 
-func (routeInventoryServices) RecordEngineFaults([]config.ServiceFault) {}
+func (routeInventoryServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (routeInventoryServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

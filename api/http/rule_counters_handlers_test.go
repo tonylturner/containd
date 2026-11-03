@@ -33,7 +33,7 @@ func TestRuleCountersRoute(t *testing.T) {
 		SnapshotVersion: "v9", Since: time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC),
 		Rules: []enforce.RuleCount{{RuleID: "police", Action: rules.ActionRateLimit, Packets: 12, Bytes: 1200, ExcessDrops: &excess}},
 	}}
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 	get := func() *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		serveWithConfigRevision(t, s, rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
@@ -48,7 +48,7 @@ func TestRuleCountersRoute(t *testing.T) {
 	if rec := get(); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "the last apply failed") {
 		t.Fatalf("engine error: %d %s", rec.Code, rec.Body)
 	}
-	s = NewServerWithEngine(&mockStore{}, nil, &mockEngine{})
+	s = newTestServerWithEngine(&mockStore{}, nil, &mockEngine{})
 	rec = httptest.NewRecorder()
 	serveWithConfigRevision(t, s, rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
 	if rec.Code != http.StatusServiceUnavailable {

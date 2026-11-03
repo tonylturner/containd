@@ -4,7 +4,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/netip"
 	"path/filepath"
@@ -105,8 +104,12 @@ type reservationReplayStore struct {
 	snapshot *config.Config
 }
 
-func (s *reservationReplayStore) Load(context.Context) (*config.Config, error) {
-	return s.snapshot, nil
+func (s *reservationReplayStore) ReadRunning(ctx context.Context) (config.RunningState, error) {
+	state, err := s.SQLiteStore.ReadRunning(ctx)
+	if state.Running != nil {
+		state.Running.Config = s.snapshot
+	}
+	return state, err
 }
 
 func TestManagementReservationReplayPreflight(t *testing.T) {
@@ -115,7 +118,7 @@ func TestManagementReservationReplayPreflight(t *testing.T) {
 	replay := &reservationReplayStore{SQLiteStore: store, snapshot: cfg}
 	engine := &stageEngine{mockEngine: &mockEngine{}}
 	services := &stageServices{}
-	_, err := ApplyRunningConfig(context.Background(), replay, engine, services)
+	_, err := replayTestConfig(context.Background(), replay, engine, services)
 	if err == nil || !strings.Contains(err.Error(), "reserved management path") || engine.mutations != 0 || services.mutations != 0 {
 		t.Fatalf("replay escaped preflight: %v engine=%d services=%d", err, engine.mutations, services.mutations)
 	}
@@ -129,8 +132,8 @@ func TestManagementBootFaultGatesReplayAndView(t *testing.T) {
 	}
 	engine := &stageEngine{mockEngine: &mockEngine{}}
 	services := &stageServices{}
-	_, err := ApplyRunningConfig(ctx, store, engine, services)
-	if !errors.Is(err, config.ErrManagementBootFault) || engine.mutations != 0 || services.mutations != 0 {
+	_, err := replayTestConfig(ctx, store, engine, services)
+	if err != nil || engine.mutations != 2 || services.mutations != 0 || engine.snap.Version != config.ManagementRecoveryVersion {
 		t.Fatalf("boot fault replay escaped: %v", err)
 	}
 	rec := requestStage(t, NewServer(store, nil), "GET", "/system/management-reservation", nil)
@@ -140,7 +143,7 @@ func TestManagementBootFaultGatesReplayAndView(t *testing.T) {
 	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApplyRunningConfig(ctx, store, engine, services); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err != nil {
 		t.Fatal(err)
 	}
 	if engine.mutations == 0 || services.mutations == 0 {

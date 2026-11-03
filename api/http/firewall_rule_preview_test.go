@@ -54,7 +54,7 @@ func TestPreviewFirewallRuleDelegates(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	NewServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, eng).ServeHTTP(rec, req)
+	newTestServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, eng).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d %s", rec.Code, rec.Body.String())
 	}
@@ -88,7 +88,7 @@ func TestPreviewFirewallRuleCarriesActionParameters(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
-		NewServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, eng).ServeHTTP(rec, req)
+		newTestServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, eng).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK || eng.calls != 1 || !reflect.DeepEqual(eng.entry, want) {
 			t.Fatalf("%s: status=%d entry=%+v, want %+v", body, rec.Code, eng.entry, want)
 		}
@@ -110,7 +110,7 @@ func TestPreviewFirewallRuleErrors(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", bytes.NewBufferString(tc.body))
 			req.Header.Set("Content-Type", "application/json")
-			NewServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, tc.engine).ServeHTTP(rec, req)
+			newTestServerWithEngine(&mockStore{cfg: config.DefaultConfig()}, nil, tc.engine).ServeHTTP(rec, req)
 			if rec.Code != tc.want {
 				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.want, rec.Body.String())
 			}
@@ -126,7 +126,7 @@ func TestPreviewFirewallCandidateForwards(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest("POST", "/api/v1/firewall/rules/preview", strings.NewReader(`{"id":"via","action":"ALLOW","viaForwards":["candidate"]}`))
 	req.Header.Set("Content-Type", "application/json")
-	NewServerWithEngine(&mockStore{cfg: cfg}, nil, eng).ServeHTTP(rec, req)
+	newTestServerWithEngine(&mockStore{cfg: cfg}, nil, eng).ServeHTTP(rec, req)
 	if rec.Code != 200 || !reflect.DeepEqual(eng.entry.ViaForwards, []string{"candidate"}) || len(eng.forwards) != 1 || eng.forwards["candidate"].Backend.String() != "10.0.0.2:502" || !reflect.DeepEqual(eng.forwards["candidate"].IngressDevices, []string{"wan0"}) {
 		t.Fatalf("response=%d %s entry=%+v forwards=%+v", rec.Code, rec.Body, eng.entry, eng.forwards)
 	}

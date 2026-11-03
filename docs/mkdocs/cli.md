@@ -383,9 +383,13 @@ audit or evidence databases.
 
 Runtime inspection and actions:
 
-- `show protection` — includes the current boot/apply IDs and fault causes.
-- `retry protection <boot-id> <apply-id> CONFIRM` (admin) — use IDs from the
-  inspected status; stale requests fail rather than silently retrying another apply.
+- `show protection` — includes desired/applied/protecting revisions, `ready`,
+  boot/apply IDs and per-owner fault causes. Null revisions are not verified.
+- `retry protection <boot-id> <apply-id> <desired-revision> CONFIRM` (admin) — use
+  all three identities from the inspected authenticated status. Stale or uncertain
+  observations fail rather than silently retrying another target; refresh first.
+  Acceptance queues outstanding owner work, not proof of completion. Automatic
+  retries continue without repeated operator action.
 - `update av definitions CONFIRM` (admin) — starts an immediate definition update.
 - `show pcap status`
 - `start pcap CONFIRM` / `stop pcap CONFIRM` (admin) — use the committed collector

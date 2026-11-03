@@ -83,7 +83,7 @@ export default function SystemSettingsPage() {
       setError(res.error || "Failed to upload trusted CA bundle.");
     } else if (res.state === "stored") {
       const reason = res.warnings.length > 0 ? `: ${res.warnings.join("; ")}` : "";
-      setWarning(`Trust certificates saved but not active. Applying configuration retries activation${reason || "."}`);
+      setWarning(`Trust certificates saved; owner acknowledgement pending. Check live protection status for retry or repair details${reason || "."}`);
       setTrustDetails(`Revision: ${res.revision}${reason}`);
     } else {
       setStatus(clear ? "Additional trust cleared. Outbound TLS now uses the OS trust store." : "Trust certificates are active.");

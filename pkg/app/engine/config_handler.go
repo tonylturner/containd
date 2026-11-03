@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -58,7 +59,7 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager, coordinator *protectionCoordinator) http.HandlerFunc {
 	store := dp.Events()
 	var current appliedConfig
-	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
+	return coordinator.admit("config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, current.get())
@@ -91,6 +92,10 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 			previous.DPIICSParsing = next.DPIICSParsing
 			parsingOnly := current.applied && sameDataPlane(previous, next)
 			current.mu.Unlock()
+			if !unchanged {
+				coordinator.outcome(coordinator.metadata, protection.SubsystemConfig, true, false, false, "")
+				coordinator.dp.BeginProtection(engineBootID, coordinator.current)
+			}
 			if !unchanged && parsingOnly {
 				dp.SetICSParsing(next.DPIICSParsing)
 				simMgr.setParsing(next.DPIICSParsing)
@@ -112,7 +117,7 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				current.applied, current.dp = true, next
 				current.mu.Unlock()
 			}
-			if err := dp.RetryProtection(coordinator.ctx); err != nil {
+			if err := dp.RetryProtection(r.Context()); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}

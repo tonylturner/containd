@@ -2,7 +2,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
@@ -53,31 +51,15 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 				}
 			}
 		}
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		runtimeStore, ok := store.(config.RuntimeStore)
+		coordinator, ok := requestCoordinator(c)
 		if !ok {
-			internalError(c, errors.New("store does not support runtime transactions"))
 			return
 		}
-		var warnings []string
-		var observation dpengine.ProtectionStatus
-		attempt := 0
-		revision, err := runtimeStore.ApplyChange(c.Request.Context(), expectedConfigRevision(c), change, ttl, func(ctx context.Context, previous, next *config.Config) error {
-			w, protection, err := applyConfigSnapshot(ctx, store, engine, services, previous, next)
-			if attempt == 0 {
-				warnings = w
-				observation = protection
-			}
-			attempt++
-			return err
-		})
+		result, err := coordinator.Change(c.Request.Context(), expectedConfigRevision(c), change, ttl)
 		if revisionMismatchResponse(c, err) {
 			return
 		}
-		recoveryWarnings := reenterRecoveryLocked(c.Request.Context(), store, engine, err)
 		if err != nil {
-			setWarningHeader(c, recoveryWarnings)
 			var failure *config.ApplyError
 			if errors.As(err, &failure) {
 				body := gin.H{"error": "configuration apply failed", "detail": failure.Err.Error(), "restored": failure.RestoreError == nil, "reapplied": failure.ReapplyError == nil}
@@ -96,22 +78,24 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			}
 			return
 		}
-		setWarningHeader(c, warnings)
+		setWarningHeader(c, deliveryWarnings(c.Request.Context(), coordinator, result.Warnings))
 		auditLog(c, audit.Record{Action: "config." + string(change), Target: "running"})
 		status := "committed"
 		if change == config.ChangeRollback {
 			status = "rolled back"
 		}
-		configRevisionResponse(c, revision)
-		committedConfigResponse(c, status, protectionResponse(observation))
+		configRevisionResponse(c, result.Revision)
+		committedConfigResponse(c, status, transitionResponse(c, coordinator, engine, result))
 	}
 }
 
 func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		revision, err := store.ConfirmCommit(c.Request.Context(), expectedConfigRevision(c))
+		coordinator, ok := requestCoordinator(c)
+		if !ok {
+			return
+		}
+		revision, err := coordinator.Confirm(c.Request.Context(), expectedConfigRevision(c))
 		if err != nil {
 			if revisionMismatchResponse(c, err) {
 				return

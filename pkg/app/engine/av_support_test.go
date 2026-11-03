@@ -14,15 +14,19 @@ import (
 	"testing"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"go.uber.org/zap"
 )
 
-type failingAVApplier struct{ applied int }
+type failingAVApplier struct {
+	testServiceOwner
+	applied int
+}
 
-func (f *failingAVApplier) Apply(context.Context, config.AVConfig) error {
-	f.applied++
+func (a *failingAVApplier) Apply(context.Context, config.AVConfig) error {
+	a.applied++
 	return errors.New("clamd not ready")
 }
 
@@ -50,9 +54,9 @@ func TestServicesApplyReportsAVFailure(t *testing.T) {
 }
 
 // startingAVApplier is a backend still starting: its apply ran out of time.
-type startingAVApplier struct{}
+type startingAVApplier struct{ testServiceOwner }
 
-func (startingAVApplier) Apply(context.Context, config.AVConfig) error {
+func (*startingAVApplier) Apply(context.Context, config.AVConfig) error {
 	return fmt.Errorf("clamd not ready: %w", context.DeadlineExceeded)
 }
 
@@ -62,7 +66,7 @@ func TestServicesApplyReportsStartingBackendAsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, startingAVApplier{}, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
+	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, &startingAVApplier{}, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "scanning is pending") {
 		t.Fatalf("starting backend failed the apply: %d %s", rec.Code, rec.Body)
 	}
@@ -77,25 +81,10 @@ func TestServicesApplyReportsStartingBackendAsPending(t *testing.T) {
 	}
 }
 
-func TestAVApplyPending(t *testing.T) {
-	expired, cancel := context.WithTimeout(context.Background(), 0)
-	defer cancel()
-	<-expired.Done()
-	live := context.Background()
-	cases := []struct {
-		name string
-		ctx  context.Context
-		err  error
-		want bool
-	}{
-		{"no error", expired, nil, false},
-		{"refused by backend", live, errors.New("unsupported av mode"), false},
-		{"apply ran out of time", expired, errors.New("clamd not ready: dial unix: no such file"), true},
-		{"deadline in the error", live, fmt.Errorf("clamd not ready: %w", context.DeadlineExceeded), true},
-	}
-	for _, tc := range cases {
-		if got := avApplyPending(tc.ctx, tc.err); got != tc.want {
-			t.Errorf("%s: pending = %v, want %v", tc.name, got, tc.want)
-		}
-	}
+func (a *failingAVApplier) ApplyDelivery(ctx context.Context, meta protection.Metadata, cfg config.AVConfig) (protection.OwnerOutcome, error) {
+	return a.testServiceOwner.apply(ctx, meta, protection.SubsystemAV, cfg.Enabled, cfg, func(ctx context.Context) error { return a.Apply(ctx, cfg) })
+}
+
+func (a *startingAVApplier) ApplyDelivery(ctx context.Context, meta protection.Metadata, cfg config.AVConfig) (protection.OwnerOutcome, error) {
+	return a.testServiceOwner.apply(ctx, meta, protection.SubsystemAV, cfg.Enabled, cfg, func(ctx context.Context) error { return a.Apply(ctx, cfg) })
 }

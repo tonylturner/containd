@@ -187,6 +187,54 @@ func TestShutdownClosesIdleConnectionsAtOnce(t *testing.T) {
 	keptAlive.expectEOF()
 }
 
+type readCountingConn struct {
+	net.Conn
+	reads int
+}
+
+func (c *readCountingConn) Read(p []byte) (int, error) {
+	c.reads++
+	return c.Conn.Read(p)
+}
+
+func TestTransactionAfterShutdownDoesNotReadNextHead(t *testing.T) {
+	srv := &Server{}
+	srv.init()
+	set := testSettings(t.TempDir())
+	if err := srv.Update(set); err != nil {
+		t.Fatal(err)
+	}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	client := &readCountingConn{Conn: serverSide}
+	defer client.Close()
+	c := newConn(srv, client, &set)
+	c.client.active.Store(true)
+
+	// Shutdown can observe active=true just before transaction marks the
+	// keep-alive connection idle. Cancellation must prevent the next read.
+	srv.cancel()
+	done := make(chan bool, 1)
+	go func() { done <- c.transaction() }()
+	select {
+	case persists := <-done:
+		if persists {
+			t.Fatal("transaction persisted after Shutdown")
+		}
+	case <-time.After(time.Second):
+		_ = client.Close()
+		<-done
+		t.Fatal("transaction waited for another request after Shutdown")
+	}
+	if client.reads != 0 {
+		t.Fatalf("transaction read %d times after Shutdown", client.reads)
+	}
+	if c.client.active.Load() {
+		t.Fatal("client remained active after the canceled transaction")
+	}
+}
+
 func TestShutdownForcesActiveConnectionsAtDeadline(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)

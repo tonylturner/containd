@@ -94,8 +94,8 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 # shellcheck source=scripts/smoke-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-lib.sh"
-# shellcheck source=scripts/smoke-engine-api.sh
-source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
+# shellcheck source=scripts/smoke-config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-config.sh"
 # shellcheck source=scripts/smoke-dpi-lib-parsing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-dpi-lib-parsing.sh"
 # shellcheck source=test/data-smoke/identify/smoke.sh
@@ -140,38 +140,20 @@ wait_for_jq() {
   return 1
 }
 
+# Explicitly commit the saved candidate. The preview is diagnostic only;
+# management compiles and delivers the authoritative running snapshot.
 apply_snapshot() {
-  local ruleset_file snap ruleset_head code tmp_apply_resp
-  ruleset_file=$(mktemp)
+  local ruleset_file ruleset_head
+  ruleset_file="$WORK_DIR/ruleset-preview.json"
   if ! "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset_file"; then
     log "failed to fetch ruleset preview"
-    rm -f "$ruleset_file"
-    exit 1
+    return 1
   fi
-  snap=$(jq -c '.snapshot' "$ruleset_file")
   ruleset_head=$(jq -r '.ruleset' "$ruleset_file" | head -n 20)
   log "Compiled ruleset (first 20 lines):"
   echo "$ruleset_head"
-  rm -f "$ruleset_file"
-
-  log "Applying dataplane configuration to engine..."
-  local apply_id
-  apply_id=$(engine_apply_id)
-  code=$(engine_apply engine /internal/config "$WORK_DIR/smoke-dpi-engine-config.out" "$apply_id" <<<"$DATAPLANE_CFG")
-  if [[ "$code" != "200" ]]; then
-    log "engine config failed (HTTP $code): $(cat "$WORK_DIR/smoke-dpi-engine-config.out")"
-    exit 1
-  fi
-
-  log "Applying snapshot to engine..."
-  tmp_apply_resp=$(mktemp)
-  code=$(engine_apply engine /internal/apply_rules "$tmp_apply_resp" "$apply_id" <<<"$snap")
-  if [[ "$code" != "200" ]]; then
-    log "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"
-    rm -f "$tmp_apply_resp"
-    exit 1
-  fi
-  rm -f "$tmp_apply_resp"
+  log "Committing the saved candidate through management..."
+  smoke_commit_config "$WORK_DIR/config.revision" "$WORK_DIR/commit.json"
 }
 
 server_state() {
@@ -573,8 +555,6 @@ if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
 else
   COVERAGE_STATE=enforcing
 fi
-
-DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataplane')
 
 tmp_cfg_resp=$(mktemp)
 tmp_cfg_err=$(mktemp)

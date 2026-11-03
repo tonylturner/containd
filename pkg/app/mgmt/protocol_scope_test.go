@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
-	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -207,7 +206,7 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 					}
 				}
 				srv, calls := recordingEngine(t)
-				if _, err := httpapi.ApplyBootConfig(ctx, stores.store, engineapi.NewHTTPClient(srv.URL), nil); err != nil {
+				if _, err := mgmtTestCoordinator(t, stores.store, engineapi.NewHTTPClient(srv.URL), nil).Replay(ctx, false); err != nil {
 					t.Fatal(err)
 				}
 				applied, _ := nextRuleset(t, calls)

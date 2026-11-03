@@ -18,7 +18,10 @@ type autoAssignOptions struct {
 	Reservation *mgmtpath.Reservation
 	// KeepBound pins every row that already names a device and withholds
 	// those devices from discovery, so only unbound rows receive assignments.
-	KeepBound         bool
+	KeepBound bool
+	// UseCommittedAddrs uses saved interface addresses to identify devices
+	// during boot repair; runtime assignment does not move explicit bindings.
+	UseCommittedAddrs bool
 	AllowFallback     bool
 	DefaultRouteIface string
 }
@@ -118,7 +121,21 @@ func computeDefaultInterfaceAssignments(ifaces []config.Interface, state []confi
 			}
 		}
 	}
-	assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultAutoAssignSubnets())
+	if opts.UseCommittedAddrs {
+		explicitSubnets := make(map[string]string)
+		defaultSubnets := defaultAutoAssignSubnets()
+		for _, logical := range order {
+			if subnet := DefaultInterfaceSubnetOverride(logical); subnet != "" {
+				explicitSubnets[logical] = subnet
+				delete(defaultSubnets, logical)
+			}
+		}
+		assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, explicitSubnets)
+		assignByCommittedAddresses(order, ifaceByName, candidates, stateByName, assignments, usedDev, explicitSubnets)
+		assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultSubnets)
+	} else {
+		assignBySubnet(order, ifaceByName, candidates, stateByName, assignments, usedDev, defaultAutoAssignSubnets())
+	}
 	// Explicit subnet authority must never fall through to naming, routing or
 	// index heuristics, including when discovery is missing or ambiguous.
 	heuristicOrder := make([]string, 0, len(order))
@@ -195,6 +212,89 @@ func assignBySubnet(order []string, ifaceByName map[string]config.Interface, can
 			usedDev[matches[0]] = true
 		}
 	}
+}
+
+func assignByCommittedAddresses(order []string, ifaceByName map[string]config.Interface, candidates []autoAssignCandidate, stateByName map[string]config.InterfaceState, assignments map[string]string, usedDev map[string]bool, explicitSubnets map[string]string) {
+	for _, logical := range order {
+		if _, ok := ifaceByName[logical]; !ok {
+			continue
+		}
+		if explicitSubnets[logical] != "" {
+			continue
+		}
+		if _, already := assignments[logical]; already {
+			continue
+		}
+		addresses := committedInterfaceIPs(ifaceByName[logical].Addresses)
+		if len(addresses) == 0 {
+			continue
+		}
+		matches := map[string]struct{}{}
+		for _, candidate := range candidates {
+			if usedDev[candidate.name] || !interfaceHasAnyIP(stateByName[candidate.name].Addrs, addresses) {
+				continue
+			}
+			matches[candidate.name] = struct{}{}
+		}
+		if len(matches) == 1 {
+			for device := range matches {
+				assignments[logical] = device
+				usedDev[device] = true
+			}
+		}
+	}
+}
+
+func committedInterfaceIPs(addresses []string) []net.IP {
+	ips := make([]net.IP, 0, len(addresses))
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		var ip net.IP
+		if strings.Contains(address, "/") {
+			parsed, _, err := net.ParseCIDR(address)
+			if err != nil {
+				continue
+			}
+			ip = parsed
+		} else {
+			ip = net.ParseIP(address)
+		}
+		if ip != nil {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
+}
+
+func interfaceHasAnyIP(addrs []string, want []net.IP) bool {
+	for _, address := range addrs {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		var ip net.IP
+		if strings.Contains(address, "/") {
+			parsed, _, err := net.ParseCIDR(address)
+			if err != nil {
+				continue
+			}
+			ip = parsed
+		} else {
+			ip = net.ParseIP(address)
+		}
+		if ip == nil {
+			continue
+		}
+		for _, expected := range want {
+			if ip.Equal(expected) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func assignDefaultRouteWAN(ifaceByName map[string]config.Interface, opts autoAssignOptions, stateByName map[string]config.InterfaceState, assignments map[string]string, usedDev map[string]bool) {
@@ -308,10 +408,11 @@ func ifaceHasIPv4InCIDR(addrs []string, cidr string) bool {
 	return false
 }
 
-// AutoBindDefaultInterfaceDevices is the boot repair binder: it may move
-// default rows that look like stale index-order bindings. Boot callers persist
-// the result with config.Repair so running and any staged candidate get the
-// same repair. Runtime applies use bindUnboundDefaultInterfaceDevices instead.
+// AutoBindDefaultInterfaceDevices is the boot repair binder. It changes a
+// default row only when current discovery contradicts its saved binding.
+// Boot callers persist the result with config.Repair so running and any staged
+// candidate get the same repair. Runtime applies use
+// bindUnboundDefaultInterfaceDevices instead.
 func AutoBindDefaultInterfaceDevices(cfg *config.Config) bool {
 	return AutoBindDefaultInterfaceDevicesReserved(cfg, nil)
 }
@@ -342,8 +443,20 @@ func bindUnboundDefaultInterfaceDevices(cfg *config.Config) {
 	}
 }
 
-// AutoBindDefaultInterfaceDevicesReserved never moves an existing reserved binding.
+// AutoBindDefaultInterfaceDevicesReserved preserves existing reserved bindings
+// while repairing other default rows. Boot management repair uses
+// RepairDefaultInterfaceDevicesReserved to reconcile a stale reserved owner.
 func AutoBindDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Reservation) bool {
+	return autoBindDefaultInterfaceDevices(cfg, r, false)
+}
+
+// RepairDefaultInterfaceDevicesReserved repairs a boot-time reservation
+// binding only when the stored row does not match the reservation authority.
+func RepairDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Reservation) bool {
+	return autoBindDefaultInterfaceDevices(cfg, r, true)
+}
+
+func autoBindDefaultInterfaceDevices(cfg *config.Config, r *mgmtpath.Reservation, repairReservation bool) bool {
 	if cfg == nil || len(cfg.Interfaces) == 0 {
 		return false
 	}
@@ -351,7 +464,7 @@ func AutoBindDefaultInterfaceDevicesReserved(cfg *config.Config, r *mgmtpath.Res
 	if err != nil {
 		return false
 	}
-	return autoBindDefaultInterfaceDevicesReservedFromState(cfg, state, defaultRouteIface, r)
+	return autoBindDefaultInterfaceDevicesWithReservationPolicy(cfg, state, defaultRouteIface, r, repairReservation)
 }
 
 // discoverLocalInterfaces reports kernel interface state and the device that
@@ -369,28 +482,157 @@ func autoBindDefaultInterfaceDevicesFromState(cfg *config.Config, state []config
 }
 
 func autoBindDefaultInterfaceDevicesReservedFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string, r *mgmtpath.Reservation) bool {
-	if cfg == nil || len(cfg.Interfaces) == 0 {
+	return autoBindDefaultInterfaceDevicesWithReservationPolicy(cfg, state, defaultRouteIface, r, false)
+}
+
+func repairDefaultInterfaceDevicesReservedFromState(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string, r *mgmtpath.Reservation) bool {
+	return autoBindDefaultInterfaceDevicesWithReservationPolicy(cfg, state, defaultRouteIface, r, true)
+}
+
+func autoBindDefaultInterfaceDevicesWithReservationPolicy(cfg *config.Config, state []config.InterfaceState, defaultRouteIface string, r *mgmtpath.Reservation, repairReservation bool) bool {
+	if cfg == nil || len(cfg.Interfaces) == 0 || !defaultInterfaceLayout(cfg.Interfaces) {
 		return false
 	}
-	assignments, err := computeDefaultInterfaceAssignments(cfg.Interfaces, state, autoAssignOptions{
+	stateByName := make(map[string]config.InterfaceState, len(state))
+	for _, current := range state {
+		stateByName[strings.TrimSpace(current.Name)] = current
+	}
+	repair := make(map[string]bool)
+	nextInterfaces := append([]config.Interface(nil), cfg.Interfaces...)
+	for i, iface := range cfg.Interfaces {
+		device := strings.TrimSpace(iface.Device)
+		if device == "" {
+			repair[iface.Name] = true
+			continue
+		}
+		if r != nil && device == r.Device {
+			if !repairReservation || reservedBindingIsAuthoritative(cfg.Interfaces, iface, r) {
+				continue
+			}
+			repair[iface.Name] = true
+			nextInterfaces[i].Device = ""
+			continue
+		}
+		current, exists := stateByName[device]
+		if !exists || bindingAddressContradicts(iface, current, state) {
+			repair[iface.Name] = true
+			nextInterfaces[i].Device = ""
+		}
+	}
+	if len(repair) == 0 {
+		return false
+	}
+	assignments, err := computeDefaultInterfaceAssignments(nextInterfaces, state, autoAssignOptions{
 		Reservation:       r,
+		KeepBound:         true,
 		AllowFallback:     false,
+		UseCommittedAddrs: true,
 		DefaultRouteIface: defaultRouteIface,
 	})
-	if err != nil || len(assignments) == 0 {
-		return false
-	}
-	if !shouldRepairDefaultInterfaceBindings(cfg.Interfaces, state, assignments) {
+	if err != nil {
 		return false
 	}
 	changed := false
 	for i := range cfg.Interfaces {
+		if !repair[cfg.Interfaces[i].Name] {
+			continue
+		}
 		if dev, ok := assignments[cfg.Interfaces[i].Name]; ok && strings.TrimSpace(cfg.Interfaces[i].Device) != dev {
 			cfg.Interfaces[i].Device = dev
 			changed = true
 		}
 	}
 	return changed
+}
+
+func bindingAddressContradicts(iface config.Interface, current config.InterfaceState, state []config.InterfaceState) bool {
+	subnet := DefaultInterfaceSubnetOverride(iface.Name)
+	if subnet != "" {
+		_, network, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return false
+		}
+		hasIPv4 := false
+		for _, address := range current.Addrs {
+			ip, _, err := net.ParseCIDR(strings.TrimSpace(address))
+			if err != nil || ip.To4() == nil || ip.IsLinkLocalUnicast() || ip.IsLoopback() {
+				continue
+			}
+			hasIPv4 = true
+			if network.Contains(ip) {
+				return false
+			}
+		}
+		return hasIPv4
+	}
+
+	expected := committedInterfaceIPs(iface.Addresses)
+	if len(expected) > 0 {
+		for _, address := range current.Addrs {
+			ip, _, err := net.ParseCIDR(strings.TrimSpace(address))
+			if err != nil || ip.IsLinkLocalUnicast() || ip.IsLoopback() {
+				continue
+			}
+			for _, want := range expected {
+				if ip.Equal(want) {
+					return false
+				}
+			}
+		}
+		for _, address := range current.Addrs {
+			ip, _, err := net.ParseCIDR(strings.TrimSpace(address))
+			if err != nil || ip.IsLinkLocalUnicast() || ip.IsLoopback() {
+				continue
+			}
+			for _, want := range expected {
+				if (ip.To4() != nil) == (want.To4() != nil) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return bindingContradictsDefaultSubnet(iface, current, state)
+}
+
+func bindingContradictsDefaultSubnet(iface config.Interface, current config.InterfaceState, state []config.InterfaceState) bool {
+	subnet := strings.TrimSpace(defaultAutoAssignSubnets()[iface.Name])
+	if subnet == "" || ifaceHasIPv4InCIDR(current.Addrs, subnet) || !hasNonLinkLocalIPv4(current.Addrs) {
+		return false
+	}
+	_, stateByName := buildAutoAssignCandidates(state)
+	matches := 0
+	for name, candidate := range stateByName {
+		if name == current.Name || !candidate.Up || !isAutoAssignableDevice(name, candidate.MAC) {
+			continue
+		}
+		if ifaceHasIPv4InCIDR(candidate.Addrs, subnet) {
+			matches++
+		}
+	}
+	return matches == 1
+}
+
+func hasNonLinkLocalIPv4(addrs []string) bool {
+	for _, address := range addrs {
+		ip, _, err := net.ParseCIDR(strings.TrimSpace(address))
+		if err == nil && ip.To4() != nil && !ip.IsLinkLocalUnicast() && !ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
+}
+
+func reservedBindingIsAuthoritative(ifaces []config.Interface, iface config.Interface, r *mgmtpath.Reservation) bool {
+	if r == nil || iface.Device != r.Device || config.ValidateManagementInterfaces(ifaces, r) != nil {
+		return false
+	}
+	subnet := DefaultInterfaceSubnetOverride(iface.Name)
+	if subnet == "" {
+		return true
+	}
+	_, network, err := net.ParseCIDR(subnet)
+	return err == nil && network.Contains(net.IP(r.Local.Addr().AsSlice()))
 }
 
 func collectLocalInterfaceState() ([]config.InterfaceState, error) {
@@ -430,52 +672,4 @@ func defaultInterfaceLayout(ifaces []config.Interface) bool {
 		}
 	}
 	return len(ifaces) > 0
-}
-
-func shouldRepairDefaultInterfaceBindings(ifaces []config.Interface, state []config.InterfaceState, assignments map[string]string) bool {
-	if !defaultInterfaceLayout(ifaces) {
-		return false
-	}
-	defaultNames := defaultInterfaceOrder()
-	ifaceByName := map[string]config.Interface{}
-	for _, iface := range ifaces {
-		ifaceByName[iface.Name] = iface
-	}
-
-	for _, name := range defaultNames {
-		if iface, ok := ifaceByName[name]; ok && strings.TrimSpace(iface.Device) == "" {
-			return true
-		}
-	}
-
-	candidates, _ := buildAutoAssignCandidates(state)
-	idxOrder := map[string]string{}
-	idx := 0
-	for _, name := range defaultNames {
-		if _, ok := ifaceByName[name]; !ok {
-			continue
-		}
-		if idx >= len(candidates) {
-			return false
-		}
-		idxOrder[name] = candidates[idx].name
-		idx++
-	}
-
-	looksLikeLegacyIndexBinding := true
-	needsRepair := false
-	for _, name := range defaultNames {
-		iface, ok := ifaceByName[name]
-		if !ok {
-			continue
-		}
-		cur := strings.TrimSpace(iface.Device)
-		if cur != idxOrder[name] {
-			looksLikeLegacyIndexBinding = false
-		}
-		if want := strings.TrimSpace(assignments[name]); want != "" && cur != want {
-			needsRepair = true
-		}
-	}
-	return looksLikeLegacyIndexBinding && needsRepair
 }

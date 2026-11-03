@@ -72,10 +72,11 @@ up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
 18080`, run the script with `SMOKE_SKIP_UP=1`, then `down --volumes` the
 project you created.
 
-The scripts never reach the engine API through a published port. While
-enforcing, the engine admits its unauthenticated API only from loopback, so
-the scripts call it inside the `engine` container with `docker compose exec`
-(`scripts/smoke-engine-api.sh`).
+Policy changes use management candidate saves and explicit commits; the
+scripts never apply engine configuration directly. They read engine telemetry
+without a published port: while enforcing, the engine admits its
+unauthenticated API only from loopback, so the scripts read it inside the
+`engine` container with `docker compose exec` (`scripts/smoke-engine-api.sh`).
 
 ## Forwarding fixtures
 

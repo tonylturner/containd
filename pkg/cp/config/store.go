@@ -54,6 +54,8 @@ type Store interface {
 type SQLiteStore struct {
 	db                 *sql.DB
 	mu                 sync.Mutex
+	applyGate          chan struct{}
+	storeNotify        chan<- struct{}
 	pendingTimer       *time.Timer
 	autoRollbackNotify chan<- struct{}
 	options            storeOptions
@@ -116,7 +118,11 @@ func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
-	store := &SQLiteStore{db: db}
+	if err := validateIdentities(context.Background(), db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	store := &SQLiteStore{db: db, applyGate: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(&store.options)
 	}
@@ -129,6 +135,10 @@ func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 		return nil, err
 	}
 	if _, err := store.MigrateIndustrialScope(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.initializeRunningIdentities(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -155,6 +165,9 @@ func tuneSQLite(db *sql.DB) error {
 
 func bootstrapSchema(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS running_identity (key TEXT PRIMARY KEY, token TEXT NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS running_identity_genesis (id INTEGER PRIMARY KEY CHECK (id = 1));`,
+		`CREATE TABLE IF NOT EXISTS runtime_transition (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS config_revision (id INTEGER PRIMARY KEY CHECK (id = 1), epoch TEXT NOT NULL, counter INTEGER NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS ids_banks (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS configs (
@@ -382,6 +395,7 @@ func (s *SQLiteStore) Close() error {
 		s.pendingTimer = nil
 	}
 	s.autoRollbackNotify = nil
+	s.storeNotify = nil
 	if s.db != nil {
 		return s.db.Close()
 	}
@@ -438,11 +452,27 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 	}
 	s.pendingTimer = time.AfterFunc(after, func() {
 		// Re-check pending state before rollback.
-		bg := context.Background()
+		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.enterApply(bg); err != nil {
+			s.mu.Lock()
+			if s.pendingTimer != nil {
+				s.schedulePendingLocked(time.Second)
+			}
+			s.mu.Unlock()
+			return
+		}
+		defer s.leaveApply()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		pending, err := s.loadPending(bg)
-		if err != nil || pending == nil {
+		if err != nil {
+			if !errors.Is(err, ErrNotFound) && s.pendingTimer != nil {
+				s.schedulePendingLocked(time.Second)
+			}
+			return
+		}
+		if pending == nil {
 			return
 		}
 		if time.Now().UnixNano() < pending.DeadlineUnix {
@@ -453,6 +483,9 @@ func (s *SQLiteStore) schedulePendingLocked(after time.Duration) {
 		applied, err := s.timedRollbackLocked(bg)
 		if err != nil {
 			slog.Error("auto-rollback failed", "error", err)
+			if s.pendingTimer != nil {
+				s.schedulePendingLocked(time.Second)
+			}
 			return
 		}
 		if !applied {
@@ -558,7 +591,8 @@ func loadIDSRulesFrom(ctx context.Context, db interface {
 }
 
 func (s *SQLiteStore) checkAndSchedulePending() error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	pending, err := s.loadPending(ctx)

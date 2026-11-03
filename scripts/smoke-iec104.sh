@@ -95,6 +95,8 @@ WORK_DIR=$(mktemp -d)
 CURL=(curl -sf --max-time 10 --connect-timeout 5)
 # shellcheck source=scripts/config-revision.sh
 source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
+# shellcheck source=scripts/smoke-config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-config.sh"
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
 CC_SUBNET=${IEC104_CC_SUBNET:-10.233.0}
@@ -369,16 +371,7 @@ apply_config() {
     log "config POST for $label rejected (HTTP $code): $(cat "$resp" 2>/dev/null)"
     return 1
   fi
-  local ruleset snap
-  ruleset="$WORK_DIR/ruleset.json"
-  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
-  snap=$(jq -c '.snapshot' "$ruleset")
-  local apply_id
-  apply_id=$(engine_apply_id)
-  code=$(echo "$cfg" | jq -c '.dataplane' | engine_apply firewall /internal/config "$resp" "$apply_id")
-  [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
-  code=$(engine_apply firewall /internal/apply_rules "$resp" "$apply_id" <<<"$snap")
-  [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
+  smoke_commit_config "$WORK_DIR/config.revision" "$WORK_DIR/commit.json" || return 1
   CC_LAST_POLICY_COT3=$(cc_count 'cot=3 ' cc.log)
   return 0
 }

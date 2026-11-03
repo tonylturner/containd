@@ -82,12 +82,13 @@ type dhcpRuntime struct {
 	fd            int
 }
 
-func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool, reservations map[string]string, m *Manager) error {
+func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool, reservations map[string]string, m *Manager, ready chan<- struct{}) error {
 	rt, err := newDHCPRuntime(dev, cfg, pl, reservations, m)
 	if err != nil {
 		return err
 	}
 	defer unix.Close(rt.fd)
+	close(ready)
 
 	buf := make([]byte, 1500)
 	for {

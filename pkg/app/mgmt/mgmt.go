@@ -17,6 +17,7 @@ import (
 
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/app/convergence"
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
@@ -64,7 +65,7 @@ type mgmtListenerConfig struct {
 	reservedHTTPAddr    string
 }
 
-func Run(ctx context.Context, opts Options) error {
+func Run(ctx context.Context, opts Options) (runErr error) {
 	logger := logging.NewService("mgmt")
 	logging.InstallSlogBridge(logger.Desugar())
 	if err := validateJWTSecret(logger); err != nil {
@@ -92,9 +93,14 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	defer stores.store.Close()
-	defer stores.auditStore.Close()
-	defer stores.userStore.Close()
+	storesSafe := true
+	defer func() {
+		if storesSafe {
+			stores.userStore.Close()
+			stores.auditStore.Close()
+			stores.store.Close()
+		}
+	}()
 
 	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
 	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
@@ -146,7 +152,20 @@ func Run(ctx context.Context, opts Options) error {
 	if telemetryStore != nil {
 		historyStore = telemetryStore
 	}
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController)
+	diagnostics := make(chan error, 1)
+	runtimeStore, ok := stores.store.(config.RuntimeStore)
+	if !ok {
+		return fmt.Errorf("store %T does not support runtime convergence", stores.store)
+	}
+	environment := &httpapi.RuntimeEnvironment{Store: stores.store, Engine: engineClient,
+		RefreshMaterial: func(ctx context.Context, snapshot *config.RunningSnapshot) error {
+			return httpapi.RefreshLocalMaterial(ctx, stores.store, serviceManager.Manager, snapshot)
+		}}
+	coordinator, err := convergence.New(convergence.Options{Store: runtimeStore, Engine: engineClient, Services: serviceManager.Manager, Environment: environment, Demo: demoController, Errors: diagnostics})
+	if err != nil {
+		return err
+	}
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController, coordinator)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
@@ -173,26 +192,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 	installSyslogSources(serviceManager, engineClient, stores, logger)
-	// Management-run services must be available even while engine health is
-	// unreachable. Never render unprojected stored service content.
-	engineReachable := false
-	if health, ok := engineClient.(httpapi.RuntimeHealthClient); ok {
-		probe, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
-		_, err := health.RuntimeHealth(probe)
-		cancel()
-		engineReachable = err == nil
+	if err := bootstrapLocalServices(ctx, stores.store, engineClient, serviceManager.Manager); err != nil {
+		logger.Warnf("local service bootstrap: %v", err)
 	}
-	if cfg, err := stores.store.Load(ctx); err == nil && !engineReachable && config.CheckManagementBootFault(ctx, stores.store) == nil {
-		if effective, faults, err := config.EffectiveForStore(stores.store, cfg); err == nil {
-			_, warnings := serviceManager.ApplyEffective(ctx, effective.Services, faults)
-			for _, warning := range warnings {
-				logger.Warn(warning)
-			}
+	stopRuntime := startConvergence(ctx, coordinator, logger, diagnostics)
+	defer func() {
+		err := stopRuntime()
+		if errors.Is(err, convergence.ErrDrain) {
+			storesSafe = false
 		}
-	}
-	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager, demoController)
-	defer stopEngineSync()
-	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
+		runErr = errors.Join(runErr, err)
+	}()
+	stopReload := startConfigReload(ctx, logger, coordinator, stores.auditStore, opts.Reload)
 	defer stopReload()
 
 	// Start SSH server (admin-only) for interactive CLI.
@@ -238,33 +249,12 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return fail(err)
 	}
 
-	// Repair stale interface.device bindings before the HTTP server begins
-	// serving traffic. Without this, mgmtAccessHandler reads the stored
-	// config with device fields pointing at kernel devices the OS may have
-	// renumbered across container restarts — leading to false 403s on the
-	// very first API call from the management plane.
-	//
-	// Blank the device fields on default-named logical interfaces first so
-	// AutoBindDefaultInterfaceDevices reliably re-runs subnet-match
-	// assignment. The "shouldRepair" gate inside autobind only triggers
-	// when bindings are blank OR match the legacy eth0..ethN index pattern;
-	// docker-shuffled bindings look neither, so without blanking, the
-	// scrambled state survives. Subnet-based reassignment is the
-	// authoritative determinism source (see CONTAIND_AUTO_*_SUBNET env vars
-	// + assignBySubnet); we're not changing that, just making sure it runs.
+	// Repair only default-interface bindings contradicted by current kernel
+	// discovery before the HTTP server begins serving traffic. Existing
+	// bindings with no contrary address evidence remain operator authority.
 	if cfg != nil {
 		repaired, repairErr := config.Repair(context.Background(), stores.store, func(next *config.Config) error {
-			// Keep the old bindings if discovery cannot produce a replacement.
-			devices := make([]string, len(next.Interfaces))
-			for i := range next.Interfaces {
-				devices[i] = next.Interfaces[i].Device
-			}
-			blankDefaultInterfaceDevicesExcept(next, r)
-			if !httpapi.AutoBindDefaultInterfaceDevicesReserved(next, r) {
-				for i := range next.Interfaces {
-					next.Interfaces[i].Device = devices[i]
-				}
-			}
+			httpapi.RepairDefaultInterfaceDevicesReserved(next, r)
 			return nil
 		})
 		if repairErr != nil {
@@ -293,40 +283,6 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 	stores.bootEvent = event
 	stores.bootEvents = events
 	return stores, cfg, nil
-}
-
-// blankDefaultInterfaceDevices clears the Device field on each default
-// logical interface (wan/dmz/lan1..lan6) so the subsequent
-// AutoBindDefaultInterfaceDevices pass treats them as needing assignment.
-// Non-default interfaces (custom user-named) are left untouched.
-func blankDefaultInterfaceDevices(cfg *config.Config) { blankDefaultInterfaceDevicesExcept(cfg, nil) }
-
-func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservation) {
-	if cfg == nil {
-		return
-	}
-	defaults := map[string]struct{}{}
-	for _, name := range config.DefaultPhysicalInterfaces() {
-		defaults[name] = struct{}{}
-	}
-	// A matching device name alone is not ownership after NIC renumbering:
-	// an addressed default row may now point at the reserved NIC by accident.
-	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
-	for i := range cfg.Interfaces {
-		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
-			// Structural validity alone cannot establish ownership: on a
-			// partial appliance an unaddressed ordinary row may now carry the
-			// reserved NIC's old ethN name. Explicit subnet authority wins.
-			subnet := httpapi.DefaultInterfaceSubnetOverride(cfg.Interfaces[i].Name)
-			_, network, err := net.ParseCIDR(subnet)
-			if subnet == "" || err == nil && network.Contains(net.IP(r.Local.Addr().AsSlice())) {
-				continue
-			}
-		}
-		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
-			cfg.Interfaces[i].Device = ""
-		}
-	}
 }
 
 func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {

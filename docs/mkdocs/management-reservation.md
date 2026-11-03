@@ -30,7 +30,10 @@ Default interfaces bind independently to a unique **up** NIC matching their
 unset. Missing or ambiguous explicit subnet matches stay
 unbound; names, the default route and index order cannot override that authority.
 Five- and seven-NIC appliances do not need eight NICs to initialize a reservation.
-Default bindings are rediscovered by subnet on restart, including NIC renumbering.
+At restart, a present device binding is kept unless current kernel addresses
+contradict its saved interface addresses or subnet authority. Missing or
+contradicted bindings, including NIC renumbering, are repaired from current
+interface discovery; explicit subnet hints remain authoritative.
 
 Management INPUT rules contain bound device names, never unbound logical names.
 If a listener has logical access grants but none of its bindings exists on a
