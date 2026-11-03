@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Strict uses HTTPS only, Secure cookies, HSTS and appliance-only SSH. It refuses
   lab mode, static tokens, default password overrides and Docker socket mounts.
 - Strict rotates accounts still using `containd` and reissues unclaimed one-time
-  passwords at boot. Claimed non-default credentials remain unchanged.
+  passwords at boot. Claimed non-default credentials remain unchanged. The
+  factory-reset confirmation and forced-password dialog identify strict
+  one-time-password recovery.
 
 ### Fixed
 
@@ -21,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uploads, preserve the last-good identity on invalid reloads, and warn without
   refusing boot in either profile.
 - Report the effective Secure-cookie policy and its source in TLS status and
-  System Settings, including training environment overrides.
+  System Settings, including training environment overrides; System Settings
+  also identifies the selected deployment profile. Print healthcheck failures
+  to stderr, retaining certificate validity dates.
 - Honor `enableHSTS=false` in training by removing a duplicate HSTS header.
 - Bind runtime convergence to committed running generations, with authenticated
   desired/applied/protecting revisions, per-owner outcomes and `ready`. Retry

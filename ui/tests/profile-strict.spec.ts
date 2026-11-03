@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import type { DeploymentProfile, TLSInfo } from "../lib/api";
+import type { DeploymentProfile, TLSInfo, User } from "../lib/api";
 
 const servedFingerprint = Array(32).fill("AB").join(":");
 const configuredFingerprint = Array(32).fill("CD").join(":");
@@ -30,7 +30,7 @@ function tlsInfo(profile: DeploymentProfile): TLSInfo {
   };
 }
 
-async function mockAPI(page: Page, profile: DeploymentProfile, authenticated = false) {
+async function mockAPI(page: Page, profile: DeploymentProfile, authenticated = false, userOverrides: Partial<User> = {}) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/health") {
@@ -38,7 +38,7 @@ async function mockAPI(page: Page, profile: DeploymentProfile, authenticated = f
     }
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
       return route.fulfill(authenticated
-        ? { json: { id: "admin-1", username: "containd", role: "admin", profile } }
+        ? { json: { id: "admin-1", username: "containd", role: "admin", profile, ...userOverrides } }
         : { status: 401, json: { error: "unauthorized" } });
     }
     if (path === "/api/v1/system/tls") return route.fulfill({ json: tlsInfo(profile) });
@@ -84,6 +84,7 @@ for (const width of [1280, 390]) {
       await page.goto("/system/settings/");
       await loaded;
       await expect(page.getByRole("heading", { name: "Management HTTPS" })).toBeVisible();
+      await expect(row(page, "Deployment profile")).toContainText(profile);
       if (profile === "strict") {
         await expect(row(page, "HTTP enabled (next start)")).toContainText("Disabled · source: profile · saved: enabled");
         await expect(row(page, "HTTPS enabled (next start)")).toContainText("Enabled · source: profile · saved: disabled");
@@ -131,6 +132,23 @@ for (const width of [1280, 390]) {
       await noOverflow(page);
     });
   }
+}
+
+for (const profile of ["training", "strict"] as const) {
+  test(`${profile} forced password change identifies the current password`, async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+    await mockAPI(page, profile, true, { mustChangePassword: true });
+    const loaded = page.waitForResponse("**/api/v1/auth/me");
+    await page.goto("/system/settings/");
+    await loaded;
+    const expected = profile === "strict"
+      ? "You must change the one-time password before continuing."
+      : "You must change the default password before continuing.";
+    await expect(page.getByText(expected, { exact: true })).toBeVisible();
+    if (profile === "strict") {
+      await expect(page.getByText("You must change the default password before continuing.", { exact: true })).toHaveCount(0);
+    }
+  });
 }
 
 for (const scenario of ["pending", "missing", "failed"] as const) {

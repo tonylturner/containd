@@ -217,6 +217,8 @@ test("settings page marks saved files that differ from the served ones", async (
     "/api/v1/system/tls": { json: { ...saved, ...bound, ...served, servedCertFile: "/data/tls/default.crt", servedKeyFile: "/data/tls/default.key" } },
   });
   const card = await openSettings(page);
+  await expect(card.getByText("Deployment profile", { exact: true })).toBeVisible();
+  await expect(card.getByText("—", { exact: true })).toBeVisible();
   await expect(card.getByText("/data/tls/default.crt")).toBeVisible();
   await expect(card.getByText("CN=served")).toBeVisible();
   await expect(card.getByText("served.example, containd.local, 192.0.2.10, 2001:db8::10")).toBeVisible();

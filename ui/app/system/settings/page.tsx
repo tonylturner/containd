@@ -5,7 +5,7 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
-import { api, isAdmin, type TLSInfo } from "../../../lib/api";
+import { api, isAdmin, type DeploymentProfile, type TLSInfo } from "../../../lib/api";
 import {
   clearDismissedTips,
   getPersistCLIHistory,
@@ -22,6 +22,7 @@ export default function SystemSettingsPage() {
   const canEdit = isAdmin();
   const confirm = useConfirm();
   const [tlsInfo, setTLSInfo] = useState<TLSInfo | null>(null);
+  const [deploymentProfile, setDeploymentProfile] = useState<DeploymentProfile>();
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [caFile, setCAFile] = useState<File | null>(null);
@@ -33,8 +34,10 @@ export default function SystemSettingsPage() {
   const persistHistory = useSyncExternalStore(subscribePrefs, getPersistCLIHistory, () => false);
 
   const { refresh } = useAsyncRefresh(useCallback(async () => {
-    const info = await api.getTLSInfo();
+    const [info, me] = await Promise.all([api.getTLSInfo(), api.me()]);
     setTLSInfo(info);
+    const profile = me?.profile;
+    setDeploymentProfile(profile === "training" || profile === "strict" ? profile : undefined);
     if (!info?.managed) {
       setCertFile(null);
       setKeyFile(null);
@@ -147,6 +150,7 @@ export default function SystemSettingsPage() {
             <p className="mb-2 text-xs text-(--text-muted)">
               Effective policy and its source. Saved values are shown when the profile overrides them.
             </p>
+            <Row label="Deployment profile" value={deploymentProfile ?? "—"} />
             {tlsPolicyRows(tlsInfo).map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />
             ))}

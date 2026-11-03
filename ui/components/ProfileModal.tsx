@@ -42,6 +42,11 @@ export function ProfileModal({
   const mustStayOpen = !!forcePassword || !!forceMFA;
   const mfaRequired = !!me.mfaRequired;
   const mfaGraceDisplay = formatOptionalDate(me.mfaGraceUntil);
+  const forcePasswordMessage = me.profile === "strict"
+    ? "You must change the one-time password before continuing."
+    : me.profile === "training"
+      ? "You must change the default password before continuing."
+      : "You must change your password before continuing.";
 
   React.useEffect(() => {
     if (initialTab === "password") {
@@ -208,7 +213,7 @@ export function ProfileModal({
               <line x1="12" y1="9" x2="12" y2="13" />
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
-            You must change the default password before continuing.
+            {forcePasswordMessage}
           </div>
         )}
 
