@@ -14,7 +14,7 @@ import (
 )
 
 func TestIDSImportReportsStorageOnlyRules(t *testing.T) {
-	server := NewServerWithEngine(stageStore(t), &mockAuditStore{}, &mockEngine{})
+	server := newTestServerWithEngine(stageStore(t), &mockAuditStore{}, &mockEngine{})
 	for _, duplicate := range []bool{false, true} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)

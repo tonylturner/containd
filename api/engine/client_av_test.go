@@ -88,11 +88,11 @@ func TestConfigureTrustSendsContentAndRevision(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := NewHTTPClient(srv.URL)
-	if err := c.ConfigureTrust(context.Background(), trust.Bundle{Revision: trust.NoRevision}); err != nil || got != `POST /internal/trust {"pem":"","revision":"none"}` {
+	if err := c.ConfigureTrust(context.Background(), testAdmission(), trust.Bundle{Revision: trust.NoRevision}); err != nil || got != `POST /internal/trust {"pem":"","revision":"none"}` {
 		t.Fatalf("ConfigureTrust = %v (%s)", err, got)
 	}
 	var se *StatusError
-	if err := c.ConfigureTrust(context.Background(), trust.Bundle{PEM: "bad"}); !errors.As(err, &se) || se.Code != http.StatusBadRequest {
+	if err := c.ConfigureTrust(context.Background(), testAdmission(), trust.Bundle{PEM: "bad"}); !errors.As(err, &se) || se.Code != http.StatusBadRequest {
 		t.Fatalf("ConfigureTrust(bad) = %#v", err)
 	}
 }

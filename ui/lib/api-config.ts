@@ -1,3 +1,4 @@
+import { isFactoryResetResult, isRuntimeApplyResult, postRuntimeResult } from "./api-runtime-result";
 import { authHeaders, fetchWithSession, handleUnauthorized } from "./api-core";
 import {
   getConfigJSON,
@@ -37,8 +38,8 @@ export const configAPI = {
   validateConfig: (cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/validate", cfg),
   factoryReset: (expectedRevision: string) =>
-    postJSONResult<{ message: string; loggedOut: boolean; warnings: string[] }>(
-      "/api/v1/system/factory-reset", { confirm: "NUCLEAR" }, expectedRevision,
+    postRuntimeResult(
+      "/api/v1/system/factory-reset", { confirm: "NUCLEAR" }, expectedRevision, isFactoryResetResult,
     ),
   diffConfig: async () => {
     const snapshot = await getConfigJSON<ConfigDiff>("/api/v1/config/diff");
@@ -81,14 +82,14 @@ export const configAPI = {
       "/api/v1/ids/restore",
       rules, expectedRevision,
     ),
-  commit: (expectedRevision: string) => postJSONResult<{ status: string }>("/api/v1/config/commit", {}, expectedRevision),
+  commit: (expectedRevision: string) => postRuntimeResult("/api/v1/config/commit", {}, expectedRevision, isRuntimeApplyResult),
   commitConfirmed: (expectedRevision: string, ttlSeconds?: number) =>
-    postJSONResult<{ status: string }>(
+    postRuntimeResult(
       "/api/v1/config/commit_confirmed",
-      ttlSeconds ? { ttl_seconds: ttlSeconds } : {}, expectedRevision,
+      ttlSeconds ? { ttl_seconds: ttlSeconds } : {}, expectedRevision, isRuntimeApplyResult,
     ),
   confirmCommit: (expectedRevision: string) =>
     postJSONResult<{ status: string }>("/api/v1/config/confirm", {}, expectedRevision),
   rollback: (expectedRevision: string) =>
-    postJSONResult<{ status: string }>("/api/v1/config/rollback", {}, expectedRevision),
+    postRuntimeResult("/api/v1/config/rollback", {}, expectedRevision, isRuntimeApplyResult),
 };

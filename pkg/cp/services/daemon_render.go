@@ -39,7 +39,7 @@ func publishDaemonFiles(ctx context.Context, files ...daemonFile) error {
 		var err error
 		f.temp, err = stageDaemonFile(f.path, f.body, 0o644)
 		if err != nil {
-			return err
+			return &daemonPublicationError{err}
 		}
 		if f.check != nil {
 			if err := f.check(ctx, f.temp); err != nil {
@@ -48,19 +48,29 @@ func publishDaemonFiles(ctx context.Context, files ...daemonFile) error {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return &daemonPublicationError{err}
 	}
 	for _, f := range files {
 		if f.body == nil {
 			if err := os.Remove(f.path); err != nil && !os.IsNotExist(err) {
-				return err
+				return &daemonPublicationError{err}
 			}
 		} else if err := os.Rename(f.temp, f.path); err != nil {
-			return err
+			return &daemonPublicationError{err}
 		}
 	}
 	return nil
 }
+
+// daemonRenderError distinguishes daemon parser rejection from transient file
+// publication/start failures. Never expose its underlying daemon output.
+type daemonRenderError struct{ error }
+
+// daemonPublicationError is an ordinary retryable filesystem delivery failure.
+type daemonPublicationError struct{ error }
+
+func (e *daemonRenderError) Unwrap() error      { return e.error }
+func (e *daemonPublicationError) Unwrap() error { return e.error }
 
 func checkDaemon(ctx context.Context, binary string, args ...string) error {
 	if binary == "" {
@@ -70,8 +80,11 @@ func checkDaemon(ctx context.Context, binary string, args ...string) error {
 	defer cancel()
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.CommandContext(ctx, binary, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s preflight: %w: %s", filepath.Base(binary), err, strings.TrimSpace(string(out)))
+	if err := cmd.Run(); err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return fmt.Errorf("%s preflight interrupted: %w", filepath.Base(binary), contextErr)
+		}
+		return &daemonRenderError{fmt.Errorf("%s preflight rejected: %w", filepath.Base(binary), err)}
 	}
 	return nil
 }

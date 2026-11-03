@@ -86,7 +86,7 @@ func TestIEC104InventoryRegisteredRoute(t *testing.T) {
 		Controlling: netip.MustParseAddrPort("192.0.2.1:50000"), Controlled: netip.MustParseAddrPort("192.0.2.2:2404"),
 		CA: 1, TypeID: 46, IOAs: []uint32{2001}, ControlDirection: true,
 	})
-	server := NewServerWithEngine(&mockStore{cfg: nil}, nil, inventoryEngine{inv: inv})
+	server := newTestServerWithEngine(&mockStore{cfg: nil}, nil, inventoryEngine{inv: inv})
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, authedRequest("GET", "/api/v1/inventory/iec104", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"pointsPerCA":256`) {
@@ -122,7 +122,7 @@ func TestInventoryObservationsRegisteredRoute(t *testing.T) {
 	inv.RecordEvent(ip, "192.0.2.3", dpi.Event{Proto: "modbus", FlowID: key.Hash()})
 	inv.RecordEvent(ip, "192.0.2.2", dpi.Event{Proto: "modbus"})
 	inv.RecordEvent(ip, "192.0.2.2", dpi.Event{Proto: "cip"})
-	server := NewServerWithEngine(&mockStore{}, nil, inventoryEngine{inv: inv})
+	server := newTestServerWithEngine(&mockStore{}, nil, inventoryEngine{inv: inv})
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, authedRequest("GET", "/api/v1/inventory/"+ip, nil))
 	var got []inventory.DiscoveredAsset

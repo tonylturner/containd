@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
@@ -79,10 +80,11 @@ func DefaultAVOptions() AVOptions {
 // supervises clamd and the FreshClam schedule, manages custom definitions
 // and scans complete objects. Its children live until Stop.
 type AVManager struct {
-	opts   AVOptions
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	delivery avDelivery
+	opts     AVOptions
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 	// op serializes Apply, definition changes and post-update reloads. It is
 	// a channel so goroutines being stopped can abandon the wait.
 	op chan struct{}
@@ -188,6 +190,10 @@ func (m *AVManager) unlock() { <-m.op }
 // possibly for minutes, releases it at once.
 func (m *AVManager) Stop() error {
 	m.cancel()
+	m.delivery.mu.Lock()
+	defer m.delivery.mu.Unlock()
+	m.delivery.meta = protection.Metadata{}
+	m.delivery.outcome = protection.OwnerOutcome{}
 	m.op <- struct{}{}
 	defer m.unlock()
 	m.stopObserver()
@@ -208,6 +214,14 @@ func (m *AVManager) Stop() error {
 // Apply waits for the proof only until ctx ends, and Status reports the
 // activation as pending until then.
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
+	m.delivery.mu.Lock()
+	defer m.delivery.mu.Unlock()
+	m.delivery.meta = protection.Metadata{}
+	m.delivery.outcome = protection.OwnerOutcome{}
+	return m.apply(ctx, cfg)
+}
+
+func (m *AVManager) apply(ctx context.Context, cfg config.AVConfig) error {
 	if err := m.Validate(ctx, cfg); err != nil {
 		return fmt.Errorf("%w: %w", ErrAVInvalid, err)
 	}

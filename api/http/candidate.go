@@ -10,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 var errCandidateRejected = errors.New("candidate edit rejected")
@@ -30,10 +29,6 @@ func committedConfigResponse(c *gin.Context, status string, body gin.H) {
 	}
 	body["status"] = status
 	c.JSON(http.StatusOK, body)
-}
-
-func protectionResponse(observation dpengine.ProtectionStatus) gin.H {
-	return gin.H{"applyId": observation.ApplyID, "protection": observation}
 }
 
 func replaceCandidate(c *gin.Context, ctx context.Context, store config.Store, cfg *config.Config) bool {

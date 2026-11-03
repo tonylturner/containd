@@ -221,16 +221,16 @@ func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL)
-	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err != nil {
+	if err := c.ApplyRules(ctx, testAdmission(), rules.Snapshot{}); err != nil {
 		t.Fatalf("ApplyRules: %v", err)
 	}
-	if err := c.Configure(ctx, config.DataPlaneConfig{Enforcement: true}); err != nil {
+	if err := c.Configure(ctx, testAdmission(), config.DataPlaneConfig{Enforcement: true}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if _, err := c.ConfigureServices(ctx, config.ServicesConfig{}); err == nil || !strings.Contains(err.Error(), "service apply failed") {
+	if err := c.ConfigureServices(ctx, testAdmission(), config.ServicesConfig{}); err == nil || !strings.Contains(err.Error(), "service apply failed") {
 		t.Fatalf("ConfigureServices error = %v", err)
 	}
-	if err := c.ConfigureInterfacesReplace(ctx, []config.Interface{{Name: "wan"}}); err != nil {
+	if err := c.ConfigureInterfaces(ctx, testAdmission(), []config.Interface{{Name: "wan"}}, true); err != nil {
 		t.Fatalf("ConfigureInterfacesReplace: %v", err)
 	}
 	statsOut, err := c.ListProtoStats(ctx)
@@ -284,7 +284,7 @@ func TestHTTPClientEmptyBaseURLGuards(t *testing.T) {
 
 	c := &HTTPClient{}
 	ctx := context.Background()
-	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err == nil {
+	if err := c.ApplyRules(ctx, testAdmission(), rules.Snapshot{}); err == nil {
 		t.Fatal("expected ApplyRules to reject empty BaseURL")
 	}
 	if _, err := c.PcapConfig(ctx); err == nil {
@@ -442,13 +442,13 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL)
-	if err := c.ConfigureInterfaces(ctx, []config.Interface{{Name: "wan", Device: "eth0"}}); err != nil {
+	if err := c.ConfigureInterfaces(ctx, testAdmission(), []config.Interface{{Name: "wan", Device: "eth0"}}, false); err != nil {
 		t.Fatalf("ConfigureInterfaces: %v", err)
 	}
-	if err := c.ConfigureRouting(ctx, config.RoutingConfig{}); err != nil {
+	if err := c.ConfigureRouting(ctx, testAdmission(), config.RoutingConfig{}, false); err != nil {
 		t.Fatalf("ConfigureRouting: %v", err)
 	}
-	if err := c.ConfigureRoutingReplace(ctx, config.RoutingConfig{}); err != nil {
+	if err := c.ConfigureRouting(ctx, testAdmission(), config.RoutingConfig{}, true); err != nil {
 		t.Fatalf("ConfigureRoutingReplace: %v", err)
 	}
 	talkers, err := c.ListTopTalkers(ctx, 3)
@@ -563,65 +563,5 @@ func TestRuntimeHealthWithoutBootID(t *testing.T) {
 	health, err := NewHTTPClient(srv.URL).RuntimeHealth(context.Background())
 	if err != nil || health.BootID != "" {
 		t.Fatalf("legacy RuntimeHealth = %+v, %v", health, err)
-	}
-}
-
-// TestConfigureServicesWarnings: a services apply the engine accepted with
-// warnings returns them; a failed one is an error carrying the engine's
-// detail.
-func TestConfigureServicesWarnings(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name     string
-		status   int
-		body     string
-		warnings []string
-		errText  string
-		service  string
-	}{
-		{"applied", http.StatusOK, `{"faults":[]}`, nil, "", ""},
-		{"pending", http.StatusOK, `{"faults":[],"warnings":["AV backend is still starting: clamd not ready; scanning is pending until it is ready"]}`,
-			[]string{"AV backend is still starting: clamd not ready; scanning is pending until it is ready"}, "", ""},
-		{"runtime", http.StatusOK, `{"faults":[{"service":"dhcp","kind":"runtime","message":"runtime apply failed"}]}`, nil, "", "dhcp"},
-		{"no body", http.StatusNoContent, "", nil, "engine services response", ""},
-		{"missing faults", http.StatusOK, `{"status":"applied"}`, nil, "missing faults", ""},
-		{"invalid service", http.StatusOK, `{"faults":[{"service":"dns","kind":"runtime","message":"failed"}]}`, nil, "invalid runtime fault", ""},
-		{"invalid kind", http.StatusOK, `{"faults":[{"service":"av","kind":"config","message":"failed"}]}`, nil, "invalid runtime fault", ""},
-		{"duplicate", http.StatusOK, `{"faults":[{"service":"av","kind":"runtime","message":"failed"},{"service":"av","kind":"runtime","message":"failed"}]}`, nil, "invalid runtime fault", ""},
-		{"malformed", http.StatusOK, `{"status":`, nil, "engine services response", ""},
-		{"unavailable", http.StatusServiceUnavailable, "request refused", nil, "engine services status 503: request refused", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/internal/services" || r.Method != http.MethodPost {
-					t.Errorf("%s %s", r.Method, r.URL.Path)
-				}
-				var svc config.ServicesConfig
-				if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
-					t.Errorf("decode services: %v", err)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.status)
-				// Static fixtures deliberately include malformed JSON to exercise the client decoder.
-				// nosemgrep: go.lang.security.audit.xss.no-io-writestring-to-responsewriter.no-io-writestring-to-responsewriter
-				_, _ = io.WriteString(w, tc.body)
-			}))
-			defer srv.Close()
-			result, err := NewHTTPClient(srv.URL).ConfigureServices(context.Background(), config.ServicesConfig{})
-			if tc.errText != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.errText) || result.Faults != nil {
-					t.Fatalf("result=%v err=%v, want error %q", result, err, tc.errText)
-				}
-				return
-			}
-			if err != nil || !reflect.DeepEqual(result.Warnings, tc.warnings) {
-				t.Fatalf("result=%v err=%v, want %v", result, err, tc.warnings)
-			}
-			if tc.service != "" && (len(result.Faults) != 1 || result.Faults[0].Service != tc.service || result.Faults[0].Kind != "runtime") {
-				t.Fatalf("lost typed runtime fault: %+v", result)
-			}
-		})
 	}
 }

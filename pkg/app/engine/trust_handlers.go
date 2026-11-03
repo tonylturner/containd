@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/common/trust"
 )
 
@@ -31,6 +32,19 @@ func trustHandler(t trustApplier) http.HandlerFunc {
 			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrustBody)).Decode(&b); err != nil {
 				http.Error(w, "invalid trusted CA request: "+err.Error(), http.StatusBadRequest)
 				return
+			}
+			// The owner exposes the revision of the live client trust pool. Equality
+			// is positive confirmation, not an inference from a previous HTTP result.
+			if t.TrustRevision() == b.Revision {
+				if err := b.Validate(); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				writeJSON(w, map[string]string{"revision": b.Revision})
+				return
+			}
+			if completion, ok := r.Context().Value(completionKey{}).(phaseCompletion); ok {
+				completion.c.outcome(completion.m, protection.SubsystemTrust, true, false, false, "")
 			}
 			if err := t.SetTrust(r.Context(), b); err != nil {
 				avError(w, err)

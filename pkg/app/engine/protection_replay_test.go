@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,10 +27,10 @@ func TestProtectionReplayWindow(t *testing.T) {
 	now := time.Now()
 	c.now = func() time.Time { return now }
 	calls := 0
-	h := c.admit(func(w http.ResponseWriter, _ *http.Request) { calls++; w.WriteHeader(200) })
+	h := c.admit("config", func(w http.ResponseWriter, _ *http.Request) { calls++; w.WriteHeader(200) })
 	post := func(id string, want int) {
 		t.Helper()
-		if w := coordinatedPost(h, id, `{}`); w.Code != want {
+		if w := coordinatedPost(c, h, id, `{}`); w.Code != want {
 			t.Fatalf("%q: %d %s; want %d", id, w.Code, w.Body, want)
 		}
 	}
@@ -61,8 +62,8 @@ func TestProtectionReplayExpiredAdmission(t *testing.T) {
 			defer func() { now = now.Add(applyReplayWindow) }()
 			return now
 		}
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
-		r.Header.Set(applyIDHeader, "old")
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		setProtectionHeaders(r, "old", "", "test-running")
 		if canceled {
 			ctx, cancel := context.WithCancel(r.Context())
 			cancel()
@@ -70,7 +71,7 @@ func TestProtectionReplayExpiredAdmission(t *testing.T) {
 			c.now = time.Now
 		}
 		w := httptest.NewRecorder()
-		c.admit(func(http.ResponseWriter, *http.Request) { t.Fatal("expired request admitted") })(w, r)
+		c.admit("config", func(http.ResponseWriter, *http.Request) { t.Fatal("expired request admitted") })(w, r)
 		if w.Code != http.StatusRequestTimeout || c.current != "" {
 			t.Fatalf("expired request: %d; current=%q", w.Code, c.current)
 		}

@@ -164,9 +164,9 @@ func TestStoredFaultPromotionRestoreConfirmAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts := 0
-	err = testApplyChange(s, ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
+	err = testApplyChange(s, ctx, ChangeCommit, 0, func(_ context.Context, _, next *RunningSnapshot) error {
 		attempts++
-		_, faults, err := Effective(next, nil)
+		_, faults, err := Effective(next.Config, nil)
 		if err != nil || len(faults) != 1 {
 			t.Fatalf("callback did not project stored fault: %v %+v", err, faults)
 		}

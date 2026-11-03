@@ -99,14 +99,14 @@ func TestRevisionRejectsWithoutEffects(t *testing.T) {
 		func() error { _, err := s.ConfirmCommit(ctx, base.Revision); return err },
 		func() error { _, err := s.Rollback(ctx, base.Revision); return err },
 		func() error {
-			_, err := s.ApplyChange(ctx, base.Revision, ChangeCommit, 0, func(context.Context, *Config, *Config) error {
+			_, err := s.ApplyChange(ctx, base.Revision, ChangeCommit, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 				t.Fatal("stale runtime apply ran")
 				return nil
 			})
 			return err
 		},
 		func() error {
-			_, err := s.ApplyReset(ctx, base.Revision, DefaultConfig(), func(context.Context, *Config, *Config) error {
+			_, err := s.ApplyReset(ctx, base.Revision, DefaultConfig(), func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 				t.Fatal("stale reset apply ran")
 				return nil
 			})
@@ -153,7 +153,7 @@ func TestRevisionInternalTransitionsAndNoABA(t *testing.T) {
 	if revisionSnapshot(t, s).Revision != before {
 		t.Fatal("no-op repair allocated")
 	}
-	if err := s.SetRuntimeApplyFault(ctx, "diagnostic"); err != nil {
+	if err := s.SetRuntimeApplyFault(ctx, runningState(t, s).RunningRevision, "diagnostic"); err != nil {
 		t.Fatal(err)
 	}
 	if revisionSnapshot(t, s).Revision != before {
@@ -189,13 +189,13 @@ func TestRevisionInternalTransitionsAndNoABA(t *testing.T) {
 		t.Fatal(err)
 	}
 	remember()
-	if err := testApplyChange(s, ctx, ChangeCommit, 0, func(context.Context, *Config, *Config) error {
+	if err := testApplyChange(s, ctx, ChangeCommit, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 		return errors.New("runtime failure")
 	}); err == nil {
 		t.Fatal("apply failure hidden")
 	}
 	remember()
-	if err := testApplyReset(s, ctx, DefaultConfig(), func(context.Context, *Config, *Config) error { return nil }); err != nil {
+	if err := testApplyReset(s, ctx, DefaultConfig(), func(context.Context, *RunningSnapshot, *RunningSnapshot) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	remember()
@@ -267,7 +267,7 @@ func TestRevisionCompensationDoesNotOverwriteAnotherHandle(t *testing.T) {
 	}
 	defer second.Close()
 	var concurrent Revision
-	_, err = first.ApplyChange(ctx, revisionSnapshot(t, first).Revision, ChangeCommit, 0, func(context.Context, *Config, *Config) error {
+	_, err = first.ApplyChange(ctx, revisionSnapshot(t, first).Revision, ChangeCommit, 0, func(context.Context, *RunningSnapshot, *RunningSnapshot) error {
 		base := revisionSnapshot(t, second)
 		cfg := base.Candidate
 		cfg.Description = "newer candidate from another handle"

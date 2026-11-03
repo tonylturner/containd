@@ -19,7 +19,9 @@ func testBaseRevision(store config.Store, ctx context.Context) config.Revision {
 	return snapshot.Revision
 }
 func testApplyChange(store config.RuntimeStore, ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
-	_, err := store.ApplyChange(ctx, testBaseRevision(store, ctx), change, ttl, apply)
+	_, err := store.ApplyChange(ctx, testBaseRevision(store, ctx), change, ttl, func(ctx context.Context, previous, next *config.RunningSnapshot) error {
+		return apply(ctx, previous.Config, next.Config)
+	})
 	return err
 }
 func testCommit(store config.Store, ctx context.Context) error {

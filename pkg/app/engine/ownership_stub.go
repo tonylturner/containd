@@ -17,6 +17,7 @@ import (
 )
 
 type ownershipManager struct {
+	ownershipDelivery
 	reservation *mgmtpath.Reservation
 	guard       *netcfg.ManagementGuard
 	applyMu     sync.Mutex

@@ -32,7 +32,7 @@ async function uploadCA(page: Page) {
 test("trusted CA upload reports the revision the engine applied", async ({ page }) => {
   await mockAPI(page, {
     "/api/v1/system/tls": { json: { httpEnabled: true, httpsEnabled: true } },
-    "/api/v1/system/tls/trusted-ca": { json: { status: "updated", revision: "sha256:abc123" } },
+    "/api/v1/system/tls/trusted-ca": { json: { status: "updated", revision: "sha256:abc123", warnings: [] } },
   });
   await uploadCA(page);
   await expect(page.getByText("Trust certificates are active.")).toBeVisible();
@@ -44,17 +44,17 @@ test("trusted CA stored but not applied is not reported as applied", async ({ pa
   await mockAPI(page, {
     "/api/v1/system/tls": { json: { httpEnabled: true, httpsEnabled: true } },
     "/api/v1/system/tls/trusted-ca": {
-      json: { status: "stored", revision: "sha256:abc123", warnings: ["trust: engine unavailable"] },
+      json: { status: "stored", revision: "sha256:abc123", warnings: ["trust: owner acknowledgement pending"] },
     },
   });
   await uploadCA(page);
   await expect(
     page.getByRole("status").filter({
-      hasText: "Trust certificates saved but not active. Applying configuration retries activation: trust: engine unavailable",
+      hasText: "Trust certificates saved; owner acknowledgement pending. Check live protection status for retry or repair details: trust: owner acknowledgement pending",
     }),
   ).toBeVisible();
   await page.getByText("Trust update details", { exact: true }).click();
-  await expect(page.getByText("Revision: sha256:abc123: trust: engine unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Revision: sha256:abc123: trust: owner acknowledgement pending", { exact: true })).toBeVisible();
   await expect(page.getByText("Trust certificates are active.", { exact: true })).toHaveCount(0);
 });
 
@@ -93,3 +93,16 @@ test("antivirus card shows a reported scan series", async ({ page }) => {
   await expect(page.locator('[title="AV scans per minute"]')).toHaveCount(1);
   await expect(page.locator('[data-telemetry="AV scans per minute"]')).toContainText("Rate: 12.0 /min");
 });
+
+
+for (const body of [{}, { status: "accepted", revision: "sha256:abc123", warnings: [] }, { status: "updated", warnings: [] }]) {
+  test(`malformed trust upload never claims activation: ${JSON.stringify(body)}`, async ({ page }) => {
+    await mockAPI(page, {
+      "/api/v1/system/tls": { json: { httpEnabled: true, httpsEnabled: true } },
+      "/api/v1/system/tls/trusted-ca": { json: body },
+    });
+    await uploadCA(page);
+    await expect(page.getByText("Trust owner acknowledgement could not be verified. Refresh protection status.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Trust certificates are active.", { exact: true })).toHaveCount(0);
+  });
+}

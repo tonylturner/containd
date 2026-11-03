@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -17,14 +18,18 @@ import (
 // ProtectionStatus is an engine-owned observation, not an apply acknowledgement.
 // It is shared with the engine API client; slices returned by Protection are copies.
 type ProtectionStatus struct {
-	BootID           string                `json:"bootId"`
-	ApplyID          string                `json:"applyId"`
-	InstalledApplyID string                `json:"installedApplyId"`
-	State            string                `json:"state"`
-	Retryable        bool                  `json:"retryable"`
-	ObservedAt       time.Time             `json:"observedAt"`
-	Components       []ProtectionComponent `json:"components"`
-	Effects          []ProtectionEffect    `json:"effects"`
+	RunningRevision  protection.Revision         `json:"runningRevision"`
+	Mode             protection.ApplyMode        `json:"mode"`
+	Installed        *protection.Acknowledgement `json:"installed"`
+	Subsystems       []protection.OwnerOutcome   `json:"subsystems"`
+	BootID           string                      `json:"bootId"`
+	ApplyID          string                      `json:"applyId"`
+	InstalledApplyID string                      `json:"installedApplyId"`
+	State            string                      `json:"state"`
+	Retryable        bool                        `json:"retryable"`
+	ObservedAt       time.Time                   `json:"observedAt"`
+	Components       []ProtectionComponent       `json:"components"`
+	Effects          []ProtectionEffect          `json:"effects"`
 }
 
 type ProtectionComponent struct {
@@ -61,11 +66,16 @@ type protectionState struct {
 	applying         bool
 	installFailed    bool
 	nflogLost        bool
+	ruleInputApply   string
+	ruleInput        []byte
+	installedInput   []byte
+	outcomes         map[protection.SubsystemName]protection.OwnerOutcome
+	serviceOutcomes  func() []protection.OwnerOutcome
 	store            *events.Writer
 }
 
 func newProtection(store *events.Writer) *protectionState {
-	p := &protectionState{store: store, components: map[string]ProtectionComponent{}}
+	p := &protectionState{store: store, components: map[string]ProtectionComponent{}, outcomes: map[protection.SubsystemName]protection.OwnerOutcome{}}
 	p.status = ProtectionStatus{BootID: rand.Text(), State: "pending", Components: []ProtectionComponent{}, Effects: []ProtectionEffect{}}
 	p.setLocked("nft", "pending", "awaiting configuration", 0, 0)
 	return p
@@ -195,7 +205,7 @@ func (p *protectionState) recomputeLocked() {
 	}
 }
 
-// BeginProtection publishes pending before an apply changes any runtime service.
+// BeginProtection publishes nft pending before configuration or policy changes.
 func (e *Engine) BeginProtection(bootID, applyID string) {
 	p := e.protection
 	p.update(func() {
@@ -212,11 +222,48 @@ func (e *Engine) BeginProtection(bootID, applyID string) {
 func (e *Engine) Protection() ProtectionStatus {
 	p := e.protection
 	p.mu.Lock()
+	observe := p.serviceOutcomes
+	p.mu.Unlock()
+	var services []protection.OwnerOutcome
+	if observe != nil {
+		services = observe()
+	}
+	p.mu.Lock()
 	defer p.mu.Unlock()
 	st := p.status
 	st.ObservedAt = time.Now().UTC()
 	st.Components = slices.Clone(st.Components)
 	st.Effects = slices.Clone(st.Effects)
+	if st.Installed != nil {
+		ack := *st.Installed
+		st.Installed = &ack
+	}
+	st.Subsystems = p.outcomeSnapshotLocked()
+	if observe != nil {
+		// These owners' live ledgers are authoritative even when an unlabelled
+		// mutation or Stop removed their identity. Never resurrect a copied ack.
+		st.Subsystems = slices.DeleteFunc(st.Subsystems, func(out protection.OwnerOutcome) bool {
+			return out.Name == protection.SubsystemAV || out.Name == protection.SubsystemWireGuard || out.Name == protection.SubsystemDHCP
+		})
+	}
+	for _, out := range services {
+		replaced := false
+		for i := range st.Subsystems {
+			if st.Subsystems[i].Name == out.Name {
+				st.Subsystems[i] = cloneProtectionOutcome(out)
+				replaced = true
+				break
+			}
+		}
+		if !replaced && out.Name != "" {
+			st.Subsystems = append(st.Subsystems, cloneProtectionOutcome(out))
+		}
+		if out.Retryable {
+			st.Retryable = true
+		}
+	}
+	slices.SortFunc(st.Subsystems, func(a, b protection.OwnerOutcome) int { return strings.Compare(string(a.Name), string(b.Name)) })
+
 	return st
 }
 
@@ -266,13 +313,17 @@ func (p *protectionState) bindAttempt(epoch uint64, group uint16, err error, att
 }
 
 // SetScanProtection records actual gate admission separately from scanner readiness.
-func (e *Engine) SetScanProtection(gateState, gateReason string, scannerReady bool, scannerReason string, unknown bool) {
+// An explicitly disabled scanner is off; readiness errors while enabled remain pending.
+func (e *Engine) SetScanProtection(gateState, gateReason string, scannerEnabled, scannerReady bool, scannerReason string, unknown bool) {
 	p := e.protection
 	p.update(func() {
 		p.gateUnknown = unknown
 		p.setLocked("scan-gate", gateState, gateReason, 0, 0)
 		state := "pending"
-		if scannerReady {
+		switch {
+		case !scannerEnabled:
+			state, scannerReason = "off", ""
+		case scannerReady:
 			state = "ready"
 			scannerReason = ""
 		}
@@ -283,4 +334,13 @@ func (e *Engine) SetScanProtection(gateState, gateReason string, scannerReady bo
 // SetProtectionBootID sets process identity before admitting the first apply.
 func (e *Engine) SetProtectionBootID(id string) {
 	e.protection.update(func() { e.protection.status.BootID = id })
+}
+
+// ObserveServiceDelivery projects the AV, WireGuard and DHCP owner ledgers without retaining copied
+// apply-time proofs. The callback must not call back into the engine; it runs
+// outside the protection lock and must return detached owner observations.
+func (e *Engine) ObserveServiceDelivery(observe func() []protection.OwnerOutcome) {
+	e.protection.mu.Lock()
+	defer e.protection.mu.Unlock()
+	e.protection.serviceOutcomes = observe
 }

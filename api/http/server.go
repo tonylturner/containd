@@ -6,24 +6,20 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
-	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/app/convergence"
 	"github.com/tonylturner/containd/pkg/common/profile"
-	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
-	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/demo"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
@@ -36,7 +32,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
@@ -52,16 +47,8 @@ func NewServer(store config.Store, auditStore audit.Store) *gin.Engine {
 
 // EngineClient is an optional interface for pushing compiled snapshots to the data plane.
 type EngineClient interface {
-	Configure(ctx context.Context, cfg config.DataPlaneConfig) error
-	ConfigureInterfaces(ctx context.Context, ifaces []config.Interface) error
-	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
-	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
-	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
-	// ConfigureServices applies the services configuration and returns the
-	// independent runtime outcomes and pending warnings.
-	ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error)
+	convergence.EngineClient
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
-	ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error)
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
 	PcapConfig(ctx context.Context) (config.PCAPConfig, error)
 	SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error)
@@ -85,8 +72,6 @@ type EngineClient interface {
 	ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error)
 	UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error)
 	DeleteAVDef(ctx context.Context, name string) error
-	// ConfigureTrust distributes the additional CA bundle to the engine.
-	ConfigureTrust(ctx context.Context, b trust.Bundle) error
 }
 
 // RulePreviewClient delegates impact evaluation to the engine's live policy context.
@@ -153,12 +138,8 @@ type ServicesValidator interface {
 	Validate(ctx context.Context, cfg config.ServicesConfig) error
 }
 
-// ServicesApplier applies a validated projection and its fault set. Runtime
-// failures narrow that projection and return warnings, never block enforcement.
-type ServicesApplier interface {
-	ApplyEffective(ctx context.Context, cfg config.ServicesConfig, faults []config.ServiceConfigError) (config.ServicesConfig, []string)
-	RecordEngineFaults([]config.ServiceFault)
-}
+// ServicesApplier retains runtime proof in the existing service owners.
+type ServicesApplier interface{ convergence.ServiceApplier }
 
 // DemoController persists management intent before engine delivery.
 type DemoController interface {
@@ -201,7 +182,42 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 			listenerFaults = provider
 		}
 	}
+	var runtime convergence.Coordinator
+	for _, opt := range opts {
+		if supplied, ok := opt.(convergence.Coordinator); ok {
+			runtime = supplied
+		}
+	}
+	if runtime == nil {
+		if rs, ok := store.(config.RuntimeStore); ok {
+			var refresh func(context.Context, *config.RunningSnapshot) error
+			if services == nil {
+				manager := cpservices.NewManager(cpservices.ManagerOptions{})
+				services = manager
+				refresh = func(ctx context.Context, snapshot *config.RunningSnapshot) error {
+					return RefreshLocalMaterial(ctx, store, manager, snapshot)
+				}
+			}
+			if services != nil {
+				runtimeEngine := convergence.EngineClient(engine)
+				if runtimeEngine == nil {
+					runtimeEngine = unavailableEngine{}
+				}
+				var err error
+				runtime, err = convergence.New(convergence.Options{Store: rs, Engine: runtimeEngine, Services: services, Environment: &RuntimeEnvironment{Store: store, Engine: engine, RefreshMaterial: refresh}})
+				if err != nil {
+					panic(err)
+				} // dependencies above are constructed, never optional here
+			}
+		}
+	}
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if runtime != nil {
+			c.Set(runtimeContextKey, runtime)
+		}
+		c.Next()
+	})
 	r.Use(accessLogger(), revisionResponseHeaders(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -546,139 +562,4 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 		auditLog(c, audit.Record{Action: "config.save_candidate", Target: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"status": "staged"})
 	}
-}
-
-// ApplyRunningConfig replays the current stored running config through the same
-// serialized apply path used by commits and rollback.
-func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
-	return applyRunningConfig(ctx, store, engine, services)
-}
-
-// runningConfigApplyMu protects replay and running-store mutations coupled to
-// runtime applies. Hold it before loading a config to modify, through its apply.
-var runningConfigApplyMu sync.Mutex
-
-func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
-	// Load only after acquiring the lock: a queued replay must not push a
-	// snapshot read before a newer commit's apply.
-	runningConfigApplyMu.Lock()
-	defer runningConfigApplyMu.Unlock()
-	return applyRunningConfigLocked(ctx, store, engine, services, nil)
-}
-
-// applyRunningConfigLocked is the single apply sequence. Callers must hold
-// runningConfigApplyMu, including across any preceding store mutation.
-func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) (warnings []string, applyErr error) {
-	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := config.CheckManagementBootFault(ctx, store); err != nil {
-		return nil, err
-	}
-	cfg, err := store.Load(ctx)
-	if err != nil {
-		if errors.Is(err, config.ErrNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	warnings, _, err = applyConfigSnapshot(ctx, store, engine, services, previous, cfg)
-	return warnings, err
-}
-
-// applyConfigSnapshot must not load or mutate the store: a transition holds its
-// mutex across this callback. Validation uses only immutable boot authority.
-func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, dpengine.ProtectionStatus, error) {
-	ctx = engineclient.NewApplyContext(ctx)
-	// Bind unbound default logical interfaces to discovered kernel devices
-	// before applying them. Explicit bindings are applied exactly as staged
-	// and validated. Keep this change in memory only: applying a previously
-	// loaded snapshot must never persist it over a newer store mutation.
-	// Bootstrap owns persisted default device bindings.
-	// Reserved bindings were persisted by bootstrap; never normalize them on replay.
-	if config.ReservationForStore(store) == nil {
-		bindUnboundDefaultInterfaceDevices(cfg)
-	}
-	effective, faults, err := config.EffectiveForStore(store, cfg)
-	if err != nil {
-		return nil, dpengine.ProtectionStatus{}, err
-	}
-	cfg = effective
-	scanWarnings, _ := config.ValidateScanSelection(cfg)
-	// Compile once before any side effects. A sink may subsequently quarantine
-	// another service; compile that narrower projection again before engine apply.
-	snap, err := compile.CompileSnapshot(cfg)
-	if err != nil {
-		return nil, dpengine.ProtectionStatus{}, err
-	}
-	if services != nil {
-		var serviceWarnings []string
-		cfg.Services, serviceWarnings = services.ApplyEffective(ctx, cfg.Services, faults)
-		scanWarnings = append(scanWarnings, serviceWarnings...)
-		snap, err = compile.CompileSnapshot(cfg)
-		if err != nil {
-			return nil, dpengine.ProtectionStatus{}, err
-		}
-	}
-	for _, fault := range faults {
-		scanWarnings = append(scanWarnings, fault.Service+": quarantined")
-	}
-	warnings := scanWarnings
-	if engine == nil {
-		return nil, dpengine.ProtectionStatus{}, errors.New("engine unavailable")
-	}
-	// Auxiliary infrastructure remains best-effort. Dataplane configuration
-	// and ruleset application are mandatory: they control enforcement.
-	if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-		warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
-	}
-	if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
-		warnings = append(warnings, warning)
-	}
-	if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-		warnings = append(warnings, fmt.Sprintf("routing: %v", err))
-	}
-	// Trust precedes services so AV clients verify with the current bundle.
-	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
-		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
-	}
-	serviceResult, err := engine.ConfigureServices(ctx, cfg.Services)
-	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("services: %v", err))
-	} else {
-		if services != nil {
-			services.RecordEngineFaults(serviceResult.Faults)
-		}
-		for _, fault := range serviceResult.Faults {
-			warnings = append(warnings, "services: "+fault.Service+": "+fault.Message)
-		}
-	}
-	for _, warning := range serviceResult.Warnings {
-		warnings = append(warnings, "services: "+warning)
-	}
-	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-		return nil, dpengine.ProtectionStatus{}, fmt.Errorf("dataplane: %w", err)
-	}
-	// Replay config on boot/reconnect, but preserve operational captures
-	// across promotions that do not change saved capture settings.
-	if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
-		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-			warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
-		}
-		if cfg.PCAP.Enabled {
-			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-				warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
-			}
-		} else {
-			if _, err := engine.StopPcap(ctx); err != nil {
-				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
-			}
-		}
-	}
-	observation, err := engine.ApplyRules(ctx, snap)
-	if err != nil {
-		return nil, dpengine.ProtectionStatus{}, fmt.Errorf("ruleset: %w", err)
-	}
-	return warnings, engineclient.NormalizeProtection(observation, engineclient.ApplyID(ctx)), nil
 }

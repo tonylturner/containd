@@ -13,6 +13,9 @@ import (
 // zero rather than NULL, so NOT IN cannot accidentally retain every generation.
 // Callers hold mu (or are booting before the store is made available).
 func (s *SQLiteStore) commitStateTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM running_identity WHERE key NOT IN (SELECT key FROM configs)`); err != nil {
+		return err
+	}
 	if !s.recoveryHoldsBanks {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM ids_banks WHERE id NOT IN (
    SELECT COALESCE(CASE WHEN json_valid(data) THEN json_extract(data, '$.ids_bank') END, 0)
@@ -21,7 +24,11 @@ func (s *SQLiteStore) commitStateTx(ctx context.Context, tx *sql.Tx) error {
 			return fmt.Errorf("reclaim IDS banks: %w", err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.notifyStoreLocked()
+	return nil
 }
 
 // finishBankRecoveryLocked releases the saved-row hold only after apply or

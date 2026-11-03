@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ type NTPManager struct {
 	lastStop   time.Time
 	lastExit   string
 	cmd        *exec.Cmd
+	done       <-chan struct{}
 	log        *zap.SugaredLogger
 }
 
@@ -112,8 +114,11 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 	path := m.configPath()
 	if !cfg.Enabled {
 		m.mu.Lock()
-		m.stopLocked()
+		err := m.stopLocked()
 		m.mu.Unlock()
+		if err != nil {
+			return err
+		}
 		_ = os.Remove(path)
 		m.mu.Lock()
 		m.lastCfg = cfg
@@ -138,6 +143,13 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 	m.mu.Unlock()
 	if m.Supervise {
 		m.startOrRestart(ctx, path)
+		m.mu.Lock()
+		why := m.lastError
+		running := m.cmd != nil
+		m.mu.Unlock()
+		if why != "" || !running {
+			return fmt.Errorf("NTP daemon startup failed")
+		}
 	}
 	return nil
 }
@@ -240,8 +252,10 @@ func (m *NTPManager) startDaemon(configPath string) <-chan string {
 		return nil
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
-		_ = m.cmd.Process.Signal(os.Interrupt)
-		time.Sleep(50 * time.Millisecond)
+		if err := m.stopLocked(); err != nil {
+			m.lastError = err.Error()
+			return nil
+		}
 	}
 
 	// Use background context so the daemon outlives the API request that triggered it.
@@ -257,6 +271,8 @@ func (m *NTPManager) startDaemon(configPath string) <-chan string {
 		return nil
 	}
 	m.cmd = cmd
+	done := make(chan struct{})
+	m.done = done
 	m.lastError = ""
 	m.lastStart = time.Now().UTC()
 	m.log.Infow("started NTP daemon", "impl", m.NTPDName, "pid", cmd.Process.Pid, "config", configPath)
@@ -266,6 +282,7 @@ func (m *NTPManager) startDaemon(configPath string) <-chan string {
 	earlyExit := make(chan string, 1)
 	go func() {
 		err := cmd.Wait()
+		close(done)
 		exit := "ok"
 		if err != nil {
 			exit = err.Error()
@@ -288,15 +305,18 @@ func (m *NTPManager) startDaemon(configPath string) <-chan string {
 	return earlyExit
 }
 
-func (m *NTPManager) stopLocked() {
+func (m *NTPManager) stopLocked() error {
 	if m.cmd != nil && m.cmd.Process != nil {
-		_ = m.cmd.Process.Signal(os.Interrupt)
+		if err := stopManagedProcess(m.cmd.Process, m.done); err != nil {
+			return err
+		}
 		m.log.Infow("stopped NTP daemon", "impl", m.NTPDName, "pid", m.cmd.Process.Pid)
 		m.emit("service.ntp.stopped", map[string]any{"pid": m.cmd.Process.Pid, "count": 1})
 		m.lastStop = time.Now().UTC()
 		m.lastExit = "stopped"
 	}
 	m.cmd = nil
+	return nil
 }
 
 func (m *NTPManager) emit(kind string, attrs map[string]any) {

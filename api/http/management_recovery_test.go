@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -30,14 +32,14 @@ type recoveryEngine struct {
 	rulesErr  error
 }
 
-func (e *recoveryEngine) Configure(_ context.Context, dp config.DataPlaneConfig) error {
+func (e *recoveryEngine) Configure(_ context.Context, admission protection.Admission, dp config.DataPlaneConfig) error {
 	e.dp = dp
 	return e.configErr
 }
 
-func (e *recoveryEngine) ApplyRules(_ context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
+func (e *recoveryEngine) ApplyRules(_ context.Context, admission protection.Admission, snapshot rules.Snapshot) error {
 	e.snapshot = snapshot
-	return dpengine.ProtectionStatus{}, e.rulesErr
+	return e.rulesErr
 }
 
 func TestManagementRecoveryApplyAndStatus(t *testing.T) {
@@ -48,7 +50,7 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 	}
 	engine := &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}
 	services := &stageServices{}
-	if _, err := ApplyBootConfig(ctx, store, engine, services); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err != nil {
 		t.Fatal(err)
 	}
 	if engine.mutations != 0 || services.mutations != 0 || !engine.dp.Enforcement ||
@@ -114,19 +116,19 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 	}
 	// Failure cannot become a warning/success, even for an nft permission error.
 	engine.rulesErr = errors.New("nft apply failed: permission denied")
-	if _, err := ApplyBootConfig(ctx, store, engine, services); err == nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err == nil {
 		t.Fatal("recovery apply failure ignored")
 	}
 	engine.rulesErr = nil
 	engine.configErr = errors.New("configure failed")
-	if _, err := ApplyBootConfig(ctx, store, engine, services); err == nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err == nil {
 		t.Fatal("recovery configure failure ignored")
 	}
 	engine.configErr = nil
 	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApplyBootConfig(ctx, store, engine, services); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err != nil {
 		t.Fatal(err)
 	}
 	if engine.mutations == 0 || services.mutations == 0 {
@@ -134,7 +136,7 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 	}
 }
 
-func TestQueuedRecoveryRechecksPromotionUnderApplyLock(t *testing.T) {
+func TestRecoveryReplayRechecksCommittedAuthority(t *testing.T) {
 	store, _ := reservedAPIStore(t)
 	ctx := context.Background()
 	if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
@@ -142,18 +144,11 @@ func TestQueuedRecoveryRechecksPromotionUnderApplyLock(t *testing.T) {
 	}
 	engine := &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}
 	services := &stageServices{}
-	runningConfigApplyMu.Lock()
-	done := make(chan error, 1)
-	go func() {
-		_, err := ApplyBootConfig(ctx, store, engine, services)
-		done <- err
-	}()
-	err := testCommit(store, ctx)
-	runningConfigApplyMu.Unlock()
-	if err != nil {
+	coordinator := testCoordinator(t, store, engine, services)
+	if _, err := coordinator.Change(ctx, testBaseRevision(store, ctx), config.ChangeCommit, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-done; err != nil {
+	if _, err := coordinator.Replay(ctx, false); err != nil {
 		t.Fatal(err)
 	}
 	if engine.snapshot.Version == config.ManagementRecoveryVersion || engine.mutations == 0 || services.mutations == 0 {
@@ -184,7 +179,7 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 	}
 	engine := &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}
 	services := &stageServices{}
-	if _, err := ApplyBootConfig(ctx, store, engine, services); err != nil {
+	if _, err := replayTestConfig(ctx, store, engine, services); err != nil {
 		t.Fatal(err)
 	}
 	snap := engine.snapshot

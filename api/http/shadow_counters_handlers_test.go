@@ -4,12 +4,13 @@ package httpapi
 import (
 	"context"
 	"errors"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 type shadowEngine struct {
@@ -25,7 +26,7 @@ func (e *shadowEngine) ShadowCounters(context.Context) (dpengine.ShadowCounters,
 func TestShadowCountersRoute(t *testing.T) {
 	since := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	eng := &shadowEngine{mockEngine: &mockEngine{}, counters: dpengine.ShadowCounters{Available: true, SnapshotVersion: "applied", Since: &since, Unit: "messages", Rules: []dpengine.ShadowRuleCount{{RuleID: "trial", ShadowMatches: 12, WouldAllow: 10, WouldDeny: 2}}}}
-	s := NewServerWithEngine(&mockStore{}, nil, eng)
+	s := newTestServerWithEngine(&mockStore{}, nil, eng)
 	get := func(authed bool) *httptest.ResponseRecorder {
 		r := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/firewall/shadow-counters", nil)

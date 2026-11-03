@@ -14,19 +14,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
 type resetCaptureServices struct{ config.ServicesConfig }
 
-func (s *resetCaptureServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+func (s *resetCaptureServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
 	s.ServicesConfig = cfg
-	return cfg, nil
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 
 func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
@@ -85,7 +88,7 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				protected := router.Group("", authMiddleware(us))
 				protected.GET("/auth/me", func(c *gin.Context) { c.Status(http.StatusOK) })
 				protected.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-				protected.POST("/reset", factoryResetHandler(store, us, engine, services, func(_ context.Context, initiator string) { revoked = initiator }))
+				protected.POST("/reset", testRuntimeHandler(t, store, engine, services, factoryResetHandler(store, us, engine, services, func(_ context.Context, initiator string) { revoked = initiator })))
 				rec := httptest.NewRecorder()
 				serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
 				if rec.Code != http.StatusOK {
@@ -255,7 +258,7 @@ func TestFactoryResetPreservesSecretlessLabBypass(t *testing.T) {
 	router := gin.New()
 	router.Use(authMiddleware(us))
 	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-	router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
+	router.POST("/reset", testRuntimeHandler(t, store, &mockEngine{}, nil, factoryResetHandler(store, us, &mockEngine{}, nil)))
 	router.GET("/auth/me", func(c *gin.Context) { c.Status(http.StatusOK) })
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, router, rec, withTestRevision(store, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), "lab")))
@@ -289,7 +292,7 @@ func TestFactoryResetReportsAuditCleanupWarning(t *testing.T) {
 		c.Next()
 	})
 	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-	router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
+	router.POST("/reset", testRuntimeHandler(t, store, &mockEngine{}, nil, factoryResetHandler(store, us, &mockEngine{}, nil)))
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "audit reset:") || strings.Contains(rec.Body.String(), "completed") {
@@ -310,7 +313,7 @@ func TestFactoryResetReportsDynamicBlockClearFailure(t *testing.T) {
 	engine := &mockEngine{clearErr: errors.New("engine blocks clear status 502: nft: netlink busy")}
 	router := gin.New()
 	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
-	router.POST("/reset", factoryResetHandler(store, us, engine, nil))
+	router.POST("/reset", testRuntimeHandler(t, store, engine, nil, factoryResetHandler(store, us, engine, nil)))
 	rec := httptest.NewRecorder()
 	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	var body struct {
@@ -331,4 +334,7 @@ func TestFactoryResetReportsDynamicBlockClearFailure(t *testing.T) {
 	}
 }
 
-func (*resetCaptureServices) RecordEngineFaults([]config.ServiceFault) {}
+func (*resetCaptureServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (*resetCaptureServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

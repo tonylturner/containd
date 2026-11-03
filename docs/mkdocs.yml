@@ -57,6 +57,7 @@ nav:
   - Operations:
       - CLI: cli.md
       - Services: services.md
+      - Runtime Protection: protection.md
       - Reserved Management Path: management-reservation.md
   - Architecture:
       - Overview: architecture.md

@@ -24,7 +24,7 @@ func TestCLIStatusTracksOtherSessionsCandidateEdits(t *testing.T) {
 			ShellMode: config.SSHShellModeAppliance, ShellModeSource: config.SSHShellModeSourceDefault,
 		}, nil
 	})
-	server := httptest.NewServer(NewServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}}))
+	server := httptest.NewServer(newTestServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}}))
 	defer server.Close()
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{
 		Addr: server.Listener.Addr().String(), Enabled: true,

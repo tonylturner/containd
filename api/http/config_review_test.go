@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
+	deliveryservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 )
 
@@ -63,7 +66,12 @@ func TestPromotionReconcilesOnlyChangedPCAPSettings(t *testing.T) {
 					t.Fatal(err)
 				}
 				engine := &captureApplyEngine{runtimeMockEngine: newRuntimeMockEngine()}
-				server := NewServerWithEngine(store, nil, engine)
+				coordinator := testCoordinator(t, store, engine, nil)
+				if err := coordinator.Tick(ctx); err != nil {
+					t.Fatal(err)
+				}
+				engine.starts, engine.stops, engine.settings = 0, 0, 0
+				server := NewServerWithEngineAndServices(store, nil, engine, &stageServices{}, nil, coordinator)
 				rec := requestStage(t, server, "POST", "/pcap/start", map[string]any{"interfaces": []string{"explicit"}})
 				if rec.Code != http.StatusOK || !reflect.DeepEqual(engine.pcapStartCfg.Interfaces, []string{"explicit"}) {
 					t.Fatalf("explicit capture failed: %d %s", rec.Code, rec.Body)
@@ -161,8 +169,8 @@ type validationReadServices struct {
 	store config.Store
 }
 
-func (s validationReadServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
-	return cfg, nil
+func (s validationReadServices) ApplyDelivery(_ context.Context, _ protection.Metadata, cfg config.ServicesConfig, _ []config.ServiceConfigError) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{Effective: cfg}, nil
 }
 func (s validationReadServices) Validate(ctx context.Context, _ config.ServicesConfig) error {
 	return configReadableDuringDiscovery(ctx, s.store)
@@ -228,4 +236,7 @@ func TestConfigReadsOmitBankAndRoundTripRetainsIt(t *testing.T) {
 	}
 }
 
-func (validationReadServices) RecordEngineFaults([]config.ServiceFault) {}
+func (validationReadServices) DeliveryOutcomes() []protection.OwnerOutcome { return nil }
+func (validationReadServices) RetryDelivery(context.Context, protection.Metadata) (deliveryservices.DeliveryResult, error) {
+	return deliveryservices.DeliveryResult{}, nil
+}

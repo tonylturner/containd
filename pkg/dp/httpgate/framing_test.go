@@ -270,7 +270,8 @@ func TestPanicInScannerEndsOnlyThatConnection(t *testing.T) {
 				t.Fatalf("status %d after the panic", resp.StatusCode)
 			}
 			start := time.Now()
-			if err := g.shutdown(5 * time.Second); err != nil || time.Since(start) > 2*time.Second {
+			err := g.shutdown(2 * time.Second)
+			if err != nil || time.Since(start) > 2*time.Second {
 				t.Fatalf("Shutdown after a panic: %v in %v", err, time.Since(start))
 			}
 		})

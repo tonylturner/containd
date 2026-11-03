@@ -225,7 +225,7 @@ func TestFactoryResetPreservesTLSIdentity(t *testing.T) {
 			}
 			defer us.Close()
 			router := gin.New()
-			router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
+			router.POST("/reset", testRuntimeHandler(t, store, &mockEngine{}, nil, factoryResetHandler(store, us, &mockEngine{}, nil)))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(`{"confirm":"NUCLEAR"}`))))
 			if rec.Code != 200 {

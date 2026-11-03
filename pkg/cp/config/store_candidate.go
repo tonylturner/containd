@@ -125,7 +125,10 @@ func writeReferencedConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *C
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, key, string(blob), time.Now().Unix())
-	return err
+	if err != nil {
+		return err
+	}
+	return mintIdentityTx(ctx, tx, key)
 }
 
 // Promotions move immutable references. Only a changed running bank needs to
@@ -176,6 +179,13 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, expected *Revision, ttl
 		if err := writeReferencedConfigTx(ctx, tx, configKeyPrevious, running, runningID); err != nil {
 			return "", err
 		}
+		token, err := readRunningIdentity(ctx, tx, configKeyRunning)
+		if err != nil {
+			return "", err
+		}
+		if err := writeRunningIdentityTx(ctx, tx, configKeyPrevious, token); err != nil {
+			return "", err
+		}
 	}
 	if candidateID != runningID {
 		if err := replaceIDSRulesTx(ctx, tx, candidate.IDS.Rules); err != nil {
@@ -196,6 +206,9 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, expected *Revision, ttl
 		if _, err := tx.ExecContext(ctx, `REPLACE INTO configs (key, data, updated_at) VALUES (?, ?, ?)`, configKeyPending, string(blob), time.Now().Unix()); err != nil {
 			return "", err
 		}
+	}
+	if err := establishTransitionTx(ctx, tx, capture != nil); err != nil {
+		return "", err
 	}
 	revision, err := s.commitRevisionTx(ctx, tx)
 	if err != nil {
@@ -267,6 +280,9 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context, expected *Revision, ca
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key IN (?, ?)`, configKeyPending, bootFaultKey); err != nil {
+		return "", err
+	}
+	if err := establishTransitionTx(ctx, tx, capture != nil); err != nil {
 		return "", err
 	}
 	revision, err := s.commitRevisionTx(ctx, tx)

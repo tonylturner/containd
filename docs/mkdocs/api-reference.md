@@ -219,7 +219,9 @@ still carries `X-Containd-Config: staged`; the header does not mean the
 entire request completed.
 Configuration reads also return `X-Containd-Revision`; successful configuration
 writes return the revision produced by that write, alongside the staged or
-committed header. The revision is header-only, including on `/config/diff`.
+committed header. The whole-state CAS revision is header-only, including on
+`/config/diff`; `runningRevision` in runtime results is a separate identity,
+not a write precondition.
 Unauthenticated `/health` and all error responses omit the revision header.
 A learner HTTP 503 reporting durable staging has no revision header: re-read the
 candidate and review it before retrying the receipt.
@@ -232,49 +234,25 @@ overwriting another operator's changes.
 
 ## Protection observations
 
-Commit, commit-confirmed, rollback and factory reset success bodies include
-`{status, applyId, protection}`. Reset also retains its logout, message and
-warning fields. Confirm remains `{status:"confirmed"}`: it does not apply runtime.
-An opaque `applyId` identifies one runtime apply, not a configuration revision;
-boot replay, timed rollback and compensation each mint a fresh ID. Synchronous
-success does not certify readiness. Missing telemetry reports `unknown` without
-undoing a successful transaction.
+Commit, commit-confirmed, rollback and factory reset return
+`{status, runningRevision, applyId, protection}`; confirm remains
+`{status:"confirmed"}` without runtime replay. `runningRevision` identifies
+committed running intent, independently of the whole-state CAS header.
 
-When scan selection is active, protection follows live AV readiness. Losing
-clamd or ICAP removes `protecting` without a commit; recovery requires an EICAR
-canary detection in every selected direction, not merely a successful connection
-or ICAP `OPTIONS` response.
+`GET /dataplane/protection` returns the authenticated revision-bound aggregate:
+desired/applied/protecting revisions, `ready` and per-owner `subsystems`, alongside
+raw engine observations. Null means **Not verified**. Traffic services require
+verified apply or teardown; DNS/NTP/syslog/DHCP faults are visible and retryable
+without gating ready. Degraded logging or scheduling means not ready.
 
-NFLOG rule-hit logging starts and retries independently of NFQUEUE capture.
-An exhausted queue bind does not prevent logging from becoming ready. A queue
-that the installed policy does not require cannot by itself prevent
-`protecting`; unavailable logging instead reports `degraded` with a retry action.
+Admin `POST /dataplane/protection/retry` requires exactly
+`{bootId, applyId, desiredRevision}` from the inspected observation. HTTP 202
+queues work, not completion; 409 `protection_superseded` requires refreshing the
+observation. No CAS header is required or acknowledged. `/health` stays sanitized,
+unauthenticated HTTP 200 liveness, not the authenticated readiness certificate.
 
-- `GET /dataplane/protection` (any authenticated user) returns the current
-  `ProtectionStatus`: `bootId`, `applyId`, `installedApplyId`, `state`, `retryable`,
-  `observedAt`, `components` and `effects`. Components carry `name`, `required`,
-  `state`, `reason`, `since`, and optional bounded `attempt`/`maxAttempts`.
-  Effects carry `traffic` and `effect` (`normal`, `fail_closed_drop`,
-  `not_inspected`, or `unknown`). An unavailable upstream returns 502; no engine
-  returns 503.
-- `POST /dataplane/protection/retry` (admin) sends `{bootId, applyId}` from the
-  observation the operator reviewed. It returns 202 `{status:"retrying",applyId}`,
-  409 with `code: protection_superseded` or `protection_not_retryable`, 502 for
-  upstream failure, or 503 without an engine. Invalid identities return 400.
-  The action is audited as `dataplane.protection.retry`; it restarts only failed
-  consumers and keeps the current apply identity. No revision header is needed.
-
-`/health` remains unauthenticated HTTP 200. Its `protection` object contains only
-`{state, applyId}`, never component details. `enforcement` maps `protecting` to
-`enforcing`, `pending`/`failed` to `unavailable` with fixed reasons
-"protection pending"/"protection failed", `degraded` to `degraded` with reason
-"rule-hit logging unavailable; nft policy enforcing", `disabled` to `disabled`,
-and unreadable or stale observations to `unknown`. Persisted apply faults and
-management recovery still override protection; schedule planner degradation
-still overrides enforcing. Neither raw kernel errors nor private policy text
-appear in health reasons. Topology and firewall/ICS indicators retain the health
-reason when a health-only override applies while datapath protection is healthy,
-rather than explaining a degraded state as "Protecting".
+See [Runtime Protection](protection.md) for revision semantics, subsystem and
+acknowledgement fields, all retry/observation responses and health mapping.
 
 ## Orchestrator Client Contract
 
@@ -352,13 +330,29 @@ A store preflight/validation failure before promotion is HTTP 400 without
 recovery fields and does not promote running. A disconnected request is not
 proof of success or failure; read running, candidate and health before retrying.
 
-Internal runtime apply requests carry an opaque `X-Containd-Apply-Id`.
-The engine rejects a superseded ID with HTTP 409, code `apply_superseded`,
-for five minutes after supersession. Older history is evicted on admission;
-IDs are not ordered by their contents or by the management clock. Management
-serializes applies and uses a five-second engine request timeout. A request
-canceled or waiting five minutes for admission is rejected with HTTP 408,
-code `apply_expired`, without side effects. The current ID does not expire.
+Every internal POST to config, interfaces, routing, services, trust, apply_rules
+or protection-retry carries all five admission headers:
+
+- `X-Containd-Apply-Id`: opaque attempt identity.
+- `X-Containd-Engine-Boot-Id`: observed engine process identity.
+- `X-Containd-Running-Revision`: immutable target running generation.
+- `X-Containd-Apply-Mode`: `normal` or `recovery`.
+- `X-Containd-Previous-Apply-Id`: observed predecessor, present even when empty.
+
+These are internal delivery identities, not public whole-state CAS. New attempts
+compare the predecessor atomically; an attempt cannot change its target or phase
+input. Boot, predecessor, input or supersession conflicts renew the coordinator
+attempt, never fall back to unlabelled delivery. Explicit destructive replacement
+keeps `?mode=replace` with its own immutable admission. Recovery uses the reserved
+`recovery:<bootId>` target, never a persisted normal running generation.
+
+Superseded IDs return HTTP 409, code `apply_superseded`, for five minutes after
+supersession. Older history is evicted on admission; IDs are not ordered by
+contents or management clock. Management serializes effects and uses a
+five-second engine request timeout. A canceled request or one waiting five
+minutes for admission returns HTTP 408, code `apply_expired`, without side
+effects. The current ID does not expire. Transport success accepts phase input;
+only owner completion/readback can acknowledge delivery.
 
 `GET /health` remains HTTP 200 liveness and uses one observation budget of
 one second. General firewall health is a top-level `enforcement` object with
@@ -469,8 +463,9 @@ the engine cannot clear its blocks (a `dynamic blocks:` warning: they remain
 in force until they expire). HTTP 200
 means the reset was applied, not that every subsystem converged. With warnings,
 `message` reports incomplete convergence rather than completion; inspect the
-warnings and runtime health before continuing. Mandatory daemon, dataplane or
-ruleset failures still use the failure/recovery response above.
+warnings and runtime health before continuing. Critical synchronous apply
+failures still use the failure/recovery response above; per-owner delivery
+faults remain visible and outstanding.
 
 Outside lab mode, session-backed web/API tokens are revoked. Lab mode does not
 look up session records: signed, unexpired tokens remain valid after reset even
@@ -493,12 +488,17 @@ candidate, from the configuration store and replay the existing apply sequence:
   policy and saved PCAP configuration.
 
 This repairs runtime drift; it does not commit candidate edits or change
-configuration history. Invalid configuration fails preflight. A failed replay
-retains the stored running configuration and records a runtime-health fault;
+the persisted running generation. It creates a fresh attempt; invalid policy
+fails preflight. A failed replay retains the stored running configuration and
+records a runtime-health fault;
 already-replayed subsystems are not transactionally rolled back. The process
-logs the result and warnings and writes a `config.reload` audit record. Retry
-after resolving the reported failure. Auxiliary apply failures remain warnings,
-as with commit.
+logs the result and warnings and writes a `config.reload` audit record.
+Outstanding delivery retries automatically; config/render faults require repair.
+Referenced proxy/OpenVPN/DNS/NTP/syslog/DHCP material is explicitly reloaded by
+its owner, even when the configuration JSON is unchanged. Failed material reload
+is safely quarantined through that owner, never accepted by JSON equality alone.
+This is an explicit refresh, not a continuous file watcher. Inspect authenticated
+protection for completion; warning headers are diagnostics, not ledger proof.
 
 Environment variables and command-line flags are never reloaded. Management
 HTTP/HTTPS listeners, TLS source paths, HTTP middleware, SSH listen address/banner/shell

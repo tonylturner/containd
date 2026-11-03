@@ -298,7 +298,8 @@ func testProfileFactoryReset(t *testing.T) {
 	ledger.Append(users.BootstrapMetadata{Username: "containd", Generation: 42, Reason: "reset"})
 	router := gin.New()
 	router.Use(withAuditStore(as))
-	router.POST("/reset", factoryResetWithLedger(store, us, &mockEngine{}, nil, ledger))
+	engine := &mockEngine{}
+	router.POST("/reset", testRuntimeHandler(t, store, engine, nil, factoryResetWithLedger(store, us, engine, nil, ledger)))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(`{"confirm":"NUCLEAR"}`))))
 	if rec.Code != http.StatusOK {

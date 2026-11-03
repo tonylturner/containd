@@ -46,7 +46,7 @@ func TestConfigResponseHeadersEveryStagedRoute(t *testing.T) {
 		t.Run(test.method+test.path, func(t *testing.T) {
 			t.Setenv("CONTAIND_OPENVPN_DIR", t.TempDir())
 			store := stageStore(t)
-			server := NewServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
+			server := newTestServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
 			var rec *httptest.ResponseRecorder
 			if test.path == "/ids/import" {
 				rec = httptest.NewRecorder()
@@ -75,7 +75,7 @@ func TestConfigResponseHeadersEveryLifecycleRoute(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			server := NewServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
+			server := newTestServerWithEngine(store, nil, &stageEngine{mockEngine: &mockEngine{}})
 			rec := requestStage(t, server, "POST", path, map[string]int{"ttl_seconds": 3600})
 			if rec.Code != http.StatusOK {
 				t.Fatalf("lifecycle failed: %d %s", rec.Code, rec.Body)

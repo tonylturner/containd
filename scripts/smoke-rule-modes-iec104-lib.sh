@@ -40,10 +40,7 @@ iec_modes_install() {
   local cfg=$1 label=$2 order=$3 running
   cfg=$(iec_modes_order "$order" <<<"$cfg") || return 1
   apply_config "$cfg" "$label" || return 1
-  # apply_config stages and directly applies the snapshot. Promote it as well
-  # so the authoritative running bank can prove the installed array order.
-  cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" \
-    -X POST "${BASE}/config/commit" >"$RESULTS_DIR/modes-$order-$label-commit.json" || return 1
+  cp "$WORK_DIR/commit.json" "$RESULTS_DIR/modes-$order-$label-commit.json" || return 1
   running=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config") || return 1
   printf '%s\n' "$running" >"$RESULTS_DIR/modes-$order-$label-running.json"
   jq -e --argjson expected "$(jq '[.firewall.rules[].id]' <<<"$cfg")" \

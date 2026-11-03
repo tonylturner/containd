@@ -3,8 +3,8 @@ package mgmtapp
 
 import (
 	"context"
+
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"time"
 )
 
 func testBaseRevision(store config.Store, ctx context.Context) config.Revision {
@@ -16,10 +16,6 @@ func testBaseRevision(store config.Store, ctx context.Context) config.Revision {
 }
 func testCommit(store config.Store, ctx context.Context) error {
 	_, err := store.Commit(ctx, testBaseRevision(store, ctx))
-	return err
-}
-func testCommitConfirmed(store config.Store, ctx context.Context, ttl time.Duration) error {
-	_, err := store.CommitConfirmed(ctx, testBaseRevision(store, ctx), ttl)
 	return err
 }
 func testMutateCandidate(store config.Store, ctx context.Context, edit func(*config.Config) error) error {

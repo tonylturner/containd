@@ -50,6 +50,9 @@ func TestStoredDNP3UnitIDBootsIntoRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := db.Exec(`INSERT INTO running_identity (key,token) SELECT 'previous',token FROM running_identity WHERE key='running'`); err != nil {
+		t.Fatal(err)
+	}
 
 	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
 	if err != nil {

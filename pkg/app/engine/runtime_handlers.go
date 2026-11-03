@@ -6,6 +6,7 @@ package engineapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -239,7 +240,7 @@ func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.
 
 // applyRulesHandler applies a snapshot and hands its scan selection to the gate.
 func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *protectionCoordinator, sim *simulationManager) http.HandlerFunc {
-	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
+	return coordinator.admit("nft", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -254,10 +255,18 @@ func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if coordinator.metadata.Mode != "recovery" && snap.Version == config.ManagementRecoveryVersion {
+			protectionError(w, http.StatusBadRequest, "invalid_recovery_identity", "recovery rules require recovery identity")
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := dpEngine.ApplyRulesAndReconcile(ctx, snap, func() { gate.applySnapshot(snap.Gate) }); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if errors.Is(err, engine.ErrResolvedPolicyChanged) {
+				protectionError(w, http.StatusConflict, "apply_input_changed", err.Error())
+			} else {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
 			return
 		}
 		if sim != nil {

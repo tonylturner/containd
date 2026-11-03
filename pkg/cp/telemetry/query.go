@@ -7,9 +7,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -146,12 +146,7 @@ func (s *Store) Query(ctx context.Context, q Query, now time.Time) (wire.SeriesR
 			groups[m.dims[q.Group]] = append(groups[m.dims[q.Group]], series)
 		}
 	}
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(groups)) {
 		members := groups[key]
 		series := wire.Series{Dims: map[string]string{q.Group: key}, Points: make([]wire.Point, 0, int(duration/res))}
 		for i := range members[0].Points {

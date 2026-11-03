@@ -4,42 +4,43 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
 	"testing"
 )
 
-// TestCommitCarriesEngineServiceWarnings: a services apply the engine
-// accepted with warnings, such as an AV backend that is still starting,
-// commits and reports them next to the infrastructure warnings; a failed
-// apply stays a warning of its own.
+// Transport warnings are not delivery proof. Only typed owner failures
+// become warning headers; missing observations never manufacture readiness.
 func TestCommitCarriesEngineServiceWarnings(t *testing.T) {
-	const pending = "AV backend is still starting: clamd not ready; scanning is pending until it is ready"
 	for _, tc := range []struct {
-		name     string
-		warnings []string
-		err      error
-		want     []string
+		name string
+		err  error
+		want []string
 	}{
-		{"applied", nil, nil, nil},
-		{"pending", []string{pending}, nil, []string{"services: " + pending}},
-		{"failed", nil, errors.New("engine services status 503: AV service apply failed"),
-			[]string{"services: engine services status 503: AV service apply failed"}},
+		{"applied", nil, nil},
+
+		{"failed", errors.New("engine services status 503: AV service apply failed"),
+			[]string{"av: owner delivery failed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := stageStore(t)
-			engine := &mockEngine{svcWarnings: tc.warnings, svcErr: tc.err}
-			server := NewServerWithEngine(store, &mockAuditStore{}, engine)
+			engine := &mockEngine{svcErr: tc.err}
+			server := newTestServerWithEngine(store, &mockAuditStore{}, engine)
 			rec := requestStage(t, server, http.MethodPost, "/config/commit", nil)
 			if rec.Code != http.StatusOK || !engine.applied {
 				t.Fatalf("status=%d applied=%v body=%s", rec.Code, engine.applied, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "committed")
+			var body struct{ Protection struct{ Ready bool } }
+			if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Protection.Ready {
+				t.Fatal("transport success manufactured readiness")
+			}
 			if got := rec.Header().Values("X-Containd-Warnings"); !slices.Equal(got, tc.want) {
 				t.Fatalf("X-Containd-Warnings = %q, want %q", got, tc.want)
 			}
-			replayed, err := ApplyRunningConfig(context.Background(), store, engine, nil)
+			replayed, err := replayTestConfig(context.Background(), store, engine, nil)
 			if err != nil || !slices.Equal(replayed, tc.want) {
 				t.Fatalf("replay warnings = %q err=%v, want %q", replayed, err, tc.want)
 			}

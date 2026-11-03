@@ -4,29 +4,12 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
-
-// Record failed replay as well as failed compensation. An engine ruleset can
-// still be valid while services/dataplane replay failed before reaching it.
-func recordRuntimeApplyResult(ctx context.Context, store config.Store, applyErr error) error {
-	runtimeStore, ok := store.(config.RuntimeStore)
-	if !ok {
-		return applyErr
-	}
-	fault := ""
-	if applyErr != nil {
-		fault = applyErr.Error()
-	}
-	healthCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	defer cancel()
-	return errors.Join(applyErr, runtimeStore.SetRuntimeApplyFault(healthCtx, fault))
-}
 
 // rulesetObservation is one read of the engine's ruleset status, shared by
 // the health objects derived from it. err is set when the engine is absent

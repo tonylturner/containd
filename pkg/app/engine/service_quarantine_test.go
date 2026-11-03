@@ -8,11 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
-type quarantineAVApplier struct{ cfg config.AVConfig }
+type quarantineAVApplier struct {
+	testServiceOwner
+	cfg config.AVConfig
+}
 
 func (a *quarantineAVApplier) Apply(_ context.Context, cfg config.AVConfig) error {
 	a.cfg = cfg
@@ -33,4 +37,8 @@ func TestServiceQuarantineDisablesBackendNotPolicy(t *testing.T) {
 	if !gate.av.Enabled || !gate.av.ScanGateEnabled() || gate.settings.FailPolicy != "closed" || !gate.settings.ScanDownloads {
 		t.Fatalf("quarantine changed scan policy: %+v", gate.settings)
 	}
+}
+
+func (a *quarantineAVApplier) ApplyDelivery(ctx context.Context, meta protection.Metadata, cfg config.AVConfig) (protection.OwnerOutcome, error) {
+	return a.testServiceOwner.apply(ctx, meta, protection.SubsystemAV, cfg.Enabled, cfg, func(ctx context.Context) error { return a.Apply(ctx, cfg) })
 }

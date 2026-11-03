@@ -254,13 +254,13 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			calls := 0
-			err = testApplyChange(s, ctx, change, time.Hour, func(ctx context.Context, _, next *Config) error {
+			err = testApplyChange(s, ctx, change, time.Hour, func(ctx context.Context, _, next *RunningSnapshot) error {
 				calls++
 				if calls == 1 {
 					cancel()
 					return fmt.Errorf("runtime failed")
 				}
-				if ctx.Err() != nil || !reflect.DeepEqual(next, running) {
+				if ctx.Err() != nil || !reflect.DeepEqual(next.Config, running) {
 					t.Fatal("reapply lost config/bank or recovery context")
 				}
 				return nil

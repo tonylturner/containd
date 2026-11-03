@@ -29,5 +29,5 @@ func (g *gateManager) publishProtection() {
 		state, reason = "ready", ""
 	}
 	unknown := g.admitErr != ""
-	g.protection.SetScanProtection(state, reason, st.Scanner.Ready, st.Scanner.Error, unknown)
+	g.protection.SetScanProtection(state, reason, g.av.Enabled, st.Scanner.Ready, st.Scanner.Error, unknown)
 }

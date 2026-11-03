@@ -36,7 +36,7 @@ func TestOpsCommands(t *testing.T) {
 		{"issue openvpn client", []string{"operator", "CONFIRM"}, "POST", "/api/v1/services/vpn/openvpn/clients", `{"name":"operator"}`, true, true},
 		{"revoke openvpn client", []string{"c1", "CONFIRM"}, "POST", "/api/v1/services/vpn/openvpn/clients/c1/revoke", "{}", true, true},
 		{"show protection", nil, "GET", "/api/v1/dataplane/protection", "", false, false},
-		{"retry protection", []string{"boot", "apply", "CONFIRM"}, "POST", "/api/v1/dataplane/protection/retry", `{"applyId":"apply","bootId":"boot"}`, true, true},
+		{"retry protection", []string{"boot", "apply", "revision", "CONFIRM"}, "POST", "/api/v1/dataplane/protection/retry", `{"applyId":"apply","bootId":"boot","desiredRevision":"revision"}`, true, true},
 		{"update av definitions", []string{"CONFIRM"}, "POST", "/api/v1/services/av/update", "", true, true},
 		{"show pcap status", nil, "GET", "/api/v1/pcap/status", "", false, false},
 		{"start pcap", []string{"CONFIRM"}, "POST", "/api/v1/pcap/start", "", true, true},
