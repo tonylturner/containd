@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-11-03
+
 ### Changed
 
 - Strict uses HTTPS only, Secure cookies, HSTS and appliance-only SSH. It refuses
@@ -69,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- API: commit, rollback and factory-reset results add `runningRevision`.
+  `GET /api/v1/dataplane/protection` reports desired, applied and protecting
+  revisions with per-owner outcomes, and `ready` means the running revision is
+  protecting. Protection retry now requires `{bootId, applyId, desiredRevision}`
+  from that status (`POST /api/v1/dataplane/protection/retry`); a superseded
+  value returns 409 and a missing or malformed one 400. Automation
+  that waits for policy should wait for `ready` at its commit's `runningRevision`.
 - Management now refuses to start when its configured users database cannot be
   created or opened; it no longer falls back to `data/users.db`. Correct the
   configured path and permissions before upgrading.
@@ -2667,7 +2676,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.38...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.39...HEAD
+[0.1.39]: https://github.com/tonylturner/containd/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
