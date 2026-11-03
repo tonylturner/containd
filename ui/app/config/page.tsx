@@ -11,7 +11,8 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
+import { api, isAdmin, type ConfigBackup, type ConfigBundle, type User } from "../../lib/api";
+import { factoryResetLoginGuidance } from "../../lib/recovery-guidance";
 import { ConfigDiffBlocks } from "./config-diff-blocks";
 import { ConfigChangeSummary } from "./config-change-summary";
 import { ConfigActionBar } from "./config-action-bar";
@@ -80,6 +81,7 @@ function ConfigPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [backupName, setBackupName] = useState("");
   const [backups, setBackups] = useState<ConfigBackup[]>([]);
+  const [me, setMe] = useState<User | null>(null);
   const [runningLoadedAt, setRunningLoadedAt] = useState<Date | null>(null);
   const [candidateLoadedAt, setCandidateLoadedAt] = useState<Date | null>(null);
   const [viewerSource, setViewerSource] = useState<ViewerSource>("running");
@@ -101,6 +103,16 @@ function ConfigPage() {
 
   useEffect(() => {
     refreshBackups();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void api.me().then((user) => {
+      if (active) setMe(user);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   function statusWithWarning(base: string, warning?: string) {
@@ -139,9 +151,10 @@ function ConfigPage() {
   function doFactoryReset() {
     if (!canEdit || !canSaveNow() || !diffRevision) return;
     dialogOpen.current = true;
+    const loginGuidance = factoryResetLoginGuidance(me?.profile, me?.labMode);
     confirm.open({
       title: "Factory reset appliance", variant: "danger", confirmLabel: "Reset now",
-      message: "This immediately wipes configuration, users and audit history and applies appliance defaults. It cannot be undone. Log in afterwards with the default credentials. Lab web/API tokens remain valid.",
+      message: `This immediately wipes configuration, users and audit history and applies appliance defaults. It cannot be undone. ${loginGuidance}`,
       onConfirm: async () => {
         if (!canSaveNow()) { setStatus("Factory reset failed: configuration unavailable."); return; }
         const result = await diffView.writeRefresh(base => api.factoryReset(base), api.diffConfig);
@@ -381,6 +394,8 @@ function ConfigPage() {
       canEdit={canEdit}
       canMutate={canSave && !!diffRevision && !diffView.stale}
       canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
+      profile={me?.profile}
+      labMode={me?.labMode}
       ttlSeconds={ttlSeconds}
       onTtlChange={setTtlSeconds}
       onCommit={doCommit}
@@ -560,6 +575,8 @@ function ConfigPage() {
             canEdit={canEdit}
             canMutate={canSave && !!diffRevision && !diffView.stale}
             canCommit={false}
+            profile={me?.profile}
+            labMode={me?.labMode}
             ttlSeconds={ttlSeconds}
             onTtlChange={setTtlSeconds}
             onCommit={doCommit}

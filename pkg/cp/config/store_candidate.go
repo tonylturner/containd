@@ -252,6 +252,8 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context, expected *Revision, ca
 	if err := s.checkStored(prev); err != nil {
 		return "", err
 	}
+	// Rollback restores previously accepted saved intent, not a new write.
+	// Profile projection still governs runtime policy for carried weak values.
 	if prev.scopeMigration != nil || prev.modeMigration != nil || prev.orderMigration != nil {
 		if err := writeConfigTx(ctx, tx, configKeyPrevious, prev); err != nil {
 			return "", err

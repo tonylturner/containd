@@ -22,6 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/common/telemetry"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -39,12 +40,13 @@ type Options struct {
 }
 
 type mgmtStores struct {
-	store       config.Store
-	auditStore  audit.Store
-	userStore   users.Store
-	bootEvent   *dpevents.Event
-	bootEvents  []dpevents.Event
-	scopeEvents []dpevents.Event
+	store           config.Store
+	auditStore      audit.Store
+	userStore       users.Store
+	bootEvent       *dpevents.Event
+	bootEvents      []dpevents.Event
+	scopeEvents     []dpevents.Event
+	bootstrapLedger *users.BootstrapLedger
 }
 
 type mgmtListenerConfig struct {
@@ -68,6 +70,7 @@ type mgmtListenerConfig struct {
 func Run(ctx context.Context, opts Options) (runErr error) {
 	logger := logging.NewService("mgmt")
 	logging.InstallSlogBridge(logger.Desugar())
+	logger.Infof("profile=%s", profile.Current())
 	if err := validateJWTSecret(logger); err != nil {
 		return err
 	}
@@ -102,7 +105,10 @@ func Run(ctx context.Context, opts Options) (runErr error) {
 		}
 	}()
 
-	runtimeCfg := reservationSafeBootListeners(cfg, opts.Reservation)
+	runtimeCfg, overrides := config.ProjectProfile(reservationSafeBootListeners(cfg, opts.Reservation), profile.IsStrict())
+	if err := recordProfileBoot(logger, stores.auditStore, overrides); err != nil {
+		return err
+	}
 	if err := validateReservedBootEnvironment(runtimeCfg, opts.Reservation); err != nil {
 		return err
 	}
@@ -165,7 +171,7 @@ func Run(ctx context.Context, opts Options) (runErr error) {
 	if err != nil {
 		return err
 	}
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController, coordinator)
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions, historyStore, demoController, stores.bootstrapLedger, coordinator)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()
@@ -184,7 +190,7 @@ func Run(ctx context.Context, opts Options) (runErr error) {
 	record := &runtimeRecordPublisher{path: RuntimeRecordPath(), served: publishBoundManagement(listenerCfg, bound.binds)}
 	publishRuntimeRecord(logger, record)
 	if listenerCfg.tlsLoader != nil {
-		listenerCfg.tlsLoader.OnChange(func() { publishRuntimeRecord(logger, record) })
+		observeTLSIdentity(logger, listenerCfg.tlsLoader, func() { publishRuntimeRecord(logger, record) })
 	}
 	defer func() {
 		if err := record.remove(); err != nil {
@@ -264,8 +270,21 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		}
 	}
 	stores.auditStore = mustInitAuditStore()
-	stores.userStore = mustInitUsersStore()
+	userStore, err := initUsersStore()
+	if err != nil {
+		stores.auditStore.Close()
+		return fail(err)
+	}
+	stores.userStore = userStore
+	stores.bootstrapLedger = &users.BootstrapLedger{}
+	delivery := newBootstrapDelivery(logger, usersDBPath(), stores.bootstrapLedger)
+	userStore.SetBootstrapObserver(delivery.observe)
 	if err := stores.userStore.EnsureDefaultAdmin(context.Background()); err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	if err := auditBootstrapDelivery(context.Background(), stores.auditStore, stores.bootstrapLedger); err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()
 		return fail(err)
@@ -309,6 +328,9 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	}
 	tlsCert, tlsKey, err := ensureTLSIdentity(cfg, detectIPs(), logger.Warnf)
 	if err != nil {
+		if profile.IsStrict() {
+			return listenerCfg, strictHTTPSError(err)
+		}
 		logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
 		if listenerCfg.optionalFault != nil {
 			listenerCfg.optionalFault(fmt.Errorf("https TLS certificate: %w", err))
@@ -319,8 +341,13 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	listenerCfg.tlsCert = tlsCert
 	listenerCfg.tlsKey = tlsKey
 	listenerCfg.tlsLoader = newCertReloader(tlsCert, tlsKey)
-	if _, err := listenerCfg.tlsLoader.GetCertificate(nil); err != nil {
-		return listenerCfg, err
+	pair, err := listenerCfg.tlsLoader.GetCertificate(nil)
+	if err != nil {
+		return listenerCfg, strictHTTPSError(err)
+	}
+	warnManagementTLSValidity(logger, tlsCert, pair.Leaf)
+	if err := checkManagementTLSSubjectAltName(logger, tlsCert, pair.Leaf, profile.IsStrict()); err != nil {
+		return listenerCfg, strictHTTPSError(err)
 	}
 	return listenerCfg, nil
 }

@@ -4,6 +4,11 @@ containd uses the CISA Secure by Design badge as a statement of intent and
 transparency, **not government certification**. This page maps the seven pledge
 goals to containd's design and defaults.
 
+The shipped starter is training. The separate [strict profile](deployment-profiles.md)
+requires HTTPS, Secure cookies and HSTS, issues one-time bootstrap passwords and
+forbids lab authentication, Linux-shell access and mounted Docker sockets.
+These protections are profile-specific, not claims about all deployments.
+
 A goal is met when the shipped design meets it by default, without extra
 configuration. Steps that an operator takes for a specific deployment are in
 [Deployment hardening](#deployment-hardening). They do not change a status.
@@ -19,7 +24,7 @@ Official references:
 | Pledge goal | Status | Default design |
 | ----------- | ------ | -------------- |
 | 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account on web/API and SSH password login; admins can require it. An SSH key alone signs in. |
-| 2. Default passwords | Met | Forced first-login change on web/API and SSH, for password and key logins. |
+| 2. Default passwords | Met with caveat | Strict issues one-time passwords; training shares a bootstrap password with forced change outside lab mode. |
 | 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
 | 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
 | 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
@@ -87,7 +92,10 @@ Caveats:
 
 What the design delivers by default:
 
-- With default bootstrap settings, a fresh install seeds one admin account,
+- Strict seeds a random one-time admin password through container stdout and
+  a private file, requires a change, and reissues unclaimed passwords on restart.
+  Application logs, syslog and audit records never contain that secret.
+- In training, with default bootstrap settings, a fresh install seeds one admin account,
   `containd` / `containd`, and marks it for a forced password change.
   `CONTAIND_DEFAULT_ADMIN_USERNAME` and `CONTAIND_DEFAULT_ADMIN_PASSWORD`
   override the seed; a non-default seed password is not marked for change.
@@ -99,7 +107,7 @@ What the design delivers by default:
   uppercase letter, lowercase letter and digit, and must differ from the current
   one, so the bootstrap value cannot be kept.
 
-Design note: the default bootstrap credential is the same on every instance, and the
+Training design note: the default bootstrap credential is the same on every training instance, and the
 forced change at first login is what retires it, as the pledge describes.
 containd often runs in offline labs and classrooms that have no channel to
 distribute a per-instance secret. Bind management to a trusted network until
@@ -108,7 +116,7 @@ the first login; see [Deployment hardening](#deployment-hardening).
 #### Lab-mode credential pinning
 
 `CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops.
-It is off by default and in the supplied production Compose file. With default
+It is off by default in the training starter and refused in strict. With default
 bootstrap settings, a fresh lab uses `containd` / `containd`. Lab mode does not
 reset existing accounts or override custom bootstrap credentials. It refuses
 every password change for every user, on every path, with the same reason:
@@ -164,7 +172,8 @@ What the design delivers by default:
   path, when declared, compiles into every firewall as an independent allow for
   its exact reserved sources and listener, so policy cannot lock out that path.
   See
-  [Reserved Management Path](management-reservation.md).
+  [Reserved Management Path](management-reservation.md) (training-only; strict
+  refuses reservations rather than silently removing that boundary).
 - **Authenticated remote engine API.** Numeric loopback retains credential-free
   HTTP; every non-loopback listener requires TLS 1.3 mutual authentication from
   one dedicated engine secret. Combined mode defaults to `127.0.0.1:8081`.
@@ -263,7 +272,8 @@ These steps adapt a deployment to its network. They are guidance, not gaps.
   network. Then enroll an admin SSH key and disable SSH password login; the SSH
   setup wizard offers both steps and refuses a change that would lock out SSH.
 - Require MFA for administrative accounts.
-- Keep `CONTAIND_LAB_MODE=0` except in the isolated cases above.
+- Prefer the strict manifest where its management boundary fits. Keep
+  `CONTAIND_LAB_MODE=0` in training except in the isolated cases above.
 - Use a unique JWT secret. Replace the generated self-signed HTTPS certificate,
   and prefer HTTPS. Managed uploads atomically replace a single PEM bundle;
   [external identities](config-format.md#management-https-identity) are read-only.

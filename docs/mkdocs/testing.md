@@ -130,7 +130,7 @@ that supply them separately, such as `build/Dockerfile.mgmt`.
 ## Quickstart Smoke
 
 `bash scripts/smoke-quickstart.sh` is the CI check of the public Compose
-quickstart. It starts `deploy/docker-compose.yml`, waits for health, rotates
+quickstart. It starts training `deploy/docker-compose.yml`, asserts `/health.profile`, waits for health, rotates
 the bootstrap password and checks that interface assignment, routing and the
 monitoring APIs answer. Set `CONTAIND_IMAGE` to the image under test, for
 example `containd/containd:dev`; Compose uses its default image otherwise.
@@ -141,6 +141,18 @@ quickstart ports (8080, 8443 and 2222 by default); move them with the
 volumes on exit.
 Use a fresh, disposable data directory: the starter bind-mounts `deploy/data`,
 which `down -v` does not remove, and the script changes the admin password.
+
+## Strict Profile Smoke
+
+`bash scripts/smoke-strict.sh` tests strict bootstrap, startup refusals, saved
+intent, recovery, secret delivery and TLS against `CONTAIND_IMAGE`. It uses an
+owned `COMPOSE_PROJECT_NAME` (default unique per invocation), isolated ephemeral
+loopback ports and fresh project volumes per case. Set `STRICT_COMPOSE_OVERRIDE`
+for an additional image or topology override. It requires Docker Compose with
+`!override` support, curl, jq, Python 3, OpenSSL and OpenSSH on the host, and pulls
+`python:3-alpine` for database fixtures and syslog capture. It tears down its
+project volumes, not external deployments. Its private temporary directory
+contains test credentials and logs until cleanup. Do not use a live data volume.
 
 ## Forwarding Smoke
 

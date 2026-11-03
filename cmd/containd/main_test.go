@@ -169,6 +169,18 @@ func TestCLILoopExitStatus(t *testing.T) {
 	}
 }
 
+func TestHealthcheckCommandReportsFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	const diagnostic = "health check failed: management TLS certificate has expired: NotBefore=2026-01-01T00:00:00Z NotAfter=2026-10-01T00:00:00Z current UTC time=2026-11-02T00:00:00Z"
+
+	if got := healthcheckCommand(func() error { return errors.New(diagnostic) }, &stderr); got != 1 {
+		t.Fatalf("healthcheck exit status = %d, want 1", got)
+	}
+	if got := stderr.String(); got != diagnostic+"\n" {
+		t.Fatalf("healthcheck stderr = %q, want %q", got, diagnostic+"\n")
+	}
+}
+
 // Outside an SSH shell the CLI and the container health check call the
 // listener management's runtime record names, and report management as not
 // running without it.

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -378,13 +379,27 @@ func clearAuthCookie(c *gin.Context) {
 }
 
 // cookieSecure returns true if the Secure flag should be set on auth cookies.
-// Auto-detects TLS from the request, and can be overridden via CONTAIND_COOKIE_SECURE.
+// Strict always uses Secure. Training auto-detects TLS from the request and
+// permits CONTAIND_COOKIE_SECURE to override that choice.
 func cookieSecure(c *gin.Context) bool {
+	policy, _ := secureCookiesPolicy()
+	return policy == "always" || policy == "https-only" && c.Request.TLS != nil
+}
+
+// secureCookiesPolicy reports the request-independent auth cookie policy and
+// its authority, shared by cookie issuance, deletion and TLS status.
+func secureCookiesPolicy() (policy, source string) {
+	if profile.IsStrict() {
+		return "always", "profile"
+	}
 	env := strings.TrimSpace(os.Getenv("CONTAIND_COOKIE_SECURE"))
 	if env != "" {
-		return env == "1" || strings.EqualFold(env, "true")
+		if env == "1" || strings.EqualFold(env, "true") {
+			return "always", "environment"
+		}
+		return "never", "environment"
 	}
-	return c.Request.TLS != nil
+	return "https-only", "default"
 }
 
 func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {

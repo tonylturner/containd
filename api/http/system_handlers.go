@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -27,13 +28,15 @@ import (
 )
 
 type tlsInfoResponse struct {
+	config.TLSProfileFields
+	// SecureCookies is the auth cookie policy, not a flag for this request.
+	SecureCookies       string `json:"secureCookies"`
+	SecureCookiesSource string `json:"secureCookiesSource"`
 	// HTTPListenAddr, HTTPSListenAddr, HTTPEnabled and HTTPSEnabled are the
 	// listeners management binds when it next starts with this
 	// configuration.
 	HTTPListenAddr  string `json:"httpListenAddr,omitempty"`
 	HTTPSListenAddr string `json:"httpsListenAddr,omitempty"`
-	HTTPEnabled     bool   `json:"httpEnabled"`
-	HTTPSEnabled    bool   `json:"httpsEnabled"`
 	// BoundHTTPListenAddr and BoundHTTPSListenAddr are the addresses of the
 	// listeners management has bound now; empty when that listener is not
 	// bound.
@@ -70,6 +73,7 @@ type tlsInfoResponse struct {
 	ServedCertDNSNames []string `json:"servedCertDnsNames,omitempty"`
 	ServedCertIPs      []string `json:"servedCertIps,omitempty"`
 	ReloadError        string   `json:"reloadError,omitempty"`
+	CertificateWarning string   `json:"certificateWarning,omitempty"`
 }
 
 func getTLSHandler(store config.Store) gin.HandlerFunc {
@@ -86,16 +90,16 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 
 		// The listeners management binds when it starts with this
 		// configuration, under this process's environment.
-		listeners := config.EffectiveManagementListeners(cfg)
+		effective, _ := config.ProjectProfile(cfg, profile.IsStrict())
+		listeners := config.EffectiveManagementListeners(effective)
 		bound := config.BoundManagementListeners()
 		certFile, keyFile := mgmttls.IdentityFiles(cfg)
 		served := currentServedManagement()
 
 		resp := tlsInfoResponse{
+			TLSProfileFields:     tlsProfileFields(cfg, effective),
 			HTTPListenAddr:       listeners.HTTP.Addr,
 			HTTPSListenAddr:      listeners.HTTPS.Addr,
-			HTTPEnabled:          listeners.HTTP.Enabled,
-			HTTPSEnabled:         listeners.HTTPS.Enabled,
 			BoundHTTPListenAddr:  boundAddr(bound.HTTP),
 			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
 			HTTPListenChanges:    listenerChanges(bound.HTTP, listeners.HTTP),
@@ -106,6 +110,9 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			ServedCertFile:       cleanFilePath(served.CertFile),
 			ServedKeyFile:        cleanFilePath(served.KeyFile),
 		}
+		resp.SecureCookies, resp.SecureCookiesSource = secureCookiesPolicy()
+		now := time.Now()
+		var certificateWarnings []string
 
 		var leaf *x509.Certificate
 		if served.TLS != nil {
@@ -120,9 +127,12 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			}
 		}
 		if leaf != nil {
+			resp.ServedCertFingerprintSHA256 = mgmttls.Fingerprint(leaf)
 			resp.ServedCertSubject = leaf.Subject.String()
 			resp.ServedCertNotAfter = formatNotAfter(leaf)
 			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(leaf)
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.ServedCertFile, mgmttls.ValidateSubjectAltName(leaf))
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.ServedCertFile, mgmttls.ValidateValidity(leaf, now))
 		}
 
 		configuredLeaf := leaf
@@ -137,10 +147,57 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			resp.CertIssuer = cert.Issuer.String()
 			resp.CertNotAfter = formatNotAfter(cert)
 			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.CertFile, mgmttls.ValidateSubjectAltName(cert))
+			certificateWarnings = appendCertificateWarning(certificateWarnings, resp.CertFile, mgmttls.ValidateValidity(cert, now))
+		}
+		// Read the next-start identity independently, even when its paths
+		// equal the served identity: a failed reload retains a last-good leaf.
+		if pair, err := mgmttls.ReadPair(resp.CertFile, resp.KeyFile); err == nil {
+			resp.CertFingerprintSHA256 = mgmttls.Fingerprint(pair.Leaf)
 		}
 
+		resp.CertificateWarning = strings.Join(certificateWarnings, "; ")
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+func appendCertificateWarning(warnings []string, path string, err error) []string {
+	if err == nil {
+		return warnings
+	}
+	warning := fmt.Sprintf("%s: %v", path, err)
+	for _, existing := range warnings {
+		if existing == warning {
+			return warnings
+		}
+	}
+	return append(warnings, warning)
+}
+
+func tlsProfileFields(saved, effective *config.Config) config.TLSProfileFields {
+	var fields config.TLSProfileFields
+	for _, field := range []struct {
+		saved, effective *bool
+		value            *bool
+		source           *string
+		override         **bool
+	}{
+		{saved.System.Mgmt.EnableHTTP, effective.System.Mgmt.EnableHTTP, &fields.HTTPEnabled, &fields.HTTPEnabledSource, &fields.HTTPEnabledSaved},
+		{saved.System.Mgmt.EnableHTTPS, effective.System.Mgmt.EnableHTTPS, &fields.HTTPSEnabled, &fields.HTTPSEnabledSource, &fields.HTTPSEnabledSaved},
+		{saved.System.Mgmt.EnableHSTS, effective.System.Mgmt.EnableHSTS, &fields.HSTSEnabled, &fields.HSTSEnabledSource, &fields.HSTSEnabledSaved},
+	} {
+		savedValue := field.saved == nil || *field.saved
+		*field.value = field.effective == nil || *field.effective
+		*field.source = "default"
+		if field.saved != nil {
+			*field.source = "config"
+		}
+		if savedValue != *field.value {
+			*field.source = "profile"
+			*field.override = &savedValue
+		}
+	}
+	return fields
 }
 
 // boundAddr is the address of a bound listener; empty when it is not bound.
@@ -249,6 +306,14 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 		pair, err := mgmttls.ParseBundle([]byte(req.CertPEM + "\n" + req.KeyPEM + "\n"))
 		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid cert/key pair", err.Error())
+			return
+		}
+		if err := mgmttls.ValidateSubjectAltName(pair.Leaf); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := mgmttls.ValidateValidity(pair.Leaf, time.Now()); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 

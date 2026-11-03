@@ -1,0 +1,169 @@
+# containd — strict deployment, HTTPS and SSH published on loopback only.
+# Start from the repository root:
+#   docker compose --env-file .env -f deploy/docker-compose.strict.yml up -d
+# Use one profile per data directory; see docs/mkdocs/deployment-profiles.md.
+# The quickstart, bootstrap and containd helper scripts are training-only.
+# Root and networking capabilities are still required for the dataplane.
+
+services:
+  containd:
+    image: ${CONTAIND_IMAGE:-ghcr.io/tonylturner/containd:latest}
+    # Root is required for nftables, routing, and TUN operations across Docker runtimes,
+    # including Docker Desktop-backed classroom/lab environments.
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - SYS_TIME
+    environment:
+      - CONTAIND_PROFILE=strict
+      - CONTAIND_MGMT_HTTPS_ADDR=${CONTAIND_MGMT_HTTPS_ADDR:-:8443}
+      - CONTAIND_ENGINE_URL=${CONTAIND_ENGINE_URL:-}
+      - CONTAIND_ENGINE_SECRET=${CONTAIND_ENGINE_SECRET:-}
+      - CONTAIND_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-127.0.0.1:8081}
+      - CONTAIND_CAPTURE_IFACES=${CONTAIND_CAPTURE_IFACES:-}
+      - CONTAIND_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-1}
+      - CONTAIND_WAN_SUBNET=${CONTAIND_WAN_SUBNET:-192.168.240.0/24}
+      - CONTAIND_DMZ_SUBNET=${CONTAIND_DMZ_SUBNET:-192.168.241.0/24}
+      - CONTAIND_LAN1_SUBNET=${CONTAIND_LAN1_SUBNET:-192.168.242.0/24}
+      - CONTAIND_LAN2_SUBNET=${CONTAIND_LAN2_SUBNET:-192.168.243.0/24}
+      - CONTAIND_LAN3_SUBNET=${CONTAIND_LAN3_SUBNET:-192.168.244.0/24}
+      - CONTAIND_LAN4_SUBNET=${CONTAIND_LAN4_SUBNET:-192.168.245.0/24}
+      - CONTAIND_LAN5_SUBNET=${CONTAIND_LAN5_SUBNET:-192.168.246.0/24}
+      - CONTAIND_LAN6_SUBNET=${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}
+      - CONTAIND_AUTO_WAN_SUBNET=${CONTAIND_AUTO_WAN_SUBNET:-}
+      - CONTAIND_AUTO_DMZ_SUBNET=${CONTAIND_AUTO_DMZ_SUBNET:-}
+      - CONTAIND_AUTO_LAN1_SUBNET=${CONTAIND_AUTO_LAN1_SUBNET:-}
+      - CONTAIND_AUTO_LAN2_SUBNET=${CONTAIND_AUTO_LAN2_SUBNET:-}
+      - CONTAIND_AUTO_LAN3_SUBNET=${CONTAIND_AUTO_LAN3_SUBNET:-}
+      - CONTAIND_AUTO_LAN4_SUBNET=${CONTAIND_AUTO_LAN4_SUBNET:-}
+      - CONTAIND_AUTO_LAN5_SUBNET=${CONTAIND_AUTO_LAN5_SUBNET:-}
+      - CONTAIND_AUTO_LAN6_SUBNET=${CONTAIND_AUTO_LAN6_SUBNET:-}
+      - CONTAIND_CONFIG_DB=${CONTAIND_CONFIG_DB:-/data/config.db}
+      - CONTAIND_AUDIT_DB=${CONTAIND_AUDIT_DB:-/data/audit.db}
+      - CONTAIND_USERS_DB=${CONTAIND_USERS_DB:-/data/users.db}
+      - CONTAIND_TELEMETRY_DB=${CONTAIND_TELEMETRY_DB:-/data/telemetry.db}
+      - CONTAIND_SSH_ADDR=${CONTAIND_SSH_ADDR:-:2222}
+      - CONTAIND_SSH_AUTH_KEYS_DIR=${CONTAIND_SSH_AUTH_KEYS_DIR:-/data/ssh/authorized_keys.d}
+      - CONTAIND_SSH_HOST_KEY=${CONTAIND_SSH_HOST_KEY:-/data/ssh/host_key}
+      - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=${CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY:-}
+      - CONTAIND_SSH_BOOTSTRAP_ADMIN_USER=${CONTAIND_SSH_BOOTSTRAP_ADMIN_USER:-containd}
+      - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:?Set CONTAIND_JWT_SECRET to a random 32+ character string}
+      - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
+      - CONTAIND_ALLOWED_ORIGINS=${CONTAIND_ALLOWED_ORIGINS:-}
+      - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
+    ports:
+      - "127.0.0.1:${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
+      - "127.0.0.1:${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
+      # The default loopback engine API is plaintext and namespace-local.
+      # Non-loopback overrides require the dedicated engine mutual TLS secret.
+      # It stays on the container's loopback and is never published. For host
+      # diagnostics, call it inside the container, for example
+      # `docker compose exec containd curl -s http://127.0.0.1:8081/health`.
+    volumes:
+      - ./data:/data
+      # ClamAV signature databases survive container replacement.
+      - clamav-db:/var/lib/clamav
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/containd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    command: ["all"]
+
+    networks:
+      wan:
+        ipv4_address: ${CONTAIND_WAN_IP:-192.168.240.2}
+        gw_priority: 100
+        priority: 1000
+      dmz:
+        ipv4_address: ${CONTAIND_DMZ_IP:-192.168.241.2}
+        gw_priority: 0
+        priority: 900
+      lan1:
+        ipv4_address: ${CONTAIND_LAN1_IP:-192.168.242.2}
+        gw_priority: 0
+        priority: 800
+      lan2:
+        ipv4_address: ${CONTAIND_LAN2_IP:-192.168.243.2}
+        gw_priority: 0
+        priority: 700
+      lan3:
+        ipv4_address: ${CONTAIND_LAN3_IP:-192.168.244.2}
+        gw_priority: 0
+        priority: 600
+      lan4:
+        ipv4_address: ${CONTAIND_LAN4_IP:-192.168.245.2}
+        gw_priority: 0
+        priority: 500
+      lan5:
+        ipv4_address: ${CONTAIND_LAN5_IP:-192.168.246.2}
+        gw_priority: 0
+        priority: 400
+      lan6:
+        ipv4_address: ${CONTAIND_LAN6_IP:-192.168.247.2}
+        gw_priority: 0
+        priority: 300
+
+networks:
+  wan:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${CONTAIND_WAN_SUBNET:-192.168.240.0/24}
+  dmz:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_DMZ_SUBNET:-192.168.241.0/24}
+  lan1:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN1_SUBNET:-192.168.242.0/24}
+  lan2:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN2_SUBNET:-192.168.243.0/24}
+  lan3:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN3_SUBNET:-192.168.244.0/24}
+  lan4:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN4_SUBNET:-192.168.245.0/24}
+  lan5:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN5_SUBNET:-192.168.246.0/24}
+  lan6:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}
+
+volumes:
+  clamav-db:

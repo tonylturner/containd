@@ -18,6 +18,7 @@ import (
 
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/app/convergence"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/demo"
@@ -153,14 +154,18 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
 // opts may contain ManagementGuardHealth, ManagementListenerFaults,
-// FactoryResetSessions, DemoController and TelemetryStore providers.
+// FactoryResetSessions, *users.BootstrapLedger, DemoController and TelemetryStore providers.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	var demoController DemoController
 	var telemetryStore TelemetryStore
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
 	var resetSessions FactoryResetSessions
+	var bootstrapLedger *users.BootstrapLedger
 	for _, opt := range opts {
+		if ledger, ok := opt.(*users.BootstrapLedger); ok {
+			bootstrapLedger = ledger
+		}
 		if provider, ok := opt.(DemoController); ok {
 			demoController = provider
 		}
@@ -217,9 +222,6 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
-		if c.Request != nil && c.Request.TLS != nil {
-			c.Header("Strict-Transport-Security", "max-age=31536000")
-		}
 		c.Next()
 	})
 	// Avoid trusting all proxies by default; this prevents spoofed ClientIP via X-Forwarded-For.
@@ -279,7 +281,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), setTrustedCAHandler(store, engine))
-		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), requireConfigRevision(), factoryResetHandler(store, userStore, engine, services, resetSessions))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), requireConfigRevision(), factoryResetWithLedger(store, userStore, engine, services, bootstrapLedger, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), requireConfigRevision(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), validateConfigHandler(store))
@@ -505,6 +507,10 @@ func validateConfigHandler(store config.Store) gin.HandlerFunc {
 		// secrets. Both documents come from one authoritative read snapshot.
 		cfg.RestoreRedactedSecrets(snapshot.Candidate)
 		if err := config.CheckWrite(snapshot.Running, cfg, config.ReservationForStore(store)); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := config.ValidateProfileWrite(snapshot.Running, cfg, profile.IsStrict()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}

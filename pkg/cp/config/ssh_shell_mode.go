@@ -45,6 +45,7 @@ const (
 	SSHShellModeSourceEnvironment = "environment (" + EnvSSHShellMode + ")"
 	SSHShellModeSourceConfig      = "config"
 	SSHShellModeSourceDefault     = "default"
+	SSHShellModeSourceProfile     = "profile (strict)"
 )
 
 // ResolveSSHShellMode returns the shell mode SSH runs and its source. A

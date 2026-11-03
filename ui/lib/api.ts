@@ -11,6 +11,9 @@ export type ApiFailure = { ok: false; error: string; retryAfter?: number; status
 
 export type ConfigSnapshot<T> = { data: T; revision: string };
 
+export type DeploymentProfile = "training" | "strict";
+export type ProfileValueSource = "profile" | "config" | "default";
+
 // This file is the stable UI API facade. Keep shared public types and the
 // exported `api` surface here, but place endpoint families in `api-*.ts`
 // domain modules and generic transport/session helpers in api-core/request.
@@ -429,6 +432,8 @@ export type User = {
   mfaRequired?: boolean;
   mfaGraceUntil?: string;
   labMode?: boolean;
+  /** Deployment profile, included by /auth/me (not stored on the account). */
+  profile?: DeploymentProfile;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -463,7 +468,17 @@ export type TLSInfo = {
   httpListenAddr?: string;
   httpsListenAddr?: string;
   httpEnabled: boolean;
+  httpEnabledSource: ProfileValueSource;
+  httpEnabledSaved?: boolean;
   httpsEnabled: boolean;
+  httpsEnabledSource: ProfileValueSource;
+  httpsEnabledSaved?: boolean;
+  hstsEnabled: boolean;
+  hstsEnabledSource: ProfileValueSource;
+  hstsEnabledSaved?: boolean;
+  /** Request-independent auth cookie policy, not this request's Secure flag. */
+  secureCookies: "always" | "https-only" | "never";
+  secureCookiesSource: "profile" | "environment" | "default";
   /** Listeners management has bound now; absent when not bound. */
   boundHttpListenAddr?: string;
   boundHttpsListenAddr?: string;
@@ -480,6 +495,7 @@ export type TLSInfo = {
   certNotAfter?: string;
   certDnsNames?: string[];
   certIps?: string[];
+  certFingerprintSHA256?: string;
   /** Files and certificate the bound HTTPS listener serves now; absent when
    * none is bound. All file paths are cleaned, so equal strings name the
    * same file. */
@@ -489,8 +505,11 @@ export type TLSInfo = {
   servedCertNotAfter?: string;
   servedCertDnsNames?: string[];
   servedCertIps?: string[];
+  servedCertFingerprintSHA256?: string;
   /** Latest identity reload failure; the listener retains its last valid certificate. */
   reloadError?: string;
+  /** Warning for a served or configured management certificate without a DNS or IP SAN. */
+  certificateWarning?: string;
 };
 
 /** Result of a management certificate upload: status "updated" when the

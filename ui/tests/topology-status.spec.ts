@@ -8,7 +8,7 @@ import { observation, openProtection, protectionAPI } from "./fixtures/protectio
 // Unversioned ruleset detail cannot be joined to that observation.
 
 const health = (state: NonNullable<HealthResponse["enforcement"]>["state"], reason = ""): HealthResponse =>
-  ({ status: "ok", component: "containd", enforcement: { state, reason } });
+  ({ status: "ok", component: "containd", profile: "training", enforcement: { state, reason } });
 test("the chip requires aggregate readiness as well as enforcement health", () => {
   expect(topologyStatus(health("enforcing"), observation())).toEqual({ label: "ENFORCING", tone: "ok" });
   expect(topologyStatus(health("enforcing"), observation({ state: "failed" }))).toMatchObject({ label: "UNAVAILABLE", tone: "error" });

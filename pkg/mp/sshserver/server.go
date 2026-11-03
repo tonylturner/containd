@@ -20,6 +20,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -418,7 +419,7 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 }
 
 func (s *Server) isLinuxShellMode() bool {
-	return strings.EqualFold(s.opts.ShellMode, "linux")
+	return !profile.IsStrict() && strings.EqualFold(s.opts.ShellMode, "linux")
 }
 
 // repl runs the appliance CLI. pr is the client's PTY request, or nil when the
@@ -433,7 +434,11 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 	entry, role := api.SessionEntry(ctx)
 	statusPoller := cli.NewSessionStatusPoller(ctx, api)
 	defer statusPoller.Close()
-	writeTTY(rw, entry+"\nshell opens the Linux OS shell; exit disconnects SSH. menu and wizard are available here. Type help for commands.\n")
+	controls := "exit disconnects SSH. menu and wizard are available here. Type help for commands.\n"
+	if !profile.IsStrict() {
+		controls = "shell opens the Linux OS shell; " + controls
+	}
+	writeTTY(rw, entry+"\n"+controls)
 	defer writeTTY(rw, cli.SessionExit+"\nSSH disconnecting.\n")
 	for {
 		status := statusPoller.Snapshot()
@@ -469,6 +474,10 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		case "exit", "quit", "logout":
 			return
 		case "shell":
+			if profile.IsStrict() {
+				writeTTY(rw, profile.Refusal("shell", "the Linux shell is training-only").Error()+"\n")
+				continue
+			}
 			if pr != nil {
 				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
 				statusPoller.Refresh(api)
@@ -494,7 +503,11 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		err := cli.SessionCommandError(line, reg.ParseAndExecute(ctx, line, &buf))
 		statusPoller.Refresh(api)
 		if strings.EqualFold(line, "help") {
-			buf.WriteString("\nSSH controls: configure names this CLI; shell opens Linux (PTY required); menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
+			buf.WriteString("\nSSH controls: configure names this CLI; ")
+			if !profile.IsStrict() {
+				buf.WriteString("shell opens Linux (PTY required); ")
+			}
+			buf.WriteString("menu, wizard, diagnostics; exit / quit / logout disconnect SSH.\n")
 		}
 		if s.opts.AuditStore != nil {
 			rec := audit.Record{

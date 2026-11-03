@@ -12,7 +12,7 @@ Sessions have a 30-minute idle timeout and a 4-hour maximum lifetime.
 Logout revokes the session and clears the cookie. Cookie-authenticated browser
 writes require a same-origin request or an explicitly allowed origin.
 
-Lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
+Training-only lab mode (`CONTAIND_LAB_MODE=1`) still requires a token, but grants admin
 privileges without normal session enforcement. If a JWT secret is configured,
 the token must be an HS256 JWT signed with it and carry `exp` (30 seconds of
 leeway); no session or `jti` is required. Without a secret, any nonempty token
@@ -25,11 +25,14 @@ user-management endpoints still report stored account roles.
 Factory reset does not revoke lab tokens, even with a JWT secret configured.
 Do not expose lab mode to untrusted clients.
 
-Static bearer authentication is a fallback when the user store or JWT secret
+In training, static bearer authentication is a fallback when the user store or JWT secret
 is unavailable: `CONTAIND_ADMIN_TOKEN` grants admin access and
 `CONTAIND_AUDITOR_TOKEN` grants read-only access. These tokens do not replace
-session authentication in a normally configured appliance. Production startup
-requires a nonempty, non-example JWT secret.
+session authentication in a normally configured appliance. Outside lab mode,
+startup requires a nonempty, non-example JWT secret. Strict
+requires at least 32 characters and refuses static tokens and lab mode.
+`GET /health` and `GET /auth/me` include `profile: "training" | "strict"`.
+See [deployment profiles](deployment-profiles.md) for bootstrap credentials.
 
 When optional local-account MFA is enabled, `POST /auth/login` returns an MFA challenge instead of a session token, and `POST /auth/login/mfa` completes the login with a TOTP code.
 
@@ -448,7 +451,10 @@ to their prior state and returns HTTP 500. It does not undo the successfully
 applied configuration: the config and users databases do not share a
 transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`, indicating
 cookie clearing and client logout, not revocation of lab tokens. To log in again,
-use the default credentials. Configuration history, pending rollback and the old
+use the default credentials in training, or the new one-time password printed to
+container stdout and written to `<users-db-directory>/bootstrap/admin-password`
+in strict. Strict reset retains a secret-free `auth.bootstrap_password.issued`
+audit record after the audit wipe. Configuration history, pending rollback and the old
 IDS bank are replaced, not retained for rollback.
 
 The response includes `warnings` and the `X-Containd-Warnings` header when an
@@ -514,6 +520,29 @@ HTTP 409. This is an identity-mode policy, not a guarantee that an upload will
 pass validation or filesystem checks. Do not infer mode from file paths:
 explicitly setting both source paths to `/data/tls/server.pem` is external
 mode, although its reported paths match the managed bundle.
+
+TLS status also reports effective `httpEnabled`, `httpsEnabled` and `hstsEnabled`,
+per-field `*Source` (`profile`, `config` or `default`) and overridden `*Saved`
+values. `servedCertFingerprintSHA256` describes the served leaf;
+`certFingerprintSHA256` describes the configured next-start leaf. These may
+differ after a rejected reload. Fingerprints are uppercase colon-separated
+SHA-256 DER hashes. Strict disables HTTP and forces HTTPS, HSTS and Secure
+cookies. There is no `/system/ssh` route; use CLI `show system ssh`.
+`certificateWarning` identifies a served or configured management certificate
+without a DNS or IP SAN, including how to add one, or outside its validity
+window, including `NotBefore`, `NotAfter` and the current UTC time.
+`reloadError` reports a rejected certificate reload, including an invalid
+validity window; the last-good identity remains served.
+
+TLS status always includes `secureCookies` (`always`, `https-only` or `never`)
+and `secureCookiesSource` (`profile`, `environment` or `default`). These describe
+the auth cookie Secure policy, not the flag chosen for the status request.
+Strict reports `always` with source `profile`. Training defaults to `https-only`
+with source `default`: Secure is set only when the server request uses TLS, not
+from forwarded headers. In training, a trimmed nonempty `CONTAIND_COOKIE_SECURE`
+reports source `environment`: `1` or case-insensitive `true` selects `always`;
+any other nonempty value selects `never`. System Settings displays this policy
+and its source without inferring them from the browser URL.
 
 ## Events: Filtered Queries and Legacy Lists
 
@@ -869,7 +898,11 @@ listener setting supplies a value.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CONTAIND_MGMT_ADDR` | `:8080` | Management HTTP listen address |
+| `CONTAIND_PROFILE` | `training` with warning when unset | `training` or `strict`; unknown values refuse startup. Manifests hardcode the profile |
+| `CONTAIND_DEFAULT_ADMIN_USERNAME` | `containd` | Bootstrap username |
+| `CONTAIND_DEFAULT_ADMIN_PASSWORD` | `containd` in training | Training seed override; strict refuses and issues a one-time password |
+| `CONTAIND_SSH_SHELL_MODE` | `appliance` | Training override: `appliance` or `linux`; strict permits only appliance CLI and no shell escape |
+| `CONTAIND_MGMT_ADDR` | `:8080` | Management HTTP listen address in training; strict does not bind HTTP |
 | `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | Management HTTPS listen address |
 | `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
 | `CONTAIND_ENGINE_ADDR` | `127.0.0.1:8081` in `all`; required in `engine` | Engine API listen address. In `engine` mode, the engine's address on the management network (loopback only with a reserved management path) |
@@ -881,11 +914,13 @@ listener setting supplies a value.
 | `CONTAIND_TELEMETRY_DB` | `data/telemetry.db` | Management retained counter history SQLite database; Compose uses `/data/telemetry.db` |
 | `CONTAIND_LAB_MODE` | Disabled | Lab authentication described above |
 | `CONTAIND_JWT_SECRET` | Unset | Set a unique secret, e.g. `openssl rand -hex 32` |
-| `CONTAIND_COOKIE_SECURE` | Automatic | Unset: Secure on HTTPS requests. `1` forces Secure; `0` disables it. Set `1` behind a TLS-terminating proxy. |
+| `CONTAIND_COOKIE_SECURE` | Automatic | Unset: Secure on HTTPS requests. `1` forces Secure; `0` disables it in training. Strict always uses Secure and refuses disabling overrides. Set `1` behind a TLS-terminating proxy in training. |
 | `CONTAIND_TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated trusted proxy IPs/CIDRs for forwarded client addresses |
 | `CONTAIND_ALLOWED_ORIGINS` | *(empty)* | Optional comma-separated browser origins allowed to embed or call the appliance cross-origin. Cookie-authenticated browser writes from other origins are denied unless listed here. |
 
-Relative database paths are relative to the process working directory.
+Relative database paths are relative to the process working directory. Management
+refuses users-database creation/open failures in both profiles; it never falls
+back to another users database.
 The engine API uses credential-free HTTP only on numeric loopback listeners.
 Every non-loopback listener requires TLS 1.3 mutual authentication, including
 probes and metrics. While enforcing, admission remains limited to loopback and

@@ -16,8 +16,15 @@ info:
     Static admin/auditor bearer tokens are a
     fallback only when the user store or JWT secret is unavailable.
     Persisted configuration edits stage a shared candidate. Reads of editable
-    settings use that candidate; commit promotes and applies it. Operational
-    commands remain immediate. Authentication and authorization errors use
+    settings use that candidate; commit promotes and applies it.
+    In strict, validation, candidate writes, imports and promotion reject newly
+    introduced Linux SSH shell mode, disabled HTTPS or disabled HSTS with 400.
+    Existing weak saved values may be carried or repaired field by field,
+    compared with unprojected running intent, not the previous candidate.
+    Rollback may restore previously accepted saved intent. Runtime projection
+    enforces strict policy without persisting it; HTTP enablement is projected
+    off rather than rejected on writes. Session cookies are always Secure in strict.
+    Operational commands remain immediate. Authentication and authorization errors use
     ErrorResponse; protected operations may return 401, 403 or 503. Admin-only
     operations say so in their summary.
   license:
@@ -227,9 +234,15 @@ components:
               lastError: {type: string, description: Sanitized current error}
               lastSuccessAt: {type: string, format: date-time}
 
+    DeploymentProfile:
+      type: string
+      enum: [training, strict]
+      description: Immutable deployment profile selected at process startup.
     HealthResponse:
       type: object
+      required: [profile]
       properties:
+        profile: {$ref: '#/components/schemas/DeploymentProfile'}
         evidence:
           type: object
           required: [state]
@@ -2831,7 +2844,7 @@ components:
           maximum: 36500
           description: "Rotate host keys at this age in days; 0 disables rotation. Running settings are checked every minute."
         listenAddr: {type: string}
-        shellMode: {type: string, enum: ['', appliance, linux], description: 'What an interactive SSH login opens. Empty means appliance. A non-empty CONTAIND_SSH_SHELL_MODE overrides it; SSH reads it at startup.'}
+        shellMode: {type: string, enum: ['', appliance, linux], description: 'What an interactive SSH login opens. Empty means appliance. Training permits a non-empty CONTAIND_SSH_SHELL_MODE override; SSH reads it at startup. Strict forces appliance mode and refuses Linux shell access.'}
       type: object
     ScheduleConfig:
       description: >-
@@ -3134,10 +3147,15 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
-      required: [managed]
+      required: [managed, httpEnabled, httpEnabledSource, httpsEnabled, httpsEnabledSource, hstsEnabled, hstsEnabledSource, secureCookies, secureCookiesSource]
       description: >-
         The listen addresses and enabled flags are those management binds when it
-        starts with the saved configuration: CONTAIND_MGMT_ADDR and
+        starts with the profile-projected saved configuration. Strict disables
+        HTTP and enables HTTPS and HSTS without changing saved intent. Each
+        enabledSource is profile when overridden, otherwise config for an explicit
+        saved setting or default for an unset setting (which defaults to true).
+        Each enabledSaved is present only when overridden, including false.
+        CONTAIND_MGMT_ADDR and
         CONTAIND_MGMT_HTTPS_ADDR take precedence over the saved addresses, then
         the defaults :8080 and :8443 apply. A saved listener change binds at the
         next start. boundHttpListenAddr and boundHttpsListenAddr are the
@@ -3163,7 +3181,29 @@ components:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}
         httpEnabled: {type: boolean}
+        httpEnabledSource: {type: string, enum: [profile, config, default]}
+        httpEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; an unset HTTP setting reports true under strict'}
         httpsEnabled: {type: boolean}
+        httpsEnabledSource: {type: string, enum: [profile, config, default]}
+        httpsEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; false is preserved'}
+        hstsEnabled: {type: boolean}
+        hstsEnabledSource: {type: string, enum: [profile, config, default]}
+        hstsEnabledSaved: {type: boolean, description: 'Saved/default value only when overridden; false is preserved'}
+        secureCookies:
+          type: string
+          enum: [always, https-only, never]
+          description: >-
+            Request-independent auth cookie Secure policy, not the flag on this
+            request. Strict always reports always. Training defaults to https-only
+            (Secure only when the request uses TLS). A trimmed nonempty
+            CONTAIND_COOKIE_SECURE selects always for 1 or case-insensitive true,
+            otherwise never. This uses the server request TLS state, not forwarded headers.
+        secureCookiesSource:
+          type: string
+          enum: [profile, environment, default]
+          description: 'Strict always reports profile, even with an environment override; training reports environment for a trimmed nonempty CONTAIND_COOKIE_SECURE, otherwise default'
+        servedCertFingerprintSHA256: {type: string, description: 'SHA-256 of the bound served leaf DER, uppercase colon-separated hex; last-good identity on reload failure, absent when unavailable'}
+        certFingerprintSHA256: {type: string, description: 'SHA-256 of the configured next-start leaf DER, uppercase colon-separated hex; absent when its validated identity is unavailable'}
         boundHttpListenAddr: {type: string, description: 'Address of the bound HTTP listener; absent when none is bound'}
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
         httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
@@ -3176,7 +3216,8 @@ components:
         certNotAfter: {type: string}
         certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
         certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
-        reloadError: {type: string, description: 'Latest bound identity reload error; last-good certificate remains served'}
+        reloadError: {type: string, description: 'Latest bound identity reload error, including a certificate outside its validity window; last-good certificate remains served'}
+        certificateWarning: {type: string, description: 'Warning naming a served or configured management certificate without a DNS or IP subject alternative name, with replacement guidance, or outside its validity window with NotBefore, NotAfter and the current UTC time'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
@@ -3934,7 +3975,9 @@ components:
       type: object
     MeResponse:
       type: object
+      required: [profile]
       properties:
+        profile: {$ref: '#/components/schemas/DeploymentProfile'}
         id: {type: string}
         username: {type: string}
         firstName: {type: string}
@@ -4337,7 +4380,7 @@ paths:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
-          description: Reset applied; inspect warnings for incomplete convergence and reauthenticate with default credentials
+          description: Reset applied; inspect warnings for incomplete convergence. Training uses default credentials; strict issues a one-time password in the container log and bootstrap/admin-password beside the users database, requiring a password change at first login
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
@@ -4374,7 +4417,7 @@ paths:
     post:
       summary: Validate configuration without staging (admin)
       description: >
-        Uses the same structural and immutable management-reservation checks as
+        Uses the same structural, deployment-profile and immutable management-reservation checks as
         persistence. Reservation errors name the field and "reserved management path".
         Disabling all ordinary interface access flags is permitted.
       tags: [Config]
@@ -7868,12 +7911,17 @@ paths:
       summary: Atomically replace the managed TLS bundle (admin)
       tags: [System]
       description: >-
-        Validates the certificate chain and matching key, then atomically publishes
-        /data/tls/server.pem (0600) with one durable rename. Both resolved paths
-        must select the legacy defaults; nondefault external paths are read-only.
-        Does not change saved listener paths. The bound listener reads the bundle
-        once on reload. A pre-rename failure preserves the old bundle; a parent
-        directory sync failure returns 500 with commit uncertain, without rollback.
+        Validates the certificate chain and matching key, and requires the leaf
+        certificate to include a DNS or IP subject alternative name and to be
+        currently within its validity window. A certificate without a DNS or IP
+        SAN, expired, or not yet valid returns 400 without writing; validity
+        errors name NotBefore, NotAfter and the current UTC time. Then atomically
+        publishes /data/tls/server.pem (0600) with one durable rename. Both
+        resolved paths must select the legacy defaults; nondefault external paths
+        are read-only. Does not change saved listener paths. The bound listener
+        reads the bundle once on reload. A pre-rename failure preserves the old
+        bundle; a parent directory sync failure returns 500 with commit uncertain,
+        without rollback.
       requestBody:
         required: true
         content:
@@ -7898,6 +7946,15 @@ paths:
             read-only external mode, including paths under /data. The error names
             the paths and their selecting overrides, and explains how to return
             to the managed bundle.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '400':
+          description: >-
+            Nothing written. The certificate/key pair is invalid, the leaf
+            certificate has no DNS or IP subject alternative name, or its
+            validity window does not include the current UTC time. Validity
+            errors include NotBefore, NotAfter and the current UTC time.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

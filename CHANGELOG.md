@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Strict uses HTTPS only, Secure cookies, HSTS and appliance-only SSH. It refuses
+  lab mode, static tokens, default password overrides and Docker socket mounts.
+- Strict rotates accounts still using `containd` and reissues unclaimed one-time
+  passwords at boot. Claimed non-default credentials remain unchanged. The
+  factory-reset confirmation and forced-password dialog identify strict
+  one-time-password recovery.
+
 ### Fixed
 
+- Require DNS/IP SANs for management TLS uploads and strict boot; training warns
+  on, but keeps serving, legacy identities. Reject out-of-window certificate
+  uploads, preserve the last-good identity on invalid reloads, and warn without
+  refusing boot in either profile.
+- Report the effective Secure-cookie policy and its source in TLS status and
+  System Settings, including training environment overrides; System Settings
+  also identifies the selected deployment profile. Print healthcheck failures
+  to stderr, retaining certificate validity dates.
+- Honor `enableHSTS=false` in training by removing a duplicate HSTS header.
 - Bind runtime convergence to committed running generations, with authenticated
   desired/applied/protecting revisions, per-owner outcomes and `ready`. Retry
   outstanding owners without replaying healthy services; adopt unchanged live
@@ -51,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Management now refuses to start when its configured users database cannot be
+  created or opened; it no longer falls back to `data/users.db`. Correct the
+  configured path and permissions before upgrading.
+- An unset profile selects training with a startup warning. Keep one profile per
+  data directory. Strict does not support the reserved plain-HTTP management
+  path; design and test a replacement boundary before migrating.
+- Both profiles report certificate fingerprints and profile status. Training
+  now honors saved `enableHSTS=false`; review that setting before upgrading.
 - API: `/api/v1/security/conduits` `ids` is now `enabled` or `disabled` (was
   `full`, `partial` or `none`) and each conduit has a `checks` object with
   `provenance` and `reason` per control. Heuristic `gaps` and `mitre` entries
@@ -77,6 +103,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `CONTAIND_PROFILE=training|strict`, a loopback-only strict Compose manifest,
+  deployment-profile and lost-password documentation, and a strict smoke in CI.
+- Deliver strict one-time passwords through container stdout and a private
+  bootstrap file. Keep issuance audit records secret-free, including after reset.
+- Report effective TLS settings, profile overrides and served/configured SHA-256
+  fingerprints. Log the served fingerprint at boot and successful reload.
 - Charts show retained history of real counters: interface throughput per zone
   (Dashboard Traffic, Zone Status, Monitoring, Topology), events, services and
   antivirus. A missed sample shows as a gap, a counter restart as a reset mark,

@@ -32,6 +32,14 @@ export type TrustedCAUploadResult =
   | { state: "stored"; revision: string; warnings: string[] }
   | { state: "failed"; error: string };
 
+/** Accept older TLS status payloads while rejecting malformed warning values. */
+export function parseTLSInfo(value: unknown): TLSInfo | null {
+  if (!isRecord(value) || (value.certificateWarning !== undefined && typeof value.certificateWarning !== "string")) {
+    return null;
+  }
+  return value as unknown as TLSInfo;
+}
+
 export const policyAPI = {
   listAssets: () => getConfigJSON<Asset[]>("/api/v1/assets", "list"),
   createAsset: (expectedRevision: string, a: Asset) => postJSONResult<Asset>("/api/v1/assets", a, expectedRevision),
@@ -45,7 +53,7 @@ export const policyAPI = {
   getDashboard: (signal?: AbortSignal) =>
     getJSONShaped<DashboardData>("/api/v1/dashboard", { objects: ["health", "counts"] }, signal),
 
-  getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
+  getTLSInfo: async () => parseTLSInfo(await getJSON<TLSInfo>("/api/v1/system/tls")),
   setTLSCert: (certPEM: string, keyPEM: string) =>
     postJSONResult<TLSCertUpload>("/api/v1/system/tls/cert", {
       certPEM,

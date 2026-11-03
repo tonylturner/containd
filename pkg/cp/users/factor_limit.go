@@ -147,11 +147,11 @@ func comparePassword(hash, password string) error {
 // reservePasswordCheck refuses a locked check, otherwise counts the attempt
 // as a failure and returns the password hash to compare.
 func (s *SQLiteStore) reservePasswordCheck(ctx context.Context, id string, now time.Time) (string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin password check: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.close()
 	var hash string
 	err = tx.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, id).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -160,7 +160,7 @@ func (s *SQLiteStore) reservePasswordCheck(ctx context.Context, id string, now t
 	if err != nil {
 		return "", fmt.Errorf("read password: %w", err)
 	}
-	st, err := loadFactor(ctx, tx, id, FactorCurrentPassword)
+	st, err := loadFactor(ctx, tx.Tx, id, FactorCurrentPassword)
 	if err != nil {
 		return "", err
 	}
@@ -234,13 +234,14 @@ ON CONFLICT(user_id, factor) DO UPDATE SET failures=excluded.failures, last_fail
 }
 
 // commitFactor saves st, commits tx and returns result.
-func commitFactor(ctx context.Context, tx *sql.Tx, st *factorState, result error) error {
-	if err := st.save(ctx, tx); err != nil {
+func commitFactor(ctx context.Context, tx *mutationTx, st *factorState, result error) error {
+	if err := st.save(ctx, tx.Tx); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit %s failures: %w", st.factor, err)
 	}
+	tx.close()
 	return result
 }
 

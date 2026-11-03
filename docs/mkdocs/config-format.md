@@ -48,8 +48,10 @@ deadline is pending. **Recovery** contains **Rollback** and explains that it
 keeps the newer staged candidate; review that candidate before committing
 again. **Factory reset** is a separate immediate action in **Recovery**:
 type `NUCLEAR`, then confirm. It is revision-guarded, wipes configuration,
-users and audit history, applies appliance defaults and resets the default
-admin login. TLS identity files remain; lab web/API tokens remain valid.
+users and audit history, applies appliance defaults and resets the admin
+login: training restores the default credentials; strict issues a new one-time
+password (see [Deployment profiles](deployment-profiles.md)). TLS identity
+files remain; in lab mode, lab web/API tokens remain valid.
 Back up before resetting. The committed document is not proof of live traffic protection.
 Exports, appliance backups and IDS bank backup/restore remain on Overview.
 
@@ -484,6 +486,13 @@ TLS bytes and the saved managed/external choice.
 
 Admins replace the managed identity with
 `POST /api/v1/system/tls/cert`, sending `{"certPEM":"...","keyPEM":"..."}`.
+The leaf certificate must include at least one DNS or IP subject alternative
+name (SAN); a common name alone is not sufficient. An upload without a DNS or
+IP SAN, or with a validity window outside the appliance's current UTC time,
+returns HTTP 400 and leaves the existing bundle unchanged. The error includes
+`NotBefore`, `NotAfter` and the current UTC time. For example, add a SAN when
+generating a certificate with `-addext 'subjectAltName=DNS:<name>,IP:<addr>'`.
+
 The pair is validated and published with one durable atomic rename; the listener
 reads the bundle once at each reload. Failures before rename preserve the old
 bundle. A failure to sync the directory after rename returns HTTP 500 with
@@ -492,6 +501,24 @@ confirmed. Inspect status before retrying; containd does not roll it back.
 A successful upload reports `updated` when the bound HTTPS listener serves the
 bundle, or `stored` with a warning when it takes effect at the next start.
 Uploads never change saved paths.
+
+Generated self-signed management identities include `localhost` and
+`127.0.0.1` SANs. Strict refuses to start with a stored management certificate
+that lacks a DNS or IP SAN. Training continues serving an existing SAN-less
+identity and logs a warning with the replacement guidance; TLS status reports
+it in `certificateWarning`. A SAN-less certificate encountered on reload does
+not replace the last-good identity and is reported in `reloadError`.
+
+An expired or not-yet-valid certificate does not prevent management from
+starting in either profile: boot logs a warning naming the file, validity
+window and current UTC time, and TLS status reports it in `certificateWarning`.
+The bound listener may continue to serve that identity, but the loopback TLS
+client reports an explicit validity-window error to callers such as the local
+CLI's health command.
+Replacing it through upload requires a certificate currently within its
+validity window. An invalid certificate encountered on reload does not replace
+the last-good identity and is reported in `reloadError`; replacing it with a
+currently valid certificate recovers normally.
 
 Handshakes check each file's device/inode, size and modification time. Unchanged
 files are not reread or reparsed, including invalid replacements: status keeps
@@ -512,8 +539,10 @@ its containing directory read-only into containd, not the replaceable file inode
 and have the operator replace the bundle atomically in that directory. Separate
 certificate and key files are also accepted, but cannot guarantee atomic
 rotation: a mismatched or unreadable replacement keeps the last-good pair in
-memory. With no valid pair at start, HTTPS is disabled and the reason is logged;
-containd never self-signs external paths. Changing source paths requires restart.
+memory. With no readable, parseable matching pair at start, training disables
+HTTPS and logs the reason; strict refuses startup instead of falling back to
+HTTP. containd never
+self-signs external paths. Changing source paths requires restart.
 
 `GET /api/v1/system/tls` describes configured and bound files (both file fields
 name `server.pem` in managed mode). Its always-present boolean `managed` uses
@@ -527,6 +556,21 @@ snapshot, not an independently read certificate. `reloadError` reports an invali
 rotation while the last-good identity remains served. Private keys are never
 returned. A pin/rotation race fails verification; retry the operation rather than
 disabling certificate verification.
+
+The loopback HTTPS client performs ordinary certificate validity checks as well
+as leaf pinning. An expired stored certificate can still be served and does not
+by itself prevent strict startup, but loopback API calls such as the local CLI's
+health command fail with `NotBefore`, `NotAfter` and the current UTC time until
+a currently valid certificate is installed.
+
+Strict overrides saved HTTP, HTTPS and HSTS enablement without rewriting saved
+intent. TLS status includes `httpEnabledSource`, `httpsEnabledSource`,
+`hstsEnabledSource` and overridden `*Saved` values, plus
+`servedCertFingerprintSHA256` and `certFingerprintSHA256`. See
+[deployment profiles](deployment-profiles.md) for write and migration rules.
+The request-independent auth cookie policy and its source are reported as
+`secureCookies` and `secureCookiesSource`; see the
+[TLS status API](api-reference.md#reload-running-configuration-sighup).
 
 ## Additional CA bundle
 

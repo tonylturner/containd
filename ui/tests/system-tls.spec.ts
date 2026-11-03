@@ -1,12 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { certUploadNotice, tlsView, type TLSRow } from "../app/system/settings/tls-view";
+import { certUploadNotice, tlsPolicyRows, tlsView, type TLSRow } from "../app/system/settings/tls-view";
+import type { ProfileValueSource } from "../lib/api";
+import { parseTLSInfo } from "../lib/api-policy";
 
 // Model tests: no page, no server.
 
 const saved = {
   managed: false,
   httpEnabled: true, httpsEnabled: true, httpListenAddr: ":8080", httpsListenAddr: ":8443",
+  httpEnabledSource: "default" as ProfileValueSource,
+  httpsEnabledSource: "default" as ProfileValueSource,
+  hstsEnabled: true, hstsEnabledSource: "default" as ProfileValueSource,
+  secureCookies: "https-only" as const, secureCookiesSource: "default" as const,
   certFile: "/etc/tls/server.crt", keyFile: "/etc/tls/server.key",
   certSubject: "CN=saved", certNotAfter: "2027-01-01T00:00:00Z",
   certDnsNames: ["saved.example"], certIps: ["192.0.2.20"],
@@ -24,12 +30,25 @@ const served = {
 const iso = (v: string | undefined) => v ?? "—";
 const rows = (list: TLSRow[]) => Object.fromEntries(list.map((r) => [r.label, r.value]));
 
+test("cookie policy stays unknown until TLS status is loaded", () => {
+  expect(rows(tlsPolicyRows(null))["Secure cookies"]).toBe("—");
+});
+
+test("TLS response accepts an optional certificate warning and rejects malformed warning values", () => {
+  const warning = "/etc/tls/server.pem: management TLS certificate has no DNS or IP subject alternative name; add one with -addext 'subjectAltName=DNS:<name>,IP:<addr>'";
+  expect(parseTLSInfo({ ...saved, certificateWarning: warning })?.certificateWarning).toBe(warning);
+  expect(parseTLSInfo(saved)?.certificateWarning).toBeUndefined();
+  expect(parseTLSInfo({ ...saved, certificateWarning: 42 })).toBeNull();
+});
+
 test("listeners and files served now equal to the next start show once", () => {
   const view = tlsView({ ...saved, ...bound, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile }, iso);
   expect(view).toEqual({
     rows: [
       { label: "HTTP listen", value: "[::]:8080" },
       { label: "HTTPS listen", value: "[::]:8443" },
+      { label: "Served certificate SHA-256", value: "Unavailable" },
+      { label: "Configured certificate SHA-256", value: "Unavailable" },
       { label: "Cert file", value: "/etc/tls/server.crt" },
       { label: "Key file", value: "/etc/tls/server.key" },
       { label: "Cert subject", value: "CN=served" },
@@ -94,6 +113,8 @@ test("without a bound HTTPS listener the saved files wait for the next start", (
     "HTTP listen": "[::]:8080",
     "HTTPS listen": "not bound",
     "HTTPS listen (next start)": ":8443",
+    "Served certificate SHA-256": "Unavailable",
+    "Configured certificate SHA-256": "Unavailable",
     "Cert file": "no HTTPS listener bound",
     "Key file": "no HTTPS listener bound",
     "Cert file (next start)": "/etc/tls/server.crt",
@@ -196,6 +217,8 @@ test("settings page marks saved files that differ from the served ones", async (
     "/api/v1/system/tls": { json: { ...saved, ...bound, ...served, servedCertFile: "/data/tls/default.crt", servedKeyFile: "/data/tls/default.key" } },
   });
   const card = await openSettings(page);
+  await expect(card.getByText("Deployment profile", { exact: true })).toBeVisible();
+  await expect(card.getByText("—", { exact: true })).toBeVisible();
   await expect(card.getByText("/data/tls/default.crt")).toBeVisible();
   await expect(card.getByText("CN=served")).toBeVisible();
   await expect(card.getByText("served.example, containd.local, 192.0.2.10, 2001:db8::10")).toBeVisible();
@@ -206,6 +229,22 @@ test("settings page marks saved files that differ from the served ones", async (
   await expect(card.getByText("they are served from the next management start")).toBeVisible();
   await expect(card.getByText("[::]:8080")).toBeVisible();
   await expect(card.getByText(/listen \(next start\)/)).toHaveCount(0);
+});
+
+test("settings page shows the API certificate warning verbatim and clears it when absent", async ({ page }) => {
+  const warning = "/etc/tls/server.pem: management TLS certificate has no DNS or IP subject alternative name; add one with -addext 'subjectAltName=DNS:<name>,IP:<addr>'";
+  const identity = { ...managedSaved, ...bound, ...served, servedCertFile: managedSaved.certFile, servedKeyFile: managedSaved.keyFile };
+  await mockAPI(page, { "/api/v1/system/tls": { json: { ...identity, certificateWarning: warning } } });
+  const card = await openSettings(page);
+  const notice = card.getByRole("status", { name: "Certificate warning" });
+  await expect(notice).toHaveText(warning);
+  await expect(notice).toHaveClass(/border-amber\/30/);
+  await expect(notice).toHaveClass(/bg-amber\/10/);
+  await expect(notice).toHaveClass(/text-amber/);
+
+  await page.route("**/api/v1/system/tls", (route) => route.fulfill({ json: identity }));
+  await card.getByRole("button", { name: "Refresh" }).click();
+  await expect(notice).toHaveCount(0);
 });
 
 for (const width of [1280, 390]) {

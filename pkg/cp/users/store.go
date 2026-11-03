@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 
 	_ "modernc.org/sqlite"
 )
@@ -87,8 +88,9 @@ type Store interface {
 // SQLiteStore keeps accounts and sessions. SetPassword, SetTOTP and
 // DisableTOTP revoke the account's other sessions in the same transaction.
 type SQLiteStore struct {
-	db          *sql.DB
-	revocations revocationHub
+	db                *sql.DB
+	revocations       revocationHub
+	bootstrapObserver bootstrapObserver
 }
 
 // ResetToDefaultAdmin replaces users and sessions with the default admin atomically.
@@ -96,11 +98,11 @@ func (s *SQLiteStore) ResetToDefaultAdmin(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("users store unavailable")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin user reset: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.close()
 
 	// Clear sessions first to avoid FK complaints in some SQLite configurations.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
@@ -109,12 +111,16 @@ func (s *SQLiteStore) ResetToDefaultAdmin(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM users`); err != nil {
 		return fmt.Errorf("wipe users: %w", err)
 	}
-	if err := ensureDefaultAdmin(ctx, tx); err != nil {
+	events, revoked, err := seedDefaultAdminTx(ctx, tx.Tx, "reset")
+	if err != nil {
 		return fmt.Errorf("seed default admin: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit user reset: %w", err)
 	}
+	tx.close()
+	s.revocations.publish(revoked)
+	s.emitBootstrapEvents(events)
 	return nil
 }
 
@@ -192,6 +198,12 @@ CREATE TABLE IF NOT EXISTS mfa_challenges (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mfa_challenges_expiry ON mfa_challenges(expires_at);
+CREATE TABLE IF NOT EXISTS bootstrap_pending (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  issued_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS factor_failures (
   user_id TEXT NOT NULL,
   factor TEXT NOT NULL,
@@ -228,7 +240,25 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("users store unavailable")
 	}
-	return ensureDefaultAdmin(ctx, s.db)
+	if !profile.IsStrict() {
+		return ensureDefaultAdmin(ctx, s.db)
+	}
+	tx, err := s.beginMutationTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin default admin: %w", err)
+	}
+	defer tx.close()
+	events, revoked, err := seedDefaultAdminTx(ctx, tx.Tx, "seed")
+	if err != nil {
+		return err
+	}
+	if err := tx.commit(ctx); err != nil {
+		return fmt.Errorf("commit default admin: %w", err)
+	}
+	tx.close()
+	s.revocations.publish(revoked)
+	s.emitBootstrapEvents(events)
+	return nil
 }
 
 type userDB interface {
@@ -436,6 +466,10 @@ func insertUser(ctx context.Context, db userDB, u User, password string, bootstr
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
+	return insertHashedUser(ctx, db, u, string(hash))
+}
+
+func insertHashedUser(ctx context.Context, db userDB, u User, hash string) (*User, error) {
 	now := time.Now().UTC()
 	u.ID = newID()
 	u.CreatedAt = now
@@ -444,9 +478,9 @@ func insertUser(ctx context.Context, db userDB, u User, password string, bootstr
 	if u.MustChangePassword {
 		mustChange = 1
 	}
-	_, err = db.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), mustChange, now.Unix(), now.Unix())
+		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, hash, mustChange, now.Unix(), now.Unix())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, ErrUsernameTaken
@@ -479,8 +513,7 @@ func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password strin
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	now := time.Now().UTC()
-	return s.updateCredential(ctx, "set password", id, "", `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
+	return s.setPasswordHash(ctx, id, string(hash))
 }
 
 // SetTOTP enables TOTP with secret and revokes the account's other sessions.
@@ -517,18 +550,19 @@ func (s *SQLiteStore) disableTOTP(ctx context.Context, id string, now time.Time,
 // of factor (every factor when empty) and revokes the account's other
 // sessions atomically, then notifies revocation subscribers.
 func (s *SQLiteStore) updateCredential(ctx context.Context, op, id string, factor Factor, query string, args ...any) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginMutationTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", op, err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	revoked, err := updateCredentialTx(ctx, tx, op, id, factor, query, args...)
+	defer tx.close()
+	revoked, err := updateCredentialTx(ctx, tx.Tx, op, id, factor, query, args...)
 	if err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.commit(ctx); err != nil {
 		return fmt.Errorf("commit %s: %w", op, err)
 	}
+	tx.close()
 	s.revocations.publish(revoked)
 	return nil
 }

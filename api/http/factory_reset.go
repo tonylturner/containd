@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/labmode"
+	"github.com/tonylturner/containd/pkg/common/profile"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -26,6 +29,10 @@ type factoryResetRequest struct {
 type FactoryResetSessions func(ctx context.Context, sessionID string)
 
 func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier, revoke ...FactoryResetSessions) gin.HandlerFunc {
+	return factoryResetWithLedger(cfgStore, userStore, engine, services, nil, revoke...)
+}
+
+func factoryResetWithLedger(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier, ledger *users.BootstrapLedger, revoke ...FactoryResetSessions) gin.HandlerFunc {
 	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		var req factoryResetRequest
@@ -118,6 +125,14 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 				}
 			}
 		}
+		if ledger != nil {
+			for _, issued := range ledger.Drain() {
+				auditLog(c, audit.Record{
+					Action: "auth.bootstrap_password.issued", Target: issued.Username,
+					Detail: fmt.Sprintf("generation=%d reason=%s", issued.Generation, issued.Reason),
+				})
+			}
+		}
 		if len(warnings) == 0 {
 			auditLog(c, audit.Record{Action: "system.factory_reset.completed", Target: "all", Result: "success"})
 		} else {
@@ -139,9 +154,14 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 				closeSessions(ctx, sessionID)
 			}
 		}
-		message := "Factory reset completed. Log in with the default credentials."
+		loginMessage := "Log in with the default credentials."
+		if profile.IsStrict() {
+			passwordFile := filepath.Join(filepath.Dir(common.Env("CONTAIND_USERS_DB", filepath.Join("data", "users.db"))), "bootstrap", "admin-password")
+			loginMessage = fmt.Sprintf("Log in with the one-time password printed to the container log and written to %s; a password change is required at first login.", passwordFile)
+		}
+		message := "Factory reset completed. " + loginMessage
 		if len(warnings) > 0 {
-			message = "Factory reset applied with warnings; runtime convergence is incomplete. " + strings.Join(warnings, "; ") + ". Log in with the default credentials."
+			message = "Factory reset applied with warnings; runtime convergence is incomplete. " + strings.Join(warnings, "; ") + ". " + loginMessage
 		}
 		if lab {
 			message += " Lab web/API tokens remain valid; factory reset does not revoke them."

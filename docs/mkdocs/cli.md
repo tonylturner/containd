@@ -423,6 +423,10 @@ console never uploads a file.
 
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
+[Deployment profiles](deployment-profiles.md) select the authentication boundary.
+Strict issues a one-time first-admin password, uses pinned HTTPS locally and
+always sets Secure cookies. Lab mode and the Linux shell are training-only.
+
 Environment variables (common):
 - `CONTAIND_LAB_MODE=1` refuses every password change, including the SSH menu
   reset and the wizard's password step. It keeps existing and custom-seeded
@@ -434,8 +438,8 @@ Environment variables (common):
   access rather than ordinary role enforcement. Use only in isolated, disposable environments; see
   [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).
 - `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification. Compose requires
-  a non-empty value even for labs; follow [onboarding](docker-compose.md#quickstart).
-- `CONTAIND_COOKIE_SECURE=1` forces the `Secure` flag on the auth cookie (use when serving over HTTPS).
+  a non-empty value in starter/dev/strict manifests even for labs; follow [onboarding](docker-compose.md#quickstart).
+- `CONTAIND_COOKIE_SECURE=1` forces the `Secure` flag on the auth cookie in training. Strict always uses Secure.
 
 Roles:
 - `admin` (full access)
@@ -490,7 +494,11 @@ Notes:
 
 ### Shell modes
 
-The SSH shell mode selects what an interactive SSH login opens:
+Strict always opens the appliance CLI. It refuses `shell` with
+`The Linux shell is disabled in the strict profile.` Password and bootstrap-key
+logins must complete the first-login password change before reaching the CLI.
+
+In training, the SSH shell mode selects what an interactive SSH login opens:
 
 - `appliance` (default): the containd CLI. Type `shell` to open a
   Linux shell. Type `exit` in that shell to return to the CLI.
@@ -513,10 +521,15 @@ always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`); to change the
 mode there, set the variable in `.env` and run `docker compose up -d`.
 
 `show system` shows the mode SSH runs as `ssh.shell_mode` and its source as
-`ssh.shell_mode_source`: `environment (CONTAIND_SSH_SHELL_MODE)`, `config` or
-`default`. When the saved value differs, `ssh.shell_mode_saved` shows it and
+`ssh.shell_mode_source`: `environment (CONTAIND_SSH_SHELL_MODE)`, `config`,
+`default` or `profile (strict)`. Strict shows effective appliance mode and any
+overridden saved mode. When the saved value differs, `ssh.shell_mode_saved` shows it and
 says whether the environment overrides it or it applies after a restart.
 `show system ssh` also lists the mode and its source.
+`show system` reports effective next-start `mgmt.http_enabled`,
+`mgmt.https_enabled` and `mgmt.hsts`, each with a matching `_source` and,
+when overridden, `_saved` line. Listener addresses and live bound state
+are separate from this profile policy.
 
 The Linux shell needs a PTY. Interactive `ssh` requests one by default;
 `ssh -T` does not. Without a PTY, a `linux` mode login opens the appliance CLI
@@ -543,7 +556,8 @@ serves, using the public-leaf snapshot in the runtime record; no private key is
 recorded. The record follows valid [management TLS rotations](config-format.md#management-https-identity),
 including retention of the last-good identity after an invalid external rotation.
 It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
-`CONTAIND_CLI_PASSWORD`; both default to `containd`. Without the file, the
+`CONTAIND_CLI_PASSWORD`; both default to `containd` in training. In strict, supply the claimed credentials
+after completing the first-login change. Without the file, the
 CLI stops with `management is not running`. The container health check
 (`containd healthcheck`) uses the same file.
 
@@ -564,8 +578,8 @@ only confirms that you are already there; it never starts the wizard.
 
 Access and lab caveats:
 
-- Only admin accounts can log in over SSH. Every admin can open the Linux
-  shell in both modes, in and outside lab mode.
+- Only admin accounts can log in over SSH. In training, every admin can open
+  the Linux shell in both modes, in and outside lab mode. Strict refuses it.
 - Outside lab mode, the [account checks](#account-checks-at-ssh-login) finish
   before the CLI or shell opens. Lab mode skips them.
 - The shell runs as the containd process user. The starter Compose file runs

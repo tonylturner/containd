@@ -33,6 +33,9 @@ func TestShowSystemSSHReportsAppliancePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if err := store.Save(context.Background(), config.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
 	store.SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error) {
 		return config.SSHRuntimePolicy{
 			AllowPassword:     true,
@@ -125,6 +128,9 @@ func shellModeStore(t *testing.T, policy config.SSHRuntimePolicy) config.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Save(context.Background(), config.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
 	store.SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error) {
 		return policy, nil
 	})
