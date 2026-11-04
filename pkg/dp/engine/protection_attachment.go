@@ -95,11 +95,7 @@ func missingZoneAttachments(snap *rules.Snapshot, devices []string) string {
 		}
 	}
 	if snap.Gate.Enabled {
-		// Only include entries select egress zones. The zone allocation
-		// alone does not imply an active selection.
-		for _, entry := range snap.Gate.Include {
-			add(entry.DestZones...)
-		}
+		add(snap.Gate.ReferencedZones...)
 	}
 	live := make(map[string]bool, len(devices))
 	for _, device := range devices {

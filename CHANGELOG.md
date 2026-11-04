@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strict-only folder. Starting without that move creates a fresh appliance.
   Never share profile data.
 
+### Fixed
+
+- Interface attachment health counts zones explicitly named (source or destination)
+  by enabled AV scan include entries; "any" includes reference no zone.
+
 ## [0.1.40] - 2026-11-04
 
 ### Fixed

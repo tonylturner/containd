@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/protection"
+	"github.com/tonylturner/containd/pkg/cp/compile"
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -49,7 +51,8 @@ func TestMissingZoneAttachmentsScanSelection(t *testing.T) {
 		Default:    rules.ActionAllow,
 		ZoneIfaces: map[string][]string{"scan": {"scan0"}, "retained": {"old0"}, "literal": {"explicit0"}},
 		Gate: rules.GateSelection{
-			Enabled: true,
+			Enabled:         true,
+			ReferencedZones: []string{"scan"},
 			Zones: []rules.GateZone{
 				{Name: "scan", Index: 1, Devices: []string{"scan0"}},
 				{Name: "retained", Index: 2, Devices: []string{"old0"}},
@@ -71,28 +74,52 @@ func TestMissingZoneAttachmentsScanSelection(t *testing.T) {
 	}
 	snap.Gate.Enabled = true
 	snap.Gate.Include = nil
+	snap.Gate.ReferencedZones = nil
 	if got := missingZoneAttachments(snap, nil); got != "" {
 		t.Fatalf("allocation without selection raised a fault: %q", got)
 	}
 }
 
 func TestProtectionScanInterfaceAttachment(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source []string
+		dest   []string
+	}{
+		{name: "destination only", dest: []string{"scan"}},
+		{name: "source only", source: []string{"scan"}},
+		{name: "any"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				System:     config.SystemConfig{Hostname: "containd"},
+				Zones:      []config.Zone{{Name: "scan"}, {Name: "optional"}},
+				Interfaces: []config.Interface{{Name: "scan0", Zone: "scan"}, {Name: "optional0", Zone: "optional"}},
+				DataPlane:  config.DataPlaneConfig{Enforcement: true},
+				Firewall:   config.FirewallConfig{DefaultAction: config.ActionAllow},
+				Services: config.ServicesConfig{AV: config.AVConfig{Enabled: true, HTTPDownload: true, Scan: config.ScanSelection{
+					Include: []config.ScanInclude{{SourceZones: tc.source, DestZones: tc.dest, DestPorts: []string{"80"}}},
+				}}},
+			}
+			snap, err := compile.CompileSnapshot(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantReason := ""
+			if len(tc.source)+len(tc.dest) > 0 {
+				wantReason = "zone scan has no attached interface: scan0"
+			}
+			checkScanAttachmentProtection(t, snap, wantReason)
+		})
+	}
+}
+
+func checkScanAttachmentProtection(t *testing.T, snap rules.Snapshot, wantReason string) {
+	t.Helper()
 	e, _ := admissionEngine(t)
 	t.Cleanup(e.Close)
 	m := protection.Metadata{BootID: "boot", ApplyID: "scan-attachment", RunningRevision: "running", Mode: protection.ModeNormal}
 	e.BindProtection(m)
-	snap := rules.Snapshot{
-		Default:    rules.ActionAllow,
-		ZoneIfaces: map[string][]string{"scan": {"scan0"}, "retained": {"old0"}},
-		Gate: rules.GateSelection{
-			Enabled: true,
-			Zones: []rules.GateZone{
-				{Name: "scan", Index: 1, Devices: []string{"scan0"}},
-				{Name: "retained", Index: 2, Devices: []string{"old0"}},
-			},
-			Include: []rules.GateEntry{{DestZones: []string{"scan"}, Ports: []rules.GatePortRange{{Lo: 80, Hi: 80}}}},
-		},
-	}
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +134,12 @@ func TestProtectionScanInterfaceAttachment(t *testing.T) {
 	e.reconcileInterfaceAttachment(m, func() ([]string, error) { return nil, nil })
 	degraded := e.Protection()
 	c := protectionComponent(t, degraded, "interface-attachment")
-	if degraded.State != "degraded" || degraded.Retryable || c.State != "degraded" ||
-		c.Reason != "zone scan has no attached interface: scan0" {
+	wantState, wantComponent := "protecting", "ready"
+	if wantReason != "" {
+		wantState, wantComponent = "degraded", "degraded"
+	}
+	if degraded.State != wantState || degraded.Retryable || c.State != wantComponent ||
+		c.Reason != wantReason {
 		t.Fatalf("missing scan attachment: %+v", degraded)
 	}
 	if !reflect.DeepEqual(before.Installed, degraded.Installed) ||
@@ -125,7 +156,7 @@ func TestProtectionScanInterfaceAttachment(t *testing.T) {
 	ready := e.Protection()
 	c = protectionComponent(t, ready, "interface-attachment")
 	if ready.State != "protecting" || ready.Retryable || c.State != "ready" || c.Reason != "" {
-		t.Fatalf("scan attachment did not clear fault, or retained zone raised one: %+v", ready)
+		t.Fatalf("scan attachment did not clear fault, or optional zone raised one: %+v", ready)
 	}
 }
 

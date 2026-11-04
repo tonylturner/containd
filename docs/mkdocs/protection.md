@@ -43,7 +43,9 @@ Unavailable rule-hit logging means `degraded` and `ready: false`, even while nft
 policy still enforces packets.
 
 A policy-referenced zone with configured rows but no existing kernel device is
-also degraded and not ready. The `interface-attachment` component names the
+also degraded and not ready. This includes zones explicitly named by enabled AV
+scan include entries, but not "any" selections or explicit interface selectors.
+The `interface-attachment` component names the
 zone and its rows, for example `zone lan has no attached interface: lan1`. Rows
 attach only to identically named devices; missing parents/members defer
 VLAN/bridge creation. Interface delivery remains acknowledged; attachment is
