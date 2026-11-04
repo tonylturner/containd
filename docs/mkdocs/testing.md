@@ -195,6 +195,23 @@ deny checks and the translate-only forward check; disabling LAN masquerade
 defeats only the LAN-to-WAN source-address check. Both scripts accept the
 isolation variables described in the smoke fixture README linked below.
 
+## NFLOG Smoke
+
+`bash scripts/smoke-nflog.sh` verifies that a logged L4 DENY rule keeps its
+NFLOG group bound and emits an exact `firewall.rule.hit` event. It repeats the
+binding and event checks after a changed commit, an unchanged commit, a
+protection retry, an engine-container restart and a full Compose restart. The
+script uses `CONTAIND_IMAGE` (default `containd/containd:dev`), an isolated
+project (`COMPOSE_PROJECT_NAME`, default `smoke-nflog`), a temporary named
+`/data` volume, and an ephemeral loopback management port. Set
+`SMOKE_WAN_NET` and `SMOKE_LAN_NET` to unused three-octet subnet prefixes when
+the defaults (`172.32.0` and `172.33.0`) conflict with the host. The NFLOG
+group is configurable with `SMOKE_NFLOG_GROUP` (default `100`). The script
+accepts `COMPOSE_FILE` to select the base smoke compose file(s), and requires
+Docker Compose 2.24.4 or later, curl, jq and Python 3 on the host. It refuses
+to take over an existing project, then removes only its own Compose project
+and volume when it exits.
+
 ## Scanning Gate Smoke
 
 CI runs this smoke against the just-built `containd/containd:ci` image, using a
