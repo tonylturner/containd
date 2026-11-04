@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-11-04
+
 ### Fixed
 
 - Firewall rule-hit logging (NFLOG) stopped after every config commit or restart
@@ -2681,7 +2683,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.39...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.40...HEAD
+[0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/tonylturner/containd/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
