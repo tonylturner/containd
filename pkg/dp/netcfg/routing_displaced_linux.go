@@ -124,6 +124,8 @@ func (s *displacedRoutes) restoreRemoved(ctx context.Context, intent []kernelRou
 		original, _ := decodeKernelRoute(s.Routes[i])
 		retained := false
 		for _, want := range intent {
+			// Deferred routes still own their key: restore the foreign route
+			// only when that intent is removed, not while attachment is pending.
 			if sameRouteKey(original, want) {
 				retained = true
 				break

@@ -21,23 +21,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway, interfaceIndexes map[string]int) (kernelRoute, string, error) {
+func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway, interfaceIndexes map[string]int) (kernelRoute, error) {
 	ipnet, prefixLen, err := parseRouteDestination(r.Dst)
 	if err != nil {
-		return kernelRoute{}, "", err
+		return kernelRoute{}, err
 	}
 	if ipnet.IP.To4() == nil {
-		return kernelRoute{}, "", fmt.Errorf("route dst must be IPv4: %q", r.Dst)
+		return kernelRoute{}, fmt.Errorf("route dst must be IPv4: %q", r.Dst)
 	}
 	gw4, ifaceHint, err := resolveRouteGateway(r.Gateway, gwByName)
 	if err != nil {
-		return kernelRoute{}, "", err
+		return kernelRoute{}, err
 	}
 	if strings.TrimSpace(r.Iface) == "" {
 		r.Iface = ifaceHint
 	}
 	if r.Table < 0 || r.Table > 252 || r.Metric < 0 {
-		return kernelRoute{}, "", fmt.Errorf("invalid route table or metric")
+		return kernelRoute{}, fmt.Errorf("invalid route table or metric")
 	}
 	table := uint8(unix.RT_TABLE_MAIN)
 	if r.Table != 0 {
@@ -47,9 +47,9 @@ func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway, inte
 	ifIndex := interfaceIndexes[iface]
 	route := kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: uint32(table), metric: uint32(r.Metric), proto: routeProtoContaind}
 	if iface != "" && ifIndex == 0 {
-		return route, iface, nil
+		route.deferredIface = iface
 	}
-	return route, "", nil
+	return route, nil
 }
 
 func putRoute(r kernelRoute, replace bool) error {
@@ -193,6 +193,8 @@ type kernelRoute struct {
 	proto   uint8
 	tos     uint8
 	raw     []byte
+	// deferredIface is intent-only: the named interface is not attached yet.
+	deferredIface string
 }
 
 func kernelRoutes(ctx context.Context) ([]kernelRoute, error) {
