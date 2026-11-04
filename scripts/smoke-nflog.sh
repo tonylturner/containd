@@ -209,8 +209,13 @@ YAML
   export COMPOSE_FILE="${BASE_COMPOSE_FILES}:$OVERRIDE"
 }
 
+# A restart may republish the ephemeral host port, so resolve it on every wait.
 wait_for_management() {
-  local ready=0
+  local ready=0 published
+  published=$(compose port engine 18080) || harness_error "could not resolve management port"
+  published=${published##*:}
+  [[ $published =~ ^[0-9]+$ ]] || harness_error "invalid published management port: $published"
+  BASE="http://127.0.0.1:${published}/api/v1"
   for _ in {1..60}; do
     if "${CURL[@]}" "$BASE/health" >/dev/null 2>&1; then
       ready=1
@@ -427,11 +432,6 @@ main() {
   write_isolation_override
   STACK_OWNED=1
   compose up -d --no-build || harness_error "could not start isolated smoke project"
-  local published
-  published=$(compose port engine 18080) || harness_error "could not resolve management port"
-  published=${published##*:}
-  [[ $published =~ ^[0-9]+$ ]] || harness_error "invalid published management port: $published"
-  BASE="http://127.0.0.1:${published}/api/v1"
   wait_for_management
 
   for _ in {1..20}; do
