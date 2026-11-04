@@ -53,10 +53,14 @@ earlier; downgrading requires restoring the pre-upgrade data backup.
    capture selectors and service listeners before restoring normal traffic.
 
 Rows now bind only by name. The schema upgrade drops saved `interfaces[].device`
-bindings and rewrites saved references to legacy device names to their row names
-when unambiguous. Migration evidence in audit/events records dropped bindings and
-rewritten references. New exports omit `device`; importing old exports uses the
-same upgrade. Auto-assignment and its API/CLI are removed. Subnet environment
+bindings and rewrites saved references to legacy device names to row names. Each
+reference keeps the meaning its consumer gave it before the upgrade, assuming every
+bound device existed: VLAN parents, bridge members, DHCP and PCAP interfaces prefer
+a row name; routes, gateways, capture interfaces and PCAP forward targets prefer a
+bound device; VPN listeners resolve in saved row order. Migration evidence in
+audit/events records dropped bindings, rewritten references, and references that
+matched both a row and another row's device, with the row chosen. New exports omit
+`device`; importing old exports uses the same upgrade. Auto-assignment and its API/CLI are removed. Subnet environment
 hints no longer assign roles; keep subnet variables only for Compose IPAM.
 `CONTAIND_CAPTURE_IFACES` remains a kernel-name list: update it to row names under
 the named Compose topology (for example `wan,lan1`).

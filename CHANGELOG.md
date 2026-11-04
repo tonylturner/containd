@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Engine 28.1+ and Compose accepting `interface_name` (2.36.0+) are required.
   Back up config and the full data directory, then add `interface_name: <row name>`
   on every appliance network attachment **before recreating** with the new image.
-  Schema 0.1.11 drops saved `device` bindings and rewrites unambiguous legacy
-  device references to row names, recording migration evidence in audit/events.
+  Schema 0.1.11 drops saved `device` bindings and rewrites legacy device
+  references to row names, keeping each reference's pre-upgrade meaning, and
+  records migration evidence (including name/device collisions) in audit/events.
   Auto-assignment and its API/CLI are removed; subnet environment hints are no
   longer read by containd (Compose IPAM variables remain).
 - An image-only upgrade without matching Compose names leaves rows unattached:
