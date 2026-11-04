@@ -44,6 +44,91 @@ func TestMissingZoneAttachments(t *testing.T) {
 	}
 }
 
+func TestMissingZoneAttachmentsScanSelection(t *testing.T) {
+	snap := &rules.Snapshot{
+		Default:    rules.ActionAllow,
+		ZoneIfaces: map[string][]string{"scan": {"scan0"}, "retained": {"old0"}, "literal": {"explicit0"}},
+		Gate: rules.GateSelection{
+			Enabled: true,
+			Zones: []rules.GateZone{
+				{Name: "scan", Index: 1, Devices: []string{"scan0"}},
+				{Name: "retained", Index: 2, Devices: []string{"old0"}},
+			},
+			Include:    []rules.GateEntry{{SourceDevices: []string{"explicit0"}, DestZones: []string{"scan"}}},
+			Exclude:    []rules.GateEntry{{DestDevices: []string{"explicit0"}}},
+			ICSDevices: []string{"explicit0"},
+		},
+	}
+	if got := missingZoneAttachments(snap, nil); got != "zone scan has no attached interface: scan0" {
+		t.Fatalf("scan-only zone not counted or non-zone selectors counted: %q", got)
+	}
+	if got := missingZoneAttachments(snap, []string{"scan0"}); got != "" {
+		t.Fatalf("retained-only zone or explicit device raised a fault: %q", got)
+	}
+	snap.Gate.Enabled = false
+	if got := missingZoneAttachments(snap, nil); got != "" {
+		t.Fatalf("disabled selection raised a fault: %q", got)
+	}
+	snap.Gate.Enabled = true
+	snap.Gate.Include = nil
+	if got := missingZoneAttachments(snap, nil); got != "" {
+		t.Fatalf("allocation without selection raised a fault: %q", got)
+	}
+}
+
+func TestProtectionScanInterfaceAttachment(t *testing.T) {
+	e, _ := admissionEngine(t)
+	t.Cleanup(e.Close)
+	m := protection.Metadata{BootID: "boot", ApplyID: "scan-attachment", RunningRevision: "running", Mode: protection.ModeNormal}
+	e.BindProtection(m)
+	snap := rules.Snapshot{
+		Default:    rules.ActionAllow,
+		ZoneIfaces: map[string][]string{"scan": {"scan0"}, "retained": {"old0"}},
+		Gate: rules.GateSelection{
+			Enabled: true,
+			Zones: []rules.GateZone{
+				{Name: "scan", Index: 1, Devices: []string{"scan0"}},
+				{Name: "retained", Index: 2, Devices: []string{"old0"}},
+			},
+			Include: []rules.GateEntry{{DestZones: []string{"scan"}, Ports: []rules.GatePortRange{{Lo: 80, Hi: 80}}}},
+		},
+	}
+	if err := e.ApplyRules(context.Background(), snap); err != nil {
+		t.Fatal(err)
+	}
+	e.SetScanProtection("ready", "", true, true, "", false)
+	ack := protection.Acknowledgement{Metadata: m, Operation: protection.OperationApply}
+	e.SetProtectionOutcome(m, protection.OwnerOutcome{
+		Name: protection.SubsystemInterfaces, Owner: protection.OwnerEngine, DesiredRevision: m.RunningRevision,
+		Operation: protection.OperationApply, State: protection.DeliveryReady, Acknowledged: &ack, ObservedAt: time.Now(),
+	})
+	before := e.Protection()
+	installed := e.RulesetStatus()
+	e.reconcileInterfaceAttachment(m, func() ([]string, error) { return nil, nil })
+	degraded := e.Protection()
+	c := protectionComponent(t, degraded, "interface-attachment")
+	if degraded.State != "degraded" || degraded.Retryable || c.State != "degraded" ||
+		c.Reason != "zone scan has no attached interface: scan0" {
+		t.Fatalf("missing scan attachment: %+v", degraded)
+	}
+	if !reflect.DeepEqual(before.Installed, degraded.Installed) ||
+		!reflect.DeepEqual(installed, e.RulesetStatus()) {
+		t.Fatal("attachment observation changed installed policy")
+	}
+	for _, out := range degraded.Subsystems {
+		if out.State != protection.DeliveryReady || out.Fault != nil || out.Retryable ||
+			out.Acknowledged == nil || *out.Acknowledged != ack {
+			t.Fatalf("attachment invalidated delivery: %+v", out)
+		}
+	}
+	e.reconcileInterfaceAttachment(m, func() ([]string, error) { return []string{"scan0"}, nil })
+	ready := e.Protection()
+	c = protectionComponent(t, ready, "interface-attachment")
+	if ready.State != "protecting" || ready.Retryable || c.State != "ready" || c.Reason != "" {
+		t.Fatalf("scan attachment did not clear fault, or retained zone raised one: %+v", ready)
+	}
+}
+
 func TestProtectionInterfaceAttachment(t *testing.T) {
 	e, _ := admissionEngine(t)
 	t.Cleanup(e.Close)
