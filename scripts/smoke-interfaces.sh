@@ -18,7 +18,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/containd-smoke-interfaces.XXXXXX")
 MAIN_COMPOSE="$WORK_DIR/main.yml"
-MAIN_REVERSED_COMPOSE="$WORK_DIR/main-reversed.yml"
 FRESH_COMPOSE="$WORK_DIR/fresh.yml"
 FRESH_MISSING_COMPOSE="$WORK_DIR/fresh-missing-lan.yml"
 BASE_PROJECT=${COMPOSE_PROJECT_NAME:-smoke-interfaces}
@@ -37,12 +36,12 @@ CURRENT_LAN_PREFIX=
 EXPECTED_REVISION=
 CURRENT_PROJECT=
 CURRENT_COMPOSE=
+MANAGEMENT_VIA_EXEC=0
 BASE=
 PHASE=setup
 STACK_OWNED=0
 MAIN_OWNED=0
 FRESH_OWNED=0
-MAIN_CLEANUP_COMPOSE=
 FAIL_REPORTED=0
 HARNESS_REPORTED=0
 DIAGNOSTICS_DONE=0
@@ -72,6 +71,12 @@ use_stack() {
 }
 
 api_get() {
+  if ((MANAGEMENT_VIA_EXEC)); then
+    compose exec -T engine curl --fail --silent --show-error \
+      --max-time 10 --connect-timeout 5 -H "$AUTH_HEADER" \
+      "http://127.0.0.1:18080$1"
+    return
+  fi
   "${CURL[@]}" -H "$AUTH_HEADER" "$BASE$1"
 }
 
@@ -127,7 +132,7 @@ on_exit() {
     fi
   fi
   if ((MAIN_OWNED)); then
-    cleanup_project "$BASE_PROJECT" "$MAIN_CLEANUP_COMPOSE" || {
+    cleanup_project "$BASE_PROJECT" "$MAIN_COMPOSE" || {
       log "cleanup failed for owned project $BASE_PROJECT" >&2
       if ((rc == 0)); then rc=1; fi
     }
@@ -206,30 +211,20 @@ check_engine_version() {
 
 write_compose() {
   local file=$1 wan_prefix=$2 lan_prefix=$3
-  local wan_priority=$4 lan_priority=$5 include_engine_lan=$6
-  local wan_key=$7 lan_key=$8 engine_networks
-  if [[ $include_engine_lan == true ]] && ((wan_priority > lan_priority)); then
-    engine_networks="      $wan_key:
+  local include_engine_lan=$4 engine_networks
+  if [[ $include_engine_lan == true ]]; then
+    engine_networks="      wan_net:
         interface_name: wan
-        priority: $wan_priority
+        priority: 100
         ipv4_address: ${wan_prefix}.2
-      $lan_key:
+      lan_net:
         interface_name: lan1
-        priority: $lan_priority
+        priority: 50
         ipv4_address: ${lan_prefix}.2"
-  elif [[ $include_engine_lan == true ]]; then
-    engine_networks="      $lan_key:
-        interface_name: lan1
-        priority: $lan_priority
-        ipv4_address: ${lan_prefix}.2
-      $wan_key:
-        interface_name: wan
-        priority: $wan_priority
-        ipv4_address: ${wan_prefix}.2"
   else
-    engine_networks="      $wan_key:
+    engine_networks="      wan_net:
         interface_name: wan
-        priority: $wan_priority
+        priority: 100
         ipv4_address: ${wan_prefix}.2"
   fi
   cat >"$file" <<YAML
@@ -264,7 +259,7 @@ $engine_networks
     user: "0"
     cap_add: [NET_ADMIN]
     networks:
-      $lan_key:
+      lan_net:
         ipv4_address: ${lan_prefix}.3
     depends_on: [engine]
 
@@ -274,7 +269,7 @@ $engine_networks
     user: "0"
     cap_add: [NET_ADMIN]
     networks:
-      $wan_key:
+      wan_net:
         ipv4_address: ${wan_prefix}.4
     depends_on: [engine]
 
@@ -305,7 +300,7 @@ $engine_networks
             Thread(target=serve, args=(port,), daemon=True).start()
         ThreadingHTTPServer(("0.0.0.0", 18082), Handler).serve_forever()
     networks:
-      $wan_key:
+      wan_net:
         ipv4_address: ${wan_prefix}.3
     depends_on: [engine]
 
@@ -313,14 +308,14 @@ volumes:
   data: {}
 
 networks:
-  $wan_key:
+  wan_net:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
         - subnet: ${wan_prefix}.0/24
-  $lan_key:
+  lan_net:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
@@ -672,21 +667,15 @@ main() {
   ensure_project_is_fresh "$FRESH_PROJECT"
   check_engine_version
 
-  write_compose "$MAIN_COMPOSE" "$WAN_PREFIX" "$LAN_PREFIX" 100 50 true wan_net lan_net
-  # Compose normalizes service network maps by network key rather than YAML
-  # declaration order; swapping only priority leaves the ethN order unchanged.
-  # Reverse the sortable network keys too, while keeping row names fixed.
-  write_compose "$MAIN_REVERSED_COMPOSE" "$WAN_PREFIX" "$LAN_PREFIX" 50 100 true a_wan_net z_lan_net
-  write_compose "$FRESH_COMPOSE" "$FRESH_WAN_PREFIX" "$FRESH_LAN_PREFIX" 100 50 true wan_net lan_net
-  write_compose "$FRESH_MISSING_COMPOSE" "$FRESH_WAN_PREFIX" "$FRESH_LAN_PREFIX" 100 50 false wan_net lan_net
+  write_compose "$MAIN_COMPOSE" "$WAN_PREFIX" "$LAN_PREFIX" true
+  write_compose "$FRESH_COMPOSE" "$FRESH_WAN_PREFIX" "$FRESH_LAN_PREFIX" true
+  write_compose "$FRESH_MISSING_COMPOSE" "$FRESH_WAN_PREFIX" "$FRESH_LAN_PREFIX" false
   check_compose_file "$MAIN_COMPOSE" "$BASE_PROJECT"
-  check_compose_file "$MAIN_REVERSED_COMPOSE" "$BASE_PROJECT"
   check_compose_file "$FRESH_COMPOSE" "$FRESH_PROJECT"
   check_compose_file "$FRESH_MISSING_COMPOSE" "$FRESH_PROJECT"
 
   PHASE='phase 1: initial named attachments'
   log "Starting first isolated project $BASE_PROJECT..."
-  MAIN_CLEANUP_COMPOSE=$MAIN_COMPOSE
   MAIN_OWNED=1
   start_stack "$BASE_PROJECT" "$MAIN_COMPOSE"
   STACK_OWNED=1
@@ -706,32 +695,78 @@ main() {
   pass "phase 1 passed: ALLOW and DENY traffic matched exact rule counters with ready protection"
   MAIN_VOLUME=$(capture_volume "$BASE_PROJECT")
 
-  PHASE='phase 2: reversed attachment priority'
-  log "Recreating $BASE_PROJECT with network priorities swapped..."
-  compose down --remove-orphans
-  MAIN_CLEANUP_COMPOSE=$MAIN_REVERSED_COMPOSE
-  use_stack "$BASE_PROJECT" "$MAIN_REVERSED_COMPOSE"
-  start_stack "$BASE_PROJECT" "$MAIN_REVERSED_COMPOSE"
+  PHASE='phase 2: reversed attachment order'
+  log "Normalizing the phase-1 baseline, then reconnecting the zone networks in reverse order..."
+  engine_id=$(compose ps -q engine) ||
+    harness_error "could not find the owned engine container for attachment reordering"
+  [[ -n $engine_id ]] || harness_error "engine container ID is empty during attachment reordering"
+
+  # Compose does not guarantee the startup endpoint order. If it started the
+  # phase-1 stack LAN-first, normalize only that unexpected order so the
+  # required LAN-then-WAN reconnect below is guaranteed to reverse its baseline.
+  if ((main_wan_index > main_lan_index)); then
+    MANAGEMENT_VIA_EXEC=1
+    docker network disconnect "${BASE_PROJECT}_wan_net" "$engine_id" ||
+      harness_error "could not disconnect the initial WAN endpoint to normalize the phase-1 baseline"
+    docker network disconnect "${BASE_PROJECT}_lan_net" "$engine_id" ||
+      harness_error "could not disconnect the initial LAN endpoint to normalize the phase-1 baseline"
+    api_get /health >/dev/null ||
+      harness_error "management loopback was unreachable while normalizing the phase-1 baseline"
+    docker network connect --ip "$ENGINE_WAN" \
+      --driver-opt com.docker.network.endpoint.ifname=wan \
+      "${BASE_PROJECT}_wan_net" "$engine_id" ||
+      harness_error "could not attach WAN first to normalize the phase-1 baseline"
+    docker network connect --ip "$ENGINE_LAN" \
+      --driver-opt com.docker.network.endpoint.ifname=lan1 \
+      "${BASE_PROJECT}_lan_net" "$engine_id" ||
+      harness_error "could not attach LAN second to normalize the phase-1 baseline"
+    MANAGEMENT_VIA_EXEC=0
+    wait_for_management
+    wait_for_protection_ready
+    assert_device_names
+    main_wan_index=$(device_index wan) || harness_error "cannot read normalized phase-1 wan link index"
+    main_lan_index=$(device_index lan1) || harness_error "cannot read normalized phase-1 lan1 link index"
+  fi
+  ((main_wan_index < main_lan_index)) ||
+    harness_error "phase-1 baseline did not follow the controlled WAN-then-LAN order (wan $main_wan_index, lan1 $main_lan_index)"
+  pass "phase-1 reference attachment order: wan index $main_wan_index, lan1 index $main_lan_index"
+
+  docker network disconnect "${BASE_PROJECT}_wan_net" "$engine_id" ||
+    harness_error "could not disconnect the phase-1 WAN network from the engine"
+  docker network disconnect "${BASE_PROJECT}_lan_net" "$engine_id" ||
+    harness_error "could not disconnect the phase-1 LAN network from the engine"
+  MANAGEMENT_VIA_EXEC=1
+  api_get /health >/dev/null ||
+    harness_error "management loopback was unreachable with both zone networks detached"
+  log "Using docker exec to the engine loopback while the published host path is detached"
+  docker network connect --ip "$ENGINE_LAN" \
+    --driver-opt com.docker.network.endpoint.ifname=lan1 \
+    "${BASE_PROJECT}_lan_net" "$engine_id" ||
+    harness_error "could not reconnect the LAN network first with endpoint name lan1"
+  docker network connect --ip "$ENGINE_WAN" \
+    --driver-opt com.docker.network.endpoint.ifname=wan \
+    "${BASE_PROJECT}_wan_net" "$engine_id" ||
+    harness_error "could not reconnect the WAN network second with endpoint name wan"
+  MANAGEMENT_VIA_EXEC=0
   wait_for_management
+
   assert_revision_unchanged "$EXPECTED_REVISION"
   wait_for_protection_ready
   assert_device_names
   reversed_wan_index=$(device_index wan) || harness_error "cannot read wan link index after recreation"
   reversed_lan_index=$(device_index lan1) || harness_error "cannot read lan1 link index after recreation"
-  ((main_wan_index != reversed_wan_index && main_lan_index != reversed_lan_index)) ||
-    fail "swapping Compose network priority did not change the named device indices (wan $main_wan_index->$reversed_wan_index, lan1 $main_lan_index->$reversed_lan_index)"
   if ((main_wan_index < main_lan_index)); then
     ((reversed_wan_index > reversed_lan_index)) ||
-      fail "reversed Compose priority did not reverse attachment index order"
+      harness_error "phase-2 connect order did not reverse the phase-1 index order (wan $main_wan_index->$reversed_wan_index, lan1 $main_lan_index->$reversed_lan_index)"
   else
     ((reversed_wan_index < reversed_lan_index)) ||
-      fail "reversed Compose priority did not reverse attachment index order"
+      harness_error "phase-2 connect order did not reverse the phase-1 index order (wan $main_wan_index->$reversed_wan_index, lan1 $main_lan_index->$reversed_lan_index)"
   fi
-  pass "priority swap reversed device index order (wan $main_wan_index->$reversed_wan_index, lan1 $main_lan_index->$reversed_lan_index)"
+  pass "phase-2 attachments reversed the phase-1 index order (wan $main_wan_index->$reversed_wan_index, lan1 $main_lan_index->$reversed_lan_index)"
   exercise_lan_policy
   assert_revision_unchanged "$EXPECTED_REVISION"
   pass "phase 2 passed: named interfaces preserved verdicts and counters without changing the running revision"
-  cleanup_project "$BASE_PROJECT" "$MAIN_REVERSED_COMPOSE"
+  cleanup_project "$BASE_PROJECT" "$MAIN_COMPOSE"
   MAIN_OWNED=0
   STACK_OWNED=0
 
