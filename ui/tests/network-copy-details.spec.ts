@@ -60,7 +60,7 @@ for (const override of [
       const json = path.includes("/auth/") ? { id: "admin", username: "containd", role: "admin" }
         : path === "/api/v1/pcap/config" ? config
         : path === "/api/v1/pcap/status" ? { running: false, lastError: captureError }
-        : path === "/api/v1/interfaces" ? [{ name: "lan1", device: "eth0", zone: "lan" }]
+        : path === "/api/v1/interfaces" ? [{ name: "lan1", zone: "lan" }]
         : path === "/api/v1/interfaces/state" ? [{ name: "eth0", up: true, addrs: [] }]
         : path === "/api/v1/zones" ? [{ name: "lan" }]
         : path === "/api/v1/pcap/list" ? []

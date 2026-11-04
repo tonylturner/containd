@@ -96,7 +96,7 @@ test("topology nodes draw no made-up traffic sparklines", async ({ page }) => {
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
     if (p === "/api/v1/config") {
       body = {
-        interfaces: [{ name: "lan", device: "eth9", zone: "lan" }],
+        interfaces: [{ name: "eth9", zone: "lan" }],
         zones: [{ name: "lan" }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
       };
     }

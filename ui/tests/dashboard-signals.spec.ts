@@ -348,20 +348,25 @@ const device = (name: string) => ({ name, index: 1, up: true, mtu: 1500, mac: "0
 
 for (const scenario of [
   { name: "unbound logical records", interfaces: [{ name: "lo" }, { name: "lan" }], interfaceState: [device("lo"), device("eth0")], ready: false },
-  { name: "partially bound records", interfaces: [{ name: "lan", device: "eth0" }, { name: "wan" }], interfaceState: [device("eth0"), device("eth1")], ready: false },
-  { name: "missing device with no spare device", interfaces: [{ name: "lan", device: "absent0" }], interfaceState: [device("lo")], ready: false },
-  { name: "explicit device binding", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ready: true },
-  { name: "bound device with its link down", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [{ ...device("eth0"), up: false }], ready: true },
+  { name: "partially bound records", interfaces: [{ name: "lan" }, { name: "wan" }], interfaceState: [device("lan"), device("eth1")], ready: false },
+  { name: "missing device with no spare device", interfaces: [{ name: "lan" }], interfaceState: [device("lo")], ready: false },
+  { name: "matching row name", interfaces: [{ name: "lan" }], interfaceState: [device("lan")], ready: true },
+  { name: "matching row with its link down", interfaces: [{ name: "lan" }], interfaceState: [{ ...device("lan"), up: false }], ready: false },
   { name: "matching logical and device name", interfaces: [{ name: "eth0" }], interfaceState: [device("eth0")], ready: true },
-  { name: "no reported network devices", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [], ready: false },
-  { name: "no configured interfaces", interfaces: [], interfaceState: [device("eth0")], ready: false },
+  { name: "no reported network devices", interfaces: [{ name: "lan" }], interfaceState: [], ready: false },
+  { name: "no configured interfaces", interfaces: [], interfaceState: [device("lan")], ready: false },
 ]) {
-  test(`Bind interfaces readiness follows Interfaces device matching: ${scenario.name}`, async ({ page }) => {
+  test(`Bind interfaces readiness follows Interfaces name matching: ${scenario.name}`, async ({ page }) => {
     await openDashboard(page, { events: [], services, interfaceCount: scenario.interfaces.length, ...scenario });
     await expect(bindStep(page).getByText(scenario.ready ? "Ready" : "Action", { exact: true })).toBeVisible();
     await expect(bindStep(page).getByText(scenario.ready ? "Action" : "Ready", { exact: true })).toHaveCount(0);
-    if (scenario.ready) await expect(bindStep(page)).toContainText("1 of 1 bound to network devices");
-    else if (scenario.interfaces.length) await expect(bindStep(page)).toContainText("not connected to network devices");
+    if (scenario.ready) await expect(bindStep(page)).toContainText("1 of 1 interfaces attached");
+    if (!scenario.interfaces.length) await expect(bindStep(page)).toContainText("0 of 0 interfaces attached");
+    if (scenario.interfaces.length) {
+      const missing = scenario.interfaces.filter(iface => !scenario.interfaceState.some(state => state.name === iface.name && state.up));
+      await expect(bindStep(page)).toContainText(`${scenario.interfaces.length - missing.length} of ${scenario.interfaces.length} interfaces attached`);
+      if (missing.length) await expect(bindStep(page)).toContainText(`Not attached: ${missing.map(iface => iface.name).join(", ")}`);
+    }
   });
 }
 
@@ -373,7 +378,7 @@ for (const failure of [
 ]) {
   test(`Bind interfaces stays unknown with ${failure.name}`, async ({ page }) => {
     await openDashboard(page, { events: [], services, interfaceCount: 1,
-      interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ...failure,
+      interfaces: [{ name: "lan" }], interfaceState: [device("lan")], ...failure,
     });
     await expect(bindStep(page).getByText("Unknown", { exact: true })).toBeVisible();
     await expect(bindStep(page).getByText("Ready", { exact: true })).toHaveCount(0);
@@ -384,7 +389,7 @@ for (const failure of [
 test("Bind interfaces discards stale readiness on a failed refresh and recovers", async ({ page }) => {
   await page.clock.install();
   const mocks: Mocks = { events: [], services, interfaceCount: 1,
-    interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
+    interfaces: [{ name: "lan" }], interfaceState: [device("lan")],
   };
   await openDashboard(page, mocks);
   await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
@@ -400,7 +405,7 @@ test("Bind interfaces discards stale readiness on a failed refresh and recovers"
 
 test("a completed checklist keeps every task visible without a collapse control", async ({ page }) => {
   await openDashboard(page, { events: [], services, ruleCount: 1, interfaceCount: 1,
-    interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
+    interfaces: [{ name: "lan" }], interfaceState: [device("lan")],
   });
   await expect(page.getByRole("heading", { name: "First-Run Checklist", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^First-Run Checklist/ })).toHaveCount(0);

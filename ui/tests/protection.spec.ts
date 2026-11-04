@@ -480,3 +480,19 @@ test("trust storage invalidates live readiness without a fake configuration comm
   expect(mock.reads).toBeGreaterThan(reads);
   expect(await page.evaluate(() => window.configCommits)).toBe(0);
 });
+
+for (const path of ["/", "/interfaces/"]) {
+  test(`unattached zone degradation is visible without expanding details on ${path}`, async ({ page }) => {
+    const reason = "zone ot has no attached interface: lan1, lan2";
+    const mock = await protectionAPI(page, observation({
+      state: "degraded", retryable: false,
+      components: [{ name: "zone-attachment", required: false, state: "failed", reason, since: "2026-10-31T12:00:00Z" }],
+      subsystems: [subsystem({ state: "ready", fault: null, reason: "", retryable: false, nextRetryAt: null })],
+    }));
+    await openProtection(page, path);
+    const notice = page.getByRole("status", { name: "Traffic protection" });
+    await expect(notice.getByText(`zone-attachment: ${reason}`, { exact: true })).toBeVisible();
+    await expect(notice.getByRole("button", { name: "Retry now" })).toHaveCount(0);
+    expect(mock.retries).toEqual([]);
+  });
+}

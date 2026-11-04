@@ -13,8 +13,8 @@ test("quick-start conflict offers one review notice without a generic red error"
       } });
     }
     const json = path.startsWith("/auth/") ? { id: "admin", role: "admin" }
-      : path === "/interfaces" ? [{ name: "wan", device: "eth1", zone: "wan" }]
-      : path === "/interfaces/state" ? [{ name: "eth1", addrs: ["192.0.2.2/24"] }]
+      : path === "/interfaces" ? [{ name: "wan", zone: "wan" }]
+      : path === "/interfaces/state" ? [{ name: "wan", addrs: ["192.0.2.2/24"] }]
       : path === "/routing" ? { gateways: [], routes: [], rules: [] }
       : path === "/zones" || path === "/firewall/rules" ? []
       : path === "/dataplane" ? { captureInterfaces: [], dpiMock: false }

@@ -66,20 +66,17 @@ const zones = [
 const interfaces: Interface[] = [
   {
     name: "wan",
-    device: "eth1",
     zone: "wan",
     addresses: ["192.0.2.1/24"],
     access: { mgmt: true, http: true, https: true, ssh: true },
   },
   {
     name: "ot1",
-    device: "eth2",
     zone: "ot",
     addressMode: "dhcp",
   },
   {
     name: "lan1",
-    device: "eth0",
     zone: "lan",
     access: { mgmt: true, http: true, https: true, ssh: true },
   },
@@ -87,7 +84,7 @@ const interfaces: Interface[] = [
 
 const interfaceState = [
   {
-    name: "eth1",
+    name: "wan",
     index: 2,
     up: true,
     mtu: 1500,
@@ -95,7 +92,7 @@ const interfaceState = [
     addrs: ["192.168.240.2/24"],
   },
   {
-    name: "eth0",
+    name: "lan1",
     index: 1,
     up: true,
     mtu: 1500,
@@ -103,7 +100,7 @@ const interfaceState = [
     addrs: ["fe80::1/64", "fea0::1/64", "2001:db8::1/64", "192.168.242.2/24"],
   },
   {
-    name: "eth2",
+    name: "ot1",
     index: 3,
     up: true,
     mtu: 1500,
@@ -111,8 +108,8 @@ const interfaceState = [
     addrs: ["192.168.243.2/24"],
   },
   {
-    // A logical name must not shadow an explicit device binding.
-    name: "lan1",
+    // A different kernel interface must not supply a row's runtime addresses.
+    name: "eth0",
     index: 4,
     up: true,
     mtu: 1500,
@@ -512,18 +509,18 @@ test("dashboard health keeps twelve pixels between uptime and gauges", async ({ 
   expect(cpuBox.y - uptimeBox.y - uptimeBox.height).toBe(12);
 });
 
-test("interface addresses prefer config, then the bound device, without mutating either", () => {
+test("interface addresses prefer config, then the matching row name, without mutating either", () => {
   const before = JSON.stringify({ interfaces, interfaceState });
   expect(interfaceAddresses(interfaces[0], interfaceState)).toEqual({
     source: "config", addrs: ["192.0.2.1/24"],
   });
   const lan = interfaces.find((i) => i.name === "lan1")!;
-  expect(runtimeFor(lan, interfaceState)?.name).toBe("eth0");
+  expect(runtimeFor(lan, interfaceState)?.name).toBe("lan1");
   expect(interfaceAddresses(lan, interfaceState)).toEqual({
     source: "os", addrs: ["192.168.242.2/24", "2001:db8::1/64"],
   });
   expect(interfaceAddresses({ name: "eth0" }, interfaceState).source).toBe("os");
-  expect(interfaceAddresses({ name: "lan1", device: "missing" }, interfaceState)).toEqual({
+  expect(interfaceAddresses({ name: "missing" }, interfaceState)).toEqual({
     source: "none", addrs: [],
   });
   expect(interfaceAddresses({ name: "missing", addressMode: "dhcp" }, interfaceState)).toEqual({
@@ -545,7 +542,7 @@ test("Interfaces shows configured, external OS/Docker, and DHCP addresses", asyn
     if (req.url().includes("/api/v1/") && req.method() !== "GET") writes.push(req.url());
   });
   await page.goto("/interfaces");
-  const row = (name: string) => page.getByRole("row").filter({
+  const row = (name: string) => page.getByRole("table", { name: "Configured interfaces" }).getByRole("row").filter({
     has: page.getByRole("cell", { name, exact: true }),
   });
   const configured = row("wan").getByRole("cell").nth(5);
@@ -582,10 +579,11 @@ for (const stored of [
 ] satisfies Partial<Interface>[]) {
   test(`Interfaces preserves untouched addressing ${JSON.stringify(stored)}`, async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
-    const iface = { name: "external-test", device: "eth0", ...stored };
+    const iface = { name: "external-test", ...stored };
     await page.route("**/api/v1/interfaces", (route) => route.fulfill(json([iface])));
+    await page.route("**/api/v1/interfaces/state", route => route.fulfill(json([{ ...interfaceState[1], name: iface.name }])));
     await page.goto("/interfaces");
-    const row = page.getByRole("row").filter({
+    const row = page.getByRole("table", { name: "Configured interfaces" }).getByRole("row").filter({
       has: page.getByRole("cell", { name: "external-test", exact: true }),
     });
     await row.getByRole("button", { name: "Edit", exact: true }).click();
@@ -607,8 +605,8 @@ for (const stored of [
 test("Interfaces sends explicit clears when removing an alias and leaving VLAN", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
   let iface: Interface = {
-    name: "vlan-test", alias: "Plant VLAN", device: "eth2", zone: "ot",
-    type: "vlan", parent: "eth0", vlanId: 123, addressMode: "static",
+    name: "vlan-test", alias: "Plant VLAN", zone: "ot",
+    type: "vlan", parent: "lan1", vlanId: 123, addressMode: "static",
     addresses: ["192.0.2.2/24"], gateway: "192.0.2.1",
     access: { mgmt: true, http: false, https: true, ssh: false },
   };
@@ -623,7 +621,7 @@ test("Interfaces sends explicit clears when removing an alias and leaving VLAN",
   const loaded = page.waitForResponse((res) => res.url().endsWith("/api/v1/interfaces"));
   await page.goto("/interfaces");
   await loaded;
-  const row = page.getByRole("row").filter({
+  const row = page.getByRole("table", { name: "Configured interfaces" }).getByRole("row").filter({
     has: page.getByRole("cell", { name: "vlan-test", exact: true }),
   });
   await row.getByRole("button", { name: "Edit", exact: true }).click();
@@ -636,17 +634,16 @@ test("Interfaces sends explicit clears when removing an alias and leaving VLAN",
   await expect(page.getByText("Interface staged — commit to apply.", { exact: true })).toBeVisible();
   expect(writes).toEqual([{
     type: "physical", alias: "", members: [], parent: "", vlanId: 0,
-    device: "eth2", zone: "ot", addressMode: "static",
+    zone: "ot", addressMode: "static",
     addresses: ["192.0.2.2/24"], gateway: "192.0.2.1",
     access: { mgmt: true, http: false, https: true, ssh: false },
   }]);
 
   await row.getByRole("button", { name: "Edit", exact: true }).click();
-  await row.getByPlaceholder("Network device (e.g. eth0)").fill("");
   await row.getByRole("cell").nth(4).getByRole("combobox").selectOption("");
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
-  expect(writes[1]).toEqual({ ...writes[0], device: "", zone: "" });
+  expect(writes[1]).toEqual({ ...writes[0], zone: "" });
 });
 
 test("topology uses OS/Docker fallback in zone subnets, interface details and physical pills", async ({ page }) => {
@@ -660,7 +657,7 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await expect(configured).toContainText("192.0.2.1/24");
   await expect(configured.getByRole("img")).toHaveCount(0);
   await page.locator('.react-flow__node[data-id="fw-main"]').click();
-  const detail = page.locator('[class*="ifaceItem"]').filter({ hasText: "eth0" });
+  const detail = page.locator('[class*="ifaceItem"]').filter({ hasText: "lan1" });
   await expect(detail).toContainText("192.168.242.2/24");
   await expect(detail.getByRole("img", { name: "Detected address" })).toBeVisible();
   await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
@@ -668,7 +665,7 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await process.click();
   await expect(process).toHaveAttribute("aria-expanded", "true");
   const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
-  const pill = pills.locator("div").filter({ has: page.getByText("eth0", { exact: true }) }).last();
+  const pill = pills.locator("div").filter({ has: page.getByText("lan1", { exact: true }) }).last();
   await expect(pill).toContainText("192.168.242.2/24");
   await expect(pill.getByRole("img", { name: "Detected address" })).toBeVisible();
   expect(pageErrors).toEqual([]);

@@ -127,14 +127,11 @@ export default function PcapPage() {
     const options = new Map<string, string>();
     const osSet = new Set((ifaceStates ?? []).map((s) => s.name));
     for (const iface of ifaces ?? []) {
-      const device = iface.device?.trim();
       const alias = iface.alias?.trim();
-      const bound = !!device || osSet.has(iface.name);
-      if (!bound) continue;
-      const value = device || iface.name;
+      if (!osSet.has(iface.name)) continue;
+      const value = iface.name;
       if (!value) continue;
-      const baseLabel = device ? `${iface.name} (${device})` : iface.name;
-      const label = alias ? `${alias} (${baseLabel})` : baseLabel;
+      const label = alias ? `${alias} (${iface.name})` : iface.name;
       options.set(value, label);
     }
     return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
@@ -145,12 +142,9 @@ export default function PcapPage() {
     const osSet = new Set((ifaceStates ?? []).map((s) => s.name));
     const mappedDevices = new Set<string>();
     for (const iface of ifaces ?? []) {
-      const device = iface.device?.trim();
-      const kernelDevice = device || iface.name;
-      if (!device && !osSet.has(kernelDevice)) continue;
-      if (kernelDevice) mappedDevices.add(kernelDevice);
-      const label = device && device !== iface.name ? `${iface.name} (${device})` : iface.name;
-      options.set(iface.name, iface.alias ? `${iface.alias} (${label})` : label);
+      if (!osSet.has(iface.name)) continue;
+      mappedDevices.add(iface.name);
+      options.set(iface.name, iface.alias ? `${iface.alias} (${iface.name})` : iface.name);
     }
     for (const state of ifaceStates) {
       if (!mappedDevices.has(state.name)) {
@@ -201,7 +195,7 @@ export default function PcapPage() {
       issues.push("Select at least one interface or zone to capture.");
     }
     if (ifaceStateStatus === "ready" && captureIfaceOptions.length === 0 && zoneOptions.length === 0) {
-      issues.push("No firewall interfaces are connected to network devices. Choose devices on the Interfaces page.");
+      issues.push("No firewall interfaces are connected to network devices. Set Compose interface_name to match each interface row.");
     }
     for (const selectedZone of settings.zones ?? []) {
       if (!zoneOptions.some((zone) => zone.value === selectedZone)) {
@@ -212,20 +206,15 @@ export default function PcapPage() {
     }
     if (ifaceStateStatus === "ready") {
       const available = new Set(ifaceStates.map((i) => i.name));
-      const deviceByLogical = new Map(
-        ifaces.map((iface) => [iface.name, iface.device?.trim() || iface.name]),
-      );
-      const selectedDevices = new Set(
-        (settings.interfaces ?? []).map((name) => deviceByLogical.get(name) ?? name),
-      );
+      const selectedDevices = new Set(settings.interfaces ?? []);
       for (const iface of ifaces) {
         if (iface.zone && (settings.zones ?? []).includes(iface.zone)) {
-          selectedDevices.add(iface.device?.trim() || iface.name);
+          selectedDevices.add(iface.name);
         }
       }
       const missing = Array.from(selectedDevices).filter((name) => !available.has(name));
       if (missing.length > 0) {
-        issues.push(`Kernel devices not found: ${missing.join(", ")}. Bind the interfaces or choose an available device.`);
+        issues.push(`Kernel devices not found: ${missing.join(", ")}. Check Compose interface_name or choose an available device.`);
       }
     }
     if (!Number.isFinite(settings.snaplen) || (settings.snaplen ?? 0) <= 0) issues.push("Snaplen must be greater than 0.");

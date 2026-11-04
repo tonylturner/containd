@@ -65,7 +65,7 @@ export function pickWanCIDR(state: InterfaceState | null): string | null {
   return null;
 }
 
-/** The inferred WAN gateway on the OS device the WAN interface is bound to. */
+/** The inferred WAN gateway on the kernel interface named by the WAN row. */
 export type WanGateway = { device: string; cidr: string; address: string };
 
 /**
@@ -80,7 +80,7 @@ export function inferWanGateway(
   if (!iface) {
     return { ok: false, error: "Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan')." };
   }
-  const device = iface.device?.trim() || iface.name;
+  const device = iface.name;
   const cidr = pickWanCIDR(states.find((s) => s.name === device) ?? null);
   if (!cidr) {
     return {
