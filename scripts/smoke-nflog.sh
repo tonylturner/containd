@@ -342,15 +342,19 @@ ensure_listener() {
 }
 
 # deny_rule_packets prints the packet count of the DENY rule's named counter.
+# Each command's output is captured whole: an early-exiting reader would
+# SIGPIPE the writer and trip pipefail.
 deny_rule_packets() {
-  local name
-  name=$(compose exec -T engine nft list ruleset |
-    awk -v prefix="\"containd:${RULE_ID}:DENY \"" 'index($0, prefix) {
-      for (i = 1; i < NF; i++) if ($i == "name") { gsub(/"/, "", $(i + 1)); print $(i + 1); exit }
-    }') || harness_error "could not read the nft ruleset"
-  [[ -n $name ]] || fail "no logging DENY rule for $RULE_ID in the installed nft ruleset"
-  compose exec -T engine nft list counter inet containd_policy "$name" |
-    awk '$1 == "packets" { print $2; exit }'
+  local ruleset name counter
+  ruleset=$(compose exec -T engine nft list ruleset 2>/dev/null) ||
+    harness_error "could not read the nft ruleset"
+  name=$(awk -v prefix="\"containd:${RULE_ID}:DENY \"" 'index($0, prefix) && name == "" {
+      for (i = 1; i < NF; i++) if ($i == "name") { name = $(i + 1); gsub(/"/, "", name) }
+    } END { print name }' <<<"$ruleset")
+  [[ -n $name ]] || harness_error "no logging DENY rule for $RULE_ID in the installed nft ruleset"
+  counter=$(compose exec -T engine nft list counter inet containd_policy "$name" 2>/dev/null) ||
+    harness_error "could not read nft counter $name"
+  awk '$1 == "packets" && !seen { print $2; seen = 1 }' <<<"$counter"
 }
 
 send_denied_tcp() {
