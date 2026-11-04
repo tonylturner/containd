@@ -131,6 +131,7 @@ func (p *protectionState) recomputeLocked() {
 					state, reason = "pending", c.Reason
 				} else {
 					state, reason = "degraded", "rule-hit logging unavailable"
+					p.status.Retryable = true
 				}
 			}
 		}
@@ -141,8 +142,19 @@ func (p *protectionState) recomputeLocked() {
 				}
 			}
 		}
-		if state == "degraded" {
-			p.status.Retryable = true
+		if state == "protecting" || state == "degraded" {
+			if c, ok := p.components["interface-attachment"]; ok {
+				switch c.State {
+				case "unknown":
+					state, reason = "unknown", c.Reason
+				case "degraded":
+					state = "degraded"
+					if reason != "" {
+						reason += "; "
+					}
+					reason += c.Reason
+				}
+			}
 		}
 	}
 	p.status.State = state

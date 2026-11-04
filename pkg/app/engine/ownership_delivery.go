@@ -18,6 +18,7 @@ type ownershipDelivery struct {
 	delivery          map[protection.SubsystemName]func(bool, bool)
 	active            map[protection.SubsystemName]func() bool
 	interfacesApplied func(context.Context, []config.Interface)
+	observeAttachment func(protection.Metadata)
 }
 
 func (d *ownershipDelivery) bindDelivery(r *http.Request, name protection.SubsystemName) {

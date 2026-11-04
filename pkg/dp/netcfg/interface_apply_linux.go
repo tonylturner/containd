@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -48,6 +49,9 @@ func (r interfaceResolver) deviceFor(iface config.Interface) string {
 func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyOptions) error {
 	addressApplyMu.Lock()
 	defer addressApplyMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	owned, err := loadAddressOwnership()
 	if err != nil {
 		return err
@@ -63,11 +67,18 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 	}
 
 	resolver := newInterfaceResolver(ifaces)
-	bridgeMembers, err := prepareVirtualInterfaces(ifaces, resolver)
+	bridgeMembers, unattached, err := prepareVirtualInterfaces(ifaces, resolver)
 	if err != nil {
 		return err
 	}
 	for _, iface := range ifaces {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if unattached[resolver.deviceFor(iface)] {
+			slog.Debug("interface unattached; configuration deferred", "interface", iface.Name)
+			continue
+		}
 		if err := applyInterfaceConfig(ctx, iface, bridgeMembers, resolver, opts, owned); err != nil {
 			return err
 		}
@@ -109,32 +120,7 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 	return nil
 }
 
-func prepareVirtualInterfaces(ifaces []config.Interface, resolver interfaceResolver) (map[string]string, error) {
-	bridgeMembers := map[string]string{}
-	for _, iface := range ifaces {
-		dev := resolver.deviceFor(iface)
-		if dev == "" {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(iface.Type)) {
-		case "", "physical":
-			continue
-		case "bridge":
-			if err := ensureBridgeInterface(dev, iface, resolver, bridgeMembers); err != nil {
-				return nil, err
-			}
-		case "vlan":
-			if err := ensureVLANInterface(dev, iface, resolver); err != nil {
-				return nil, err
-			}
-		default:
-			// validated earlier
-		}
-	}
-	return bridgeMembers, nil
-}
-
-func ensureBridgeInterface(dev string, iface config.Interface, resolver interfaceResolver, bridgeMembers map[string]string) error {
+func ensureBridgeInterface(dev string, iface config.Interface, resolver interfaceResolver) error {
 	if err := ensureBridge(dev); err != nil {
 		return fmt.Errorf("ensure bridge %s: %w", dev, err)
 	}
@@ -150,7 +136,6 @@ func ensureBridgeInterface(dev string, iface config.Interface, resolver interfac
 		if memberDev == "" {
 			continue
 		}
-		bridgeMembers[memberDev] = dev
 		if err := setLinkUp(memberDev); err != nil {
 			return fmt.Errorf("set link up %s: %w", memberDev, err)
 		}
@@ -169,6 +154,9 @@ func ensureVLANInterface(dev string, iface config.Interface, resolver interfaceR
 	parent, err := net.InterfaceByName(parentDev)
 	if err != nil {
 		return fmt.Errorf("vlan %s parent %s not found: %w", iface.Name, parentDev, err)
+	}
+	if err := setLinkUp(parentDev); err != nil {
+		return fmt.Errorf("set vlan parent link up %s: %w", parentDev, err)
 	}
 	if err := ensureVLAN(dev, parent.Index, iface.VLANID); err != nil {
 		return fmt.Errorf("ensure vlan %s: %w", dev, err)

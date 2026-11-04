@@ -119,6 +119,11 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
+	if m.coordinator != nil && m.observeAttachment != nil {
+		// Observe installed policy even when there is no current interface
+		// delivery to maintain. Hold the admission fence through publication.
+		defer m.observeAttachment(m.coordinator.metadata)
+	}
 	if err := m.guard.Reconcile(ctx); err != nil {
 		m.setLastError(err)
 		return
@@ -144,7 +149,9 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	}
 	// Interfaces: converge only owned addresses (REPLACE is admin-triggered only).
 	if st.ifacesSet {
-		m.publishDelivery(protection.SubsystemInterfaces, false, false)
+		// Maintenance of unchanged accepted intent does not revoke delivery.
+		// In particular, absent devices are live attachment state, not a
+		// reason for management to redeliver this phase.
 		m.publishDelivery(protection.SubsystemForwarding, false, false)
 		if err := netcfg.ApplyInterfacesWithOptions(applyCtx, st.ifaces, netcfg.ApplyOptions{Reservation: m.reservation}); err != nil {
 			m.publishDelivery(protection.SubsystemInterfaces, false, true)
