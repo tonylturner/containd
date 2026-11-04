@@ -307,6 +307,30 @@ wait_for_protection() {
   fail "protection did not report ready at committed revision $EXPECTED_REVISION"
 }
 
+# adopt_restart_revision follows the revision protection settles on after a
+# restart. Boot repair commits a new revision when Docker reordered ethN, so
+# the pre-restart revision is not an oracle; ready must still mean
+# protecting exactly the revision management wants.
+adopt_restart_revision() {
+  local status_file="$WORK_DIR/protection.json" revision
+  for _ in {1..60}; do
+    if protection_status >"$status_file" 2>/dev/null &&
+      revision=$(jq -er '
+        select(.ready == true and .desiredRevision != null
+          and .protectingRevision == .desiredRevision
+          and .appliedRevision == .desiredRevision)
+        | .desiredRevision' "$status_file" 2>/dev/null); then
+      if [[ $revision != "$EXPECTED_REVISION" ]]; then
+        log "restart settled on revision $revision (was $EXPECTED_REVISION; boot repair)"
+      fi
+      EXPECTED_REVISION=$revision
+      return 0
+    fi
+    sleep 1
+  done
+  fail "protection did not become ready at its desired revision after restart: $(jq -c '{desiredRevision,protectingRevision,appliedRevision,ready,state}' "$status_file" 2>/dev/null)"
+}
+
 assert_nflog_bound_and_ready() {
   local proc status_file="$WORK_DIR/protection.json"
   proc=$(compose exec -T engine cat /proc/net/netfilter/nfnetlink_log 2>&1) ||
@@ -524,6 +548,7 @@ main() {
 
   restart_engine
   pass "engine service container restarted"
+  adopt_restart_revision
   exercise_phase 'engine restart'
 
   PHASE='full compose restart'
@@ -531,6 +556,8 @@ main() {
   compose restart || harness_error "could not restart isolated Compose project"
   wait_for_management
   pass "all services in the isolated Compose project restarted"
+  PHASE='full compose restart'
+  adopt_restart_revision
   exercise_phase 'full compose restart'
 
   pass "all NFLOG lifecycle phases passed"
