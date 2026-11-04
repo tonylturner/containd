@@ -195,6 +195,37 @@ deny checks and the translate-only forward check; disabling LAN masquerade
 defeats only the LAN-to-WAN source-address check. Both scripts accept the
 isolation variables described in the smoke fixture README linked below.
 
+## Exact ICS Learner Smoke
+
+`bash scripts/smoke-exact-learner.sh` builds the current appliance, IEC 104
+endpoint and packet-capture helper images, then runs isolated AF_PACKET and
+NFQUEUE Compose stacks with real Modbus and IEC 104 receivers. It requires
+Docker Compose, jq, curl and Python 3.
+
+The AF_PACKET stack uses `CONTAIND_LAB_MODE=1` and a default bootstrap login.
+Suggestion review must succeed through the public API and persist `containd`
+as `review.actor`, both in the review response and the suggestion list. The
+NFQUEUE stack retains normal session login, initial password setup and the
+authenticated-review assertions.
+
+Both stacks check live and PCAP-import suggestion equivalence, the explicit
+IEC review gate, candidate-only staging, idempotent retries, monitor-rule
+delivery and restart persistence. NFQUEUE also verifies enforcement at the
+receivers; AF_PACKET is passive.
+
+The script uses unique project and image names, fresh data directories and
+ephemeral loopback management ports. It removes its Compose containers,
+networks and volumes on exit, preserving evidence under
+`build/exact-learner-<timestamp>-<pid>` (override with `EXACT_LEARNER_RESULTS`).
+The stacks use subnets `10.235.0.0/24` through `10.238.0.0/24`; keep these free.
+Built images remain available for inspection.
+
+To test an existing local appliance image without rebuilding it, set
+`EXACT_LEARNER_BUILD=0 EXACT_LEARNER_IMAGE=<image>`. The endpoint and capture
+helpers are still built from the current sources. For example, the lab review
+check fails with HTTP 400 `authenticated actor required` on
+`ghcr.io/tonylturner/containd:0.1.41` (pull it first).
+
 ## NFLOG Smoke
 
 `bash scripts/smoke-nflog.sh` verifies that a logged L4 DENY rule keeps its

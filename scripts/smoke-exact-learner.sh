@@ -28,12 +28,16 @@ if [[ -z $JWT_SECRET ]]; then
 fi
 mkdir -p "$RESULTS"
 printf '{"stamp":"%s","assertions":[]}\n' "$STAMP" >"$RESULTS/summary.json"
-docker build -f "$ROOT/build/Dockerfile.mgmt" -t "$FIREWALL_IMAGE" "$ROOT" \
-	>"$RESULTS/firewall-build.log" 2>&1 || {
-	cat "$RESULTS/firewall-build.log" >&2
-	printf 'FAIL: branch firewall image build failed; evidence: %s\n' "$RESULTS" >&2
-	exit 1
-}
+if [[ ${EXACT_LEARNER_BUILD:-1} == 0 ]]; then
+	docker image inspect "$FIREWALL_IMAGE" >"$RESULTS/firewall-image.json"
+else
+	docker build -f "$ROOT/build/Dockerfile.mgmt" -t "$FIREWALL_IMAGE" "$ROOT" \
+		>"$RESULTS/firewall-build.log" 2>&1 || {
+		cat "$RESULTS/firewall-build.log" >&2
+		printf 'FAIL: branch firewall image build failed; evidence: %s\n' "$RESULTS" >&2
+		exit 1
+	}
+fi
 docker build -t "$ENDPOINT_IMAGE" "$ROOT/test/iec104/endpoint" \
 	>"$RESULTS/endpoint-build.log" 2>&1 || {
 	cat "$RESULTS/endpoint-build.log" >&2
@@ -118,11 +122,16 @@ JSON
 		-o "$MODE_RESULTS/admin-login-response.json" -w '%{http_code}' "${BASE}/auth/login" \
 		2>"$MODE_RESULTS/admin-login-curl-error.log") || status=000
 	[[ $status == 200 ]] ||
-		exact_fail "default admin session login returned HTTP $status; response=$(cat "$MODE_RESULTS/admin-login-response.json" 2>/dev/null || true); curl=$(cat "$MODE_RESULTS/admin-login-curl-error.log" 2>/dev/null || true)"
+		exact_fail "default admin $AUTH_MODE login returned HTTP $status; response=$(cat "$MODE_RESULTS/admin-login-response.json" 2>/dev/null || true); curl=$(cat "$MODE_RESULTS/admin-login-curl-error.log" 2>/dev/null || true)"
 	TOKEN=$(jq -r '.token // empty' "$MODE_RESULTS/admin-login-response.json")
 	[[ -n $TOKEN ]] ||
-		exact_fail "admin login returned no session JWT; response=$(cat "$MODE_RESULTS/admin-login-response.json")"
+		exact_fail "admin login returned no JWT; response=$(cat "$MODE_RESULTS/admin-login-response.json")"
 	AUTH_HEADER="Authorization: Bearer $TOKEN"
+	if [[ $EXACT_LAB_MODE == 1 ]]; then
+		exact_pass_record "$CAPTURE_MODE management API uses an authenticated lab login" \
+			"CONTAIND_LAB_MODE=1; bootstrap username=containd"
+		return
+	fi
 	cat >"$MODE_RESULTS/admin-password-request.json" <<JSON
 {"currentPassword":"containd","newPassword":"$ADMIN_PASSWORD"}
 JSON
@@ -203,10 +212,15 @@ run_mode() {
 	if [[ $CAPTURE_MODE == afpacket ]]; then
 		LAN_SUBNET=10.235.0
 		WAN_SUBNET=10.236.0
+		EXACT_LAB_MODE=1
+		AUTH_MODE=lab
 	else
 		LAN_SUBNET=10.237.0
 		WAN_SUBNET=10.238.0
+		EXACT_LAB_MODE=0
+		AUTH_MODE=session
 	fi
+	export EXACT_LAB_MODE
 	LAN_CLIENT_IP=$LAN_SUBNET.3
 	MODBUS_SERVER_IP=$WAN_SUBNET.3
 	RTU_IP=$MODBUS_SERVER_IP
@@ -220,11 +234,11 @@ run_mode() {
 	COMPOSE_PROJECT_NAME=$PROJECT
 	export COMPOSE_PROJECT_NAME
 
+	STACK_UP=1
 	compose up -d --wait --wait-timeout 120 >"$MODE_RESULTS/compose-up.log" 2>&1 || {
 		cat "$MODE_RESULTS/compose-up.log" >&2
 		exact_fail "$CAPTURE_MODE Compose stack did not become healthy; startup log=$(cat "$MODE_RESULTS/compose-up.log")"
 	}
-	STACK_UP=1
 	local port
 	port=$(compose port firewall 18080 | awk -F: '{print $NF}')
 	[[ -n $port ]] || exact_fail "$CAPTURE_MODE Compose did not publish a loopback management port"
@@ -442,6 +456,11 @@ JSON
 	jq -e --arg id "$IEC_ID" '.items[] | select(.id == $id) | .status == "reviewed" and .review.actor != ""' \
 		"$API_OUTPUT" >/dev/null ||
 		exact_fail "$CAPTURE_MODE IEC suggestion was not reviewed by the public API; response=$(cat "$API_OUTPUT")"
+	if [[ $EXACT_LAB_MODE == 1 ]]; then
+		jq -e --arg id "$IEC_ID" '.items[] | select(.id == $id) | .review.actor == "containd"' \
+			"$API_OUTPUT" >/dev/null ||
+			exact_fail "$CAPTURE_MODE lab review list lost the bootstrap actor; response=$(cat "$API_OUTPUT")"
+	fi
 
 	# Empty the candidate rule list only; the currently running baseline remains
 	# active while the selected certified rules are atomically staged.

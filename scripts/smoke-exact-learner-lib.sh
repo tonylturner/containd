@@ -70,9 +70,15 @@ exact_review_selection() {
 		>"$MODE_RESULTS/review-request-$id.json"
 	exact_api_post "/learn/suggestions/$id/review" \
 		"$MODE_RESULTS/review-request-$id.json" \
-		"$MODE_RESULTS/review-response-$id.json" "$CAPTURE_MODE authenticated IEC/coordinate review"
+		"$MODE_RESULTS/review-response-$id.json" "$CAPTURE_MODE $AUTH_MODE authenticated IEC/coordinate review"
 	jq -e '.status == "reviewed" and .review.actor != ""' "$MODE_RESULTS/review-response-$id.json" >/dev/null ||
 		exact_fail "$CAPTURE_MODE suggestion review did not persist an authenticated reviewed state; response=$(cat "$MODE_RESULTS/review-response-$id.json")"
+	if [[ $EXACT_LAB_MODE == 1 ]]; then
+		jq -e '.review.actor == "containd"' "$MODE_RESULTS/review-response-$id.json" >/dev/null ||
+			exact_fail "$CAPTURE_MODE lab suggestion review did not use bootstrap actor containd; response=$(cat "$MODE_RESULTS/review-response-$id.json")"
+		exact_pass_record "$CAPTURE_MODE lab suggestion review records the bootstrap username" \
+			"suggestion=$id; actor=containd"
+	fi
 }
 
 exact_write_json() {
