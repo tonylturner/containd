@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Firewall rule-hit logging (NFLOG) stopped after every config commit or restart
+  in 0.1.39, while status still reported it ready.
+
 ## [0.1.39] - 2026-11-03
 
 ### Changed

@@ -86,7 +86,8 @@ func logRetryEngine(t *testing.T, h *logRetryHarness) *Engine {
 	go func() {
 		e.lifecycleMu.Lock()
 		defer e.lifecycleMu.Unlock()
-		e.startNFLogLocked(ctx)
+		e.nflogLifetime = ctx
+		e.startNFLogLocked()
 	}()
 	return e
 }

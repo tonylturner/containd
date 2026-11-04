@@ -38,11 +38,13 @@ func (e *Engine) StartProtection(ctx, lifetime context.Context) error {
 	epoch, onError := e.epoch.Load(), e.onError
 	e.lifecycleMu.Unlock()
 	backoff := startRetryInitial
+	nflogAttempted := false
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		group, err := e.start(lifetime)
+		group, err, attemptedNFLog := e.start(lifetime, !nflogAttempted)
+		nflogAttempted = nflogAttempted || attemptedNFLog
 		e.protection.bindAttempt(epoch, group, err, attempt, startRetryAttempts)
 		if err == nil || group == 0 {
 			return err
