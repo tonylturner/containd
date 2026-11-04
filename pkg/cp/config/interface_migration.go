@@ -60,7 +60,7 @@ func readLegacyInterfaceDevices(raw []byte, cfg *Config) error {
 func upgradeInterfaceNames(cfg *Config, schema string) {
 	rec := &InterfaceDeviceMigration{Timestamp: time.Now().UTC(), SchemaBefore: schema, SchemaAfter: "0.1.11"}
 	rec.ID = uint64(rec.Timestamp.UnixNano())
-	refs, ambiguous := map[string]string{}, map[string]bool{}
+	refs := newLegacyInterfaceReferences(cfg)
 	for i, row := range cfg.Interfaces {
 		path := fmt.Sprintf("interfaces[%s]", row.Name)
 		if err := enforce.ValidateInterfaceName(row.Name); err != nil {
@@ -71,49 +71,51 @@ func upgradeInterfaceNames(cfg *Config, schema string) {
 		}
 		dev := cfg.legacyDevices[i]
 		rec.Changes = append(rec.Changes, InterfaceDeviceChange{Path: path + ".device", Action: "drop", Old: dev})
-		if previous, ok := refs[dev]; ok && previous != row.Name {
-			ambiguous[dev] = true
-		}
-		refs[dev] = row.Name
 	}
-	rewrite := func(path string, ref *string) {
-		if name, ok := refs[*ref]; ok && !ambiguous[*ref] && name != *ref {
+	rewrite := func(path string, ref *string, resolve func(string) string) {
+		name := resolve(*ref)
+		if refs.collision(*ref) {
+			// Record the chosen row even when the legacy reference is kept.
+			rec.Changes = append(rec.Changes, InterfaceDeviceChange{Path: path, Action: "ambiguous", Old: *ref, New: name})
+		}
+		if name != *ref {
 			rec.Changes = append(rec.Changes, InterfaceDeviceChange{Path: path, Action: "rewrite", Old: *ref, New: name})
 			*ref = name
 		}
 	}
-	list := func(path string, refs []string) {
-		for i := range refs {
-			rewrite(fmt.Sprintf("%s[%d]", path, i), &refs[i])
+	list := func(path string, values []string, resolve func(string) string) {
+		for i := range values {
+			rewrite(fmt.Sprintf("%s[%d]", path, i), &values[i], resolve)
 		}
 	}
 	for i := range cfg.Interfaces {
 		row := &cfg.Interfaces[i]
-		rewrite(fmt.Sprintf("interfaces[%s].parent", row.Name), &row.Parent)
-		list(fmt.Sprintf("interfaces[%s].members", row.Name), row.Members)
+		rewrite(fmt.Sprintf("interfaces[%s].parent", row.Name), &row.Parent, refs.rowFirst)
+		list(fmt.Sprintf("interfaces[%s].members", row.Name), row.Members, refs.rowFirst)
 	}
 	for i := range cfg.Routing.Gateways {
-		rewrite(fmt.Sprintf("routing.gateways[%s].iface", cfg.Routing.Gateways[i].Name), &cfg.Routing.Gateways[i].Iface)
+		rewrite(fmt.Sprintf("routing.gateways[%s].iface", cfg.Routing.Gateways[i].Name), &cfg.Routing.Gateways[i].Iface, refs.deviceFirst)
 	}
 	for i := range cfg.Routing.Routes {
-		rewrite(fmt.Sprintf("routing.routes[%d].iface", i), &cfg.Routing.Routes[i].Iface)
+		rewrite(fmt.Sprintf("routing.routes[%d].iface", i), &cfg.Routing.Routes[i].Iface, refs.deviceFirst)
 	}
-	list("services.vpn.wireguard.listenInterfaces", cfg.Services.VPN.WireGuard.ListenInterfaces)
+	list("services.vpn.wireguard.listenInterfaces", cfg.Services.VPN.WireGuard.ListenInterfaces, refs.vpnListener)
 	if server := cfg.Services.VPN.OpenVPN.Server; server != nil {
-		list("services.vpn.openvpn.server.listenInterfaces", server.ListenInterfaces)
+		list("services.vpn.openvpn.server.listenInterfaces", server.ListenInterfaces, refs.vpnListener)
 	}
 	for i := range cfg.Services.DHCP.Pools {
-		rewrite(fmt.Sprintf("services.dhcp.pools[%d].iface", i), &cfg.Services.DHCP.Pools[i].Iface)
+		rewrite(fmt.Sprintf("services.dhcp.pools[%d].iface", i), &cfg.Services.DHCP.Pools[i].Iface, refs.rowFirst)
 	}
 	for i := range cfg.Services.DHCP.Reservations {
-		rewrite(fmt.Sprintf("services.dhcp.reservations[%d].iface", i), &cfg.Services.DHCP.Reservations[i].Iface)
+		rewrite(fmt.Sprintf("services.dhcp.reservations[%d].iface", i), &cfg.Services.DHCP.Reservations[i].Iface, refs.rowFirst)
 	}
 	for i := range cfg.PCAP.ForwardTargets {
-		rewrite(fmt.Sprintf("pcap.forwardTargets[%d].interface", i), &cfg.PCAP.ForwardTargets[i].Interface)
+		rewrite(fmt.Sprintf("pcap.forwardTargets[%d].interface", i), &cfg.PCAP.ForwardTargets[i].Interface, refs.deviceFirst)
 	}
-	list("services.dhcp.listenIfaces", cfg.Services.DHCP.ListenIfaces)
-	list("dataplane.captureInterfaces", cfg.DataPlane.CaptureInterfaces)
-	list("pcap.interfaces", cfg.PCAP.Interfaces)
+	// DHCP's socket binding takes precedence over its legacy firewall allowance.
+	list("services.dhcp.listenIfaces", cfg.Services.DHCP.ListenIfaces, refs.rowFirst)
+	list("dataplane.captureInterfaces", cfg.DataPlane.CaptureInterfaces, refs.deviceFirst)
+	list("pcap.interfaces", cfg.PCAP.Interfaces, refs.rowFirst)
 	cfg.legacyDevices = nil
 	if len(rec.Changes) > 0 {
 		cfg.deviceMigration = rec
