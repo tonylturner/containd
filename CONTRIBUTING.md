@@ -18,7 +18,7 @@ Prerequisites:
 
 - Go 1.26.10+ (see `go.mod` for the exact version).
 - Node.js 24+ and npm.
-- Docker with modern Docker Compose for appliance builds and smoke tests.
+- Docker Engine 28.1+ and Docker Compose with `interface_name` support (2.36.0+) for appliance builds and smoke tests.
 - OpenSSL for the JWT secret-generation command below.
 - Python 3.12+ and the pinned MkDocs dependencies for docs **and UI source builds**
   (the UI prebuild embeds the documentation).
