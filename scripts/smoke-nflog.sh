@@ -301,7 +301,7 @@ assert_nflog_bound_and_ready() {
   local proc status_file="$WORK_DIR/protection.json"
   proc=$(compose exec -T engine cat /proc/net/netfilter/nfnetlink_log 2>&1) ||
     fail "could not read /proc/net/netfilter/nfnetlink_log: $proc"
-  if ! awk -v group="$NFLOG_GROUP" 'NR > 1 && $1 == group { found=1 } END { exit !found }' \
+  if ! awk -v group="$NFLOG_GROUP" '$1 == group { found=1 } END { exit !found }' \
     <<<"$proc"; then
     fail "NFLOG group $NFLOG_GROUP is absent from /proc/net/netfilter/nfnetlink_log"
   fi
