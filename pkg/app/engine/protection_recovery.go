@@ -40,12 +40,12 @@ func (c *protectionCoordinator) recoveryPhase(w http.ResponseWriter, phase strin
 		if json.Unmarshal(body, &ifaces) == nil && json.Unmarshal([]byte(input), &snap) == nil {
 			valid = current && c.completed["nft"]
 			for _, iface := range ifaces {
-				addressOnly := config.Interface{Name: iface.Name, Device: iface.Device, Addresses: iface.Addresses}
+				addressOnly := config.Interface{Name: iface.Name, Addresses: iface.Addresses}
 				admitted := false
 				for _, rule := range snap.LocalInput {
-					admitted = admitted || slices.Contains(rule.Ifaces, iface.Device)
+					admitted = admitted || slices.Contains(rule.Ifaces, iface.Name)
 				}
-				valid = valid && admitted && iface.Device != "" && len(iface.Addresses) > 0 && reflect.DeepEqual(iface, addressOnly)
+				valid = valid && admitted && iface.Name != "" && len(iface.Addresses) > 0 && reflect.DeepEqual(iface, addressOnly)
 				for _, address := range iface.Addresses {
 					_, err := netip.ParsePrefix(address)
 					valid = valid && err == nil

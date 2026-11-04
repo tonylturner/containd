@@ -28,6 +28,12 @@ the strict manifest does not prescribe them.
 
 ## Start strict
 
+Requires Docker Engine 28.1+ and Compose with `interface_name` support (2.36.0+).
+The default host data folder is `deploy/data-strict/`, not the starter's
+`deploy/data/`. Set `CONTAIND_DATA_DIR` for a different strict-only folder.
+Existing users must [move their data before starting](update-policy.md#existing-data-directories)
+to avoid creating a fresh appliance.
+
 From a repository checkout, create a private `.env` if you do not have one:
 
 ```bash

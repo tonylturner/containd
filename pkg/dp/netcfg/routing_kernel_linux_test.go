@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,50 @@ func TestRoutingKernelConvergence(t *testing.T) {
 	}
 }
 
+func TestRoutingKernelDefersMissingInterface(t *testing.T) {
+	ctx := routingKernelContext(t)
+	cmd := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "ip", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ip %v: %v: %s", args, err, out)
+		}
+		return string(out)
+	}
+	cmd("link", "add", "routeprobe", "type", "dummy")
+	defer cmd("link", "del", "routeprobe")
+	cmd("link", "set", "routeprobe", "up")
+
+	intent := config.RoutingConfig{Routes: []config.StaticRoute{
+		{Dst: "198.19.1.0/24", Iface: "lateprobe", Table: 201},
+		{Dst: "198.19.2.0/24", Iface: "routeprobe", Table: 201},
+	}}
+	if err := ApplyRouting(ctx, intent); err != nil {
+		t.Fatalf("missing interface failed route delivery: %v", err)
+	}
+	got := cmd("-4", "route", "show", "table", "201")
+	if strings.Contains(got, "198.19.1.0/24") {
+		t.Fatalf("route through unattached interface was installed early:\n%s", got)
+	}
+	if !strings.Contains(got, "198.19.2.0/24 dev routeprobe") {
+		t.Fatalf("independent route was not applied:\n%s", got)
+	}
+
+	cmd("link", "add", "lateprobe", "type", "dummy")
+	defer cmd("link", "del", "lateprobe")
+	cmd("link", "set", "lateprobe", "up")
+	if err := ApplyRouting(ctx, intent); err != nil {
+		t.Fatalf("reconcile after interface attachment: %v", err)
+	}
+	got = cmd("-4", "route", "show", "table", "201")
+	if !strings.Contains(got, "198.19.1.0/24 dev lateprobe") || !strings.Contains(got, "198.19.2.0/24 dev routeprobe") {
+		t.Fatalf("routes did not converge after attachment:\n%s", got)
+	}
+	if err := ApplyRouting(ctx, config.RoutingConfig{}); err != nil {
+		t.Fatalf("remove owned routes: %v", err)
+	}
+}
+
 func TestRoutingRestartHelper(t *testing.T) {
 	if os.Getenv("CONTAIND_ROUTING_RESTART_HELPER") != "1" {
 		t.Skip("subprocess helper")
@@ -143,5 +188,76 @@ func TestRoutingRestartHelper(t *testing.T) {
 	ctx := routingKernelContext(t)
 	if err := ApplyRoutingReplace(ctx, config.RoutingConfig{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRoutingKernelDefersChangedInterface(t *testing.T) {
+	ctx := routingKernelContext(t)
+	for _, namedGateway := range []bool{false, true} {
+		t.Run(fmt.Sprintf("namedGateway=%t", namedGateway), func(t *testing.T) {
+			t.Setenv("CONTAIND_ROUTING_STATE_PATH", filepath.Join(t.TempDir(), "displaced.json"))
+			cmd := func(args ...string) string {
+				t.Helper()
+				out, err := exec.CommandContext(ctx, "ip", args...).CombinedOutput()
+				if err != nil {
+					t.Fatalf("ip %v: %v: %s", args, err, out)
+				}
+				return string(out)
+			}
+			apply := func(c config.RoutingConfig) {
+				t.Helper()
+				if err := ApplyRouting(ctx, c); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd("link", "add", "routeprobe", "type", "dummy")
+			defer cmd("link", "del", "routeprobe")
+			cmd("link", "set", "routeprobe", "up")
+			cmd("addr", "add", "198.19.0.1/24", "dev", "routeprobe")
+			cmd("route", "add", "198.19.1.0/24", "via", "198.19.0.3", "dev", "routeprobe", "table", "201", "metric", "10", "proto", "static")
+			baseline := cmd("-4", "route", "show", "table", "201")
+			intent := config.RoutingConfig{
+				Gateways: []config.Gateway{{Name: "gw", Address: "198.19.0.2", Iface: "routeprobe"}},
+				Routes:   []config.StaticRoute{{Dst: "198.19.1.0/24", Gateway: "198.19.0.2", Iface: "routeprobe", Table: 201, Metric: 10}},
+			}
+			if namedGateway {
+				intent.Routes[0].Gateway = "gw"
+				intent.Routes[0].Iface = ""
+			}
+			apply(intent)
+			if got := cmd("-4", "route", "show", "table", "201"); !strings.Contains(got, "via 198.19.0.2 dev routeprobe proto 98") {
+				t.Fatalf("initial route not installed:\n%s", got)
+			}
+			if namedGateway {
+				intent.Gateways[0].Iface = "lateprobe"
+			} else {
+				intent.Routes[0].Iface = "lateprobe"
+			}
+			for range 2 {
+				apply(intent)
+				if got := cmd("-4", "route", "show", "table", "201"); strings.TrimSpace(got) != "" {
+					t.Fatalf("deferred interface retained or restored a route:\n%s", got)
+				}
+				state, err := loadDisplacedRoutes()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(state.Routes) != 1 {
+					t.Fatal("deferred intent lost the displaced route journal")
+				}
+			}
+			cmd("link", "add", "lateprobe", "type", "dummy")
+			defer cmd("link", "del", "lateprobe")
+			cmd("link", "set", "lateprobe", "up")
+			cmd("addr", "add", "198.19.0.4/24", "dev", "lateprobe")
+			apply(intent)
+			if got := cmd("-4", "route", "show", "table", "201"); !strings.Contains(got, "via 198.19.0.2 dev lateprobe proto 98") || strings.Contains(got, "dev routeprobe") {
+				t.Fatalf("route did not converge to the newly attached interface:\n%s", got)
+			}
+			apply(config.RoutingConfig{})
+			if got := cmd("-4", "route", "show", "table", "201"); got != baseline {
+				t.Fatalf("intent removal did not restore foreign route:\n%s\nwant:\n%s", got, baseline)
+			}
+		})
 	}
 }

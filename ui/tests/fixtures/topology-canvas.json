@@ -30,7 +30,6 @@
     "interfaces": [
       {
         "name": "lan",
-        "device": "eth0",
         "zone": "it",
         "addresses": [
           "192.0.2.1/24"
@@ -38,7 +37,6 @@
       },
       {
         "name": "plant",
-        "device": "eth1",
         "zone": "ot",
         "addresses": [
           "198.51.100.1/24"
@@ -47,7 +45,6 @@
       },
       {
         "name": "uplink",
-        "device": "eth2",
         "zone": "wan",
         "addresses": [
           "203.0.113.2/24"
@@ -108,21 +105,21 @@
   },
   "/api/v1/interfaces/state": [
     {
-      "name": "eth0",
+      "name": "lan",
       "up": true,
       "addrs": [
         "192.0.2.1/24"
       ]
     },
     {
-      "name": "eth1",
+      "name": "plant",
       "up": true,
       "addrs": [
         "198.51.100.1/24"
       ]
     },
     {
-      "name": "eth2",
+      "name": "uplink",
       "up": true,
       "addrs": [
         "203.0.113.2/24"
@@ -132,7 +129,7 @@
   "/api/v1/routing/os": {
     "defaultRoute": {
       "gateway": "203.0.113.1",
-      "iface": "eth2"
+      "iface": "uplink"
     }
   },
   "/api/v1/flows": [],

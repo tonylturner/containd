@@ -16,7 +16,7 @@ async function mockCapture(page: Page, forwarding: boolean, role = "admin", conf
         forwardTargets: forwarding ? [{ interface: "eth0", enabled: true, host: "sensor.local", port: 9000, proto: "udp" }] : [],
       }
       : path === "/api/v1/pcap/status" ? { running: true, interfaces: ["live0"], startedAt: "2026-11-01T12:00:00Z" }
-      : path === "/api/v1/interfaces" ? [{ name: "lan", device: "eth0", zone: "lan" }]
+      : path === "/api/v1/interfaces" ? [{ name: "lan", zone: "lan" }]
       : path === "/api/v1/interfaces/state" ? [{ name: "eth0", up: true }]
       : path === "/api/v1/zones" ? [{ name: "lan" }]
       : path === "/api/v1/pcap/list" ? [{ name: "incident.pcap", interface: "eth0", createdAt: "2026-11-01T12:00:00Z", sizeBytes: 4096, status: "ready" }]

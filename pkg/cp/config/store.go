@@ -300,6 +300,9 @@ func readKindUnupgradedFrom(ctx context.Context, db configReader, kind string, w
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	cfg := stored.Config
+	if err := readLegacyInterfaceDevices([]byte(raw), &cfg); err != nil {
+		return nil, err
+	}
 	if !withBank {
 		cfg.IDS.Rules = nil
 		return &cfg, nil

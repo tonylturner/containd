@@ -25,7 +25,7 @@ const losslessConfig = `{
 		"tlsCertFile":"/cert","tlsKeyFile":"/key","trustedCaFile":"/ca"},
 		"ssh":{"listenAddr":":2222","allowPassword":true,"authorizedKeysDir":"/keys",
 			"banner":"hello","hostKeyRotationDays":7,"shellMode":"appliance"}},
-	"interfaces":[{"name":"wan","zone":"wan","device":"eth0","alias":"uplink",
+	"interfaces":[{"name":"wan","zone":"wan","alias":"uplink",
 		"type":"vlan","parent":"eth1","vlanId":42,"members":["eth2"],
 		"addressMode":"static","gateway":"192.0.2.1",
 		"addresses":["192.0.2.7/24"],"access":{"ssh":false}}],
@@ -190,7 +190,6 @@ func losslessCases(t *testing.T) []losslessCase {
 		args    []string
 		patch   map[string]any
 	}{
-		{"interface bind", setInterfaceBindAPI, []string{"wan", "eth3"}, map[string]any{"device": "eth3"}},
 		{"interface zone", setInterfaceZoneAPI, []string{"wan", "dmz"}, map[string]any{"zone": "dmz"}},
 		{"interface dhcp", setInterfaceIPAPI, []string{"wan", "dhcp"}, map[string]any{"addressMode": "dhcp", "addresses": []any{}, "gateway": ""}},
 		{"interface static", setInterfaceIPAPI, []string{"wan", "static", "192.0.2.8/24", "192.0.2.2"}, map[string]any{"addressMode": "static", "addresses": []any{"192.0.2.8/24"}, "gateway": "192.0.2.2"}},
@@ -382,7 +381,7 @@ func TestInterfaceEditRequiresExistingInterface(t *testing.T) {
 	fake := &configFake{reads: map[string]any{"/api/v1/interfaces": []config.Interface{}}}
 	server := httptest.NewServer(http.HandlerFunc(fake.serve))
 	defer server.Close()
-	err := setInterfaceBindAPI(&API{BaseURL: server.URL, Client: server.Client()})(context.Background(), io.Discard, []string{"missing", "eth0"})
+	err := setInterfaceZoneAPI(&API{BaseURL: server.URL, Client: server.Client()})(context.Background(), io.Discard, []string{"missing", "lan"})
 	if err == nil || err.Error() != "interface not found: missing" {
 		t.Fatalf("expected missing interface error, got %v", err)
 	}
@@ -396,7 +395,7 @@ func TestInterfaceEditRequiresExistingInterface(t *testing.T) {
 func quickstartReads(c config.Config) map[string]any {
 	return map[string]any{
 		"/api/v1/config/candidate": c,
-		"/api/v1/interfaces/state": []outboundIfaceState{{Name: "eth0", Addrs: []string{"192.0.2.7/24"}}},
+		"/api/v1/interfaces/state": []outboundIfaceState{{Name: "wan", Addrs: []string{"192.0.2.7/24"}}},
 	}
 }
 
@@ -440,9 +439,9 @@ func TestQuickstartPreservesUnrelatedSettings(t *testing.T) {
 			}
 			want := losslessFixture(t)
 			want.Routing.Gateways[0].Address = "192.0.2.1"
-			want.Routing.Gateways[0].Iface = "eth0"
+			want.Routing.Gateways[0].Iface = "wan"
 			want.Routing.Gateways[0].Description = "Quick start: WAN default gateway"
-			want.Routing.Routes[0].Iface = "eth0"
+			want.Routing.Routes[0].Iface = "wan"
 			want.Firewall.NAT.Enabled = true
 			want.Firewall.NAT.EgressZone = "wan"
 			want.Firewall.NAT.SourceZones = []string{"lan", "mgmt"}

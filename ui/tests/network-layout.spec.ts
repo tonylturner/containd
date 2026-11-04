@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const revision = "0123456789abcdef.1";
-const iface = { name: "lan1", device: "eth2", zone: "lan" };
-const runtime = { name: "eth2", index: 2, up: true, mtu: 1500, addrs: ["192.0.2.2/24"] };
+const iface = { name: "lan1", zone: "lan" };
+const runtime = { name: "lan1", index: 2, up: true, mtu: 1500, addrs: ["192.0.2.2/24"] };
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", async route => {
@@ -42,10 +42,10 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`network-setup-${width}.png`) });
   });
 
-  for (const attention of ["unknown", "customized"] as const) {
-    test(`interface ${attention} metadata stays with Device while Inspect is closed at ${width}px`, async ({ page }) => {
+  for (const attention of ["absent", "customized"] as const) {
+    test(`interface ${attention} metadata stays with Settings while Inspect is closed at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
-      if (attention === "unknown") {
+      if (attention === "absent") {
         await page.route("**/api/v1/interfaces/state", route => route.fulfill({ json: [] }));
       } else {
         await page.route("**/api/v1/interfaces", route => route.fulfill({ json: [{
@@ -59,24 +59,26 @@ for (const width of [1280, 390]) {
         if (request.url().includes("/api/v1/") && request.method() !== "GET") writes.push(request.url());
       });
       await page.goto("/interfaces/");
-      const row = page.getByRole("row").filter({ has: page.getByText("lan1", { exact: true }) });
-      const device = row.getByRole("cell").nth(2);
+      const row = page.getByRole("table", { name: "Configured interfaces" }).getByRole("row").filter({ has: page.getByText("lan1", { exact: true }) });
+      const settings = row.locator('[data-label="Settings"]');
+      const attachment = row.locator('[data-label="Attachment"]');
       const actions = row.getByRole("cell").last();
       const inspect = row.getByRole("button", { name: "Inspect", exact: true });
       await expect(inspect).toHaveAttribute("aria-expanded", attention === "customized" ? "true" : "false");
       if (attention === "customized") await inspect.click();
       await expect(inspect).toHaveAttribute("aria-expanded", "false");
-      const summary = attention === "unknown"
-        ? "external · physical · Live unknown"
-        : "static · physical · Link down · Access customized · Gateway set";
-      await expect(device.getByText(summary, { exact: true })).toBeVisible();
+      const summary = attention === "absent"
+        ? "external · physical"
+        : "static · physical · Access customized · Gateway set";
+      await expect(settings.getByText(summary, { exact: true })).toBeVisible();
+      await expect(attachment).toHaveText(attention === "absent" ? "not attached" : "down");
       await expect(actions).not.toContainText("physical");
       await expect(actions.getByRole("button")).toHaveText(["Inspect", "Edit", "Delete"]);
       await inspect.click();
       await expect(inspect).toHaveAttribute("aria-expanded", "true");
       await inspect.click();
       await expect(inspect).toHaveAttribute("aria-expanded", "false");
-      await expect(device.getByText(summary, { exact: true })).toBeVisible();
+      await expect(settings.getByText(summary, { exact: true })).toBeVisible();
       expect(writes).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     });

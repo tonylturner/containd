@@ -42,8 +42,10 @@ services:
     command: ["all"]
     networks:
       cc_net:
+        interface_name: cc
         ipv4_address: ${IEC104_CC_SUBNET:-10.233.0}.2
       rtu_net:
+        interface_name: rtu
         ipv4_address: ${IEC104_RTU_SUBNET:-10.234.0}.2
     ports:
       - "127.0.0.1::18080"

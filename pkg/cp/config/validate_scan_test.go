@@ -178,12 +178,12 @@ func TestScanPortRangeAndCIDR(t *testing.T) {
 
 func TestZoneDevices(t *testing.T) {
 	got := ZoneDevices([]Interface{
-		{Name: "lan2", Zone: "lan", Device: "eth2"},
+		{Name: "lan2", Zone: "lan"},
 		{Name: "lan1", Zone: "lan"},
-		{Name: "wan", Zone: "wan", Device: " eth0 "},
+		{Name: "wan", Zone: "wan"},
 		{Name: "spare"},
 	})
-	if len(got) != 2 || strings.Join(got["lan"], ",") != "eth2,lan1" || strings.Join(got["wan"], ",") != " eth0 " {
+	if len(got) != 2 || strings.Join(got["lan"], ",") != "lan1,lan2" || strings.Join(got["wan"], ",") != "wan" {
 		t.Fatalf("ZoneDevices = %v", got)
 	}
 }

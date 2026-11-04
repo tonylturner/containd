@@ -30,23 +30,21 @@ This is process authority, never an editable Config or snapshot field.
 
 ## Partial appliances and default binding
 
-Default interfaces bind independently to a unique **up** NIC matching their
-`CONTAIND_AUTO_<NAME>_SUBNET`, or `CONTAIND_<NAME>_SUBNET` when the AUTO hint is
-unset. Missing or ambiguous explicit subnet matches stay
-unbound; names, the default route and index order cannot override that authority.
-Five- and seven-NIC appliances do not need eight NICs to initialize a reservation.
-At restart, a present device binding is kept unless current kernel addresses
-contradict its saved interface addresses or subnet authority. Missing or
-contradicted bindings, including NIC renumbering, are repaired from current
-interface discovery; explicit subnet hints remain authoritative.
+Each interface row attaches to the kernel device with exactly the same name.
+Compose supplies `interface_name` for every appliance network attachment; subnet
+hints and network creation order do not assign roles. Five- and seven-NIC
+appliances do not need eight NICs to initialize a reservation. Missing rows stay
+unattached; saved names never change to follow kernel numbering. The reservation
+still discovers its own device by its declared subnet, independently of rows.
 
-Management INPUT rules contain bound device names, never unbound logical names.
-If a listener has logical access grants but none of its bindings exists on a
-NIC, enforcement permits that listener on discovered NICs **except explicitly
-disabled device bindings**. This is the unbound-appliance recovery invariant, not
-a permanent reservation. Once a granted binding exists, only granted bindings
-are used, even if administratively down. Turning every access flag off creates
-no recovery allow. Management
+Management INPUT rules use row names whose devices exist. If a listener has
+access grants but none of those names exists on a NIC, enforcement permits that
+listener on discovered NICs **except explicitly disabled live row names**. This
+is unbound-appliance recovery, not a permanent reservation. An absent `wan` row's
+denial cannot exclude a live `ethN` attachment: follow the
+[upgrade exposure warning](update-policy.md#interface-name-upgrade). Once a granted
+row is attached, only granted names are used, even if administratively down.
+Turning every access flag off creates no recovery allow. Management
 health reports `managementBinding.state: "unbound-appliance"` and `recoveryPorts`;
 `"configured"` means ordinary bindings/policy apply, and `"unknown"` means the
 running config or engine interface state could not be read.
@@ -91,9 +89,10 @@ visible even when the last successful repair has cleared its immediate error.
 
 Configuration validation rejects changes that undermine the reserved path:
 
-- Anything other than exactly one unaddressed physical logical binding of the
-  reserved device; DHCP/static addressing, another binding, virtual parents or
-  bridge/bond membership using that device.
+- A row named after the reserved device carrying addresses, DHCP mode, a
+  non-physical type, a parent or members; virtual parents or bridge membership
+  using the reserved name. Zero rows for the reserved device is valid: the
+  reserved NIC may live outside the row model.
 - The reserved local address or a source assigned elsewhere, VPN prefixes
   containing the local address, and a WireGuard device named like the reserved
   device (even disabled, because disabling deletes it).
@@ -118,16 +117,15 @@ Starter and dev Compose pass `CONTAIND_MGMT_RESERVATION` through. In reserved
 mode, also set the loopback engine bind and enforcement variables shown above.
 
 Saving, importing, committing, confirming and rolling back must preserve the
-reservation. Default NIC bindings are rediscovered by subnet on restart, while
-custom bindings and unrelated candidate edits remain intact. A valid unaddressed
-reserved binding stays pinned. Custom rows are not silently renamed, unbound,
-or stripped of addresses; correct stale custom bindings explicitly.
+reservation. Rows retain their names across restart; there is no boot-time
+subnet reassignment. Custom rows are not silently renamed or stripped of
+addresses; correct conflicts explicitly.
 
 First boot and factory reset use deployment defaults, including the reservation,
-enforcement and reserved HTTP port. Set subnet hints for the default roles that
-exist in your deployment. Factory reset checks the replacement configuration
-**before** revoking sessions or wiping data; ambiguous or incomplete discovery
-can refuse the reset. A successful reset clears the boot fault and applies defaults.
+enforcement and reserved HTTP port. Factory reset checks the replacement
+configuration **before** revoking sessions or wiping data; ambiguous reservation
+discovery can refuse the reset. A successful reset clears the boot fault and
+applies defaults.
 
 ### Boot fault mode
 
@@ -148,8 +146,8 @@ fault: a validated commit or rollback resumes normal apply; factory reset also
 recovers. A commit, rollback or factory reset that fails at runtime while the
 fault holds restores the stored state, boot fault included, and management
 pushes the recovery configuration again; the refused configuration is never
-reapplied. A later boot whose binding rediscovery resolves the conflict clears
-the persisted fault as well.
+reapplied. A later boot after correcting the deployment or stored conflict clears the
+persisted fault as well.
 
 #### Without a reservation
 

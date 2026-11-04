@@ -5,13 +5,11 @@ package httpapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -44,132 +42,6 @@ func interfaceStateHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, st)
 	}
-}
-
-func interfacesAssignHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if engine == nil {
-			apiError(c, http.StatusBadRequest, "engine unavailable")
-			return
-		}
-		req, err := bindInterfaceAssignRequest(c)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, "invalid request")
-			return
-		}
-		state, err := engine.ListInterfaceState(c.Request.Context())
-		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
-			return
-		}
-		deviceSet := interfaceDeviceSet(state)
-		defaultRouteIface := ""
-		if req.Mode == "auto" {
-			defaultRouteIface = detectKernelDefaultRouteIface()
-		}
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
-			ifaceByName := map[string]*config.Interface{}
-			for i := range cfg.Interfaces {
-				ifaceByName[cfg.Interfaces[i].Name] = &cfg.Interfaces[i]
-			}
-
-			assignments, err := resolveInterfaceAssignments(cfg.Interfaces, state, req, defaultRouteIface, config.ReservationForStore(store))
-			if err != nil {
-				apiError(c, http.StatusBadRequest, err.Error())
-				return false
-			}
-			if err := validateInterfaceAssignments(assignments, ifaceByName, deviceSet); err != nil {
-				apiError(c, http.StatusBadRequest, err.Error())
-				return false
-			}
-
-			for logical, dev := range assignments {
-				ifaceByName[logical].Device = dev
-			}
-			return true
-		})
-		if !ok {
-			return
-		}
-		auditLog(c, audit.Record{Action: "interfaces.assign", Target: "config", Detail: "candidate"})
-		c.JSON(http.StatusOK, gin.H{"interfaces": cfg.Interfaces})
-	}
-}
-
-type interfaceAssignRequest struct {
-	Mode     string            `json:"mode"`
-	Mappings map[string]string `json:"mappings"`
-}
-
-func bindInterfaceAssignRequest(c *gin.Context) (interfaceAssignRequest, error) {
-	var req interfaceAssignRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return interfaceAssignRequest{}, err
-	}
-	req.Mode = normalizedInterfaceAssignMode(req)
-	return req, nil
-}
-
-func normalizedInterfaceAssignMode(req interfaceAssignRequest) string {
-	mode := strings.ToLower(strings.TrimSpace(req.Mode))
-	if mode == "" && len(req.Mappings) > 0 {
-		return "explicit"
-	}
-	return mode
-}
-
-func resolveInterfaceAssignments(ifaces []config.Interface, state []config.InterfaceState, req interfaceAssignRequest, defaultRouteIface string, r *mgmtpath.Reservation) (map[string]string, error) {
-	switch req.Mode {
-	case "auto":
-		return computeDefaultInterfaceAssignments(ifaces, state, autoAssignOptions{
-			Reservation:       r,
-			AllowFallback:     true,
-			DefaultRouteIface: defaultRouteIface,
-		})
-	case "explicit":
-		return normalizedInterfaceMappings(req.Mappings)
-	default:
-		return nil, fmt.Errorf("mode must be auto or explicit")
-	}
-}
-
-func normalizedInterfaceMappings(mappings map[string]string) (map[string]string, error) {
-	if len(mappings) == 0 {
-		return nil, fmt.Errorf("mappings required")
-	}
-	assignments := map[string]string{}
-	for k, v := range mappings {
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if k == "" {
-			continue
-		}
-		if strings.EqualFold(v, "none") || v == "-" {
-			v = ""
-		}
-		assignments[k] = v
-	}
-	return assignments, nil
-}
-
-func validateInterfaceAssignments(assignments map[string]string, ifaceByName map[string]*config.Interface, deviceSet map[string]struct{}) error {
-	used := map[string]string{}
-	for logical, dev := range assignments {
-		if _, ok := ifaceByName[logical]; !ok {
-			return fmt.Errorf("unknown interface: %s", logical)
-		}
-		if dev == "" {
-			continue
-		}
-		if _, ok := deviceSet[dev]; !ok {
-			return fmt.Errorf("unknown kernel device: %s", dev)
-		}
-		if prev, ok := used[dev]; ok && prev != logical {
-			return fmt.Errorf("device %s already assigned to %s", dev, prev)
-		}
-		used[dev] = logical
-	}
-	return nil
 }
 
 func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.HandlerFunc {

@@ -139,27 +139,29 @@ fault only when the running document already faults that service and its section
 is unchanged. This lets an operator repair firewall policy without first fixing
 an unrelated service. New defaults and factory resets require fault-free
 configuration. Validation previews use the same write rule. Schema migrations
-preserve historical service content; boot repairs may change interface bindings
-and management defaults but may not change service sections.
+preserve historical service content; boot repairs may change management defaults
+but do not reassign interface names or change service sections.
 See [Service faults](services.md#service-faults) for status and protection effects.
 
 ## Schema
 
-The current schema is `0.1.10`. Back up before upgrading: 0.1.36 and earlier
-cannot read schema 0.1.10; restore a pre-upgrade backup to downgrade.
-See [ordered policy upgrades](#ordered-policy-upgrades) for rule-order and
+The current schema is `0.1.11`. Back up before upgrading: 0.1.40 and earlier
+cannot read schema 0.1.11; restore a pre-upgrade backup to downgrade.
+See the [interface-name upgrade](update-policy.md#interface-name-upgrade) for
+Compose changes, dropped device bindings and management exposure, and
+[ordered policy upgrades](#ordered-policy-upgrades) for rule-order and
 port-forward migration behavior.
 
-This complete example uses schema `0.1.10`. It defines two routed networks and a
+This complete example uses schema `0.1.11`. It defines two routed networks and a
 single TCP/80 allow rule. With enforcement enabled, other new forwarded
-connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
+connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative interface row names and
 addresses with your deployment's values before applying it. This is not the
 Docker starter topology.
 
 ```json
 {
-  "schema_version": "0.1.10",
-  "description": "Two-zone routed lab; adapt device names and addressing before committing",
+  "schema_version": "0.1.11",
+  "description": "Two-zone routed lab; adapt row names and addressing before committing",
   "system": {
     "hostname": "containd",
     "mgmt": {
@@ -199,8 +201,7 @@ Docker starter topology.
         "http": true,
         "https": true,
         "ssh": false
-      },
-      "device": "eth0"
+      }
     },
     {
       "name": "dmz",
@@ -213,14 +214,13 @@ Docker starter topology.
         "http": false,
         "https": false,
         "ssh": false
-      },
-      "device": "eth1"
+      }
     }
   ],
   "dataplane": {
     "captureInterfaces": [
-      "eth0",
-      "eth1"
+      "wan",
+      "dmz"
     ],
     "enforcement": false,
     "enforceTable": "containd",
@@ -325,14 +325,14 @@ Notes:
   trailing whitespace; enforcement names each zone's nftables interface set
   after it.
 - `interfaces.zone`, when set, must reference an existing zone; addresses are CIDR strings.
-- `interfaces.device`, or the `name` of an interface without a device (which is then its kernel name), must be a Linux interface name that nftables can match exactly: 1–15 bytes, without `/`, `:`, whitespace, control characters, `"`, `*` or `\`, and neither `.` nor `..`. So must each `services.dhcp.listenIfaces` entry of an enabled DHCP server that names a kernel device rather than a configured interface.
-- `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).
+- Each `interfaces[].name` is its kernel device name and must be a Linux interface name that nftables can match exactly: 1–15 bytes, without `/`, `:`, whitespace, control characters, `"`, `*` or `\`, and neither `.` nor `..`. So must each `services.dhcp.listenIfaces` entry of an enabled DHCP server that names a kernel device rather than a configured interface.
+- `pcap.interfaces` accepts interface row names or literal kernel device names. Row names are kernel device names.
 - `pcap.zones` captures every configured interface assigned to each listed zone; interface and zone selections are combined and deduplicated when capture starts.
 - `pcap.filter.port` accepts one port (for example `"2404"`) or an inclusive range (for example `"1000-2000"`). It matches source or destination ports in TCP/UDP packets; it cannot be combined with `proto: "icmp"`.
 - The live capture filter currently parses untagged Ethernet IPv4. Non-initial IPv4 fragments do not expose ports and therefore do not match a port filter.
 - Capture start rejects unknown interfaces or zones, zones with no configured interfaces, and an empty selection. `GET /api/v1/pcap/status` reports the resolved kernel devices.
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
-- `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
+- `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`). Parents and members must name configured rows; created VLAN/bridge devices use their row name.
 - `interfaces.access` controls whether mgmt/ssh is reachable on that interface (omitted access settings use the default grants; localhost is always allowed).
 - `services.dhcp` configures the built-in DHCP server. `authoritative` is a persisted boolean, default false when omitted. Requests for addresses this server cannot lease receive DHCPNAK only when authoritative, on directly attached served subnets; otherwise they receive no reply. Eligible INIT-REBOOT and renewal/rebinding requests receive DHCPACK and record a lease in both modes, even without a prior lease; relayed requests and requests selecting another server are ignored.
 - `services.ntp.intervalSeconds` pins chrony polling when positive: round up to a power of two and clamp to 16–131072 seconds. Omitted or zero retains adaptive 64–1024 second polling. Runtime status reports the configured fixed interval (or null for adaptive polling) and min/max seconds; initial bursts may be faster.

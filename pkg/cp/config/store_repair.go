@@ -84,7 +84,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Equal(before[item.cfg], after) && item.cfg.scopeMigration == nil && item.cfg.modeMigration == nil && item.cfg.orderMigration == nil {
+		if bytes.Equal(before[item.cfg], after) && item.cfg.scopeMigration == nil && item.cfg.modeMigration == nil && item.cfg.orderMigration == nil && item.cfg.deviceMigration == nil {
 			continue
 		}
 		changed = true

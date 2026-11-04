@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Smoke-test the public Compose quickstart (deploy/docker-compose.yml): start
-# it, wait for health, rotate the bootstrap password, auto-assign interfaces
+# it, wait for health, rotate the bootstrap password, check named interfaces
 # and check that the monitoring APIs answer with JSON. CI runs it against the
 # image it builds. Requirements: Docker with Compose, curl, jq and Python 3.
 #
@@ -84,10 +84,7 @@ curl -fsS -c "$cookie" \
   -d "{\"username\":\"containd\",\"password\":\"${quickstart_password}\"}" \
   "$api/auth/login" >/dev/null
 cas_read "$scratch/config.revision" curl -fsS -b "$cookie" "$api/config/candidate" >"$scratch/candidate.json"
-cas_write "$scratch/config.revision" curl -fsS -b "$cookie" \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"auto"}' \
-  "$api/interfaces/assign" | jq -e '.interfaces | type == "array" and length > 0' >/dev/null
+curl -fsS -b "$cookie" "$api/interfaces/state" | jq -e 'any(.[]; .name == "wan") and any(.[]; .name == "lan1")' >/dev/null
 cas_write "$scratch/config.revision" curl -fsS -b "$cookie" \
   -H 'Content-Type: application/json' \
   -X PATCH \

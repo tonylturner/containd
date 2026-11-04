@@ -66,8 +66,8 @@ func newSSHTestHTTPClient() *sshTestHTTPClient {
 	cfg.System.SSH.AuthorizedKeysDir = "/data/ssh"
 	cfg.System.SSH.AllowPassword = new(true)
 	cfg.Interfaces = []config.Interface{
-		{Name: "wan", Device: "eth0", Zone: "wan", AddressMode: "dhcp"},
-		{Name: "lan1", Device: "eth1", Zone: "lan", AddressMode: "static", Addresses: []string{"192.0.2.2/24"}},
+		{Name: "wan", Zone: "wan", AddressMode: "dhcp"},
+		{Name: "lan1", Zone: "lan", AddressMode: "static", Addresses: []string{"192.0.2.2/24"}},
 	}
 	return &sshTestHTTPClient{cfg: *cfg}
 }
@@ -120,8 +120,8 @@ func (c *sshTestHTTPClient) respond(method, path string, body []byte) *http.Resp
 			return jsonResponse(http.StatusOK, c.cfg.Interfaces)
 		case "/api/v1/interfaces/state":
 			return jsonResponse(http.StatusOK, []config.InterfaceState{
-				{Name: "eth0", Index: 1, Up: true, MTU: 1500, MAC: "00:11:22:33:44:55", Addrs: []string{"198.51.100.2/24"}},
-				{Name: "eth1", Index: 2, Up: true, MTU: 1500, MAC: "00:11:22:33:44:66", Addrs: []string{"192.0.2.2/24"}},
+				{Name: "wan", Index: 1, Up: true, MTU: 1500, MAC: "00:11:22:33:44:55", Addrs: []string{"198.51.100.2/24"}},
+				{Name: "lan1", Index: 2, Up: true, MTU: 1500, MAC: "00:11:22:33:44:66", Addrs: []string{"192.0.2.2/24"}},
 			})
 		case "/api/v1/routing":
 			return jsonResponse(http.StatusOK, config.RoutingConfig{})
@@ -140,8 +140,6 @@ func (c *sshTestHTTPClient) respond(method, path string, body []byte) *http.Resp
 				c.cfg = next
 			}
 			return jsonResponse(http.StatusOK, map[string]any{})
-		case "/api/v1/interfaces/assign":
-			return jsonResponse(http.StatusOK, map[string]any{"interfaces": c.cfg.Interfaces})
 		default:
 			return jsonResponse(http.StatusOK, map[string]any{})
 		}
@@ -396,9 +394,9 @@ func TestInteractiveConfigurationMenus(t *testing.T) {
 	reg := cli.NewRegistry(nil, api)
 
 	assignSession, _ := newTestSession(srv, reg, "yes\n")
-	assignSession.menuAssignInterfaces()
-	if !httpClient.saw(http.MethodPost, "/api/v1/interfaces/assign") {
-		t.Fatal("expected interface auto-assign request")
+	assignSession.menuInterfaceAttachment()
+	if !httpClient.saw(http.MethodGet, "/api/v1/interfaces/state") {
+		t.Fatal("expected interface attachment discovery")
 	}
 
 	dhcpSession, _ := newTestSession(srv, reg, "wan\ndhcp\n")

@@ -172,8 +172,8 @@ func TestCompileSnapshotPortForwards(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Zones = []config.Zone{{Name: "wan"}, {Name: "lan"}}
 	cfg.Interfaces = []config.Interface{
-		{Name: "wan", Zone: "wan", Device: "eth0"},
-		{Name: "lan1", Zone: "lan", Device: "eth1"},
+		{Name: "wan", Zone: "wan"},
+		{Name: "lan1", Zone: "lan"},
 	}
 	cfg.Firewall.NAT.PortForwards = []config.PortForward{
 		{
@@ -204,8 +204,8 @@ func TestExpandCIDRTokensVPN(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Zones = []config.Zone{{Name: "wan"}, {Name: "lan"}}
 	cfg.Interfaces = []config.Interface{
-		{Name: "wan", Zone: "wan", Device: "eth0"},
-		{Name: "lan1", Zone: "lan", Device: "eth1"},
+		{Name: "wan", Zone: "wan"},
+		{Name: "lan1", Zone: "lan"},
 	}
 
 	cfg.Services.VPN.WireGuard.Enabled = true

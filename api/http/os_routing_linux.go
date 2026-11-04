@@ -147,14 +147,6 @@ func routeMetric(raw string) *int {
 	return nil
 }
 
-func detectKernelDefaultRouteIface() string {
-	st, err := readProcNetRoute()
-	if err != nil || st == nil || st.DefaultRoute == nil {
-		return ""
-	}
-	return strings.TrimSpace(st.DefaultRoute.Iface)
-}
-
 func parseProcNetHexIPv4(hexLE string) (net.IP, error) {
 	v, err := strconv.ParseUint(hexLE, 16, 32)
 	if err != nil {

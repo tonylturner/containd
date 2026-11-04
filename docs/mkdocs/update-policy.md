@@ -26,10 +26,85 @@ disclosure and reporting.
 3. Choose a version tag or digest. Verify image signatures and signed
    [SBOM attestations](sbom.md#verifying-image-signatures-and-sbom-attestations)
    according to your deployment policy.
-4. Update deployment image references, pull the images, and recreate the appliance.
+4. Complete any deployment changes first, including the
+   [interface-name upgrade](#interface-name-upgrade). Update deployment image
+   references, pull the images, and recreate the appliance.
    For split mode, update the affected processes together as required by release notes.
 5. Verify `/api/v1/health`, `/metrics`, login, cross-zone enforcement, and key
    services. Keep the backup until the deployment is verified.
+
+## Interface-name upgrade
+
+Back up before upgrading: export the configuration and securely copy the full
+persistent data directory while the appliance is stopped. Preserve the old image
+reference and Compose file too. Schema **0.1.11** cannot be read by 0.1.40 or
+earlier; downgrading requires restoring the pre-upgrade data backup.
+
+1. Upgrade Docker Engine to **28.1+** and Compose to a version accepting
+   `interface_name` (2.36.0+).
+2. Before recreating the appliance, add `interface_name: <row name>` to **each**
+   appliance network attachment. Match your saved rows, not necessarily Docker
+   network keys. Review custom rows; their names must be valid Linux interface
+   names (1–15 bytes). There is no automatic renaming.
+3. Render the updated file with `docker compose -f <your-compose.yml> config -q`.
+   Move existing strict data as described below, then update the image and
+   recreate the appliance with `docker compose -f <your-compose.yml> up -d`.
+4. Check attached rows, management access, protection status, cross-zone policy,
+   capture selectors and service listeners before restoring normal traffic.
+
+Rows now bind only by name. The schema upgrade drops saved `interfaces[].device`
+bindings and rewrites saved references to legacy device names to row names. Each
+reference keeps the meaning its consumer gave it before the upgrade, assuming every
+bound device existed: VLAN parents, bridge members, DHCP and PCAP interfaces prefer
+a row name; routes, gateways, capture interfaces and PCAP forward targets prefer a
+bound device; VPN listeners resolve in saved row order. Migration evidence in
+audit/events records dropped bindings, rewritten references, and references that
+matched both a row and another row's device, with the row chosen. New exports omit
+`device`; importing old exports uses the same upgrade. Auto-assignment and its API/CLI are removed. Subnet environment
+hints no longer assign roles; keep subnet variables only for Compose IPAM.
+`CONTAIND_CAPTURE_IFACES` remains a kernel-name list: update it to row names under
+the named Compose topology (for example `wan,lan1`).
+
+**Do not upgrade only the image.** Without matching Compose attachment names,
+rows become unattached and zone rules stop matching. Traffic follows non-zone
+rules and the default action, which can either deny intended traffic or allow
+traffic that zone-specific denies previously blocked. Protection is **degraded**,
+not ready, with a reason naming affected policy-referenced zones and their rows;
+this does not roll back the installed policy.
+
+**Management exposure:** when no granted row is live, unbound-appliance recovery
+keeps management reachable on live NICs except explicitly denied live names.
+A WAN denial saved on an absent row named `wan` no longer applies to a device
+still named `ethN` until Compose is fixed. Restrict host port publication and
+external/container network access during the upgrade; do not assume the old WAN
+management denial protects this interval. An explicit management reservation
+remains independent deployment authority. Recreate with the correct names and
+verify management policy before reopening access.
+
+### Existing data directories
+
+The public starter keeps `./data`. Strict now defaults to
+`${CONTAIND_DATA_DIR:-./data-strict}` beside its Compose file. Repository dev
+keeps its separate repository-root `data` folder. These distinct locations avoid
+sharing an appliance accidentally; **starting without moving existing data creates a fresh
+appliance**, not an upgrade.
+
+For an existing repository strict deployment, with `CONTAIND_DATA_DIR` unset in
+both the shell and `.env`, run from the repository root after taking a backup,
+adding `interface_name` and selecting the new image:
+
+```sh
+# Stop if the target already exists or the move fails; inspect before retrying.
+docker compose --env-file .env -f deploy/docker-compose.strict.yml down &&
+  test ! -e deploy/data-strict &&
+  mv deploy/data deploy/data-strict &&
+  docker compose --env-file .env -f deploy/docker-compose.strict.yml up -d
+```
+
+If your Compose file lives elsewhere, move its adjacent `data` to `data-strict`
+instead, or set `CONTAIND_DATA_DIR` to the absolute path of your existing strict
+folder. Never point strict at a training data folder; keep each
+profile and lab isolated, including any custom overrides.
 
 ### When `:latest` moves
 

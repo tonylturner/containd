@@ -64,7 +64,7 @@ func TestEffectiveReservedListenerIsServiceFault(t *testing.T) {
 	r := &mgmtpath.Reservation{Device: "mgmt0", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
 	cfg := DefaultConfig()
 	cfg.DataPlane.Enforcement = true
-	cfg.Interfaces = []Interface{{Name: "management", Device: r.Device, Zone: "lan"}}
+	cfg.Interfaces = []Interface{{Name: "management", Zone: "lan"}}
 	cfg.Services.Proxy.Forward.Enabled = true
 	cfg.Services.Proxy.Forward.ListenPort = 8080
 	cfg.Services.DNS.Enabled = true
@@ -185,12 +185,12 @@ func TestRepairPreservesServicesAndAllowsNewReferenceFault(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
 	cfg, _ := s.Load(ctx)
-	cfg.Interfaces[0].Device = "oldnic"
+	cfg.Interfaces[0].Name = "oldnic"
 	cfg.Services.VPN.WireGuard.ListenInterfaces = []string{"oldnic"}
 	if err := s.Save(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Repair(ctx, s, func(c *Config) error { c.Interfaces[0].Device = "newnic"; return nil })
+	got, err := Repair(ctx, s, func(c *Config) error { c.Interfaces[0].Name = "newnic"; return nil })
 	if err != nil || !reflect.DeepEqual(got.Services, cfg.Services) {
 		t.Fatalf("repair lost service content: %v", err)
 	}

@@ -21,16 +21,15 @@ import (
 
 func TestResolvePCAPConfig(t *testing.T) {
 	configured := []config.Interface{
-		{Name: "wan", Device: "eth0", Zone: "outside"},
-		{Name: "lan1", Device: "eth1", Zone: "inside"},
-		{Name: "lan2", Device: "eth2", Zone: "inside"},
+		{Name: "eth0", Zone: "outside"},
+		{Name: "eth1", Zone: "inside"},
+		{Name: "eth2", Zone: "inside"},
 		{Name: "lan3", Zone: "inside"},
-		{Name: "lan4", Device: "missing", Zone: "inside"},
+		{Name: "lan4", Zone: "inside"},
 		{Name: "eth3", Zone: "inside"},
-		{Name: "lan5", Device: "eth1", Zone: "inside"},
 	}
 	got, err := resolvePCAPConfig(config.PCAPConfig{
-		Interfaces: []string{"wan", "eth4", "lan1"},
+		Interfaces: []string{"eth0", "eth4", "eth1"},
 		Zones:      []string{"inside", "inside"},
 		Filter:     config.PCAPFilter{Port: "502"},
 	}, configured, pcapTestInterfaceByName)
@@ -61,8 +60,8 @@ func pcapTestInterfaceByName(name string) (*net.Interface, error) {
 func TestResolvePCAPConfigRejectsUnknownSelection(t *testing.T) {
 	configured := []config.Interface{
 		{Name: "lan2", Zone: "lan"},
-		{Name: "lan3", Device: "missing", Zone: "lan"},
-		{Name: "eth0", Device: "missing", Zone: "outside"},
+		{Name: "lan3", Zone: "lan"},
+		{Name: "eth0", Zone: "outside"},
 	}
 	tests := []struct {
 		name string
@@ -92,12 +91,7 @@ func TestResolvePCAPConfigRejectsUnknownSelection(t *testing.T) {
 		{
 			name: "missing configured device",
 			cfg:  config.PCAPConfig{Interfaces: []string{"lan3"}},
-			want: `pcap interface "lan3" has no existing kernel device "missing"`,
-		},
-		{
-			name: "device setting takes precedence over existing name",
-			cfg:  config.PCAPConfig{Interfaces: []string{"eth0"}},
-			want: `pcap interface "eth0" has no existing kernel device "missing"`,
+			want: `pcap interface "lan3" has no existing kernel device "lan3"`,
 		},
 		{
 			name: "empty selection",
@@ -118,7 +112,7 @@ func TestResolvePCAPConfigRejectsUnknownSelection(t *testing.T) {
 func TestPCAPStartHandlerReturnsNamedResolutionError(t *testing.T) {
 	mgr := pcap.NewManager(t.TempDir())
 	ownership := newOwnershipManager(zap.NewNop().Sugar())
-	ownership.setInterfaces([]config.Interface{{Name: "wan", Device: "eth0", Zone: "outside"}})
+	ownership.setInterfaces([]config.Interface{{Name: "eth0", Zone: "outside"}})
 	req := httptest.NewRequest(http.MethodPost, "/internal/pcap/start", bytes.NewBufferString(
 		`{"enabled":true,"zones":["ghost"]}`,
 	))

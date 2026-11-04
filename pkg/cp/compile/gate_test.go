@@ -13,16 +13,15 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// gateConfig scans lan->wan downloads. Zone lan has a bound device and an
-// unbound interface, wan a bound device, ot an addressed interface, and
+// gateConfig scans lan->wan downloads. Zone lan has two rows, wan one row, ot an addressed interface, and
 // void no interface at all.
 func gateConfig(mut func(*config.Config)) *config.Config {
 	cfg := &config.Config{
 		System: config.SystemConfig{Hostname: "containd"},
 		Zones:  []config.Zone{{Name: "wan"}, {Name: "lan"}, {Name: "ot"}, {Name: "void"}},
 		Interfaces: []config.Interface{
-			{Name: "wan", Zone: "wan", Device: "eth0"},
-			{Name: "lan2", Zone: "lan", Device: "eth2"},
+			{Name: "wan", Zone: "wan"},
+			{Name: "lan2", Zone: "lan"},
 			{Name: "lan3", Zone: "lan"},
 			{Name: "ot0", Zone: "ot", Addresses: []string{"10.1.0.1/24", "2001:db8:1::1/64"}},
 		},
@@ -76,20 +75,21 @@ func TestCompileGateResolvesSelection(t *testing.T) {
 	want := rules.GateSelection{
 		Enabled: true,
 		Include: []rules.GateEntry{{
-			SourceDevices: []string{"eth2", "lan3"},
+			SourceDevices: []string{"lan2", "lan3"},
 			DestZones:     []string{"wan"},
 			Ports:         []rules.GatePortRange{{Lo: 80, Hi: 81}, {Lo: 8000, Hi: 8110}},
 		}},
 		Exclude: []rules.GateEntry{
 			{Family: 4, Sources: []string{"10.0.0.0/8", "10.1.2.3/32"}, Destinations: []string{"192.0.2.0/24"}},
 			{Family: 6, Sources: []string{"2001:db8::/32"}, Ports: []rules.GatePortRange{{Lo: 443, Hi: 443}}},
-			{SourceDevices: []string{"eth2", "lan3"}, DestDevices: []string{"eth0"}, Ports: []rules.GatePortRange{{Lo: 8080, Hi: 8080}}},
+			{SourceDevices: []string{"lan2", "lan3"}, DestDevices: []string{"wan"}, Ports: []rules.GatePortRange{{Lo: 8080, Hi: 8080}}},
 		},
-		Zones:        []rules.GateZone{{Name: "wan", Index: 1, Devices: []string{"eth0"}}, {Name: "void", Index: 2}},
-		ICSDevices:   []string{"ot0"},
-		ICSCIDRs:     []string{"10.1.0.0/24", "10.1.0.5/32", "2001:db8:1::/64", "2001:db8:1::5/128"},
-		FailPolicy:   "closed",
-		DownloadMode: "hold",
+		ReferencedZones: []string{"lan", "void", "wan"},
+		Zones:           []rules.GateZone{{Name: "wan", Index: 1, Devices: []string{"wan"}}, {Name: "void", Index: 2}},
+		ICSDevices:      []string{"ot0"},
+		ICSCIDRs:        []string{"10.1.0.0/24", "10.1.0.5/32", "2001:db8:1::/64", "2001:db8:1::5/128"},
+		FailPolicy:      "closed",
+		DownloadMode:    "hold",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("gate selection:\n got %+v\nwant %+v", got, want)
@@ -105,8 +105,8 @@ func TestCompileGateIndexesEveryZoneForAnyEgress(t *testing.T) {
 		cfg.Services.AV.Scan.DownloadMode = "stream_tail"
 	}))
 	wantZones := []rules.GateZone{
-		{Name: "wan", Index: 1, Devices: []string{"eth0"}},
-		{Name: "lan", Index: 2, Devices: []string{"eth2", "lan3"}},
+		{Name: "wan", Index: 1, Devices: []string{"wan"}},
+		{Name: "lan", Index: 2, Devices: []string{"lan2", "lan3"}},
 		{Name: "ot", Index: 3, Devices: []string{"ot0"}},
 		{Name: "void", Index: 4},
 	}
@@ -120,6 +120,9 @@ func TestCompileGateIndexesEveryZoneForAnyEgress(t *testing.T) {
 	if !reflect.DeepEqual(got.Include, wantInclude) {
 		t.Fatalf("include = %+v", got.Include)
 	}
+	if !reflect.DeepEqual(got.ReferencedZones, []string{"lan"}) {
+		t.Fatalf("any egress added zone references: %v", got.ReferencedZones)
+	}
 	if got.DownloadMode != "stream_tail" || got.FailPolicy != "closed" {
 		t.Fatalf("modes = %q %q", got.DownloadMode, got.FailPolicy)
 	}
@@ -130,15 +133,15 @@ func TestCompileGateZoneIndicesAreStable(t *testing.T) {
 	// Binding a device to void and appending a zone must not renumber wan.
 	second := compileGateSnapshot(t, gateConfig(func(cfg *config.Config) {
 		cfg.Zones = append(cfg.Zones, config.Zone{Name: "guest"})
-		cfg.Interfaces = append(cfg.Interfaces, config.Interface{Name: "void0", Zone: "void", Device: "eth9"})
+		cfg.Interfaces = append(cfg.Interfaces, config.Interface{Name: "void0", Zone: "void"})
 		cfg.Services.AV.Scan.Include[0].DestZones = []string{"guest", "wan", "void"}
 	}))
-	if !reflect.DeepEqual(first.Zones, []rules.GateZone{{Name: "wan", Index: 1, Devices: []string{"eth0"}}, {Name: "void", Index: 2}}) {
+	if !reflect.DeepEqual(first.Zones, []rules.GateZone{{Name: "wan", Index: 1, Devices: []string{"wan"}}, {Name: "void", Index: 2}}) {
 		t.Fatalf("zones = %+v", first.Zones)
 	}
 	if !reflect.DeepEqual(second.Zones, []rules.GateZone{
-		{Name: "wan", Index: 1, Devices: []string{"eth0"}},
-		{Name: "void", Index: 2, Devices: []string{"eth9"}},
+		{Name: "wan", Index: 1, Devices: []string{"wan"}},
+		{Name: "void", Index: 2, Devices: []string{"void0"}},
 		{Name: "guest", Index: 3},
 	}) {
 		t.Fatalf("zones renumbered: %+v -> %+v", first.Zones, second.Zones)
@@ -156,8 +159,41 @@ func TestCompileGateDropsUnmatchableEntries(t *testing.T) {
 			{SourceZones: []string{"wan"}, DestZones: []string{"lan"}, DestPorts: []string{"80"}},
 		}
 	}))
-	if len(got.Include) != 1 || !reflect.DeepEqual(got.Include[0].SourceDevices, []string{"eth0"}) {
+	if len(got.Include) != 1 || !reflect.DeepEqual(got.Include[0].SourceDevices, []string{"wan"}) {
 		t.Fatalf("include = %+v", got.Include)
+	}
+	if !reflect.DeepEqual(got.ReferencedZones, []string{"lan", "void", "wan"}) {
+		t.Fatalf("unmatchable entries lost references: %v", got.ReferencedZones)
+	}
+}
+
+func TestCompileGateExplicitZoneReferences(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		include []config.ScanInclude
+		want    []string
+	}{
+		{"any", []config.ScanInclude{{DestPorts: []string{"80"}}}, nil},
+		{"source only unmatchable", []config.ScanInclude{{SourceZones: []string{"void"}, DestPorts: []string{"80"}}}, []string{"void"}},
+		{"destination only unmatchable", []config.ScanInclude{{DestZones: []string{"void"}, DestPorts: []string{"80"}}}, []string{"void"}},
+		{"sorted unique", []config.ScanInclude{
+			{SourceZones: []string{"wan", "lan"}, DestZones: []string{"lan", "void"}, DestPorts: []string{"80"}},
+			{SourceZones: []string{"void"}, DestZones: []string{"wan"}, DestPorts: []string{"8080"}},
+		}, []string{"lan", "void", "wan"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := compileGateSnapshot(t, gateConfig(func(cfg *config.Config) {
+				cfg.Services.AV.Scan.Include = tc.include
+				cfg.Services.AV.Scan.Exclude = []config.ScanExclude{{SourceZones: []string{"ot"}}}
+				cfg.Services.AV.Scan.ICSZones = []string{"ot"}
+			}))
+			if !reflect.DeepEqual(got.ReferencedZones, tc.want) {
+				t.Fatalf("references = %v, want %v", got.ReferencedZones, tc.want)
+			}
+			if err := got.Validate(); err != nil {
+				t.Fatalf("compiled selection invalid: %v", err)
+			}
+		})
 	}
 }
 

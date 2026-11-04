@@ -12,7 +12,7 @@ const demoEvent: TelemetryEvent = { id: "9007199254740993", flowId: "f1", proto:
 type Scenario = { simulation?: Partial<SimulationStatus>; eventsFailed?: boolean; totalsFailed?: boolean; conduit?: Conduit["traffic"]; mutate?: (body: WireResponse, url: URL) => void; conduitsFailed?: boolean; reverseBytes?: string };
 async function open(page: Page, path: string, scenario: Scenario = {}) {
   const requests: URL[] = [];
-  const config = { zones: [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }], interfaces: [{ name: "lan", device: "eth9", zone: "it", addresses: ["192.0.2.1/24"] }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } };
+  const config = { zones: [{ name: "it", slTarget: 1 }, { name: "ot", slTarget: 2 }], interfaces: [{ name: "eth9", zone: "it", addresses: ["192.0.2.1/24"] }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } };
   const conduit: Conduit = { from: "it", to: "ot", state: "allow", ids: "disabled", checks: securityChecks, proto: [], rules: [], gaps: [], mitre: [], defaultDeny: true, tlsEnforced: false, protoWhitelist: false, mfaRequired: false, auditLogged: false, avEnabled: false,
     traffic: { state: "measured", windowSeconds: 3600, bytes: "9007199254740993", packets: "25", complete: false, coverage: "routed" } };
   await page.addInitScript(() => {

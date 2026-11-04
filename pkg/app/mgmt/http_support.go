@@ -241,10 +241,7 @@ func mgmtAllowedOnInterface(cfg *config.Config, ifaceName string, isTLS bool) bo
 		return true
 	}
 	for _, iface := range cfg.Interfaces {
-		effectiveDev := strings.TrimSpace(iface.Device)
-		if effectiveDev == "" {
-			effectiveDev = iface.Name
-		}
+		effectiveDev := strings.TrimSpace(iface.Name)
 		if effectiveDev != ifaceName && iface.Name != ifaceName {
 			continue
 		}
@@ -268,10 +265,7 @@ func sshAllowedOnInterface(cfg *config.Config, ifaceName string) bool {
 		return true
 	}
 	for _, iface := range cfg.Interfaces {
-		effectiveDev := strings.TrimSpace(iface.Device)
-		if effectiveDev == "" {
-			effectiveDev = iface.Name
-		}
+		effectiveDev := strings.TrimSpace(iface.Name)
 		if effectiveDev != ifaceName && iface.Name != ifaceName {
 			continue
 		}

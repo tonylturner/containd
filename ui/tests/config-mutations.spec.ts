@@ -49,11 +49,6 @@ async function mockAPI(page: Page) {
       if (method === "GET" && server.failReads) return route.fulfill({ status: 503, json: { error: "Unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       if (method === "POST") server.saved = server.ids = req.postDataJSON();
       result = server.ids;
-    } else if (path === "/interfaces/assign") {
-      const { mode } = req.postDataJSON();
-      expect(mode).toBe("auto");
-      collections["/interfaces"] = collections["/interfaces"].map((item, i) => ({ ...item, device: `eth${i}` }));
-      result = { interfaces: collections["/interfaces"] };
     } else if (path === "/ids/convert/sigma") {
       const { sigmaYAML } = req.postDataJSON();
       expect(sigmaYAML).toContain("title:");
@@ -238,17 +233,6 @@ test("IDS blocks Save after an acknowledged import until its rules can be read",
   await expect.poll(() => server.saved?.rules).toEqual([
     { id: "existing-rule", title: "Existing rule", enabled: false }, imported,
   ]);
-});
-
-test("interface auto-assignment acknowledges devices while another row edit is pending", async ({ page }) => {
-  await mockAPI(page);
-  await Promise.all([page.waitForResponse(read("/interfaces")), page.goto("/interfaces/")]);
-  await row(page, "lan1").getByRole("button", { name: "Edit", exact: true }).click();
-  const alias = row(page, "lan1").getByPlaceholder("alias (optional)");
-  await alias.fill("pending alias");
-  await page.getByRole("button", { name: "Auto-assign", exact: true }).click();
-  await expect(row(page, "wan1")).toContainText("eth1");
-  await expect(alias).toHaveValue("pending alias");
 });
 
 test("Sigma conversion adds a local rule without acknowledging unrelated rule edits", async ({ page }) => {

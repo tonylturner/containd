@@ -60,11 +60,11 @@ func TestConfigCollectionResponses(t *testing.T) {
 func TestCLIQuickstartCreatesFirstCandidateRule(t *testing.T) {
 	store := stageStore(t)
 	engine := &stageEngine{mockEngine: &mockEngine{
-		state: []config.InterfaceState{{Name: "eth0", Addrs: []string{"192.0.2.7/24"}}},
+		state: []config.InterfaceState{{Name: "wan", Addrs: []string{"192.0.2.7/24"}}},
 	}}
 	handler := newTestServerWithEngine(store, nil, engine)
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "wan", Device: "eth0", Zone: "wan"}}
+	cfg.Interfaces = []config.Interface{{Name: "wan", Zone: "wan"}}
 	cfg.Firewall.Rules = nil
 	// Reproduce a full-config write persisting the redacted empty rule list.
 	rec := requestStage(t, handler, http.MethodPost, "/config/candidate", cfg)

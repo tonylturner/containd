@@ -51,18 +51,14 @@ func ManagementLocalInput(cfg *config.Config) []rules.LocalServiceRule {
 func appendListenerInput(out []rules.LocalServiceRule, cfg *config.Config, id string, port int, access func(config.InterfaceAccess) bool) []rules.LocalServiceRule {
 	rule := rules.LocalServiceRule{ID: id, Proto: "tcp", Port: port}
 	for _, iface := range cfg.Interfaces {
-		device := strings.TrimSpace(iface.Device)
+		device := strings.TrimSpace(iface.Name)
 		if access(iface.Access) {
 			rule.RecoverUnbound = true
 			if device != "" {
 				rule.Ifaces = append(rule.Ifaces, device)
 			}
 		} else {
-			// Legacy/virtual rows may name a kernel device directly. Never
-			// let recovery override their explicit access denial either.
-			if device == "" {
-				device = strings.TrimSpace(iface.Name)
-			}
+			// Recovery must not override an explicit access denial.
 			if device != "" {
 				rule.DeniedIfaces = append(rule.DeniedIfaces, device)
 			}

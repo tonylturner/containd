@@ -25,9 +25,10 @@ func TestICSDecoderPorts(t *testing.T) {
 
 func TestGateSelectionValidate(t *testing.T) {
 	ok := GateSelection{Enabled: true,
-		Include: []GateEntry{{DestZones: []string{"wan"}, Ports: []GatePortRange{{Lo: 80, Hi: 80}, {Lo: 503, Hi: 2221}}}},
-		Exclude: []GateEntry{{Ports: []GatePortRange{{Lo: 502, Hi: 502}}}},
-		Zones:   []GateZone{{Name: "wan", Index: 1}, {Name: "dmz", Index: 2}},
+		ReferencedZones: []string{"lan", "wan"},
+		Include:         []GateEntry{{DestZones: []string{"wan"}, Ports: []GatePortRange{{Lo: 80, Hi: 80}, {Lo: 503, Hi: 2221}}}},
+		Exclude:         []GateEntry{{Ports: []GatePortRange{{Lo: 502, Hi: 502}}}},
+		Zones:           []GateZone{{Name: "wan", Index: 1}, {Name: "dmz", Index: 2}},
 	}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid selection rejected: %v", err)
@@ -39,10 +40,14 @@ func TestGateSelectionValidate(t *testing.T) {
 		gate GateSelection
 		err  string
 	}{
-		"decoder port": {GateSelection{Include: []GateEntry{{Ports: []GatePortRange{{Lo: 80, Hi: 80}, {Lo: 500, Hi: 600}}}}}, "gate include[0]: ports 500-600 cover ICS decoder port modbus/502"},
-		"reversed":     {GateSelection{Include: []GateEntry{{Ports: []GatePortRange{{Lo: 90, Hi: 80}}}}}, "reversed port range 90-80"},
-		"zero index":   {GateSelection{Zones: []GateZone{{Name: "wan"}}}, `zone "wan" has index 0`},
-		"shared index": {GateSelection{Zones: []GateZone{{Name: "wan", Index: 7}, {Name: "dmz", Index: 7}}}, `zones "wan" and "dmz" share index 7`},
+		"decoder port":         {GateSelection{Include: []GateEntry{{Ports: []GatePortRange{{Lo: 80, Hi: 80}, {Lo: 500, Hi: 600}}}}}, "gate include[0]: ports 500-600 cover ICS decoder port modbus/502"},
+		"reversed":             {GateSelection{Include: []GateEntry{{Ports: []GatePortRange{{Lo: 90, Hi: 80}}}}}, "reversed port range 90-80"},
+		"zero index":           {GateSelection{Zones: []GateZone{{Name: "wan"}}}, `zone "wan" has index 0`},
+		"shared index":         {GateSelection{Zones: []GateZone{{Name: "wan", Index: 7}, {Name: "dmz", Index: 7}}}, `zones "wan" and "dmz" share index 7`},
+		"disabled references":  {GateSelection{ReferencedZones: []string{"wan"}}, "disabled gate has referenced zones"},
+		"empty reference":      {GateSelection{Enabled: true, ReferencedZones: []string{""}}, "nonempty, sorted and unique"},
+		"unsorted references":  {GateSelection{Enabled: true, ReferencedZones: []string{"wan", "lan"}}, "nonempty, sorted and unique"},
+		"duplicate references": {GateSelection{Enabled: true, ReferencedZones: []string{"wan", "wan"}}, "nonempty, sorted and unique"},
 	} {
 		if err := tc.gate.Validate(); err == nil || !strings.Contains(err.Error(), tc.err) {
 			t.Errorf("%s: Validate = %v, want %q", name, err, tc.err)

@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -39,11 +40,18 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 	for _, gw := range routing.Gateways {
 		gwByName[strings.TrimSpace(gw.Name)] = gw
 	}
+	interfaceIndexes, err := routeInterfaceIndexes(routing.Routes, gwByName)
+	if err != nil {
+		return err
+	}
 	var routes []kernelRoute
 	for _, r := range routing.Routes {
-		kr, err := resolveRoute(r, gwByName)
+		kr, err := resolveRoute(r, gwByName, interfaceIndexes)
 		if err != nil {
 			return err
+		}
+		if kr.deferredIface != "" {
+			slog.Debug("static route interface unattached; configuration deferred", "destination", r.Dst, "interface", kr.deferredIface)
 		}
 		routes = append(routes, kr)
 	}
@@ -88,6 +96,9 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 		return err
 	}
 	for _, r := range routes {
+		if r.deferredIface != "" {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -140,6 +151,11 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 }
 
 func routeMatchesIntent(got, want kernelRoute) bool {
+	// Deferred intent keeps ownership of its route key, but cannot be satisfied
+	// by an installed route through any other interface.
+	if want.deferredIface != "" {
+		return false
+	}
 	// A gateway-only route lets the kernel select its output interface. Its
 	// resolved OIF must not cause deletion/re-addition on every reconcile.
 	return got.dst.Equal(want.dst) && got.dstLen == want.dstLen && got.gateway.Equal(want.gateway) && (want.ifIndex == 0 || got.ifIndex == want.ifIndex) && got.table == want.table && got.metric == want.metric && got.tos == want.tos

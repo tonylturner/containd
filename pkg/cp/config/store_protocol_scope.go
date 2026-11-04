@@ -45,7 +45,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err != nil {
 			return nil, err
 		}
-		if !beforeOrderedPolicy(cfg.SchemaVersion) {
+		if !beforeInterfaceNames(cfg.SchemaVersion) {
 			continue
 		}
 		// The config row omits the separately referenced bank. Inspect that

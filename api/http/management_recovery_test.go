@@ -166,8 +166,8 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 	f := false
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{
-		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
-		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+		{Name: "mgmtnic", Zone: "mgmt"},
+		{Name: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 	}
 	cfg.DataPlane.Enforcement = true
 	if err := store.Save(ctx, cfg); err != nil {
@@ -267,8 +267,8 @@ func TestRecoverySnapshotAdmitsBoundListeners(t *testing.T) {
 	stored := config.DefaultConfig()
 	stored.System.Mgmt.HTTPListenAddr = "192.0.2.50:9090"
 	stored.Interfaces = []config.Interface{
-		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
-		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+		{Name: "mgmtnic", Zone: "mgmt"},
+		{Name: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 	}
 	httpPorts := func() map[int]rules.LocalServiceRule {
 		ports := map[int]rules.LocalServiceRule{}

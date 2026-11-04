@@ -295,3 +295,15 @@ test("OpenVPN credential creation is confirmed and independent of staged Save", 
   await expect.poll(() => actions).toEqual([{ name: "Operator" }]);
   expect(state.writes).toEqual([]);
 });
+
+test("VPN listeners save configured interface row names", async ({ page }) => {
+  const state = await vpn(page);
+  await page.route("**/api/v1/interfaces", route => route.fulfill({
+    json: [{ name: "wan", alias: "Uplink", zone: "wan" }],
+    headers: { "X-Containd-Revision": "0123456789abcdef.1" },
+  }));
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Uplink (wan) · wan", exact: true }).check();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => state.writes[0]?.body.wireguard?.listenInterfaces).toEqual(["wan"]);
+});

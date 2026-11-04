@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const defaultOpenVPNClientEarlyExitWindow = 250 * time.Millisecond
+
 // VPNManager persists VPN service configuration and supervises optional VPN daemons.
 // WireGuard is applied in the engine (kernel netlink). OpenVPN is supervised here when enabled.
 type VPNManager struct {
@@ -27,13 +29,14 @@ type VPNManager struct {
 	OpenVPNPath      string
 	OnEvent          func(kind string, attrs map[string]any)
 
-	applyMu          sync.Mutex
-	ovpnRevision     string
-	crlCheckInterval time.Duration
-	mu               sync.Mutex
-	lastCfg          config.VPNConfig
-	lastRender       time.Time
-	lastError        string
+	applyMu                      sync.Mutex
+	ovpnRevision                 string
+	crlCheckInterval             time.Duration
+	openVPNClientEarlyExitWindow time.Duration
+	mu                           sync.Mutex
+	lastCfg                      config.VPNConfig
+	lastRender                   time.Time
+	lastError                    string
 
 	ovpnCmd        *exec.Cmd
 	ovpnWaitCh     chan struct{}
@@ -65,10 +68,11 @@ func NewVPNManager(baseDir string) *VPNManager {
 		"/usr/bin/openvpn",
 	})
 	return &VPNManager{
-		BaseDir:          baseDir,
-		SuperviseOpenVPN: supervise,
-		OpenVPNPath:      openvpnPath,
-		log:              newVPNLogger(),
+		BaseDir:                      baseDir,
+		SuperviseOpenVPN:             supervise,
+		OpenVPNPath:                  openvpnPath,
+		openVPNClientEarlyExitWindow: defaultOpenVPNClientEarlyExitWindow,
+		log:                          newVPNLogger(),
 	}
 }
 
@@ -180,7 +184,10 @@ func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string, server
 
 	// Clients may retry DNS and remote connections indefinitely. Only require
 	// survival of an early-exit window, not a completed remote handshake.
-	startupWindow := 250 * time.Millisecond
+	startupWindow := m.openVPNClientEarlyExitWindow
+	if startupWindow <= 0 {
+		startupWindow = defaultOpenVPNClientEarlyExitWindow
+	}
 	var readyCh <-chan struct{}
 	if server {
 		startupWindow = 5 * time.Second

@@ -39,7 +39,7 @@ func TestBootServiceFaultDecision(t *testing.T) {
 					reservation = &mgmtpath.Reservation{
 						Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080,
 					}
-					cfg.Interfaces = []config.Interface{{Name: "custom", Device: reservation.Device, Zone: "lan"}}
+					cfg.Interfaces = []config.Interface{{Name: "custom", Zone: "lan"}}
 					cfg.DataPlane.Enforcement = true
 				}
 				if mode != "clean" {

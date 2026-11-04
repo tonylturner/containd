@@ -42,8 +42,7 @@ func TestManagementPartialAPIsRejectBeforeSideEffects(t *testing.T) {
 		name, body string
 		handler    http.Handler
 	}{
-		{"interfaces", `[{"name":"lan3","device":"reserved","addresses":["10.99.99.8/24"]}]`, interfacesHandler(logger, owner)},
-		{"interfaces_missing", `[]`, interfacesHandler(logger, owner)},
+		{"interfaces", `[{"name":"reserved","addresses":["10.99.99.8/24"]}]`, interfacesHandler(logger, owner)},
 		{"routing", `{"rules":[{"priority":1,"table":201}]}`, routingHandler(logger, owner)},
 		{"routing_priority_wrap", `{"rules":[{"priority":4294967296,"table":201}]}`, routingHandler(logger, owner)},
 		{"routing_local_default", `{"routes":[{"dst":"0.0.0.0/0","iface":"teaching","table":255}]}`, routingHandler(logger, owner)},

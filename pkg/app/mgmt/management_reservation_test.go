@@ -31,7 +31,7 @@ func TestReservedBootFaultPreservesRecoveryAndCandidate(t *testing.T) {
 	}
 	ctx := context.Background()
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "custom", Device: "reserved-test", Zone: "lan", Addresses: []string{"192.0.2.2/24"}}}
+	cfg.Interfaces = []config.Interface{{Name: "reserved-test", Zone: "lan", Addresses: []string{"192.0.2.2/24"}}}
 	cfg.DataPlane.Enforcement = true
 	f := false
 	cfg.Interfaces[0].Access = config.InterfaceAccess{Mgmt: &f, HTTP: &f, HTTPS: &f, SSH: &f}
@@ -154,7 +154,7 @@ func TestNonReservationBootRepairErrorWarnsAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "custom", Device: "reserved-test", Zone: "lan"}}
+	cfg.Interfaces = []config.Interface{{Name: "reserved-test", Zone: "lan"}}
 	cfg.DataPlane.Enforcement = true
 	if err := store.Save(context.Background(), cfg); err != nil {
 		t.Fatal(err)

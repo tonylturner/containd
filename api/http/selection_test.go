@@ -10,11 +10,11 @@ import (
 
 func TestDesiredSelectionKeepsOriginalRequirements(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "lan", Device: "eth0", Zone: "lan"}}
+	cfg.Interfaces = []config.Interface{{Name: "lan", Zone: "lan"}}
 	if desiredSelection(cfg, rules.Snapshot{}).Forwarding {
 		t.Fatal("single zone requires forwarding")
 	}
-	cfg.Interfaces = append(cfg.Interfaces, config.Interface{Name: "wan", Device: "eth1", Zone: "wan"})
+	cfg.Interfaces = append(cfg.Interfaces, config.Interface{Name: "wan", Zone: "wan"})
 	cfg.Services.AV.Enabled = true
 	cfg.Services.AV.Mode = "clamav"
 	cfg.Services.AV.ClamAV.FreshclamEnabled = true

@@ -10,8 +10,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// ResolveForwardMatches resolves the enabled, bound forwards of an already
-// validated candidate/running config. An absent result never means unrestricted.
+// ResolveForwardMatches resolves enabled forwards using configured ingress rows
+// of an already validated candidate/running config. An absent result never means unrestricted.
 // It is independent of NAT.Enabled, which controls source NAT, not publishing.
 // Runtime device addresses are supplied separately in SnapshotInputs.
 func ResolveForwardMatches(cfg *config.Config) map[string]rules.ForwardMatch {
@@ -25,11 +25,7 @@ func ResolveForwardMatches(cfg *config.Config) map[string]rules.ForwardMatch {
 			if strings.TrimSpace(iface.Zone) != strings.TrimSpace(forward.IngressZone) {
 				continue
 			}
-			device := strings.TrimSpace(iface.Device)
-			kind := strings.ToLower(strings.TrimSpace(iface.Type))
-			if device == "" && (kind == "bridge" || kind == "vlan") {
-				device = iface.Name
-			}
+			device := strings.TrimSpace(iface.Name)
 			if device != "" {
 				devices = append(devices, device)
 			}

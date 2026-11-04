@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway) (kernelRoute, error) {
+func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway, interfaceIndexes map[string]int) (kernelRoute, error) {
 	ipnet, prefixLen, err := parseRouteDestination(r.Dst)
 	if err != nil {
 		return kernelRoute{}, err
@@ -36,10 +36,6 @@ func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway) (ker
 	if strings.TrimSpace(r.Iface) == "" {
 		r.Iface = ifaceHint
 	}
-	ifIndex := routeInterfaceIndex(r.Iface)
-	if strings.TrimSpace(r.Iface) != "" && ifIndex == 0 {
-		return kernelRoute{}, fmt.Errorf("route interface not found: %q", r.Iface)
-	}
 	if r.Table < 0 || r.Table > 252 || r.Metric < 0 {
 		return kernelRoute{}, fmt.Errorf("invalid route table or metric")
 	}
@@ -47,7 +43,13 @@ func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway) (ker
 	if r.Table != 0 {
 		table = uint8(r.Table)
 	}
-	return kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: uint32(table), metric: uint32(r.Metric), proto: routeProtoContaind}, nil
+	iface := strings.TrimSpace(r.Iface)
+	ifIndex := interfaceIndexes[iface]
+	route := kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: uint32(table), metric: uint32(r.Metric), proto: routeProtoContaind}
+	if iface != "" && ifIndex == 0 {
+		route.deferredIface = iface
+	}
+	return route, nil
 }
 
 func putRoute(r kernelRoute, replace bool) error {
@@ -104,15 +106,30 @@ func resolveRouteGateway(gateway string, gwByName map[string]config.Gateway) (ne
 	return gw.To4(), "", nil
 }
 
-func routeInterfaceIndex(iface string) int {
-	if strings.TrimSpace(iface) == "" {
-		return 0
+func routeInterfaceIndexes(routes []config.StaticRoute, gateways map[string]config.Gateway) (map[string]int, error) {
+	needsDiscovery := false
+	for _, route := range routes {
+		if strings.TrimSpace(route.Iface) != "" {
+			needsDiscovery = true
+			break
+		}
+		if gateway, ok := gateways[strings.TrimSpace(route.Gateway)]; ok && strings.TrimSpace(gateway.Iface) != "" {
+			needsDiscovery = true
+			break
+		}
 	}
-	nic, err := net.InterfaceByName(strings.TrimSpace(iface))
-	if err != nil || nic == nil {
-		return 0
+	indexes := map[string]int{}
+	if !needsDiscovery {
+		return indexes, nil
 	}
-	return nic.Index
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("discover route interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		indexes[iface.Name] = iface.Index
+	}
+	return indexes, nil
 }
 
 func openRouteNetlinkSocket() (int, error) {
@@ -176,6 +193,8 @@ type kernelRoute struct {
 	proto   uint8
 	tos     uint8
 	raw     []byte
+	// deferredIface is intent-only: the named interface is not attached yet.
+	deferredIface string
 }
 
 func kernelRoutes(ctx context.Context) ([]kernelRoute, error) {

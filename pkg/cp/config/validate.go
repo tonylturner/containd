@@ -210,18 +210,16 @@ func validateInterfaces(ifaces []Interface, zones []Zone) error {
 }
 
 type interfaceValidationState struct {
-	seen        map[string]struct{}
-	seenLower   map[string]struct{}
-	aliasSeen   map[string]struct{}
-	seenDevices map[string]struct{}
+	seen      map[string]struct{}
+	seenLower map[string]struct{}
+	aliasSeen map[string]struct{}
 }
 
 func newInterfaceValidationState() *interfaceValidationState {
 	return &interfaceValidationState{
-		seen:        map[string]struct{}{},
-		seenLower:   map[string]struct{}{},
-		aliasSeen:   map[string]struct{}{},
-		seenDevices: map[string]struct{}{},
+		seen:      map[string]struct{}{},
+		seenLower: map[string]struct{}{},
+		aliasSeen: map[string]struct{}{},
 	}
 }
 
@@ -255,9 +253,6 @@ func validateInterfaceIdentity(iface Interface, zoneSet map[string]struct{}, sta
 	if err := validateInterfaceAlias(iface, state); err != nil {
 		return err
 	}
-	if err := validateInterfaceDeviceBinding(iface, state); err != nil {
-		return err
-	}
 	if err := validateKernelInterfaceName(iface); err != nil {
 		return err
 	}
@@ -287,20 +282,6 @@ func validateInterfaceAlias(iface Interface, state *interfaceValidationState) er
 	return nil
 }
 
-func validateInterfaceDeviceBinding(iface Interface, state *interfaceValidationState) error {
-	if strings.TrimSpace(iface.Device) == "" {
-		return nil
-	}
-	if iface.Device != strings.TrimSpace(iface.Device) {
-		return fmt.Errorf("interface %s device has leading/trailing whitespace", iface.Name)
-	}
-	if _, exists := state.seenDevices[iface.Device]; exists {
-		return fmt.Errorf("duplicate interface device binding: %s", iface.Device)
-	}
-	state.seenDevices[iface.Device] = struct{}{}
-	return nil
-}
-
 func validateInterfaceTypeConfig(iface Interface, byName map[string]Interface) error {
 	switch t := strings.ToLower(strings.TrimSpace(iface.Type)); t {
 	case "", "physical":
@@ -308,7 +289,7 @@ func validateInterfaceTypeConfig(iface Interface, byName map[string]Interface) e
 	case "bridge":
 		return validateBridgeInterface(iface, byName)
 	case "vlan":
-		return validateVLANInterface(iface)
+		return validateVLANInterface(iface, byName)
 	default:
 		return fmt.Errorf("interface %s has invalid type %q", iface.Name, iface.Type)
 	}
@@ -326,6 +307,9 @@ func validateBridgeInterface(iface Interface, byName map[string]Interface) error
 		if member == iface.Name {
 			return fmt.Errorf("interface %s cannot include itself as a bridge member", iface.Name)
 		}
+		if _, ok := byName[member]; !ok {
+			return fmt.Errorf("interface %s unknown bridge member %q", iface.Name, member)
+		}
 		if ref, ok := byName[member]; ok && strings.ToLower(strings.TrimSpace(ref.Type)) == "bridge" {
 			return fmt.Errorf("interface %s bridge member %q is also a bridge (nested bridges not supported)", iface.Name, member)
 		}
@@ -333,9 +317,12 @@ func validateBridgeInterface(iface Interface, byName map[string]Interface) error
 	return nil
 }
 
-func validateVLANInterface(iface Interface) error {
+func validateVLANInterface(iface Interface, byName map[string]Interface) error {
 	if strings.TrimSpace(iface.Parent) == "" {
 		return fmt.Errorf("interface %s type vlan requires parent", iface.Name)
+	}
+	if _, ok := byName[iface.Parent]; !ok {
+		return fmt.Errorf("interface %s unknown VLAN parent %q", iface.Name, iface.Parent)
 	}
 	if iface.VLANID < 1 || iface.VLANID > 4094 {
 		return fmt.Errorf("interface %s has invalid vlanId %d (expected 1-4094)", iface.Name, iface.VLANID)
@@ -372,9 +359,6 @@ func zoneIfaceMap(ifaces []Interface) map[string][]string {
 			continue
 		}
 		name := strings.TrimSpace(iface.Name)
-		if strings.TrimSpace(iface.Device) != "" {
-			name = strings.TrimSpace(iface.Device)
-		}
 		if name == "" {
 			continue
 		}
@@ -724,9 +708,6 @@ func routingIfaceSet(ifaces []Interface) map[string]struct{} {
 	for _, iface := range ifaces {
 		if strings.TrimSpace(iface.Name) != "" {
 			ifaceSet[iface.Name] = struct{}{}
-		}
-		if strings.TrimSpace(iface.Device) != "" {
-			ifaceSet[iface.Device] = struct{}{}
 		}
 	}
 	return ifaceSet

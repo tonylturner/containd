@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { reconcileRows, upsertRow } from "../../lib/config-editor";
+import { upsertRow } from "../../lib/config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
 import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
@@ -14,6 +14,8 @@ import Link from "next/link";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { docsHrefForPath } from "../../components/shell-nav";
+import { staticAssetURL } from "../../lib/api-core";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { validateCIDRList, validateIP } from "../../lib/validate";
 import { Card } from "../../components/Card";
@@ -51,7 +53,6 @@ export default function InterfacesPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [assigning, setAssigning] = useState(false);
   const [reconciling, setReconciling] = useState(false);
 
   const confirm = useConfirm();
@@ -70,12 +71,6 @@ export default function InterfacesPage() {
         </>
       ),
       when: () => zones.length === 0,
-    },
-    {
-      id: "interfaces:binding",
-      title: "Connect logical interfaces to network devices",
-      body: "Use Auto-assign or choose a Device to apply addresses and firewall rules to the right network port.",
-      when: () => unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0,
     },
     {
       id: "interfaces:ips",
@@ -98,29 +93,7 @@ export default function InterfacesPage() {
     setZones(z ?? []);
   }, [checkLoaded, refreshForm, adoptRows]));
 
-  const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
-  const unboundConfigured = {
-    missingRuntime: ifaces.filter((iface) => !runtimeFor(iface, state)),
-    unassignedOS: state.map((iface) => iface.name).filter((name) => name !== "lo" && !boundDevices.has(name)).sort(),
-  };
-
   useConfigRefresh(refresh);
-
-  async function onAutoAssign() {
-    if (!canSaveNow()) return;
-    setError(null);
-    setAssigning(true);
-    const res = await rowsDraft.write(base => api.assignInterfaces(base, "auto"), {
-      patch: (rows, data, submitted) => reconcileRows(rows, submitted, data.interfaces, row => row.name),
-    });
-    setAssigning(false);
-    if (!res.ok) {
-      setError(revisionError(res));
-      return;
-    }
-    await refresh();
-    setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
-  }
 
   async function onReconcileReplace() {
     setError(null);
@@ -246,14 +219,6 @@ export default function InterfacesPage() {
           {isAdmin() && (
             <>
               <button
-                onClick={onAutoAssign}
-                disabled={assigning || !canSave}
-                className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
-                title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected network devices"
-              >
-                {assigning ? "Assigning..." : "Auto-assign"}
-              </button>
-              <button
                 onClick={onReconcileReplace}
                 disabled={reconciling}
                 className="rounded-xs border px-3 py-1.5 text-sm transition-ui disabled:opacity-50"
@@ -276,7 +241,11 @@ export default function InterfacesPage() {
       <NetworkSetup current="/interfaces/">
         Logical interfaces: {rowsDraft.editor.baseRevision ? ifaces.length : "Unknown"} · Live devices: {runtimeStatus === "ready" ? state.filter(device => device.name !== "lo").length : "Unknown"}
       </NetworkSetup>
-      <p className="mb-4 text-xs text-(--text-muted)">Auto-assign and interface edits stage candidate settings. Reconcile live is immediate and replaces live static addresses with running settings.</p>
+      <p className="mb-4 text-xs text-(--text-muted)">Interface edits stage candidate settings. Reconcile live is immediate and replaces live static addresses with running settings.</p>
+      <p className="mb-4 text-xs text-(--text-muted)">
+        Compose names each NIC with <code>interface_name</code> to match its interface row. {" "}
+        <a href={staticAssetURL(docsHrefForPath("/interfaces/"))} className="text-(--amber) hover:underline">Interfaces documentation</a>
+      </p>
       {reservation?.active && (
         <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">
           <p className="font-semibold">Management access is reserved</p>
@@ -337,23 +306,14 @@ export default function InterfacesPage() {
         </div>
       )}
       {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No network devices reported.</p>}
-      {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
-        <div className="mb-4 rounded-xs border px-4 py-3 text-sm">
-          <div className="font-semibold">Interface bindings needed</div>
-          <div className="mt-1">
-            Some configured interfaces are not connected to network devices. Use <span className="font-semibold">Auto-assign</span>{" "}
-            or set the <span className="font-semibold">Device</span> field per interface.
-          </div>
-        </div>
-      )}
       <div className="mt-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table aria-label="Configured interfaces" className={`w-full text-sm ${entityStyles.entities}`}>
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Alias</th>
-              <th className="px-4 py-3">Device</th>
-              <th className="px-4 py-3">Link</th>
+              <th className="px-4 py-3">Settings</th>
+              <th className="px-4 py-3">Attachment</th>
               <th className="px-4 py-3">Zone</th>
               <th className="px-4 py-3">Addresses</th>
               <th className="px-4 py-3 text-right">Actions</th>
@@ -376,6 +336,7 @@ export default function InterfacesPage() {
                 key={i.name}
                 iface={i}
                 runtime={runtimeFor(i, state)}
+                runtimeKnown={runtimeStatus === "ready"}
                 zones={zones}
                 allIfaces={ifaces}
                 osState={state}
@@ -485,8 +446,7 @@ export default function InterfacesPage() {
           ) : ifaceType === "vlan" ? (
             <span>
               A VLAN creates a virtual network interface inside the appliance. Use <span className="font-semibold">parent</span> as a
-              logical interface name (e.g. <span className="font-mono">wan</span>) or a network device name (e.g.{" "}
-              <span className="font-mono">eth0</span>).
+              configured interface name (e.g. <span className="font-mono">wan</span>).
             </span>
           ) : (
             <span />

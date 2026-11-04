@@ -30,6 +30,11 @@ func Events(ctx context.Context, store config.Store) ([]dpevents.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	devices, err := interfaceDeviceEvents(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	modes = append(modes, devices...)
 	modes = append(modes, ordered...)
 	reader, ok := store.(Reader)
 	if !ok {
@@ -51,6 +56,9 @@ func Events(ctx context.Context, store config.Store) ([]dpevents.Event, error) {
 // The outbox remains authoritative if delivery is interrupted or fails.
 func Publish(ctx context.Context, store config.Store, log audit.Store) ([]dpevents.Event, error) {
 	if err := publishModes(ctx, store, log); err != nil {
+		return nil, err
+	}
+	if err := publishInterfaceDevices(ctx, store, log); err != nil {
 		return nil, err
 	}
 	if err := publishOrdered(ctx, store, log); err != nil {

@@ -10,17 +10,27 @@ done
 ip netns add switch
 ip -n switch link add mgmtbr type bridge
 ip -n switch link set mgmtbr up
-i=0
-for subnet in 10.10.10 10.20.20 10.30.30 10.40.40 10.99.99 10.60.60 10.70.70 10.80.80; do
-  [ "$i" -lt "$NIC_COUNT" ] || break
-  device="eth$(((i + generation) % NIC_COUNT))"
+# Rotate creation order, never row identity or addressing.
+k=0
+while [ "$k" -lt "$NIC_COUNT" ]; do
+  i=$(((k + generation) % NIC_COUNT))
+  case "$i" in
+    0) device=wan; subnet=10.10.10 ;;
+    1) device=dmz; subnet=10.20.20 ;;
+    2) device=lan1; subnet=10.30.30 ;;
+    3) device=lan2; subnet=10.40.40 ;;
+    4) device=lan3; subnet=10.99.99 ;;
+    5) device=lan4; subnet=10.60.60 ;;
+    6) device=lan5; subnet=10.70.70 ;;
+    7) device=lan6; subnet=10.80.80 ;;
+  esac
   ip link add "$device" type veth peer name "port$i"
   ip link set "port$i" netns switch
   ip -n switch link set "port$i" up
   if [ "$i" = 4 ]; then ip -n switch link set "port$i" master mgmtbr; fi
   ip addr add "$subnet.2/24" dev "$device"
   ip link set "$device" up
-  i=$((i + 1))
+  k=$((k + 1))
 done
 for spec in source:10 proxy:3 outsider:11; do
   name=${spec%:*}

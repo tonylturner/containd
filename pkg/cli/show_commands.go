@@ -258,10 +258,9 @@ func showInterfaces(store config.Store) Command {
 			_, err = fmt.Fprintln(out, "No interfaces configured")
 			return err
 		}
-		t := newTable("NAME", "DEVICE", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
+		t := newTable("NAME", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
 		for _, iface := range cfg.Interfaces {
-			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
-			dev := firstNonEmpty(iface.Device, "—")
+			effectiveDev := iface.Name
 			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
@@ -271,7 +270,6 @@ func showInterfaces(store config.Store) Command {
 			}
 			t.addRow(
 				iface.Name,
-				dev,
 				firstNonEmpty(iface.Zone, "—"),
 				mode,
 				joinCSV(iface.Addresses),
@@ -282,7 +280,7 @@ func showInterfaces(store config.Store) Command {
 		t.render(out)
 		if allInterfaceAddrsEmpty(cfg.Interfaces) {
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the bound kernel interface (DEVICE).")
+			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the kernel interface with the row name (NAME).")
 		}
 		return nil
 	}
@@ -332,10 +330,9 @@ func showInterfacesAPI(api *API) Command {
 			fmt.Fprintln(out, "No interfaces configured")
 			return nil
 		}
-		t := newTable("NAME", "DEVICE", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
+		t := newTable("NAME", "ZONE", "MODE", "CONFIG_ADDRS", "GATEWAY", "OS_ADDRS")
 		for _, iface := range ifaces {
-			effectiveDev := firstNonEmpty(iface.Device, iface.Name)
-			dev := firstNonEmpty(iface.Device, "—")
+			effectiveDev := iface.Name
 			mode := interfaceMode(iface)
 			osAddrs := "—"
 			if effectiveDev != "" {
@@ -345,7 +342,6 @@ func showInterfacesAPI(api *API) Command {
 			}
 			t.addRow(
 				iface.Name,
-				dev,
 				firstNonEmpty(iface.Zone, "—"),
 				mode,
 				joinCSV(iface.Addresses),
@@ -356,7 +352,7 @@ func showInterfacesAPI(api *API) Command {
 		t.render(out)
 		if allInterfaceAddrsEmpty(ifaces) {
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the bound kernel interface (DEVICE).")
+			fmt.Fprintln(out, "Note: CONFIG_ADDRS are configured. OS_ADDRS come from the kernel interface with the row name (NAME).")
 		}
 		return nil
 	}

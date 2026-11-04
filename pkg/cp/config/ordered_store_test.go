@@ -65,7 +65,7 @@ func TestOrderedStoreOpenNormalizesLegacySourcesAndKeepsBanks(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if c.SchemaVersion != "0.1.10" || !reflect.DeepEqual(policyRuleIDs(c), []string{"reads", "z-deny"}) {
+					if c.SchemaVersion != "0.1.11" || !reflect.DeepEqual(policyRuleIDs(c), []string{"reads", "z-deny"}) {
 						t.Fatalf("bank %s not durably migrated: %+v", bank, c)
 					}
 					wantSources := slices.DeleteFunc(slices.Clone(sources), func(s string) bool { return s == "" || s == " \t" || s == " " })
@@ -86,7 +86,7 @@ func TestOrderedStoreOpenNormalizesLegacySourcesAndKeepsBanks(t *testing.T) {
 					t.Fatalf("boot %d records: %+v %v", boot, recs, err)
 				}
 				for _, rec := range recs {
-					if rec.SchemaBefore != "0.1.9" || rec.SchemaAfter != "0.1.10" ||
+					if rec.SchemaBefore != "0.1.9" || rec.SchemaAfter != "0.1.11" ||
 						!reflect.DeepEqual(rec.Before, []string{"z-deny", "reads"}) ||
 						len(rec.Forwards) != 1 || rec.Forwards[0].Overlap != "partial" || len(rec.Warnings) != 1 {
 						t.Fatalf("incomplete durable evidence: %+v", rec)
@@ -252,7 +252,7 @@ func TestOrderedStoreConfirmedRollbackAndExpiry(t *testing.T) {
 			}
 			defer s.Close()
 			got, err := s.Load(ctx)
-			if err != nil || got.SchemaVersion != "0.1.10" || got.Firewall.Rules[0].ID != "pf-process" {
+			if err != nil || got.SchemaVersion != "0.1.11" || got.Firewall.Rules[0].ID != "pf-process" {
 				t.Fatal("upgraded rollback snapshot lost", got, err)
 			}
 		})
@@ -270,7 +270,7 @@ func TestOrderedStorePromotesAndRollsBackDetachedLegacyBanks(t *testing.T) {
 	}
 	for _, bank := range []string{configKeyRunning, configKeyPrevious} {
 		got, err := readKindUnupgradedFrom(ctx, s.db, bank, false)
-		if err != nil || got.SchemaVersion != "0.1.10" || got.Firewall.Rules[0].ID != "reads" {
+		if err != nil || got.SchemaVersion != "0.1.11" || got.Firewall.Rules[0].ID != "reads" {
 			t.Fatal("promotion did not pin upgrade", bank, got, err)
 		}
 	}
@@ -296,7 +296,7 @@ func TestOrderedStorePromotesAndRollsBackDetachedLegacyBanks(t *testing.T) {
 	}
 	for _, bank := range []string{configKeyRunning, configKeyPrevious} {
 		got, err := readKindUnupgradedFrom(ctx, s.db, bank, false)
-		if err != nil || got.SchemaVersion != "0.1.10" || got.Firewall.Rules[0].ID != "pf-process" {
+		if err != nil || got.SchemaVersion != "0.1.11" || got.Firewall.Rules[0].ID != "pf-process" {
 			t.Fatal("rollback did not pin upgrade", bank, got, err)
 		}
 	}

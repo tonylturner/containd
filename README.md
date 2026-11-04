@@ -18,6 +18,8 @@ An open-source next-generation firewall purpose-built for ICS/OT network segment
 
 ## Quick Start
 
+Requires Docker Engine 28.1+ and Docker Compose with `interface_name` support.
+
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/quickstart.sh
 sh quickstart.sh
@@ -25,7 +27,7 @@ sh quickstart.sh
 
 `quickstart.sh` selects the training profile, downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, and starts the combined appliance (`containd all`) for you. With Python 3 available, it can auto-adjust fresh default subnets to avoid existing Docker networks.
 
-The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6`, matched to interfaces by subnet.
+The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6`, named explicitly with Compose `interface_name`.
 
 Docker/Compose owns the available interfaces and their Docker-level IP wiring. Use containd to bind zones, tighten policy, and configure services inside that topology. If you want different lab subnets or interface addresses, edit `.env` before you start the stack.
 
@@ -133,6 +135,10 @@ docker run -d \
   -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
   ghcr.io/tonylturner/containd:latest
 ```
+
+Interface rows must match the container's kernel names exactly; for example, a
+standalone container may need a row named `eth0`. For the starter upgrade steps
+and management exposure warning, see [interface upgrades](docs/mkdocs/update-policy.md#interface-name-upgrade).
 
 Combined mode auto-connects the management plane to the local dataplane engine. Set `CONTAIND_ENGINE_URL` only when you intentionally split mgmt and engine.
 

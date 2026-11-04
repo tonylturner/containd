@@ -16,10 +16,15 @@ import "fmt"
 // destination.
 type GateSelection struct {
 	// Enabled is false when nothing is to be steered: Include and Exclude
-	// are then empty, whatever the configuration holds.
+	// and ReferencedZones are then empty, whatever the configuration holds.
 	Enabled bool
 	Include []GateEntry
 	Exclude []GateEntry
+	// ReferencedZones is the sorted, unique set of source and destination
+	// zones explicitly named by enabled include entries, even unmatchable
+	// ones. Any-zone selectors name no zone. Attachment health uses this
+	// policy intent, not the resolved devices or egress allocation.
+	ReferencedZones []string
 	// Zones indexes every egress zone an include entry references. The
 	// compiler writes Index into the connection mark, so an index is 1..255
 	// and unique within the snapshot.
@@ -73,6 +78,14 @@ type GatePortRange struct {
 // include entry may cover an ICS decoder port and the zone indices must fit
 // the connection mark. It runs before enforcement or the snapshot swap.
 func (g GateSelection) Validate() error {
+	if !g.Enabled && len(g.ReferencedZones) > 0 {
+		return fmt.Errorf("disabled gate has referenced zones")
+	}
+	for i, zone := range g.ReferencedZones {
+		if zone == "" || (i > 0 && g.ReferencedZones[i-1] >= zone) {
+			return fmt.Errorf("gate referenced zones must be nonempty, sorted and unique")
+		}
+	}
 	for i, entry := range g.Include {
 		for _, r := range entry.Ports {
 			if r.Lo > r.Hi {

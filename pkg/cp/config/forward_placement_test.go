@@ -148,7 +148,7 @@ func TestForwardMigrationStableGrantsAndOperatorControl(t *testing.T) {
 	if got := policyRuleIDs(c); !reflect.DeepEqual(got, []string{"pf-a-1", "pf-process", "pf-z", "reads", "pf-a"}) {
 		t.Fatal(got)
 	}
-	if c.orderMigration.SchemaBefore != "" || c.SchemaVersion != "0.1.10" {
+	if c.orderMigration.SchemaBefore != "" || c.SchemaVersion != "0.1.11" {
 		t.Fatal("eligibility lost")
 	}
 	c.Firewall.Rules = []Rule{{ID: "operator-deny", Action: ActionDeny}, c.Firewall.Rules[1]}

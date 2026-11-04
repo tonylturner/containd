@@ -431,7 +431,7 @@ for _ in $(seq 1 10); do
 done
 WAN_DEV=$(discover_iface "$STATE" "${WAN_NET}.2")
 LAN_DEV=$(discover_iface "$STATE" "${LAN_NET}.2")
-if [[ -z "$WAN_DEV" || -z "$LAN_DEV" ]]; then
+if [[ "$WAN_DEV" != wan || "$LAN_DEV" != lan1 ]]; then
   echo "failed to discover wan/lan devices from interface state:" >&2
   echo "$STATE" >&2
   exit 1
@@ -457,8 +457,8 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
   # policy may have no lan zone or may contain conflicting IEC envelopes.
   {schema_version:.schema_version, system:.system,
    zones:[{name:"wan"},{name:"lan"}],
-   interfaces:[{name:"wan",device:$wan,zone:"wan"},
-               {name:"lan1",device:$lan,zone:"lan"}],
+   interfaces:[{name:"wan",zone:"wan"},
+               {name:"lan1",zone:"lan"}],
    dataplane:{}, ids:{enabled:true},
    firewall:{defaultAction:"DENY",rules:[],nat:{enabled:true,egressZone:"wan",sourceZones:["lan"]}}}
   | .system.mgmt.httpListenAddr=":18080"

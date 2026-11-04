@@ -442,7 +442,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL)
-	if err := c.ConfigureInterfaces(ctx, testAdmission(), []config.Interface{{Name: "wan", Device: "eth0"}}, false); err != nil {
+	if err := c.ConfigureInterfaces(ctx, testAdmission(), []config.Interface{{Name: "wan"}}, false); err != nil {
 		t.Fatalf("ConfigureInterfaces: %v", err)
 	}
 	if err := c.ConfigureRouting(ctx, testAdmission(), config.RoutingConfig{}, false); err != nil {

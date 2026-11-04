@@ -211,7 +211,6 @@ export type Conduit = {
 export type Interface = {
   name: string;
   alias?: string;
-  device?: string;
   type?: string;
   parent?: string;
   vlanId?: number;

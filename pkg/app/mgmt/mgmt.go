@@ -255,20 +255,6 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return fail(err)
 	}
 
-	// Repair only default-interface bindings contradicted by current kernel
-	// discovery before the HTTP server begins serving traffic. Existing
-	// bindings with no contrary address evidence remain operator authority.
-	if cfg != nil {
-		repaired, repairErr := config.Repair(context.Background(), stores.store, func(next *config.Config) error {
-			httpapi.RepairDefaultInterfaceDevicesReserved(next, r)
-			return nil
-		})
-		if repairErr != nil {
-			logger.Warnf("boot interface repair: %v", repairErr)
-		} else {
-			cfg = repaired
-		}
-	}
 	stores.auditStore = mustInitAuditStore()
 	userStore, err := initUsersStore()
 	if err != nil {

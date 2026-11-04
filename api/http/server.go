@@ -386,7 +386,6 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/zones/:name", requireAdmin(), requireConfigRevision(), deleteZoneHandler(store))
 		protected.GET("/interfaces", listInterfacesHandler(store))
 		protected.GET("/interfaces/state", interfaceStateHandler(engine))
-		protected.POST("/interfaces/assign", requireAdmin(), requireConfigRevision(), interfacesAssignHandler(store, engine))
 		protected.POST("/interfaces/reconcile", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), interfacesReconcileHandler(store, engine))
 		protected.POST("/interfaces", requireAdmin(), requireConfigRevision(), createInterfaceHandler(store))
 		protected.PATCH("/interfaces/:name", requireAdmin(), requireConfigRevision(), updateInterfaceHandler(store))

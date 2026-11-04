@@ -164,7 +164,6 @@ apply_starter_topology_prefix() {
     for role in WAN DMZ LAN1 LAN2 LAN3 LAN4 LAN5 LAN6; do
         set_env_value "$file" "CONTAIND_${role}_SUBNET" "${prefix}.${octet}.0/24"
         set_env_value "$file" "CONTAIND_${role}_IP" "${prefix}.${octet}.2"
-        set_env_value "$file" "CONTAIND_AUTO_${role}_SUBNET" "${prefix}.${octet}.0/24"
         octet=$((octet + 1))
     done
 }
@@ -259,6 +258,36 @@ if ! docker compose version >/dev/null 2>&1; then
     echo "docker compose is required" >&2
     exit 1
 fi
+
+engine_version=$(docker version --format '{{.Server.Version}}') || {
+    echo "unable to query Docker Engine; Docker Engine 28.1+ is required" >&2
+    exit 1
+}
+if ! printf '%s\n' "$engine_version" | awk -F. '
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && ($1 > 28 || ($1 == 28 && $2 >= 1)) { ok = 1 }
+    END { exit !ok }
+'; then
+    echo "Docker Engine 28.1+ is required for named interfaces (found $engine_version)" >&2
+    exit 1
+fi
+echo "Docker Engine $engine_version supports named interfaces (requires 28.1+)."
+probe=$(mktemp "${TMPDIR:-/tmp}/containd-compose.XXXXXX")
+trap 'unlink "$probe"' EXIT HUP INT TERM
+cat >"$probe" <<'YAML'
+services:
+  probe:
+    image: alpine:3.21
+    networks:
+      default:
+        interface_name: wan
+YAML
+if ! docker compose -p containd-interface-probe -f "$probe" config -q; then
+    echo "Docker Compose with interface_name support is required; upgrade Compose" >&2
+    exit 1
+fi
+echo "Docker Compose accepts interface_name."
+unlink "$probe"
+trap - EXIT HUP INT TERM
 
 mkdir -p "$TARGET_DIR"
 

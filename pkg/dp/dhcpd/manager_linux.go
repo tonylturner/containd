@@ -160,9 +160,6 @@ func newDHCPDeviceResolver(ifaces []config.Interface) func(string) string {
 			return ""
 		}
 		if i, ok := byName[ref]; ok {
-			if d := strings.TrimSpace(i.Device); d != "" {
-				return d
-			}
 			return strings.TrimSpace(i.Name)
 		}
 		return ref

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 # Receiver-verified monitor/enforce checks in fresh, isolated AF_PACKET and
-# NFQUEUE stacks. Requires Docker Compose >=2.24.4 (!override), jq, Python, Go.
+# NFQUEUE stacks. Requires Docker Engine 28.1+ and Compose with interface_name/!override, jq, Python, Go.
 # Build the current firewall once; every run gets its own ports, subnets, data,
 # networks and image tag. Queue mode intentionally has no engine-down bypass.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -38,6 +38,8 @@ for name,coords in services.items():
         net,n=coords[i:i+2]
         prefix='10.235.0' if net=='wan_net' else '10.236.0'
         lines+=['      '+net+':','        ipv4_address: '+prefix+'.'+str(n)]
+        if name=='engine':
+            lines+=['        interface_name: '+('wan' if net=='wan_net' else 'lan1')]
 lines+=['networks:','  wan_net:','    ipam:','      config: !override [{subnet: "10.235.0.0/24"}]','  lan_net:','    ipam:','      config: !override [{subnet: "10.236.0.0/24"}]']
 pathlib.Path(out).write_text('\n'.join(lines)+'\n')
 PY

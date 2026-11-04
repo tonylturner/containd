@@ -54,11 +54,11 @@ func TestManagementRecoveryAppliesManagementAddresses(t *testing.T) {
 	f := false
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{
-		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt", Addresses: []string{"192.0.2.2/24", "2001:db8::2/64"}, Gateway: "192.0.2.1"},
-		{Name: "wan0", Device: "wannic", Zone: "wan", Addresses: []string{"198.51.100.2/24"}, Access: config.InterfaceAccess{Mgmt: &f, SSH: &f}},
-		{Name: "lan0", Device: "lannic", Zone: "lan", AddressMode: "dhcp"},
-		{Name: "lan1", Device: "lan1nic", Zone: "lan"},
-		{Name: "vlan10", Device: "mgmtnic.10", Type: "vlan", Parent: "mgmt0", VLANID: 10, Zone: "lan", Addresses: []string{"203.0.113.2/24"}},
+		{Name: "mgmt0", Zone: "mgmt", Addresses: []string{"192.0.2.2/24", "2001:db8::2/64"}, Gateway: "192.0.2.1"},
+		{Name: "wan0", Zone: "wan", Addresses: []string{"198.51.100.2/24"}, Access: config.InterfaceAccess{Mgmt: &f, SSH: &f}},
+		{Name: "lan0", Zone: "lan", AddressMode: "dhcp"},
+		{Name: "lan1", Zone: "lan"},
+		{Name: "vlan10", Type: "vlan", Parent: "mgmt0", VLANID: 10, Zone: "lan", Addresses: []string{"203.0.113.2/24"}},
 	}
 	cfg.DataPlane.Enforcement = true
 	if err := store.Save(ctx, cfg); err != nil {
@@ -75,7 +75,7 @@ func TestManagementRecoveryAppliesManagementAddresses(t *testing.T) {
 	if want := []string{"dataplane", "rules", "interfaces"}; !reflect.DeepEqual(engine.calls, want) {
 		t.Fatalf("recovery engine calls %q, want %q", engine.calls, want)
 	}
-	want := []config.Interface{{Name: "mgmt0", Device: "mgmtnic", Addresses: []string{"192.0.2.2/24", "2001:db8::2/64"}}}
+	want := []config.Interface{{Name: "mgmt0", Addresses: []string{"192.0.2.2/24", "2001:db8::2/64"}}}
 	if !reflect.DeepEqual(engine.interfaces, [][]config.Interface{want}) {
 		t.Fatalf("recovery interfaces = %+v, want %+v", engine.interfaces, want)
 	}
@@ -98,12 +98,12 @@ func TestManagementRecoveryAppliesManagementAddresses(t *testing.T) {
 func TestRecoveryAddressesOnlyFromValidStoredInterfaces(t *testing.T) {
 	stored := config.DefaultConfig()
 	stored.Interfaces = []config.Interface{
-		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt", Addresses: []string{"192.0.2.2/24", "not-a-cidr"}},
-		{Name: "mgmt1", Device: "mgmt1nic", Zone: "mgmt", Addresses: []string{"192.0.2.3/24"}},
+		{Name: "mgmt0", Zone: "mgmt", Addresses: []string{"192.0.2.2/24", "not-a-cidr"}},
+		{Name: "mgmt1", Zone: "mgmt", Addresses: []string{"192.0.2.3/24"}},
 	}
 	snap := RecoverySnapshot(stored, nil)
 	got := recoveryAddresses(stored, snap.LocalInput)
-	if want := []config.Interface{{Name: "mgmt1", Device: "mgmt1nic", Addresses: []string{"192.0.2.3/24"}}}; !reflect.DeepEqual(got, want) {
+	if want := []config.Interface{{Name: "mgmt1", Addresses: []string{"192.0.2.3/24"}}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("recovery addresses = %+v, want %+v", got, want)
 	}
 	reserved, _ := reservedAPIStore(t)

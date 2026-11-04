@@ -13,8 +13,8 @@ for (const width of [390, 1280]) {
         return route.fulfill({ json: { name: "lan1", ...req.postDataJSON() }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       const json = path.startsWith("/auth/") ? { id: "admin", role: "admin" }
-        : path === "/interfaces" ? [{ name: "lan1", device: "eth1", zone: "ot", addresses: ["192.0.2.1/24"] }]
-        : path === "/interfaces/state" ? [{ name: "eth1", up: true, addrs: ["192.0.2.1/24"] }]
+        : path === "/interfaces" ? [{ name: "lan1", zone: "ot", addresses: ["192.0.2.1/24"] }]
+        : path === "/interfaces/state" ? [{ name: "lan1", up: true, addrs: ["192.0.2.1/24"] }]
         : path === "/zones" ? [{ name: "ot" }]
         : path === "/config/diff" ? { changed: false, changedSections: [] } : {};
       await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });

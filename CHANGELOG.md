@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-11-04
+
+### Breaking
+
+- Interface rows now bind to the kernel device with exactly their name. Docker
+  Engine 28.1+ and Compose accepting `interface_name` (2.36.0+) are required.
+  Back up config and the full data directory, then add `interface_name: <row name>`
+  on every appliance network attachment **before recreating** with the new image.
+  Schema 0.1.11 drops saved `device` bindings and rewrites legacy device
+  references to row names, keeping each reference's pre-upgrade meaning, and
+  records migration evidence (including name/device collisions) in audit/events.
+  Auto-assignment and its API/CLI are removed; subnet environment hints are no
+  longer read by containd (Compose IPAM variables remain).
+- An image-only upgrade without matching Compose names leaves rows unattached:
+  zone rules stop matching, traffic follows non-zone rules and the default action,
+  and protection is degraded/not ready with affected zone names. Management stays
+  reachable through unbound recovery; **a WAN management denial no longer applies
+  to the unnamed attachment until Compose is fixed**. Restrict exposure during
+  the upgrade and verify access policy after recreation. See the
+  [upgrade guide](docs/mkdocs/update-policy.md#interface-name-upgrade). Missing
+  devices defer interface and route configuration without failing delivery;
+  referenced zones without attached devices keep protection degraded until a
+  device attaches.
+- Strict Compose now uses `${CONTAIND_DATA_DIR:-./data-strict}`; the public
+  starter keeps `./data` and dev keeps repository-root `data`. Existing strict
+  users must stop the stack, back up, and move `deploy/data` to
+  `deploy/data-strict` before starting from the repository. For custom layouts,
+  move the corresponding mount source or explicitly select its existing
+  strict-only folder. Starting without that move creates a fresh appliance.
+  Never share profile data.
+
+### Fixed
+
+- Interface attachment health counts zones explicitly named (source or destination)
+  by enabled AV scan include entries; "any" includes reference no zone.
+
 ## [0.1.40] - 2026-11-04
 
 ### Fixed
@@ -2683,7 +2719,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.40...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.41...HEAD
+[0.1.41]: https://github.com/tonylturner/containd/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/tonylturner/containd/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/tonylturner/containd/compare/v0.1.37...v0.1.38

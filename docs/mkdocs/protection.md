@@ -29,9 +29,10 @@ all required operations, including verified teardown of disabled traffic service
 (VPNs and proxies). Requirements come from original desired policy, not its
 quarantined projection. DNS, NTP, syslog and DHCP faults remain visible and
 retryable but never gate ready. Missing telemetry, supersession, recovery,
-disabled enforcement, uncertain delivery, degraded rule-hit logging or schedule
-degradation cannot certify clean readiness. Packet effects remain independent
-engine observations; API transport success never infers them.
+disabled enforcement, uncertain delivery, degraded rule-hit logging, schedule
+degradation or interface attachment cannot certify clean readiness. Packet
+effects remain independent engine observations; API transport success never
+infers them.
 
 When scan selection is active, protection follows live AV readiness. Losing
 clamd or ICAP removes `protecting` without a commit; recovery requires an EICAR
@@ -40,6 +41,20 @@ or ICAP `OPTIONS` response. NFLOG logging retries independently of NFQUEUE captu
 a queue not required by installed policy does not itself block protection.
 Unavailable rule-hit logging means `degraded` and `ready: false`, even while nft
 policy still enforces packets.
+
+A policy-referenced zone with configured rows but no existing kernel device is
+also degraded and not ready. This includes zones explicitly named by enabled AV
+scan include entries, but not "any" selections or explicit interface selectors.
+The `interface-attachment` component names the
+zone and its rows, for example `zone lan has no attached interface: lan1`. Rows
+attach only to identically named devices; missing parents/members defer
+VLAN/bridge creation. Interface delivery remains acknowledged; attachment is
+live state, not a delivery failure or an operator retry. Other rows continue
+without rollback, and attachment reconciliation clears the fault when a device
+appears. Static routes through an absent interface are also deferred while
+independent routes apply; ownership reconciliation installs them when the
+device appears. A link that exists but is down is distinct from a missing
+device; failed discovery is unknown, not missing.
 
 - `GET /dataplane/protection` (any authenticated user) returns the aggregate
   `state`, `ready`, the three nullable revisions and `subsystems` (always an array),
@@ -80,9 +95,11 @@ policy still enforces packets.
 `{state, applyId}`, never revision-ledger or owner-fault details. It is
 liveness/enforcement telemetry, not the authenticated readiness certificate.
 `enforcement` maps `protecting` to `enforcing`, `pending`/`failed` to `unavailable` with fixed reasons
-"protection pending"/"protection failed", `degraded` to `degraded` with reason
-"rule-hit logging unavailable; nft policy enforcing", `disabled` to `disabled`,
-and unreadable or stale observations to `unknown`. Persisted apply faults and
+"protection pending"/"protection failed", and `degraded` to `degraded` with the
+sanitized component reason. NFLOG continues to report
+"rule-hit logging unavailable; nft policy enforcing"; attachment reports
+`interface-attachment: <zone and rows>`. `disabled` maps to `disabled`, and
+unreadable or stale observations map to `unknown`. Persisted apply faults and
 management recovery still override protection; schedule planner degradation
 still overrides enforcing. Neither raw kernel errors nor private policy text
 appear in health reasons. Topology and firewall/ICS indicators retain the health

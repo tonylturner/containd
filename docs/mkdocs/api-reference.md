@@ -414,8 +414,10 @@ can leave its requested policy unapplied. Fix enforcement availability and
 explicitly commit again.
 
 On an appliance with a [reserved management path](management-reservation.md),
-the submitted document must keep the reserved interface's `device` binding and
-set `dataplane.enforcement: true`. Copy the binding from `GET /config`.
+the submitted document must preserve the reserved management path and set
+`dataplane.enforcement: true`. A row named after the reserved NIC must remain
+unaddressed and physical; that NIC may also have no row. Interface row names
+are kernel names, not separate `device` bindings.
 Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 
 `GET /config/diff` includes `pendingConfirm: {"deadline":"<RFC3339 UTC>"}`
@@ -907,6 +909,7 @@ listener setting supplies a value.
 | `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
 | `CONTAIND_ENGINE_ADDR` | `127.0.0.1:8081` in `all`; required in `engine` | Engine API listen address. In `engine` mode, the engine's address on the management network (loopback only with a reserved management path) |
 | `CONTAIND_ENGINE_URL` | Derived engine URL in `all` | HTTP for numeric loopback listeners, HTTPS otherwise; set an HTTPS origin explicitly for remote split processes |
+| `CONTAIND_CAPTURE_IFACES` | Unset | Comma-separated kernel interface names; these equal row names under the starter, e.g. `wan,lan1` |
 | `CONTAIND_ENGINE_SECRET` | Unset | Dedicated shared 64-hex secret required for every non-loopback listener and HTTPS client; generate with `openssl rand -hex 32` |
 | `CONTAIND_CONFIG_DB` | `data/config.db` | Configuration SQLite database |
 | `CONTAIND_AUDIT_DB` | `data/audit.db` | Audit SQLite database |

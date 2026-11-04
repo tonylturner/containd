@@ -152,6 +152,7 @@ func Run(ctx context.Context, opts Options) error {
 	gateMgr := newGateManager(logger, avMgr, dpEngine, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
 	coordinator := newProtectionCoordinator(ctx, dpEngine, logger)
 	ownership.coordinator = coordinator
+	ownership.observeAttachment = dpEngine.ReconcileInterfaceAttachment
 	defer coordinator.close()
 	gateMgr.protection = dpEngine
 	gateMgr.lifetime = ctx

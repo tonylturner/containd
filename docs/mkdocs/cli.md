@@ -116,12 +116,11 @@ revision or authorization decision.
   - `show zones` / `show interfaces` (HTTP GET if API provided)
 - Mutating commands (API):
   - `set zone <name> [description]`
-  - `set interface <name> <zone> [cidr...]`
-  - `set interface bridge <name> <zone> <members_csv> [cidr...]`
-  - `set interface vlan <name> <zone> <parent> <vlan_id> [cidr...]`
+  - `set interface <name> <zone> [cidr...]` (name is the kernel device name)
+  - `set interface bridge <name> <zone> <members_csv> [cidr...]` (members name rows)
+  - `set interface vlan <name> <zone> <parent> <vlan_id> [cidr...]` (parent names a row)
   - `set interface ip <name> dhcp`
   - `set interface ip <name> static <cidr> [gateway]`
-  - `set interface bind <name> <os_iface>`
   - `set route add <dst|default> [via <gw>] [dev <iface>] [table <n>] [metric <n>]` (gateway can be an IP or a gateway name)
   - `set route del <dst|default> [via <gw>] [dev <iface>] [table <n>] [metric <n>]`
   - `set ip rule add <table> [src <cidr>] [dst <cidr>] [priority <n>]`

@@ -16,9 +16,11 @@ import (
 // this file with large validation implementations again.
 type Config struct {
 	// Pending schema-upgrade evidence is persisted with the next successful write.
-	scopeMigration *IndustrialScopeMigration
-	modeMigration  *RuleModeMigration
-	orderMigration *OrderedPolicyMigration
+	scopeMigration  *IndustrialScopeMigration
+	modeMigration   *RuleModeMigration
+	orderMigration  *OrderedPolicyMigration
+	deviceMigration *InterfaceDeviceMigration
+	legacyDevices   []string
 
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
@@ -293,7 +295,7 @@ type WireGuardConfig struct {
 	Interface        string   `json:"interface,omitempty"` // e.g. "wg0"
 	ListenPort       int      `json:"listenPort,omitempty"`
 	ListenZone       string   `json:"listenZone,omitempty"`       // zone name for inbound listener
-	ListenInterfaces []string `json:"listenInterfaces,omitempty"` // interface names/devices
+	ListenInterfaces []string `json:"listenInterfaces,omitempty"` // interface row names
 	AddressCIDR      string   `json:"addressCIDR,omitempty"`      // e.g. "10.8.0.1/24"
 	PrivateKey       string   `json:"privateKey,omitempty"`       // base64, stored encrypted later
 	Peers            []WGPeer `json:"peers,omitempty"`
@@ -345,7 +347,7 @@ type OpenVPNManagedServerConfig struct {
 	Proto      string `json:"proto,omitempty"`      // udp|tcp (default udp)
 	// ListenZone controls which zone auto-opens the OpenVPN listener (default wan).
 	ListenZone string `json:"listenZone,omitempty"`
-	// ListenInterfaces restricts auto-open rules to specific interfaces/devices.
+	// ListenInterfaces restricts auto-open rules to specific interface rows.
 	ListenInterfaces []string `json:"listenInterfaces,omitempty"`
 
 	// TunnelCIDR is the VPN client address pool.
@@ -369,17 +371,14 @@ type Interface struct {
 	Name string `json:"name"`
 	// Alias is a user-friendly display name for UI/CLI selection.
 	Alias string `json:"alias,omitempty"`
-	// Device binds this logical interface to a kernel interface name (e.g. "eth0", "enp3s0").
-	// When empty, the logical name may be used as the kernel interface name (legacy behavior).
-	Device string `json:"device,omitempty"`
 	// Type controls how this interface is realized in the OS.
 	// Supported: ""/"physical" (default), "bridge", "vlan".
 	Type string `json:"type,omitempty"`
-	// Parent is the parent interface for VLAN interfaces (logical interface name or kernel device name).
+	// Parent is the parent interface for VLAN interfaces (interface row name).
 	Parent string `json:"parent,omitempty"`
 	// VLANID is the 802.1Q VLAN ID for VLAN interfaces (1-4094).
 	VLANID int `json:"vlanId,omitempty"`
-	// Members are bridge members (logical interface names or kernel device names) for bridge interfaces.
+	// Members are bridge members (interface row names) for bridge interfaces.
 	Members []string `json:"members,omitempty"`
 	Zone    string   `json:"zone"`
 	// AddressMode controls how addresses are acquired on this interface.
@@ -679,7 +678,7 @@ type Gateway struct {
 	Name        string `json:"name"`
 	Alias       string `json:"alias,omitempty"`
 	Address     string `json:"address"`         // IPv4
-	Iface       string `json:"iface,omitempty"` // OS device name preferred; may also be a logical name
+	Iface       string `json:"iface,omitempty"` // interface row name
 	Description string `json:"description,omitempty"`
 }
 
@@ -688,7 +687,7 @@ type Gateway struct {
 type StaticRoute struct {
 	Dst     string `json:"dst"`               // CIDR or "default"
 	Gateway string `json:"gateway,omitempty"` // next hop IP
-	Iface   string `json:"iface,omitempty"`   // logical interface name or kernel device
+	Iface   string `json:"iface,omitempty"`   // interface row name
 	Table   int    `json:"table,omitempty"`   // 0=main
 	Metric  int    `json:"metric,omitempty"`
 }

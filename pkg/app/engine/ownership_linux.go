@@ -119,6 +119,11 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	}
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
+	if m.coordinator != nil && m.observeAttachment != nil {
+		// Observe installed policy even when there is no current interface
+		// delivery to maintain. Hold the admission fence through publication.
+		defer m.observeAttachment(m.coordinator.metadata)
+	}
 	if err := m.guard.Reconcile(ctx); err != nil {
 		m.setLastError(err)
 		return
@@ -144,7 +149,9 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	}
 	// Interfaces: converge only owned addresses (REPLACE is admin-triggered only).
 	if st.ifacesSet {
-		m.publishDelivery(protection.SubsystemInterfaces, false, false)
+		// Maintenance of unchanged accepted intent does not revoke delivery.
+		// In particular, absent devices are live attachment state, not a
+		// reason for management to redeliver this phase.
 		m.publishDelivery(protection.SubsystemForwarding, false, false)
 		if err := netcfg.ApplyInterfacesWithOptions(applyCtx, st.ifaces, netcfg.ApplyOptions{Reservation: m.reservation}); err != nil {
 			m.publishDelivery(protection.SubsystemInterfaces, false, true)
@@ -165,7 +172,7 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	// Routing: converge owned entries, including empty intent. Resolve logical names
 	// using the current interface bindings before applying.
 	if st.routingSet {
-		resolved := resolveRoutingIfaces(st.routing, st.ifaces)
+		resolved := resolveRoutingIfaces(st.routing)
 		m.publishDelivery(protection.SubsystemRouting, false, false)
 		if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
 			m.publishDelivery(protection.SubsystemRouting, false, true)
@@ -304,10 +311,7 @@ func ownershipStatus(m *ownershipManager) map[string]any {
 	st := m.state.Load().(ownershipState)
 	ifaces := make([]string, 0, len(st.ifaces))
 	for _, i := range st.ifaces {
-		dev := strings.TrimSpace(i.Device)
-		if dev == "" {
-			dev = strings.TrimSpace(i.Name)
-		}
+		dev := strings.TrimSpace(i.Name)
 		if dev != "" {
 			ifaces = append(ifaces, dev)
 		}

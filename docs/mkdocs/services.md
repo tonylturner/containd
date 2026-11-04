@@ -78,7 +78,7 @@ measured utilization; container memory bars require a reported positive memory
 limit and percentage. An unlimited container has no memory utilization gauge.
 The **Bind interfaces** checklist item is ready only when at least one interface
 is configured and every configured interface matches a reported network device,
-using its Device field or matching interface name. Logical interface counts alone
+using its name as the exact kernel device name. Logical interface counts alone
 do not establish readiness. Missing configuration or live device information
 leaves binding readiness **Unknown**.
 

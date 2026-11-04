@@ -178,7 +178,7 @@ func TestValidateVPNListenTargets(t *testing.T) {
 	cfg := Config{
 		Zones: []Zone{{Name: "wan"}},
 		Interfaces: []Interface{
-			{Name: "wan0", Device: "eth0", Zone: "wan"},
+			{Name: "wan0", Zone: "wan"},
 		},
 		Services: ServicesConfig{
 			VPN: VPNConfig{

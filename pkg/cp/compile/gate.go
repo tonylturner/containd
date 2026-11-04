@@ -27,6 +27,14 @@ func compileGate(cfg *config.Config, zoneIfaces map[string][]string) dprules.Gat
 	if !gate.Enabled {
 		return gate
 	}
+	// Preserve explicit policy references before dropping unmatchable entries.
+	// Empty selectors mean any and do not name a zone.
+	for _, entry := range av.Scan.Include {
+		gate.ReferencedZones = append(gate.ReferencedZones, entry.SourceZones...)
+		gate.ReferencedZones = append(gate.ReferencedZones, entry.DestZones...)
+	}
+	slices.Sort(gate.ReferencedZones)
+	gate.ReferencedZones = slices.Compact(gate.ReferencedZones)
 	gate.Zones = gateZones(cfg, av.Scan.Include, zoneIfaces)
 	for _, entry := range av.Scan.Include {
 		sources, matchable := gateDevices(entry.SourceZones, zoneIfaces)

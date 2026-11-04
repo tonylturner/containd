@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -245,112 +244,6 @@ func TestApplyICSTemplateUpsertsExistingRules(t *testing.T) {
 	}
 }
 
-func TestAssignInterfacesAuto(t *testing.T) {
-	m := &mockStore{}
-	eng := &mockEngine{
-		state: []config.InterfaceState{
-			{Name: "lo", Index: 1, Up: true},
-			{Name: "eth0", Index: 2, Up: true},
-			{Name: "eth1", Index: 3, Up: true},
-			{Name: "eth2", Index: 4, Up: true},
-			{Name: "eth3", Index: 5, Up: true},
-			{Name: "eth4", Index: 6, Up: true},
-			{Name: "eth5", Index: 7, Up: true},
-			{Name: "eth6", Index: 8, Up: true},
-			{Name: "eth7", Index: 9, Up: true},
-		},
-	}
-	s := newTestServerWithEngine(m, nil, eng)
-	rec := httptest.NewRecorder()
-	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
-	req.Header.Set("Content-Type", "application/json")
-	serveWithConfigRevision(t, s, rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if len(eng.lastIf) != 0 {
-		t.Fatalf("staging applied interfaces to engine")
-	}
-	foundWAN := false
-	for _, iface := range m.cfg.Interfaces {
-		if iface.Name == "wan" {
-			foundWAN = true
-			if iface.Device != "eth0" {
-				t.Fatalf("expected wan device eth0, got %q", iface.Device)
-			}
-		}
-	}
-	if !foundWAN {
-		t.Fatalf("expected wan interface in candidate config")
-	}
-}
-
-func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
-	m := &mockStore{}
-	eng := &mockEngine{
-		state: []config.InterfaceState{
-			{Name: "lo", Index: 1, Up: true},
-			{Name: "eth0", Index: 2, Up: true, Addrs: []string{"192.168.245.2/24"}},
-			{Name: "eth1", Index: 3, Up: true, Addrs: []string{"192.168.240.2/24"}},
-			{Name: "eth2", Index: 4, Up: true, Addrs: []string{"192.168.241.2/24"}},
-			{Name: "eth3", Index: 5, Up: true, Addrs: []string{"192.168.242.2/24"}},
-			{Name: "eth4", Index: 6, Up: true, Addrs: []string{"192.168.243.2/24"}},
-			{Name: "eth5", Index: 7, Up: true, Addrs: []string{"192.168.244.2/24"}},
-			{Name: "eth6", Index: 8, Up: true, Addrs: []string{"192.168.246.2/24"}},
-			{Name: "eth7", Index: 9, Up: true, Addrs: []string{"192.168.247.2/24"}},
-		},
-	}
-	s := newTestServerWithEngine(m, nil, eng)
-	rec := httptest.NewRecorder()
-	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
-	req.Header.Set("Content-Type", "application/json")
-	serveWithConfigRevision(t, s, rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	got := map[string]string{}
-	for _, iface := range m.cfg.Interfaces {
-		if iface.Name == "" || iface.Device == "" {
-			continue
-		}
-		got[iface.Name] = iface.Device
-	}
-	if got["wan"] != "eth1" {
-		t.Fatalf("expected wan device eth1 (subnet match), got %q", got["wan"])
-	}
-	if got["dmz"] != "eth2" {
-		t.Fatalf("expected dmz device eth2 (subnet match), got %q", got["dmz"])
-	}
-	if got["lan4"] != "eth0" {
-		t.Fatalf("expected lan4 device eth0 (subnet match), got %q", got["lan4"])
-	}
-}
-
-func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
-	m := &mockStore{}
-	eng := &mockEngine{
-		state: []config.InterfaceState{
-			{Name: "eth0", Index: 2, Up: true},
-			{Name: "eth1", Index: 3, Up: true},
-			{Name: "eth2", Index: 4, Up: true},
-			{Name: "eth3", Index: 5, Up: true},
-			{Name: "eth4", Index: 6, Up: true},
-			{Name: "eth5", Index: 7, Up: true},
-			{Name: "eth6", Index: 8, Up: true},
-			{Name: "eth7", Index: 9, Up: true},
-		},
-	}
-	s := newTestServerWithEngine(m, nil, eng)
-	rec := httptest.NewRecorder()
-	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"explicit","mappings":{"wan":"eth0","dmz":"eth0"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	serveWithConfigRevision(t, s, rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestDefaultInterfacesSeeded(t *testing.T) {
 	m := &mockStore{}
 	m.load = func() (*config.Config, error) { return nil, config.ErrNotFound }
@@ -363,75 +256,6 @@ func TestDefaultInterfacesSeeded(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"wan"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`"lan6"`)) {
 		t.Fatalf("expected default interfaces in response, got %s", rec.Body.String())
-	}
-}
-
-func TestAutoBindDefaultInterfaceDevicesFromStateUsesSubnetMapping(t *testing.T) {
-	cfg := config.DefaultConfig()
-	state := []config.InterfaceState{
-		{Name: "lo", Index: 1, Up: true},
-		{Name: "eth0", Index: 2, Up: true, MAC: "02:00:00:00:00:10", Addrs: []string{"192.168.245.2/24"}},
-		{Name: "eth1", Index: 3, Up: true, MAC: "02:00:00:00:00:11", Addrs: []string{"192.168.240.2/24"}},
-		{Name: "eth2", Index: 4, Up: true, MAC: "02:00:00:00:00:12", Addrs: []string{"192.168.241.2/24"}},
-		{Name: "eth3", Index: 5, Up: true, MAC: "02:00:00:00:00:13", Addrs: []string{"192.168.242.2/24"}},
-		{Name: "eth4", Index: 6, Up: true, MAC: "02:00:00:00:00:14", Addrs: []string{"192.168.243.2/24"}},
-		{Name: "eth5", Index: 7, Up: true, MAC: "02:00:00:00:00:15", Addrs: []string{"192.168.244.2/24"}},
-		{Name: "eth6", Index: 8, Up: true, MAC: "02:00:00:00:00:16", Addrs: []string{"192.168.246.2/24"}},
-		{Name: "eth7", Index: 9, Up: true, MAC: "02:00:00:00:00:17", Addrs: []string{"192.168.247.2/24"}},
-	}
-
-	if !autoBindDefaultInterfaceDevicesFromState(cfg, state, "eth1") {
-		t.Fatalf("expected safe default bindings to be applied")
-	}
-
-	got := map[string]string{}
-	for _, iface := range cfg.Interfaces {
-		got[iface.Name] = iface.Device
-	}
-	if got["wan"] != "eth1" {
-		t.Fatalf("expected wan to bind to eth1, got %q", got["wan"])
-	}
-	if got["dmz"] != "eth2" {
-		t.Fatalf("expected dmz to bind to eth2, got %q", got["dmz"])
-	}
-	if got["lan4"] != "eth0" {
-		t.Fatalf("expected lan4 to bind to eth0, got %q", got["lan4"])
-	}
-}
-
-func TestAutoBindDefaultInterfaceDevicesFromStateRepairsLegacyIndexBinding(t *testing.T) {
-	cfg := config.DefaultConfig()
-	for i := range cfg.Interfaces {
-		cfg.Interfaces[i].Device = fmt.Sprintf("eth%d", i)
-	}
-	state := []config.InterfaceState{
-		{Name: "lo", Index: 1, Up: true},
-		{Name: "eth0", Index: 2, Up: true, MAC: "02:00:00:00:00:10", Addrs: []string{"192.168.245.2/24"}},
-		{Name: "eth1", Index: 3, Up: true, MAC: "02:00:00:00:00:11", Addrs: []string{"192.168.246.2/24"}},
-		{Name: "eth2", Index: 4, Up: true, MAC: "02:00:00:00:00:12", Addrs: []string{"192.168.247.2/24"}},
-		{Name: "eth3", Index: 5, Up: true, MAC: "02:00:00:00:00:13", Addrs: []string{"192.168.240.2/24"}},
-		{Name: "eth4", Index: 6, Up: true, MAC: "02:00:00:00:00:14", Addrs: []string{"192.168.241.2/24"}},
-		{Name: "eth5", Index: 7, Up: true, MAC: "02:00:00:00:00:15", Addrs: []string{"192.168.242.2/24"}},
-		{Name: "eth6", Index: 8, Up: true, MAC: "02:00:00:00:00:16", Addrs: []string{"192.168.243.2/24"}},
-		{Name: "eth7", Index: 9, Up: true, MAC: "02:00:00:00:00:17", Addrs: []string{"192.168.244.2/24"}},
-	}
-
-	if !autoBindDefaultInterfaceDevicesFromState(cfg, state, "eth3") {
-		t.Fatalf("expected legacy index-order binding to be repaired")
-	}
-
-	got := map[string]string{}
-	for _, iface := range cfg.Interfaces {
-		got[iface.Name] = iface.Device
-	}
-	if got["wan"] != "eth3" {
-		t.Fatalf("expected wan to repair to eth3, got %q", got["wan"])
-	}
-	if got["dmz"] != "eth4" {
-		t.Fatalf("expected dmz to repair to eth4, got %q", got["dmz"])
-	}
-	if got["lan6"] != "eth2" {
-		t.Fatalf("expected lan6 to repair to eth2, got %q", got["lan6"])
 	}
 }
 

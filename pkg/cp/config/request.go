@@ -67,6 +67,11 @@ func DecodeRequestConfig(body []byte, mode RequestConfigMode) (*Config, error) {
 			return nil, unknownRequestKey("export")
 		}
 	}
+	if mode == RequestConfigImport {
+		if err := readLegacyInterfaceDevices(body, &cfg); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
 }
 

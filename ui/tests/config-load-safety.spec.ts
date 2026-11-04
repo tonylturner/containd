@@ -8,13 +8,13 @@ const read = (path: string) => (r: Response) =>
 
 const data: Record<string, unknown> = {
   "/zones": [{ name: "lan" }, { name: "wan" }],
-  "/interfaces": [{ name: "wan", zone: "wan", device: "eth0" }],
-  "/interfaces/state": [{ name: "eth0", addrs: ["192.0.2.2/24"] }],
+  "/interfaces": [{ name: "wan", zone: "wan" }],
+  "/interfaces/state": [{ name: "wan", addrs: ["192.0.2.2/24"] }],
   "/firewall/rules": [],
   "/firewall/nat": { enabled: false, portForwards: [{ id: "existing", externalPort: 8443 }] },
-  "/routing": { gateways: [], routes: [{ dst: "198.51.100.0/24", iface: "eth0" }], rules: [] },
+  "/routing": { gateways: [], routes: [{ dst: "198.51.100.0/24", iface: "wan" }], rules: [] },
   "/dataplane": { captureInterfaces: [], dpiMock: false, dpiEnabled: true },
-  "/pcap/config": { enabled: false, interfaces: ["wan"], zones: [], snaplen: 4096, maxSizeMB: 32, maxFiles: 5, mode: "once", promisc: false, bufferMB: 8, rotateSeconds: 120, filePrefix: "existing", filter: { src: "192.0.2.10", dst: "198.51.100.10", proto: "tcp", port: "443" }, forwardTargets: [{ interface: "eth0", enabled: true, host: "192.0.2.20", port: 9001, proto: "tcp" }] },
+  "/pcap/config": { enabled: false, interfaces: ["wan"], zones: [], snaplen: 4096, maxSizeMB: 32, maxFiles: 5, mode: "once", promisc: false, bufferMB: 8, rotateSeconds: 120, filePrefix: "existing", filter: { src: "192.0.2.10", dst: "198.51.100.10", proto: "tcp", port: "443" }, forwardTargets: [{ interface: "wan", enabled: true, host: "192.0.2.20", port: 9001, proto: "tcp" }] },
   "/pcap/status": { running: false },
   "/pcap/list": [],
   "/ids/rules": { enabled: false, rules: [{ id: "existing", title: "Existing", enabled: true }], ruleGroups: [{ id: "group", name: "Group", enabled: true }] },

@@ -75,7 +75,7 @@ export async function protectionAPI(page: Page, initial: ProtectionStatus, optio
         enforcement: { state: options.enforcement ?? "unavailable", reason: options.enforcementReason ?? "protection pending" },
         protection: { state: initial.state, applyId: initial.applyId },
       },
-      "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", device: "eth0", zone: "it" }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } },
+      "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", zone: "it" }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } },
       "/api/v1/config/diff": { changed: false, changedSections: [] },
       "/api/v1/zones": [],
       "/api/v1/interfaces/state": [],

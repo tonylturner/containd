@@ -48,7 +48,7 @@ func TestSnapshotDemoSamplesDoNotChangeRealSources(t *testing.T) {
 func TestSnapshotQuietAndNotConnectedSeries(t *testing.T) {
 	tracker := stats.New()
 	tracker.RecordPacket(netip.Addr{}, netip.Addr{}, "modbus", 0, time.Now())
-	m := Bind([]config.Interface{{Name: "logical", Device: "eth0", Zone: "plant"}, {Name: "missing", Zone: "wan"}})
+	m := Bind([]config.Interface{{Name: "logical", Zone: "plant"}, {Name: "missing", Zone: "wan"}})
 	c := Collector{BootID: "process", Membership: func() *Membership { return m }, Tracker: func() *stats.Tracker { return tracker }, Link: func(d string) (Link, error) {
 		if d == "missing" {
 			return Link{}, fs.ErrNotExist
@@ -62,7 +62,7 @@ func TestSnapshotQuietAndNotConnectedSeries(t *testing.T) {
 	for _, sample := range s.Samples {
 		switch sample.Metric {
 		case wire.IfaceRxBytes, wire.IfaceTxBytes, wire.IfaceRxPackets, wire.IfaceTxPackets:
-			if sample.Value != 0 || sample.Epoch != "kernel:ns:7" || sample.Dims["interface"] != "eth0" {
+			if sample.Value != 0 || sample.Epoch != "kernel:ns:7" || sample.Dims["interface"] != "logical" {
 				t.Fatal(sample)
 			}
 		case wire.ProtoPackets, wire.ProtoBytes:
@@ -138,7 +138,7 @@ func TestSnapshotLinkFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ifaces := make([]config.Interface, 0, len(tt.devices))
 			for _, device := range tt.devices {
-				ifaces = append(ifaces, config.Interface{Name: device, Device: device})
+				ifaces = append(ifaces, config.Interface{Name: device})
 			}
 			membership := Bind(ifaces)
 			snapshot := (Collector{
@@ -217,7 +217,7 @@ func TestSnapshotNotApplied(t *testing.T) {
 }
 
 func TestMembershipRoles(t *testing.T) {
-	m := Bind([]config.Interface{{Name: "uplink", Device: "eth0"}, {Name: "vlan", Type: "vlan", Parent: "uplink"}, {Name: "port", Device: "eth1"}, {Name: "bridge", Type: "bridge", Members: []string{"eth1"}}})
+	m := Bind([]config.Interface{{Name: "uplink"}, {Name: "vlan", Type: "vlan", Parent: "uplink"}, {Name: "port"}, {Name: "bridge", Type: "bridge", Members: []string{"port"}}})
 	for i, role := range []string{"parent", "leaf", "parent", "leaf"} {
 		if m.Interfaces[i].Role != role {
 			t.Fatalf("%+v", m.Interfaces)
@@ -246,10 +246,10 @@ func TestTrackerEpochChangesOnlyOnRebuild(t *testing.T) {
 
 func TestMembershipAccountingLeavesOnly(t *testing.T) {
 	m := Bind([]config.Interface{
-		{Name: "uplink", Device: "eth0", Zone: "wan"},
+		{Name: "uplink", Zone: "wan"},
 		{Name: "vlan", Type: "vlan", Parent: "uplink", Zone: "vlan"},
-		{Name: "port", Device: "eth1", Zone: "member"},
-		{Name: "bridge", Type: "bridge", Members: []string{"eth1"}, Zone: "lan"},
+		{Name: "port", Zone: "member"},
+		{Name: "bridge", Type: "bridge", Members: []string{"port"}, Zone: "lan"},
 		{Name: "unbound"},
 	})
 	zones := m.Zones()

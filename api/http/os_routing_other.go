@@ -16,7 +16,3 @@ func getOSRoutingHandler() gin.HandlerFunc {
 		apiError(c, http.StatusNotImplemented, "os routing view is only supported on linux")
 	}
 }
-
-func detectKernelDefaultRouteIface() string {
-	return ""
-}

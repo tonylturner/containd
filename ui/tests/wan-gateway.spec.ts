@@ -57,18 +57,18 @@ test("pickWanCIDR picks the first IPv4 CIDR that is not link-local", () => {
   expect(pickWanCIDR(null)).toBeNull();
 });
 
-test("inferWanGateway reads the state of the device the WAN interface is bound to", () => {
-  expect(inferWanGateway([{ name: "uplink", device: " eth1 ", zone: "WAN" }], [state(["192.0.2.2/24"], "uplink"), state(["198.51.100.9/24"])]))
-    .toEqual({ ok: true, wan: { device: "eth1", cidr: "198.51.100.9/24", address: "198.51.100.1" } });
-  expect(inferWanGateway([{ name: "wan", device: " " }], [state(["192.0.2.2/24"], "wan")]))
+test("inferWanGateway reads the state matching the WAN row name", () => {
+  expect(inferWanGateway([{ name: "uplink", zone: "WAN" }], [state(["192.0.2.2/24"], "uplink"), state(["198.51.100.9/24"])]))
+    .toEqual({ ok: true, wan: { device: "uplink", cidr: "192.0.2.2/24", address: "192.0.2.1" } });
+  expect(inferWanGateway([{ name: "wan" }], [state(["192.0.2.2/24"], "wan")]))
     .toEqual({ ok: true, wan: { device: "wan", cidr: "192.0.2.2/24", address: "192.0.2.1" } });
   expect(inferWanGateway([{ name: "lan", zone: "lan" }], [])).toEqual({
     ok: false, error: "Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').",
   });
-  expect(inferWanGateway([{ name: "wan", device: "eth1" }], [state(["169.254.1.1/16"])])).toEqual({
-    ok: false, error: expect.stringMatching(/^Could not determine WAN IPv4 address for 'eth1'\./),
+  expect(inferWanGateway([{ name: "wan" }], [state(["169.254.1.1/16"], "wan")])).toEqual({
+    ok: false, error: expect.stringMatching(/^Could not determine WAN IPv4 address for 'wan'\./),
   });
-  expect(inferWanGateway([{ name: "wan", device: "eth1" }], [state(["192.0.2.2/32"])]))
+  expect(inferWanGateway([{ name: "wan" }], [state(["192.0.2.2/32"], "wan")]))
     .toEqual({ ok: false, error: "Could not infer a WAN gateway from '192.0.2.2/32'." });
 });
 
@@ -110,13 +110,13 @@ const existingRouting: RoutingConfig = {
 const stagedRouting = (address: string): RoutingConfig => ({
   gateways: [
     { name: "lab", address: "10.0.0.1" },
-    { name: "wan-gw", address, iface: "eth1", description: "Auto (WAN) from OS address" },
+    { name: "wan-gw", address, iface: "wan", description: "Auto (WAN) from OS address" },
   ],
-  routes: [{ dst: "10.1.0.0/16", gateway: "lab" }, { dst: "default", gateway: "wan-gw", iface: "eth1", table: 0 }],
+  routes: [{ dst: "10.1.0.0/16", gateway: "lab" }, { dst: "default", gateway: "wan-gw", iface: "wan", table: 0 }],
   rules: [{ table: 100, src: "10.2.0.0/16" }],
 });
 
-/** Serves an admin session, a WAN interface on eth1 holding wanAddr, and records every write. */
+/** Serves an admin session, a WAN interface on wan holding wanAddr, and records every write. */
 async function serveWan(page: Page, wanAddr: string) {
   const writes: { path: string; body: unknown }[] = [];
   await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
@@ -132,8 +132,8 @@ async function serveWan(page: Page, wanAddr: string) {
     const bodies: Record<string, unknown> = {
       "/auth/me": user,
       "/auth/session": user,
-      "/interfaces": [{ name: "wan", device: "eth1", zone: "wan" }],
-      "/interfaces/state": [state(["fe80::1/64", wanAddr])],
+      "/interfaces": [{ name: "wan", zone: "wan" }],
+      "/interfaces/state": [state(["fe80::1/64", wanAddr], "wan")],
       "/routing": existingRouting,
       "/routing/os": { routes: [] },
       "/firewall/rules": [],
@@ -151,7 +151,7 @@ test("the routing page's Auto WAN setup stages the gateway inferred on the WAN d
   const writes = await serveWan(page, "198.51.100.7/31");
   await page.goto("/routing/");
   await page.getByRole("button", { name: "Auto WAN default", exact: true }).click();
-  await expect(page.getByText(/Gateway and default route staged.*'wan-gw' \(198\.51\.100\.6 via eth1\)/)).toBeVisible();
+  await expect(page.getByText(/Gateway and default route staged.*'wan-gw' \(198\.51\.100\.6 via wan\)/)).toBeVisible();
   expect(writes).toEqual([{ path: "/routing", body: stagedRouting("198.51.100.6") }]);
 });
 

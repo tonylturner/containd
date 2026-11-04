@@ -36,7 +36,7 @@ func (s *interactiveSession) renderMainMenu() {
 	s.writeLn("containd console menu")
 	s.writeLn("")
 	s.writeLn("0)  Logout")
-	s.writeLn("1)  Assign interfaces (bind)")
+	s.writeLn("1)  Interface attachment")
 	s.writeLn("2)  Set interface IP address")
 	s.writeLn("3)  Change your password (immediate)")
 	s.writeLn("4)  Setup wizard")
@@ -55,7 +55,7 @@ func (s *interactiveSession) handleMainMenuChoice(choice string) bool {
 	case "0":
 		return false
 	case "1":
-		s.menuAssignInterfaces()
+		s.menuInterfaceAttachment()
 	case "2":
 		s.menuSetInterfaceIP()
 	case "3":
@@ -81,36 +81,10 @@ func (s *interactiveSession) handleMainMenuChoice(choice string) bool {
 	return true
 }
 
-func (s *interactiveSession) menuAssignInterfaces() {
+func (s *interactiveSession) menuInterfaceAttachment() {
 	_ = s.exec("show interfaces state")
 	_ = s.exec("show interfaces")
-	auto, ok := s.ask("Auto-assign defaults now? (yes/no): ")
-	if !ok {
-		return
-	}
-	auto = strings.ToLower(strings.TrimSpace(auto))
-	if auto == "yes" || auto == "y" {
-		_ = s.exec("assign interfaces auto")
-		return
-	}
-	iface, ok := s.ask("Logical interface name (e.g. wan, dmz, lan1): ")
-	if !ok {
-		return
-	}
-	iface = strings.TrimSpace(iface)
-	if iface == "" {
-		s.writeLn("Interface name is required.")
-		return
-	}
-	dev, ok := s.ask("Kernel device (e.g. eth0) (blank to clear): ")
-	if !ok {
-		return
-	}
-	dev = strings.TrimSpace(dev)
-	if dev == "" {
-		dev = "none"
-	}
-	_ = s.exec("assign interfaces " + shellEscape(iface+"="+dev))
+	s.writeLn("Interfaces attach by row name. Configure kernel interface names in Compose.")
 }
 
 func (s *interactiveSession) menuSetInterfaceIP() {

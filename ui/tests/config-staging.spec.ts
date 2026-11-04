@@ -41,8 +41,8 @@ async function setup(page: Page, runningRevision = "running-a") {
       "/ids/rules": state.ids,
       "/ids/sources": [],
       "/security/conduits": [],
-      "/interfaces": [{ name: "lan", device: "eth0", zone: "lan" }],
-      "/interfaces/state": [{ name: "eth0", index: 2, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: ["192.0.2.1/24"] }],
+      "/interfaces": [{ name: "lan", zone: "lan" }],
+      "/interfaces/state": [{ name: "lan", index: 2, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: ["192.0.2.1/24"] }],
       "/pcap/config": { enabled: false, interfaces: ["lan"], snaplen: 65535 },
       "/pcap/status": { running: false },
       "/pcap/list": [],
@@ -164,7 +164,7 @@ test("capture cannot start when discovery reports the saved device is absent", a
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
   await expect(page.getByText("No network devices reported.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Kernel devices not found: eth0. Bind the interfaces or choose an available device.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Kernel devices not found: lan. Check Compose interface_name or choose an available device.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start capture now", exact: true })).toBeDisabled();
   expect(state.writes).toEqual([]);
 });

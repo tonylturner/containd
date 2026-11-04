@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 
 const revision = "0123456789abcdef.1";
-const iface = { name: "lan1", device: "eth2", zone: "lan" };
-const runtime = { name: "eth2", index: 2, up: true, mtu: 1500, addrs: ["192.0.2.2/24"] };
+const iface = { name: "lan1", zone: "lan" };
+const runtime = { name: "lan1", index: 2, up: true, mtu: 1500, addrs: ["192.0.2.2/24"] };
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", async route => {
@@ -48,7 +48,7 @@ test("failed interface config refresh leaves retained inspection and live Retry 
   await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Auto-assign", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Auto-assign", exact: true })).toHaveCount(0);
   runtimeUnavailable = false;
   await unavailable.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(unavailable).toHaveCount(0);

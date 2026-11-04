@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	SchemaVersionCurrent = "0.1.10"
+	SchemaVersionCurrent = "0.1.11"
 )
 
 // Build metadata injected at compile time via -ldflags.
@@ -109,7 +109,10 @@ func UpgradeInPlace(cfg *Config) error {
 		if beforeRuleModes(originalSchema) {
 			upgradeRuleModes019(cfg, originalSchema)
 		}
-		upgradeOrderedPolicy010(cfg, originalSchema)
+		if beforeOrderedPolicy(originalSchema) {
+			upgradeOrderedPolicy010(cfg, originalSchema)
+		}
+		upgradeInterfaceNames(cfg, originalSchema)
 		cfg.SchemaVersion = SchemaVersionCurrent
 		return nil
 	}

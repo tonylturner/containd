@@ -53,10 +53,7 @@ func RequiresIPv4Forwarding(ifaces []config.Interface) bool {
 		if strings.TrimSpace(iface.Zone) == "" {
 			continue
 		}
-		dev := strings.TrimSpace(iface.Device)
-		if dev == "" {
-			dev = strings.TrimSpace(iface.Name)
-		}
+		dev := strings.TrimSpace(iface.Name)
 		if dev == "" {
 			continue
 		}

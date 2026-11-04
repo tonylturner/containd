@@ -331,7 +331,7 @@ for _ in $(seq 1 15); do
 done
 CC_DEV=$(discover_iface "$STATE" "$FW_CC_IP")
 RTU_DEV=$(discover_iface "$STATE" "$FW_RTU_IP")
-[[ -n "$CC_DEV" && -n "$RTU_DEV" ]] || fatal "could not find firewall interfaces for $FW_CC_IP / $FW_RTU_IP: $STATE"
+[[ "$CC_DEV" == cc && "$RTU_DEV" == rtu ]] || fatal "could not find firewall interfaces for $FW_CC_IP / $FW_RTU_IP: $STATE"
 log "Firewall interfaces: cc=$CC_DEV ($FW_CC_IP), rtu=$RTU_DEV ($FW_RTU_IP)"
 
 # cc_count PATTERN FILE: lines matching PATTERN in the cc container's /tmp/FILE.
@@ -382,12 +382,12 @@ CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BAS
 # monitoring works and the harness routing is provable even before IEC
 # enforcement exists.
 BASELINE=$(echo "$CFG" | jq \
-  --arg ccDev "$CC_DEV" --arg rtuDev "$RTU_DEV" --arg ccIp "$CC_IP" --arg rtuIp "$RTU_IP" '
+  --arg ccIp "$CC_IP" --arg rtuIp "$RTU_IP" '
   .zones = ((.zones // []) + [{name:"lan4",description:"control centre"},{name:"lan1",description:"station"}]
     | unique_by(.name))
   | .interfaces = [
-      {name:"cc",   device:$ccDev,  zone:"lan4"},
-      {name:"rtu",  device:$rtuDev, zone:"lan1"}
+      {name:"cc",  zone:"lan4"},
+      {name:"rtu", zone:"lan1"}
     ]
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"
