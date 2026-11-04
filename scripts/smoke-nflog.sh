@@ -158,6 +158,11 @@ services:
     image: ${CONTAIND_IMAGE}
     ports: !override
       - "127.0.0.1::18080"
+    # Docker may reorder ethN on restart; the subnets let boot repair rebind
+    # wan/lan1 to the right device, as deploy/docker-compose.yml does.
+    environment:
+      - CONTAIND_WAN_SUBNET=${SMOKE_WAN_NET}.0/24
+      - CONTAIND_LAN1_SUBNET=${SMOKE_LAN_NET}.0/24
     volumes: !override
       - nflog-data:/data
       - ../ui/out:/var/lib/ngfw/ui:ro
@@ -336,8 +341,21 @@ ensure_listener() {
   ((ready)) || harness_error "wan_server has no live TCP listener on port $TEST_PORT"
 }
 
+# deny_rule_packets prints the packet count of the DENY rule's named counter.
+deny_rule_packets() {
+  local name
+  name=$(compose exec -T engine nft list ruleset |
+    awk -v prefix="\"containd:${RULE_ID}:DENY \"" 'index($0, prefix) {
+      for (i = 1; i < NF; i++) if ($i == "name") { gsub(/"/, "", $(i + 1)); print $(i + 1); exit }
+    }') || harness_error "could not read the nft ruleset"
+  [[ -n $name ]] || fail "no logging DENY rule for $RULE_ID in the installed nft ruleset"
+  compose exec -T engine nft list counter inet containd_policy "$name" |
+    awk '$1 == "packets" { print $2; exit }'
+}
+
 send_denied_tcp() {
-  local start_ts=$1 output status=0 source_port result
+  local start_ts=$1 output status=0 source_port result before after
+  before=$(deny_rule_packets)
   output=$(compose exec -T lan_client python - "$LAN_CLIENT" "$WAN_SERVER" "$TEST_PORT" <<'PY'
 import socket
 import sys
@@ -367,7 +385,12 @@ PY
   if [[ $result != timeout ]]; then
     fail "expected denied TCP to time out, got $result (source port $source_port)"
   fi
-  pass "L4 DENY blocked TCP connection from source port $source_port"
+  after=$(deny_rule_packets)
+  [[ $before =~ ^[0-9]+$ && $after =~ ^[0-9]+$ ]] ||
+    harness_error "could not read the DENY rule counter (before=$before after=$after)"
+  ((after > before)) ||
+    fail "TCP from source port $source_port timed out, but the DENY rule counter did not move ($before); another drop blocked it"
+  pass "L4 DENY rule blocked TCP connection from source port $source_port (counter $before -> $after)"
 
   for _ in {1..20}; do
     if last_events >"$WORK_DIR/events.json" 2>/dev/null &&
