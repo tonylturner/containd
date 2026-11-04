@@ -8,12 +8,30 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
+
+type nflogTestRegistration struct {
+	ctx     context.Context
+	source  func(capture.SourceEvent)
+	stopped chan struct{}
+}
+
+func nextNFLogRegistration(t *testing.T, registrations <-chan nflogTestRegistration) nflogTestRegistration {
+	t.Helper()
+	select {
+	case r := <-registrations:
+		return r
+	case <-time.After(time.Second):
+		t.Fatal("NFLOG registration did not start")
+		return nflogTestRegistration{}
+	}
+}
 
 func TestReconfigureWaitsForNFLogStopBeforeNextBind(t *testing.T) {
 	oldStartNFLog := startNFLog
@@ -78,6 +96,258 @@ func TestReconfigureWaitsForNFLogStopBeforeNextBind(t *testing.T) {
 		if event.Kind == "service.nflog.unavailable" {
 			t.Fatalf("unexpected nflog unavailable event: %+v", event)
 		}
+	}
+}
+
+func TestRetryProtectionNFLogLifetimeIsEngineOwned(t *testing.T) {
+	oldStartNFLog := startNFLog
+	t.Cleanup(func() { startNFLog = oldStartNFLog })
+
+	registrations := make(chan nflogTestRegistration, 4)
+	startNFLog = func(ctx context.Context, _ uint16, _ capture.RuleHitSink, _ func(error), _ func(capture.SourceEvent)) (func(), error) {
+		r := nflogTestRegistration{ctx: ctx, stopped: make(chan struct{})}
+		registrations <- r
+		var once sync.Once
+		return func() { once.Do(func() { close(r.stopped) }) }, nil
+	}
+
+	e := newEngineWithNFLog(t)
+	t.Cleanup(e.Close)
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+	defer cancelLifetime()
+	if err := e.Start(lifetime); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	first := nextNFLogRegistration(t, registrations)
+
+	if err := e.Reconfigure(newEngineWithNFLog(t)); err != nil {
+		t.Fatalf("Reconfigure: %v", err)
+	}
+	select {
+	case <-first.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Reconfigure did not stop the previous NFLOG consumer")
+	}
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	if err := e.RetryProtection(requestCtx); err != nil {
+		cancelRequest()
+		t.Fatalf("RetryProtection: %v", err)
+	}
+	second := nextNFLogRegistration(t, registrations)
+	cancelRequest()
+
+	select {
+	case <-second.ctx.Done():
+		t.Fatalf("NFLOG consumer context was cancelled with retry request: %v", second.ctx.Err())
+	case <-time.After(25 * time.Millisecond):
+	}
+	select {
+	case <-second.stopped:
+		t.Fatal("NFLOG consumer stopped with retry request")
+	default:
+	}
+	if got := protectionComponent(t, e.Protection(), "nflog").State; got != "ready" {
+		t.Fatalf("NFLOG state after retry request ended = %q, want ready", got)
+	}
+
+	cancelLifetime()
+	select {
+	case <-second.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("engine lifetime cancellation did not stop the NFLOG consumer")
+	}
+}
+
+func TestRetryProtectionNFLogLifetimeSurvivesRetryDeadline(t *testing.T) {
+	initial, maximum, attempts := startRetryInitial, startRetryMax, startRetryAttempts
+	startRetryInitial, startRetryMax, startRetryAttempts = 50*time.Millisecond, 50*time.Millisecond, 2
+	t.Cleanup(func() {
+		startRetryInitial, startRetryMax, startRetryAttempts = initial, maximum, attempts
+	})
+	oldStartNFLog := startNFLog
+	t.Cleanup(func() { startNFLog = oldStartNFLog })
+
+	registrations := make(chan nflogTestRegistration, 8)
+	var calls atomic.Int32
+	startNFLog = func(ctx context.Context, _ uint16, _ capture.RuleHitSink, _ func(error), _ func(capture.SourceEvent)) (func(), error) {
+		r := nflogTestRegistration{ctx: ctx, stopped: make(chan struct{})}
+		registrations <- r
+		var once sync.Once
+		stop := func() { once.Do(func() { close(r.stopped) }) }
+		if calls.Add(1) <= 3 {
+			return stop, errBind
+		}
+		return stop, nil
+	}
+
+	e := newEngineWithNFLog(t)
+	t.Cleanup(e.Close)
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+	defer cancelLifetime()
+	if err := e.Start(lifetime); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		r := nextNFLogRegistration(t, registrations)
+		select {
+		case <-r.stopped:
+		case <-time.After(time.Second):
+			t.Fatalf("initial NFLOG attempt %d did not stop", attempt)
+		}
+	}
+	awaitNFLogState(t, e, "failed")
+
+	requestCtx, cancelRequest := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelRequest()
+	if err := e.RetryProtection(requestCtx); err != nil {
+		t.Fatalf("RetryProtection: %v", err)
+	}
+	third := nextNFLogRegistration(t, registrations)
+	select {
+	case <-third.stopped:
+	default:
+		t.Fatal("failed retry bind was not stopped")
+	}
+	if got := protectionComponent(t, e.Protection(), "nflog").State; got != "pending" {
+		t.Fatalf("NFLOG state during caller retry = %q, want pending", got)
+	}
+	select {
+	case <-requestCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("retry request did not reach its deadline")
+	}
+	if got := protectionComponent(t, e.Protection(), "nflog").State; got != "pending" {
+		t.Fatalf("NFLOG state after retry deadline = %q, want pending", got)
+	}
+	var rebound nflogTestRegistration
+	select {
+	case rebound = <-registrations:
+	case <-time.After(time.Second):
+		t.Fatal("engine-owned NFLOG retry did not bind")
+	}
+	awaitNFLogState(t, e, "ready")
+	select {
+	case <-rebound.ctx.Done():
+		t.Fatalf("rebound NFLOG consumer context ended with retry deadline: %v", rebound.ctx.Err())
+	default:
+	}
+
+	cancelLifetime()
+	select {
+	case <-rebound.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("engine lifetime cancellation did not stop the NFLOG consumer")
+	}
+}
+
+func TestRetryProtectionBeforeStartUsesDeferredEngineLifetime(t *testing.T) {
+	oldStartNFLog := startNFLog
+	t.Cleanup(func() { startNFLog = oldStartNFLog })
+
+	registrations := make(chan nflogTestRegistration, 2)
+	startNFLog = func(ctx context.Context, _ uint16, _ capture.RuleHitSink, _ func(error), _ func(capture.SourceEvent)) (func(), error) {
+		r := nflogTestRegistration{ctx: ctx, stopped: make(chan struct{})}
+		registrations <- r
+		var once sync.Once
+		return func() { once.Do(func() { close(r.stopped) }) }, nil
+	}
+
+	e := newEngineWithNFLog(t)
+	t.Cleanup(e.Close)
+	requestCtx, cancelRequest := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancelRequest()
+	if err := e.RetryProtection(requestCtx); err != nil {
+		t.Fatalf("RetryProtection before Start: %v", err)
+	}
+	select {
+	case <-requestCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("retry request did not reach its deadline")
+	}
+	if got := protectionComponent(t, e.Protection(), "nflog").State; got != "pending" {
+		t.Fatalf("NFLOG state after retry deadline = %q, want pending", got)
+	}
+	select {
+	case <-registrations:
+		t.Fatal("RetryProtection started NFLOG before an engine lifetime was known")
+	default:
+	}
+
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+	defer cancelLifetime()
+	if err := e.Start(lifetime); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	r := nextNFLogRegistration(t, registrations)
+	select {
+	case <-r.ctx.Done():
+		t.Fatalf("deferred NFLOG consumer inherited request context: %v", r.ctx.Err())
+	default:
+	}
+}
+
+func TestUnexpectedNFLogEndReleasesOwnerForProtectionRetry(t *testing.T) {
+	fastRetry(t, 2)
+	oldStartNFLog := startNFLog
+	t.Cleanup(func() { startNFLog = oldStartNFLog })
+
+	registrations := make(chan nflogTestRegistration, 8)
+	var calls atomic.Int32
+	startNFLog = func(ctx context.Context, _ uint16, _ capture.RuleHitSink, _ func(error), source func(capture.SourceEvent)) (func(), error) {
+		r := nflogTestRegistration{ctx: ctx, source: source, stopped: make(chan struct{})}
+		registrations <- r
+		var once sync.Once
+		stop := func() { once.Do(func() { close(r.stopped) }) }
+		if n := calls.Add(1); n == 2 || n == 3 {
+			return stop, errBind
+		}
+		return stop, nil
+	}
+
+	e := newEngineWithNFLog(t)
+	t.Cleanup(e.Close)
+	lifetime, cancelLifetime := context.WithCancel(context.Background())
+	defer cancelLifetime()
+	if err := e.Start(lifetime); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	first := nextNFLogRegistration(t, registrations)
+	first.source(capture.SourceEvent{Terminal: true, Err: errBind})
+	select {
+	case <-first.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("unexpectedly ended NFLOG consumer was not stopped")
+	}
+
+	for attempt := 2; attempt <= 3; attempt++ {
+		r := nextNFLogRegistration(t, registrations)
+		select {
+		case <-r.stopped:
+		case <-time.After(time.Second):
+			t.Fatalf("failed NFLOG attempt %d was not stopped", attempt)
+		}
+	}
+	awaitNFLogState(t, e, "failed")
+	deadline := time.Now().Add(time.Second)
+	for e.nflogOwner.Load() != nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if owner := e.nflogOwner.Load(); owner != nil {
+		t.Fatal("ended NFLOG supervisor retained its ownership slot")
+	}
+
+	if err := e.RetryProtection(context.Background()); err != nil {
+		t.Fatalf("RetryProtection after unexpected end: %v", err)
+	}
+	rebound := nextNFLogRegistration(t, registrations)
+	if got := protectionComponent(t, e.Protection(), "nflog").State; got != "ready" {
+		t.Fatalf("NFLOG state after retry = %q, want ready", got)
+	}
+	select {
+	case <-rebound.ctx.Done():
+		t.Fatalf("rebound NFLOG consumer did not use engine lifetime: %v", rebound.ctx.Err())
+	default:
 	}
 }
 

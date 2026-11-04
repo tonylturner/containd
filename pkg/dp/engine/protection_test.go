@@ -361,7 +361,9 @@ func TestProtectionLoggingRetryDoesNotRewriteHealthySteering(t *testing.T) {
 func TestProtectionAdoptionPreservesNFLogRetryBudget(t *testing.T) {
 	e := protectionFixture(t, false)
 	stops := 0
-	e.nflogStop = func() { stops++ }
+	owner := &nflogRun{cancel: func() { stops++ }, done: make(chan struct{})}
+	close(owner.done)
+	e.nflogOwner.Store(owner)
 	e.protection.update(func() { e.protection.setLocked("nflog", "pending", "retrying", 2, 8) })
 	e.BeginProtection("boot", "next-apply")
 	if err := e.RetryProtection(context.Background()); err != nil {

@@ -189,8 +189,14 @@ func (e *Engine) retireCaptureLocked() {
 // intact. Steering is explicitly reconciled even if ownership did not change.
 // The coordinator serializes this call with configuration and installation.
 func (e *Engine) RetryProtection(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	st := e.Protection()
 	e.protection.mu.Lock()
 	reconcileSteering := e.protection.steeringFault
@@ -228,6 +234,7 @@ func (e *Engine) Close() {
 	defer e.lifecycleMu.Unlock()
 	e.retireCaptureLocked()
 	e.stopNFLogLocked()
+	e.nflogLifetime = nil
 	if e.iec != nil {
 		e.iec.stopInventory()
 		if e.iec.injector != nil {

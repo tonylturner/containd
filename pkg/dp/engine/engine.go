@@ -82,7 +82,8 @@ type Engine struct {
 	exclusionHits         *exclusionHits    // flows each exclusion exempted since the last apply
 	coverage              coverage.Settings // static coverage inputs of this configuration
 	nflogGroup            uint16            // 0 disables nflog consumer + log clauses
-	nflogStop             func()            // stops the running nflog consumer; nil before Start or after disable
+	nflogLifetime         context.Context   // engine-owned run lifetime adopted by the NFLOG consumer
+	nflogOwner            atomic.Pointer[nflogRun]
 	onError               func(error)
 	nfqueueGroup          uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
 	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
@@ -423,33 +424,43 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 }
 
 func (e *Engine) Start(ctx context.Context) error {
-	_, err := e.start(ctx)
+	_, _, err := e.start(ctx, true)
 	return err
 }
 
-// start is Start; it also returns the NFQUEUE group of the configuration
-// it started, read under the lifecycle lock.
-func (e *Engine) start(ctx context.Context) (uint16, error) {
+// start is Start; it also returns the NFQUEUE group and reports whether NFLOG
+// startup was reached, read under the lifecycle lock. StartProtection uses
+// that result to avoid restarting NFLOG on each NFQUEUE retry.
+func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, bool, error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	group := e.nfqueueGroup
 
 	if e.started.Swap(true) {
-		return group, nil
+		if e.nflogLifetime == nil || e.nflogLifetime.Err() != nil {
+			e.nflogLifetime = ctx
+		}
+		if ensureNFLog {
+			e.startNFLogLocked()
+		}
+		return group, ensureNFLog, nil
 	}
+	e.nflogLifetime = ctx
 	if e.compiler != nil {
 		e.policyMu.Lock()
 		err := e.recoverAdmission(ctx)
 		e.policyMu.Unlock()
 		if err != nil {
 			e.started.Store(false)
-			return group, err
+			return group, false, err
 		}
 	}
 	// NFLOG owns an independent lifetime and retry budget. A failed capture
 	// bind (which may be optional for the installed policy) must not strand
 	// rule-hit logging pending without ever starting its consumer.
-	e.startNFLogLocked(ctx)
+	if ensureNFLog {
+		e.startNFLogLocked()
+	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
@@ -477,7 +488,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
-		return group, err
+		return group, ensureNFLog, err
 	}
 	// Only SourceReady owns the envelope. The consumer can die after
 	// registration but before Start returns; a successful return cannot
@@ -528,7 +539,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 		}
 		close(runDone)
 	}()
-	return group, nil
+	return group, ensureNFLog, nil
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
