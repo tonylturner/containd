@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reachable through unbound recovery; **a WAN management denial no longer applies
   to the unnamed attachment until Compose is fixed**. Restrict exposure during
   the upgrade and verify access policy after recreation. See the
-  [upgrade guide](docs/mkdocs/update-policy.md#interface-name-upgrade).
+  [upgrade guide](docs/mkdocs/update-policy.md#interface-name-upgrade). Missing
+  devices defer interface and route configuration without failing delivery;
+  referenced zones without attached devices keep protection degraded until a
+  device attaches.
 - Strict Compose now uses `${CONTAIND_DATA_DIR:-./data-strict}`; the public
   starter keeps `./data` and dev keeps repository-root `data`. Existing strict
   users must stop the stack, back up, and move `deploy/data` to

@@ -387,7 +387,7 @@ components:
         desiredRevision: {type: string, nullable: true, description: Committed desired running generation; null without a desired document}
         appliedRevision: {type: string, nullable: true, description: Owner-proven installed policy generation; may be older than desired, null if unverified}
         protectingRevision: {type: string, nullable: true, description: Desired generation verified protecting now; null unless ready}
-        ready: {type: boolean, description: False for required pending/faulted/unknown owners, recovery, disabled enforcement, uncertainty or degraded logging/scheduling}
+        ready: {type: boolean, description: False for required pending/faulted/unknown owners, recovery, disabled enforcement, uncertainty, degraded logging/scheduling or interface attachment}
         subsystems:
           type: array
           description: Always an array; requested disabled traffic services require verified teardown.
@@ -400,9 +400,9 @@ components:
             type: object
             required: [name, required, state, reason, since]
             properties:
-              name: {type: string, description: 'nft, nfqueue:<group>, iec-envelope, scan-gate, scanner or nflog'}
+              name: {type: string, description: 'nft, nfqueue:<group>, iec-envelope, scan-gate, scanner, nflog or interface-attachment'}
               required: {type: boolean}
-              state: {type: string, enum: [ready, pending, failed, off]}
+              state: {type: string, enum: [ready, pending, failed, off, degraded, unknown]}
               reason: {type: string}
               attempt: {type: integer}
               maxAttempts: {type: integer}

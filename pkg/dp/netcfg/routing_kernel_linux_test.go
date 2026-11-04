@@ -136,6 +136,50 @@ func TestRoutingKernelConvergence(t *testing.T) {
 	}
 }
 
+func TestRoutingKernelDefersMissingInterface(t *testing.T) {
+	ctx := routingKernelContext(t)
+	cmd := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "ip", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ip %v: %v: %s", args, err, out)
+		}
+		return string(out)
+	}
+	cmd("link", "add", "routeprobe", "type", "dummy")
+	defer cmd("link", "del", "routeprobe")
+	cmd("link", "set", "routeprobe", "up")
+
+	intent := config.RoutingConfig{Routes: []config.StaticRoute{
+		{Dst: "198.19.1.0/24", Iface: "lateprobe", Table: 201},
+		{Dst: "198.19.2.0/24", Iface: "routeprobe", Table: 201},
+	}}
+	if err := ApplyRouting(ctx, intent); err != nil {
+		t.Fatalf("missing interface failed route delivery: %v", err)
+	}
+	got := cmd("-4", "route", "show", "table", "201")
+	if strings.Contains(got, "198.19.1.0/24") {
+		t.Fatalf("route through unattached interface was installed early:\n%s", got)
+	}
+	if !strings.Contains(got, "198.19.2.0/24 dev routeprobe") {
+		t.Fatalf("independent route was not applied:\n%s", got)
+	}
+
+	cmd("link", "add", "lateprobe", "type", "dummy")
+	defer cmd("link", "del", "lateprobe")
+	cmd("link", "set", "lateprobe", "up")
+	if err := ApplyRouting(ctx, intent); err != nil {
+		t.Fatalf("reconcile after interface attachment: %v", err)
+	}
+	got = cmd("-4", "route", "show", "table", "201")
+	if !strings.Contains(got, "198.19.1.0/24 dev lateprobe") || !strings.Contains(got, "198.19.2.0/24 dev routeprobe") {
+		t.Fatalf("routes did not converge after attachment:\n%s", got)
+	}
+	if err := ApplyRouting(ctx, config.RoutingConfig{}); err != nil {
+		t.Fatalf("remove owned routes: %v", err)
+	}
+}
+
 func TestRoutingRestartHelper(t *testing.T) {
 	if os.Getenv("CONTAIND_ROUTING_RESTART_HELPER") != "1" {
 		t.Skip("subprocess helper")

@@ -59,7 +59,30 @@ func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, rulese
 			}
 		}
 	case "degraded":
-		health["state"], health["reason"] = "degraded", "rule-hit logging unavailable; nft policy enforcing"
+		health["state"] = "degraded"
+		reason := ""
+		for _, component := range protection.Components {
+			if component.Name == "nflog" && component.State != "off" && component.State != "ready" {
+				reason = "rule-hit logging unavailable; nft policy enforcing"
+				break
+			}
+		}
+		for _, component := range protection.Components {
+			if component.Name != "interface-attachment" || component.State != "degraded" || component.Reason == "" {
+				continue
+			}
+			if reason != "" {
+				reason += "; "
+			}
+			reason += "interface-attachment: " + component.Reason
+		}
+		if reason == "" {
+			// Do not expose arbitrary engine diagnostics through unauthenticated
+			// health. Preserve the established summary for older observations
+			// that have no public degraded component to identify.
+			reason = "rule-hit logging unavailable; nft policy enforcing"
+		}
+		health["reason"] = reason
 	case "pending", "failed":
 		health["state"], health["reason"] = "unavailable", "protection "+protection.State
 	case "disabled":

@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -39,13 +40,23 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 	for _, gw := range routing.Gateways {
 		gwByName[strings.TrimSpace(gw.Name)] = gw
 	}
+	interfaceIndexes, err := routeInterfaceIndexes(routing.Routes, gwByName)
+	if err != nil {
+		return err
+	}
 	var routes []kernelRoute
+	var deferredRoutes []bool
 	for _, r := range routing.Routes {
-		kr, err := resolveRoute(r, gwByName)
+		kr, deferredIface, err := resolveRoute(r, gwByName, interfaceIndexes)
 		if err != nil {
 			return err
 		}
+		deferred := deferredIface != ""
+		if deferred {
+			slog.Debug("static route interface unattached; configuration deferred", "destination", r.Dst, "interface", deferredIface)
+		}
 		routes = append(routes, kr)
+		deferredRoutes = append(deferredRoutes, deferred)
 	}
 	var rules []kernelRule
 	for i, r := range routing.Rules {
@@ -87,7 +98,10 @@ func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 	if err := state.restoreRemoved(ctx, routes); err != nil {
 		return err
 	}
-	for _, r := range routes {
+	for i, r := range routes {
+		if deferredRoutes[i] {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
