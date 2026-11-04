@@ -43,7 +43,7 @@ func (e *Engine) StartProtection(ctx, lifetime context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		group, err, attemptedNFLog := e.start(lifetime, !nflogAttempted)
+		group, attemptedNFLog, err := e.start(lifetime, !nflogAttempted)
 		nflogAttempted = nflogAttempted || attemptedNFLog
 		e.protection.bindAttempt(epoch, group, err, attempt, startRetryAttempts)
 		if err == nil || group == 0 {

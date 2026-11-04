@@ -424,14 +424,14 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 }
 
 func (e *Engine) Start(ctx context.Context) error {
-	_, err, _ := e.start(ctx, true)
+	_, _, err := e.start(ctx, true)
 	return err
 }
 
 // start is Start; it also returns the NFQUEUE group and reports whether NFLOG
 // startup was reached, read under the lifecycle lock. StartProtection uses
 // that result to avoid restarting NFLOG on each NFQUEUE retry.
-func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, error, bool) {
+func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, bool, error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	group := e.nfqueueGroup
@@ -443,7 +443,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, error, bo
 		if ensureNFLog {
 			e.startNFLogLocked()
 		}
-		return group, nil, ensureNFLog
+		return group, ensureNFLog, nil
 	}
 	e.nflogLifetime = ctx
 	if e.compiler != nil {
@@ -452,7 +452,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, error, bo
 		e.policyMu.Unlock()
 		if err != nil {
 			e.started.Store(false)
-			return group, err, false
+			return group, false, err
 		}
 	}
 	// NFLOG owns an independent lifetime and retry budget. A failed capture
@@ -488,7 +488,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, error, bo
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
-		return group, err, ensureNFLog
+		return group, ensureNFLog, err
 	}
 	// Only SourceReady owns the envelope. The consumer can die after
 	// registration but before Start returns; a successful return cannot
@@ -539,7 +539,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, error, bo
 		}
 		close(runDone)
 	}()
-	return group, nil, ensureNFLog
+	return group, ensureNFLog, nil
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
