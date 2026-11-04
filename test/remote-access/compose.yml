@@ -12,15 +12,15 @@ services:
       CONTAIND_CONFIG_DB: /data/config.db
       CONTAIND_AUDIT_DB: /data/audit.db
       CONTAIND_USERS_DB: /data/users.db
-      CONTAIND_AUTO_WAN_SUBNET: 10.250.1.0/24
-      CONTAIND_AUTO_LAN1_SUBNET: 10.250.2.0/24
     command: ["all"]
     volumes: ["data:/data"]
     ports: ["127.0.0.1::8443"]
     networks:
       wan:
+        interface_name: wan
         ipv4_address: 10.250.1.2
       lan:
+        interface_name: lan1
         ipv4_address: 10.250.2.2
   client_a:
     image: ${RA_CLIENT_IMAGE:?set RA_CLIENT_IMAGE}

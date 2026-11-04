@@ -24,8 +24,9 @@ persistent-data locations, and the engine trust boundary: namespace-local HTTP
 on numeric loopback or mutual TLS for non-loopback listeners.
 
 The starter runs combined mode with enforcement enabled and root/capabilities
-for network operations. Logical roles map to configured subnets/IPs; Docker's
-kernel device numbering is not guaranteed. Non-WAN networks are Docker
+for network operations. Requires Docker Engine 28.1+ and Compose with
+`interface_name` support (2.36.0+). Every appliance attachment is explicitly named
+after its containd row; network attachment order is irrelevant. Non-WAN networks are Docker
 `internal` networks. Config-seeding variables do not replace persisted policy;
 make policy changes through the UI/API and commit.
 
@@ -39,10 +40,15 @@ Use `.env` when you only need to change addressing or published ports:
 - `CONTAIND_JWT_SECRET`
 - `CONTAIND_LAB_MODE` — set to `1` only for disposable workshop / classroom / single-host lab deployments. Disables password change so reproducible lab docs and SSH-on-`:2222` keep working across student runs. Existing and custom-seeded credentials are kept; a freshly seeded lab uses `containd/containd`. Lab API authentication bypasses session lookup, but signed tokens must carry `exp` and be unexpired; login does not extend the normal token lifetime. **This is a deliberate weakening of the default-password posture, scoped to the lab boundary.** Read the [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) transparency note before enabling. Do NOT set this on any deployment whose HTTP UI or SSH port is reachable from a hostile or shared network.
 
-Auto-assign uses the topology subnet variables for the eight default roles.
-Optional `CONTAIND_AUTO_<NAME>_SUBNET` overrides take precedence; leave them unset
-unless needed. With explicit subnet authority, unmatched or ambiguous roles
-stay unbound. See [interface mapping](docker-compose.md#logical-roles-and-kernel-devices).
+Subnet variables configure Compose IPAM only; containd does not use them to
+identify interfaces. See [interface mapping](docker-compose.md#logical-roles-and-kernel-devices).
+
+Give each lab its own data folder. A bootstrapped starter uses `./data` beside
+its compose; a separate lab should live in its own directory or mount a unique
+folder such as `./data-ot-lab:/data`. The repository strict and dev manifests use
+`deploy/data-strict/` and repository-root `data/` respectively. Strict accepts
+`CONTAIND_DATA_DIR` for an alternative folder. Never share a folder across labs or profiles. Existing users
+must follow the [data move steps](update-policy.md#existing-data-directories).
 
 ## Customizations That Belong in `docker-compose.yml`
 
@@ -59,13 +65,12 @@ Edit the compose file when you need to change the lab topology itself:
 To add a new `ot-control` zone:
 
 1. Add a new network under `services.containd.networks`
-2. Optionally pin its `interface_name` if your Docker Engine supports that Compose feature
+2. Set its `interface_name` to the intended interface row name (`ot-control`)
 3. Add the matching top-level network definition
 4. Add matching subnet/IP variables to your `.env`
-5. In containd, create the `ot-control` zone and a physical logical interface
-6. Discover the new kernel device by its IP/subnet, bind the logical interface to
-   that device in Interfaces (or `set interface bind <logical> <device>`), assign
-   the zone, and commit
+5. Recreate the appliance, then create the `ot-control` zone and a physical row
+   named exactly `ot-control` in containd
+6. Verify that the row is attached, assign its zone, and commit
 
 Example service/network snippet:
 
@@ -74,6 +79,7 @@ services:
   containd:
     networks:
       ot_control:
+        interface_name: ot-control
         ipv4_address: ${CONTAIND_OT_CONTROL_IP:-192.168.248.2}
         gw_priority: 0
         priority: 200
@@ -87,10 +93,10 @@ networks:
         - subnet: ${CONTAIND_OT_CONTROL_SUBNET:-192.168.248.0/24}
 ```
 
-Docker network creation does not create a containd zone or logical interface.
-Auto-assign only handles `wan`, `dmz`, and `lan1`–`lan6`; an arbitrary ninth
-`CONTAIND_AUTO_*_SUBNET` variable has no effect. Kernel names can change after
-network reattachment: verify custom bindings again after topology changes.
+Docker network creation does not create a containd zone or row. The Docker
+network key (`ot_control`) may differ from its attachment's kernel name
+(`ot-control`), but the containd row name must equal that kernel name. There is
+no discovery or separate device binding to repair after network reattachment.
 
 ## Example: Add Student Workloads
 
@@ -173,7 +179,7 @@ After customizing a lab compose:
 
 - `docker compose config -q`
 - `docker compose up -d`
-- confirm `Interfaces -> Auto-assign` maps the expected interfaces
+- confirm each row in Interfaces is attached to its identically named device
 - bind interfaces to zones and commit config
 - verify cross-zone traffic succeeds only when policy allows it
 - verify unwanted direct multi-homing or alternate Docker paths are not bypassing containd

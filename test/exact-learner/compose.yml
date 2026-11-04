@@ -24,8 +24,10 @@ services:
       - ${EXACT_DATA_DIR:?set EXACT_DATA_DIR}:/data
     networks:
       client_net:
+        interface_name: lan
         ipv4_address: ${EXACT_LAN_SUBNET:?set EXACT_LAN_SUBNET}.2
       server_net:
+        interface_name: wan
         ipv4_address: ${EXACT_WAN_SUBNET:?set EXACT_WAN_SUBNET}.2
     ports:
       - "127.0.0.1::18080"

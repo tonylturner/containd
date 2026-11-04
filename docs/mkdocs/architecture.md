@@ -70,8 +70,9 @@ Connectivity → Review** navigation strip, with a separate NAT link. Navigation
 never adopts devices or stages settings; Review opens the Config diff directly.
 In Interfaces, logical-interface and live-device counts occupy a separate line
 below navigation. The logical interface list comes before Create interface.
-Each row keeps its device, zone, link and addresses together. Mode, type and
-live/access/gateway attention indicators accompany Device, not the action buttons.
+Each row's name is its kernel device name; attachment, zone, link and addresses
+are shown together. Mode, type and live/access/gateway attention indicators
+accompany the row, not the action buttons.
 **Inspect** reveals Type, Mode, Network and Access, including
 MAC, MTU, detected versus configured addresses and gateway. Edit opens inspection;
 Save still stages the same candidate settings. Saved bridge/VLAN, gateway or
@@ -81,8 +82,9 @@ Read-only inspection and live-device Retry remain available after a failed
 configuration refresh; configuration editing stays unavailable until a successful
 configuration read.
 
-**Auto-assign** stages bindings; **Reconcile live** is a separate, immediate action
-that replaces live static addresses from running settings. Management reservation,
+Compose `interface_name` supplies the attachment; there is no device picker or
+auto-assignment. **Reconcile live** is an immediate action that replaces live
+static addresses from running settings. Management reservation,
 safeguard and boot-fault messages remain above the interface workspace, including
 when inspection is collapsed. Review and commit staged settings in Configuration.
 

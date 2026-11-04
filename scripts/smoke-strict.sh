@@ -36,7 +36,8 @@ services:
       - strict-data:/data
       - strict-av:/var/lib/clamav
     networks: !override
-      - default
+      default:
+        interface_name: wan
 volumes:
   strict-data:
   strict-av:
@@ -226,6 +227,9 @@ refusal() {
   cat >"$scenario" <<'YAML'
 services:
   observer:
+    networks:
+      default:
+        interface_name: wan
     image: ${CONTAIND_IMAGE:-ghcr.io/tonylturner/containd:latest}
     user: "0"
     cap_add: [NET_ADMIN]

@@ -119,11 +119,13 @@ could admit at L7 and mask an enforce DENY under the legacy evaluator. As monito
 it does neither: that traffic is now denied (and reset where the envelope resets).
 A former learn DENY no longer drops at L4 without a queue. Audit existing rules
 and arrange separate enforcing/L4 allowances where observation needs traffic.
-The current schema is 0.1.10, which also migrates rule order and port-forward
-permissions to first-match policy; see
+The current schema is 0.1.11. It includes the earlier migration of rule order and
+port-forward permissions to first-match policy; see
 [ordered policy upgrades](config-format.md#ordered-policy-upgrades).
-Back up before upgrading: 0.1.36 and earlier cannot read schema 0.1.10; restore
-a pre-upgrade backup to downgrade.
+Back up before upgrading: 0.1.40 and earlier cannot read schema 0.1.11; restore
+a pre-upgrade backup to downgrade. Follow the
+[interface-name upgrade](update-policy.md#interface-name-upgrade) before recreating
+the appliance.
 
 Monitoring is observation, **not learning**. It never starts evidence collection.
 See [Learning](#learning) for the separate explicit workflow.

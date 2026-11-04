@@ -41,6 +41,14 @@ a queue not required by installed policy does not itself block protection.
 Unavailable rule-hit logging means `degraded` and `ready: false`, even while nft
 policy still enforces packets.
 
+A policy-referenced zone with configured rows but no existing kernel device is
+also degraded and not ready. Its reason names the zone and rows, for example
+`zone lan has no attached interface: lan1`. Rows attach only to identically named
+devices; missing parents/members defer VLAN/bridge creation. This is live state,
+not a delivery failure: other rows continue, no rollback occurs, and attachment
+reconciliation clears the fault when a device appears. A link that exists but is
+down is distinct from a missing device; failed discovery is unknown, not missing.
+
 - `GET /dataplane/protection` (any authenticated user) returns the aggregate
   `state`, `ready`, the three nullable revisions and `subsystems` (always an array),
   alongside engine-observed `bootId`, `applyId`, `installedApplyId`,

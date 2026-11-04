@@ -349,13 +349,13 @@ wait_gate() {
 apply_policy() {
   local scanner=$1 fail_policy=$2 ics=$3 exclude=$4 updated code resp headers
   log "Committing policy: scanner=$scanner failPolicy=$fail_policy icsClient=$ics excludeClient=$exclude${SMOKE_MUTATION:+ mutation=$SMOKE_MUTATION}..."
-  updated=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg dnatPort "$DNAT_PORT" \
+  updated=$(echo "$CFG" | jq --arg dnatPort "$DNAT_PORT" \
     --arg avTarget "$AV_TARGET" --arg lanClient "$LAN_CLIENT" --arg icapDown "$ICAP_DOWN" \
     --arg assetID "$ICS_ASSET_ID" --arg scanner "$scanner" --arg failPolicy "$fail_policy" \
     --argjson ics "$ics" --argjson exclude "$exclude" --arg mutation "$SMOKE_MUTATION" '
     .interfaces |= map(
-      if .name=="wan" then .device=$wan
-      elif .name=="lan1" then .device=$lan | .zone="lan"
+      if .name=="wan" then .zone="wan"
+      elif .name=="lan1" then .zone="lan"
       else . end)
     | .system.mgmt.httpListenAddr=":18080"
     | .system.mgmt.listenAddr=":18080"
@@ -523,7 +523,7 @@ for _ in $(seq 1 10); do
 done
 WAN_DEV=$(discover_iface "$STATE" "$ENGINE_WAN")
 LAN_DEV=$(discover_iface "$STATE" "$ENGINE_LAN")
-if [[ -z "$WAN_DEV" || -z "$LAN_DEV" ]]; then
+if [[ "$WAN_DEV" != wan || "$LAN_DEV" != lan1 ]]; then
   harness_error "failed to discover wan/lan devices from interface state: $STATE"
 fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"

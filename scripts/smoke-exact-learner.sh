@@ -211,8 +211,8 @@ run_mode() {
 	MODBUS_SERVER_IP=$WAN_SUBNET.3
 	RTU_IP=$MODBUS_SERVER_IP
 	# Compose resolves every service's interpolation even when capture is not
-	# started yet. Replace this placeholder with the discovered WAN NIC below.
-	export EXACT_CAPTURE_IFACE=eth1
+	# started yet. The appliance attachment has the fixed row name wan.
+	export EXACT_CAPTURE_IFACE=wan
 	export EXACT_FIREWALL_IMAGE="$FIREWALL_IMAGE" EXACT_ENDPOINT_IMAGE="$ENDPOINT_IMAGE"
 	export EXACT_CAPTURE_IMAGE="$CAPTURE_IMAGE" EXACT_DATA_DIR="$MODE_RESULTS/data"
 	export EXACT_RESULTS_DIR="$MODE_RESULTS" EXACT_LAN_SUBNET="$LAN_SUBNET"
@@ -237,11 +237,11 @@ run_mode() {
 	exact_api_get /interfaces/state "$API_OUTPUT" "$CAPTURE_MODE interface discovery"
 	WAN_IFACE=$(jq -r --arg ip "$WAN_SUBNET.2" 'map(select(.addrs[]? | contains($ip))) | .[0].name // empty' "$API_OUTPUT")
 	LAN_IFACE=$(jq -r --arg ip "$LAN_SUBNET.2" 'map(select(.addrs[]? | contains($ip))) | .[0].name // empty' "$API_OUTPUT")
-	[[ -n $WAN_IFACE && -n $LAN_IFACE ]] ||
+	[[ $WAN_IFACE == wan && $LAN_IFACE == lan ]] ||
 		exact_fail "$CAPTURE_MODE interface state did not identify both isolated network interfaces; response=$(cat "$API_OUTPUT")"
 	EXACT_CAPTURE_IFACE=$(compose exec -T firewall sh -c \
 		"ip -o -4 addr show | awk '\$4 == \"$WAN_SUBNET.2/24\" {print \$2; exit}'" | tr -d '\r')
-	[[ -n $EXACT_CAPTURE_IFACE ]] ||
+	[[ $EXACT_CAPTURE_IFACE == wan ]] ||
 		exact_fail "$CAPTURE_MODE could not find the server-side Ethernet capture interface for $WAN_SUBNET.2"
 	export EXACT_CAPTURE_IFACE
 
@@ -252,7 +252,7 @@ run_mode() {
 		jq --arg wan_dev "$WAN_IFACE" --arg lan_dev "$LAN_IFACE" --arg client "$LAN_CLIENT_IP" --arg server "$MODBUS_SERVER_IP" \
 			--arg rtu "$RTU_IP" '
 		.zones = [{name:"wan"},{name:"lan"}]
-		| .interfaces = [{name:"wan",device:$wan_dev,zone:"wan"},{name:"lan",device:$lan_dev,zone:"lan"}]
+		| .interfaces = [{name:"wan",zone:"wan"},{name:"lan",zone:"lan"}]
 		| .system.mgmt.httpListenAddr=":18080"
 		| .system.mgmt.listenAddr=":18080"
 		| .dataplane.enforcement=true
@@ -270,10 +270,10 @@ run_mode() {
 			{id:"exact-learner-l4-iec104-reply",sourceZones:["wan"],destZones:["lan"],sources:[($rtu+"/32")],destinations:[($client+"/32")],protocols:[{name:"tcp",port:"2404"}],action:"ALLOW"}
 		]' "$MODE_RESULTS/initial-running.json" >"$MODE_RESULTS/baseline-candidate.json"
 	else
-		jq --arg wan_dev "$WAN_IFACE" --arg lan_dev "$LAN_IFACE" --arg client "$LAN_CLIENT_IP" --arg server "$MODBUS_SERVER_IP" \
+		jq --arg client "$LAN_CLIENT_IP" --arg server "$MODBUS_SERVER_IP" \
 			--arg rtu "$RTU_IP" '
 		.zones = [{name:"wan"},{name:"lan"}]
-		| .interfaces = [{name:"wan",device:$wan_dev,zone:"wan"},{name:"lan",device:$lan_dev,zone:"lan"}]
+		| .interfaces = [{name:"wan",zone:"wan"},{name:"lan",zone:"lan"}]
 		| .system.mgmt.httpListenAddr=":18080"
 		| .system.mgmt.listenAddr=":18080"
 		| .dataplane.enforcement=true

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- Interface rows now bind to the kernel device with exactly their name. Docker
+  Engine 28.1+ and Compose accepting `interface_name` (2.36.0+) are required.
+  Back up config and the full data directory, then add `interface_name: <row name>`
+  on every appliance network attachment **before recreating** with the new image.
+  Schema 0.1.11 drops saved `device` bindings and rewrites unambiguous legacy
+  device references to row names, recording migration evidence in audit/events.
+  Auto-assignment and its API/CLI are removed; subnet environment hints are no
+  longer read by containd (Compose IPAM variables remain).
+- An image-only upgrade without matching Compose names leaves rows unattached:
+  zone rules stop matching, traffic follows non-zone rules and the default action,
+  and protection is degraded/not ready with affected zone names. Management stays
+  reachable through unbound recovery; **a WAN management denial no longer applies
+  to the unnamed attachment until Compose is fixed**. Restrict exposure during
+  the upgrade and verify access policy after recreation. See the
+  [upgrade guide](docs/mkdocs/update-policy.md#interface-name-upgrade).
+- Strict Compose now uses `${CONTAIND_DATA_DIR:-./data-strict}`; the public
+  starter keeps `./data` and dev keeps repository-root `data`. Existing strict
+  users must stop the stack, back up, and move `deploy/data` to
+  `deploy/data-strict` before starting from the repository. For custom layouts,
+  move the corresponding mount source or explicitly select its existing
+  strict-only folder. Starting without that move creates a fresh appliance.
+  Never share profile data.
+
 ## [0.1.40] - 2026-11-04
 
 ### Fixed

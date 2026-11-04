@@ -53,7 +53,6 @@ services:
     sysctls:
       net.ipv4.ip_forward: "1"
     environment:
-      MGMT_SMOKE_PREFIX: "$PREFIX"
       CONTAIND_MGMT_RESERVATION: '{"subnet":"$PREFIX.4.0/24","sources":["$PREFIX.4.10","$PREFIX.4.3"],"listen":":8080"}'
       CONTAIND_ENGINE_ADDR: "127.0.0.1:8081"
       CONTAIND_ENGINE_URL: "http://127.0.0.1:8081"
@@ -67,17 +66,12 @@ services:
       CONTAIND_USERS_DB: "/data/users.db"
 EOF
 NAMES=(wan dmz lan1 lan2 lan3 lan4 lan5 lan6)
-for i in "${!NAMES[@]}"; do
-  name=${NAMES[$i]}
-  upper=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
-  printf '      CONTAIND_AUTO_%s_SUBNET: "%s.%s.0/24"\n' "$upper" "$PREFIX" "$i" >>"$COMPOSE"
-done
 cat >>"$COMPOSE" <<EOF
     volumes: [data:/data]
     networks:
 EOF
 for i in "${!NAMES[@]}"; do
-  printf '      %s:\n        ipv4_address: %s.%s.2\n' "${NAMES[$i]}" "$PREFIX" "$i" >>"$COMPOSE"
+  printf '      %s:\n        interface_name: %s\n        ipv4_address: %s.%s.2\n' "${NAMES[$i]}" "${NAMES[$i]}" "$PREFIX" "$i" >>"$COMPOSE"
 done
 for spec in source:10 proxy:3 outsider:11; do
   name=${spec%:*}
@@ -147,13 +141,12 @@ assert_reachability() {
   jq -e '.active and .guard.active and ((.guard.error // "") == "")' "$SCRATCH/reservation.json" >/dev/null
 }
 reject_address() {
-  # Docker may renumber NICs on restart. Derive this negative case from the
-  # current boot authority and config, not from a cached pre-restart device.
+  # Derive this negative case from current reservation authority and config.
   api "$BASE/system/management-reservation" >"$SCRATCH/reservation.json"
   cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/current.json"
   local device
   device=$(jq -er '.device' "$SCRATCH/reservation.json")
-  jq '(.interfaces[] | select(.device == $device)).addresses = ["192.0.2.2/24"]' \
+  jq '(.interfaces[] | select(.name == $device)).addresses = ["192.0.2.2/24"]' \
     --arg device "$device" "$SCRATCH/current.json" >"$SCRATCH/unsafe.json"
   local status
   status=$(cas_write "$SCRATCH/config.revision" peer source -o /tmp/rejection.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
@@ -196,15 +189,15 @@ login
 assert_reachability
 reject_address
 cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/restarted.json"
-jq -e --arg old "$OLD_DEVICE" '.device != $old and (.bootFault == "")' "$SCRATCH/reservation.json" >/dev/null
+jq -e --arg old "$OLD_DEVICE" '.device == $old and (.bootFault == "")' "$SCRATCH/reservation.json" >/dev/null
 jq -e 'all(.interfaces[]; .access.mgmt == false and .access.http == false and .access.https == false and .access.ssh == false)' \
   "$SCRATCH/restarted.json" >/dev/null
 
 # Deliberately bypass the API to model legacy stored conflicts, not an allowed
-# student edit. A custom row must survive normalization and trigger recovery.
+# student edit. A conflicting row must survive normalization and trigger recovery.
 DEVICE=$(jq -er '.device' "$SCRATCH/reservation.json")
 jq --arg device "$DEVICE" '
-  (.interfaces[] | select(.device == $device)) |= (.name = "custom-reserved" | .addresses = ["192.0.2.77/24"]) |
+  (.interfaces[] | select(.name == $device)) |= (.addresses = ["192.0.2.77/24"]) |
   .system.mgmt.enableHTTP = false | .system.mgmt.httpListenAddr = ":9090" |
   .system.ssh.listenAddr = ":8080"
 ' "$SCRATCH/restarted.json" >"$SCRATCH/legacy-conflict.json"
@@ -249,7 +242,7 @@ jq -e --slurpfile first "$SCRATCH/first-recovery-ruleset.json" '.appliedAt == $f
 api "$BASE/events?limit=100" >"$SCRATCH/fault-events.json"
 jq -e '[.[] | select(.kind == "management.reservation.boot_fault")] | length == 1' "$SCRATCH/fault-events.json" >/dev/null
 cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/fault-config.json"
-jq -e '.system.mgmt.enableHTTP == false and .system.mgmt.httpListenAddr == ":9090" and any(.interfaces[]; .name == "custom-reserved" and .addresses == ["192.0.2.77/24"])' \
+jq -e '.system.mgmt.enableHTTP == false and .system.mgmt.httpListenAddr == ":9090" and any(.interfaces[]; .name == "lan3" and .addresses == ["192.0.2.77/24"])' \
   "$SCRATCH/fault-config.json" >/dev/null
 # Repair only the deliberately corrupted fields in the just-read snapshot;
 # unrelated current settings must not be replaced by the pre-fault document.
@@ -266,7 +259,7 @@ transit >"$SCRATCH/transit-recovered.txt"
 compose exec -T containd curl -fsS http://127.0.0.1:8081/internal/ruleset_status >"$SCRATCH/recovered-ruleset.json"
 jq -e '.ruleset | length > 0' "$SCRATCH/recovered-ruleset.json" >/dev/null
 
-# Factory reset is a second recovery path, using the same autobound defaults as
+# Factory reset is a second recovery path, using the same name-bound defaults as
 # first boot. It must work under a valid reservation and revoke the session.
 inject_conflict
 assert_recovery
@@ -277,7 +270,7 @@ login
 api "$BASE/system/management-reservation" >"$SCRATCH/reset-reservation.json"
 jq -e '.bootFault == "" and .recovery == ""' "$SCRATCH/reset-reservation.json" >/dev/null
 cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/reset-config.json"
-jq -e --arg device "$DEVICE" '[.interfaces[] | select(.device == $device)] | length == 1 and all(.[]; (.addresses // [] | length) == 0 and (.addressMode // "static") == "static")' \
+jq -e --arg device "$DEVICE" '[.interfaces[] | select(.name == $device)] | length == 1 and all(.[]; (.addresses // [] | length) == 0 and (.addressMode // "static") == "static")' \
   "$SCRATCH/reset-config.json" >/dev/null
 
 # Syntactically valid but not local: optional HTTPS must not crash-loop mgmt.
@@ -291,4 +284,4 @@ login
 api "$BASE/system/management-reservation" >"$SCRATCH/listener-fault.json"
 jq -e '.active and any(.listenerFaults[]; contains("192.0.2.250:18443"))' "$SCRATCH/listener-fault.json" >/dev/null
 peer proxy --fail "$BASE/health" >"$SCRATCH/listener-proxy.json"
-echo "PASS: reserved health/login, all-access-off commit, exact-source access, rejection, NIC renumber, fail-closed recovery/new transit dropped, safe commit/reset, optional-listener boot fault"
+echo "PASS: reserved health/login, all-access-off commit, exact-source access, rejection, stable NIC names, fail-closed recovery/new transit dropped, safe commit/reset, optional-listener boot fault"

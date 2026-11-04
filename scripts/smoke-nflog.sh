@@ -158,18 +158,15 @@ services:
     image: ${CONTAIND_IMAGE}
     ports: !override
       - "127.0.0.1::18080"
-    # Docker may reorder ethN on restart; the subnets let boot repair rebind
-    # wan/lan1 to the right device, as deploy/docker-compose.yml does.
-    environment:
-      - CONTAIND_WAN_SUBNET=${SMOKE_WAN_NET}.0/24
-      - CONTAIND_LAN1_SUBNET=${SMOKE_LAN_NET}.0/24
     volumes: !override
       - nflog-data:/data
       - ../ui/out:/var/lib/ngfw/ui:ro
     networks: !override
       wan_net:
+        interface_name: wan
         ipv4_address: ${SMOKE_WAN_NET}.2
       lan_net:
+        interface_name: lan1
         ipv4_address: ${SMOKE_LAN_NET}.2
   lan_client:
     networks: !override
@@ -241,13 +238,13 @@ stage_and_commit() {
   read_config >"$WORK_DIR/read-candidate.json" ||
     harness_error "could not read the candidate configuration"
   if [[ $description == initial ]]; then
-    jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg group "$NFLOG_GROUP" \
+    jq --arg group "$NFLOG_GROUP" \
       --arg source "$LAN_CLIENT/32" --arg target "$WAN_SERVER/32" \
       --arg rule "$RULE_ID" --argjson port "$TEST_PORT" '
       .zones = [{name:"wan"},{name:"lan"}]
       | .interfaces = [
-          {name:"wan",device:$wan,zone:"wan"},
-          {name:"lan1",device:$lan,zone:"lan"}
+          {name:"wan",zone:"wan"},
+          {name:"lan1",zone:"lan"}
         ]
       | .system.mgmt.httpListenAddr = ":18080"
       | .system.mgmt.listenAddr = ":18080"
@@ -308,7 +305,7 @@ wait_for_protection() {
 }
 
 # adopt_restart_revision follows the revision protection settles on after a
-# restart. Boot repair commits a new revision when Docker reordered ethN, so
+# restart. Refresh the revision before mutating the candidate, so
 # the pre-restart revision is not an oracle; ready must still mean
 # protecting exactly the revision management wants.
 adopt_restart_revision() {
@@ -496,8 +493,7 @@ main() {
   done
   [[ -n $wan_dev && -n $lan_dev ]] ||
     harness_error "could not discover engine interfaces for $ENGINE_WAN and $ENGINE_LAN: $state"
-  WAN_DEV=$wan_dev
-  LAN_DEV=$lan_dev
+  [[ $wan_dev == wan && $lan_dev == lan1 ]] || harness_error "expected named interfaces wan/lan1, got $wan_dev/$lan_dev"
   log "Using isolated project $COMPOSE_PROJECT_NAME, image $CONTAIND_IMAGE, WAN $WAN_NET.0/24, LAN $LAN_NET.0/24, NFLOG group $NFLOG_GROUP"
 
   PHASE='initial commit'

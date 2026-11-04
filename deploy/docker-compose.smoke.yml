@@ -28,8 +28,10 @@ services:
       - ../ui/out:/var/lib/ngfw/ui:ro
     networks:
       wan_net:
+        interface_name: wan
         ipv4_address: 172.30.0.2
       lan_net:
+        interface_name: lan1
         ipv4_address: 172.31.0.2
     command: ["all"]
     ports:

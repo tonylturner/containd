@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Regression-test management reachability with 5/7/8 NICs and NIC renumbering,
+# Regression-test management reachability with 5/7/8 NICs and NIC creation-order changes,
 # with and without a management reservation. Run from the repository root.
 # Requirements: Go, Docker with a Linux kernel, jq, Python 3 and image/package
 # download access; containers need NET_ADMIN, NET_RAW and SYS_ADMIN.
@@ -86,20 +86,20 @@ both_peers() {
 assert_bindings() {
   api "$BASE/interfaces" >"$SCRATCH/interfaces.json"
   docker exec "$CONTAINER" ip -j -4 addr show >"$SCRATCH/addresses.json"
-  python3 - "$SCRATCH/interfaces.json" "$SCRATCH/addresses.json" "$N" "$GENERATION" <<'PY'
+  python3 - "$SCRATCH/interfaces.json" "$SCRATCH/addresses.json" "$N" <<'PY'
 import json, sys
 rows, state = [json.load(open(p)) for p in sys.argv[1:3]]
-n, generation = map(int, sys.argv[3:])
+n = int(sys.argv[3])
 subnets = ["10.10.10", "10.20.20", "10.30.30", "10.40.40",
            "10.99.99", "10.60.60", "10.70.70", "10.80.80"]
 names = ["wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"]
 for row in rows:
     i = names.index(row["name"])
-    device = row.get("device", "")
+    device = row["name"]
+    assert "device" not in row, row
     if i >= n:
-        assert not device, row
+        assert not any(s["ifname"] == device for s in state), row
         continue
-    assert device == f"eth{(i + generation) % n}", row
     live = next(s for s in state if s["ifname"] == device)
     assert any(a["local"] == subnets[i] + ".2" for a in live["addr_info"]), row
 PY
@@ -118,17 +118,11 @@ for N in 5 7 8; do
   for RESERVED in 0 1; do
     CONTAINER="$PROJECT-$N-$RESERVED"
     VOLUME="$CONTAINER-data"
-    GENERATION=0
     ENFORCED=true
     : >"$SCRATCH/deployment.env"
     if [[ "$RESERVED" == 1 ]]; then
       printf '%s\n' 'CONTAIND_MGMT_RESERVATION={"subnet":"10.99.99.0/24","sources":["10.99.99.10","10.99.99.3"],"listen":":8080"}' >>"$SCRATCH/deployment.env"
     fi
-    AUTO_NAMES=(WAN DMZ LAN1 LAN2 LAN3 LAN4 LAN5 LAN6)
-    AUTO_SUBNETS=(10.10.10 10.20.20 10.30.30 10.40.40 10.99.99 10.60.60 10.70.70 10.80.80)
-    for ((i=0; i<N; i++)); do
-      printf 'CONTAIND_AUTO_%s_SUBNET=%s.0/24\n' "${AUTO_NAMES[$i]}" "${AUTO_SUBNETS[$i]}" >>"$SCRATCH/deployment.env"
-    done
     docker volume create "$VOLUME" >/dev/null
     docker run -d --name "$CONTAINER" --network none \
       --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
@@ -161,15 +155,25 @@ for N in 5 7 8; do
       echo "outsider bypassed disabled access" >&2
       exit 1
     fi
-    GENERATION=1
     if [[ "$RESERVED" == 0 ]]; then ENFORCED=false; fi
+    cp "$SCRATCH/addresses.json" "$SCRATCH/before-restart-addresses.json"
     docker exec "$CONTAINER" sh -c 'echo 1 >/data/nic-generation'
     docker restart "$CONTAINER" >/dev/null
     wait_ready
     login
     both_peers
     assert_bindings
-    cp "$SCRATCH/interfaces.json" "$SCRATCH/$CONTAINER-renumbered-interfaces.json"
+    python3 - "$SCRATCH/before-restart-addresses.json" "$SCRATCH/addresses.json" "$N" <<'PY'
+import json, sys
+before, after = [json.load(open(p)) for p in sys.argv[1:3]]
+names = ["wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5", "lan6"][:int(sys.argv[3])]
+def creation_order(state):
+    return [s["ifname"] for s in sorted(state, key=lambda s: s["ifindex"]) if s["ifname"] in names]
+old, new = creation_order(before), creation_order(after)
+assert old == names, old
+assert new == names[1:] + names[:1], new
+PY
+    cp "$SCRATCH/interfaces.json" "$SCRATCH/$CONTAINER-reordered-interfaces.json"
     if [[ "$RESERVED" == 1 ]]; then
       cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/restarted.json"
       jq -e 'all(.interfaces[]; .access.mgmt == false and .access.http == false)' "$SCRATCH/restarted.json" >/dev/null
@@ -189,7 +193,7 @@ for N in 5 7 8; do
         fi
       done
     fi
-    echo "PASS: N=$N reservation=$RESERVED fresh boot, policy, peers and renumber"
+    echo "PASS: N=$N reservation=$RESERVED fresh boot, policy, peers and reordered creation"
     cleanup_case
   done
 done

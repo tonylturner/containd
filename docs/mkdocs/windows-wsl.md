@@ -4,7 +4,7 @@ containd is not a native Windows firewall. For classroom and lab use on Windows,
 
 ## Recommended Setup
 
-1. Install Docker Desktop.
+1. Install Docker Desktop with Engine 28.1+ and Compose supporting `interface_name` (2.36.0+).
 2. Enable the WSL2 backend in Docker Desktop settings.
 3. Open your WSL shell (`Ubuntu`, `Debian`, etc.), not PowerShell.
 4. Follow [Docker Compose onboarding](docker-compose.md#quickstart) from that

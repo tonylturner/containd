@@ -93,7 +93,7 @@ interface addresses and remove only stale addresses created by containd.
 An identical existing address satisfies intent without becoming owned. Docker
 and other foreign primary and secondary addresses remain, as do IPv6 link-local
 addresses and the reserved management device. Removing the last static address
-or its interface binding also removes stale owned addresses. Deletion precedes
+or its interface row also removes stale owned addresses. Deletion precedes
 addition; while deleting IPv4 addresses, containd temporarily enables
 `promote_secondaries` on that device and restores its previous value afterward.
 This prevents deleting an owned primary from implicitly deleting foreign or

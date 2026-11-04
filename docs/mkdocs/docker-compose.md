@@ -11,6 +11,13 @@ loopback, a one-time admin password and appliance-only SSH, use the standalone
 [strict profile](deployment-profiles.md). The quickstart, bootstrap and
 `scripts/containd*` helpers are training-only. Keep one profile per data directory.
 
+## Requirements
+
+Use Docker Engine **28.1 or later** and Docker Compose that accepts
+`interface_name` on service network attachments (Compose 2.36.0+). Docker Desktop
+must include a compatible Engine and Compose. `bootstrap-starter.sh` checks the
+Engine version and probes Compose with `docker compose config` before setup.
+
 ## Quickstart
 
 ```bash
@@ -218,34 +225,42 @@ For Docker Desktop on Windows specifically, see [Windows / WSL Notes](windows-ws
 
 ### Logical roles and kernel devices
 
-When the `containd` service is attached to multiple Docker networks, Docker creates one kernel interface per network.
-The kernel device names (`eth0`, `eth1`, …) are not guaranteed to correspond to `wan/dmz/lan1…` in a stable order,
-because Docker network attach order can vary.
+Each interface row binds to the kernel device with **exactly the row's name**.
+Compose names each appliance network attachment with `interface_name`; attachment
+order and `ethN` numbering do not determine roles. For example:
 
-In this repo’s `deploy/docker-compose.yml`, we explicitly pin:
-- `wan` as the default-gateway network (`gw_priority`) so the kernel default route is via WAN.
-- stable per-network subnets and IPs so `Interfaces -> Auto-assign` can map `wan/dmz/lan1..lan6` deterministically even on Docker engines that do not support network-level `interface_name`.
+```yaml
+services:
+  containd:
+    networks:
+      wan:
+        interface_name: wan
+        ipv4_address: ${CONTAIND_WAN_IP:-192.168.240.2}
+        gw_priority: 100
+      lan1:
+        interface_name: lan1
+        ipv4_address: ${CONTAIND_LAN1_IP:-192.168.242.2}
+```
 
-To keep the appliance UI/CLI stable in Docker labs, `Interfaces → Auto-assign` prefers matching interface roles by
-the IPv4 subnets present on each interface (defaults match this repo’s `deploy/docker-compose.yml`):
+The starter names all eight attachments `wan`, `dmz`, `lan1` … `lan6` and keeps
+WAN as the default-gateway network with `gw_priority`. Subnet/IP variables remain
+Compose IPAM settings, not containd discovery hints. containd does not read
+`CONTAIND_*_SUBNET` or `CONTAIND_AUTO_*_SUBNET`, guess roles, or auto-assign devices.
+Assign rows to zones and commit policy in containd; create or rename attachments
+in Compose. VLAN parents and bridge members must name configured rows.
 
-- `wan`: `192.168.240.0/24`
-- `dmz`: `192.168.241.0/24`
-- `lan1..lan6`: `192.168.242.0/24` … `192.168.247.0/24`
+A missing device leaves its row **not attached**; other rows continue to apply.
+A VLAN/bridge waits for missing parent/member rows. A policy-referenced zone with
+no attached device degrades protection with a reason naming the zone and rows;
+it does not roll back the configuration. Attachment is distinct from link up/down.
+When the device appears, reconciliation applies its settings and clears the fault.
 
-An explicit `CONTAIND_AUTO_<NAME>_SUBNET` hint takes precedence over
-`CONTAIND_<NAME>_SUBNET`. A missing or ambiguous match under either explicit
-authority leaves that role unbound; there is no name, default-route, or index
-fallback. Only roles without explicit authority can use those heuristics after
-subnet matching. The starter supplies explicit topology subnets for all eight roles.
+`CONTAIND_CAPTURE_IFACES` is a comma-separated list of **kernel names**, which are
+row names under the starter (for example `wan,lan1`), not Docker network IDs.
 
-On newer Docker engines you can optionally use Compose `interface_name` in custom lab files, but the supported starter path avoids depending on it so it works across older GitHub runners and classroom Docker installs.
-
-To override subnet matching (for custom lab topologies), set:
-`CONTAIND_AUTO_WAN_SUBNET`, `CONTAIND_AUTO_DMZ_SUBNET`, `CONTAIND_AUTO_LAN1_SUBNET` … `CONTAIND_AUTO_LAN6_SUBNET`.
-These optional overrides are only for the eight default roles. Normally leave
-them unset: matching already uses the corresponding topology subnet variable.
-If you set an AUTO override, keep it aligned with the intended network.
+Before upgrading an existing deployment, follow the
+[interface-name upgrade](update-policy.md#interface-name-upgrade), including its
+management exposure warning. Updating only the image is not sufficient.
 
 ### Ports
 
@@ -276,9 +291,15 @@ The bind-mount source depends on the Compose file location:
 | --- | --- |
 | Bootstrapped starter | `data/` beside the downloaded `docker-compose.yml` |
 | Repository starter (`deploy/docker-compose.yml`) | `deploy/data/` |
+| Repository strict (`deploy/docker-compose.strict.yml`) | `deploy/data-strict/` |
 | Repository dev (`deploy/docker-compose.dev.yml`) | repository-root `data/` |
+| Repository smoke (`deploy/docker-compose.smoke.yml`) | `test/data-smoke/` |
 
 Back up the directory for the layout you actually run, not an unrelated `data/`.
+Strict accepts `CONTAIND_DATA_DIR` to override its default;
+relative paths resolve beside the Compose file. Never share a data folder between
+labs or profiles. Existing strict users must
+[move their data before starting](update-policy.md#existing-data-directories).
 
 The starter and dev Compose files also mount the named volume `clamav-db` on
 `/var/lib/clamav`, so the official ClamAV databases survive container
@@ -299,7 +320,7 @@ To avoid “chicken/egg” provisioning, you can seed an admin SSH key (authoriz
 - Validate the repo-local starter path: `docker compose --env-file .env -f deploy/docker-compose.yml config -q`
 - Follow logs: `docker compose logs -f containd`
 - If a save succeeds but the UI shows a warning banner, Docker likely owns the underlying interface or route state. Adjust the topology/IP layout in `.env` or `docker-compose.yml`, then use containd for zones and policy on top of it.
-- If interface auto-assign/reconcile fails with `engine interfaces status 400`, check `docker compose logs -f containd` for the underlying runtime error.
+- If a row is not attached or protection names a zone with no attached interface, check each appliance attachment's `interface_name` against the saved row name, then recreate the container.
 - If temporary block actions are unavailable, verify dataplane enforcement is enabled in the config model and that your compose file is passing `CONTAIND_ENFORCE_ENABLED=1`.
 - If you see `operation not permitted` for WireGuard, OpenVPN TUN setup, or routing changes, verify the Docker runtime still has the expected capabilities/devices (`NET_ADMIN`, `NET_RAW`, `/dev/net/tun`) and that Windows is using the WSL2-backed Docker Desktop path.
 - Factory reset (CLI): `factory reset NUCLEAR` (admin only; wipes config/users/audit and re-seeds defaults)

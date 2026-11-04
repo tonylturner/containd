@@ -6,7 +6,7 @@ From the repository root:
 bash scripts/smoke-mgmt-reservation.sh
 ```
 
-Needs Go, Docker Compose, jq and Docker network access for Alpine/curl images.
+Needs Go, Docker Engine 28.1+, Compose with `interface_name` support, jq and Docker network access for Alpine/curl images.
 Builds the local Go binary into a test-specific minimal runtime image (no UI
 build), starts eight private zone networks, one fresh data volume, two exact
 reserved-source clients and one non-source client. Publishes **no host ports**.
@@ -14,9 +14,9 @@ All API traffic originates inside those clients. It never connects to or changes
 any `rangerdanger-*` container.
 
 Checks health/login, an all-access-off commit, exact-source-only reachability,
-substrate rejection, and deterministic NIC-renumber restart with no fault. The
-fixture entrypoint renames only its own container NICs before starting containd.
-The script then injects a legacy custom-row/listener conflict directly into its
+substrate rejection, and deterministic link-setup reorder on restart with no fault. The
+fixture entrypoint rotates link-setup order while preserving Compose row names.
+The script then injects a legacy row/listener conflict directly into its
 private config DB (the API correctly refuses such edits), restarts, and requires
 reserved health/login, one boot-fault event and an applied minimal recovery
 ruleset. Two additional isolated transit peers route through the appliance:

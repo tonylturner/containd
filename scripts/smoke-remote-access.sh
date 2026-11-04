@@ -181,11 +181,11 @@ CHECK=https-only
 api GET /interfaces/state
 WAN=$(jq -r 'map(select(any(.addrs[]?; startswith("10.250.1.2/"))))[0].name // empty' <<<"$RESPONSE")
 LAN=$(jq -r 'map(select(any(.addrs[]?; startswith("10.250.2.2/"))))[0].name // empty' <<<"$RESPONSE")
-[[ -n $WAN && -n $LAN ]] || fail "cannot discover appliance WAN/LAN devices"
+[[ $WAN == wan && $LAN == lan1 ]] || fail "cannot discover appliance WAN/LAN devices"
 api GET /config
-CFG=$(jq --arg wan "$WAN" --arg lan "$LAN" '
-  .interfaces |= map(if .name=="wan" then .device=$wan
-    elif .name=="lan1" then .device=$lan | .zone="lan" else . end)
+CFG=$(jq '
+  .interfaces |= map(if .name=="wan" then .zone="wan"
+    elif .name=="lan1" then .zone="lan" else . end)
   | .system.mgmt.enableHTTP=false | .system.mgmt.enableHTTPS=true
   | .dataplane.enforcement=true | .dataplane.enforceTable="containd"
   | .firewall.defaultAction="DENY" | .firewall.nat.enabled=false

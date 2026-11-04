@@ -288,7 +288,7 @@ for _ in $(seq 1 10); do
 done
 WAN_DEV=$(discover_iface "$STATE" "$ENGINE_WAN")
 LAN_DEV=$(discover_iface "$STATE" "$ENGINE_LAN")
-if [[ -z "$WAN_DEV" || -z "$LAN_DEV" ]]; then
+if [[ "$WAN_DEV" != wan || "$LAN_DEV" != lan1 ]]; then
   harness_error "failed to discover wan/lan devices from interface state: $STATE"
 fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
@@ -297,11 +297,11 @@ log "Fetching current config..."
 CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Applying the harness policy (default deny, allow ${LAN_CLIENT} -> wan tcp/8080, SNAT lan->wan, DNAT ${DNAT_PORT} -> lan_target:80)${SMOKE_MUTATION:+ with mutation ${SMOKE_MUTATION}}..."
-UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
+UPDATED_CFG=$(echo "$CFG" | jq \
   --arg lanClient "${LAN_CLIENT}/32" --arg mutation "$SMOKE_MUTATION" '
   .interfaces |= map(
-    if .name=="wan" then .device=$wan
-    elif .name=="lan1" then .device=$lan | .zone="lan"
+    if .name=="wan" then .zone="wan"
+    elif .name=="lan1" then .zone="lan"
     else . end)
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"

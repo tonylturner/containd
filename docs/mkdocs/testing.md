@@ -208,9 +208,14 @@ project (`COMPOSE_PROJECT_NAME`, default `smoke-nflog`), a temporary named
 the defaults (`172.32.0` and `172.33.0`) conflict with the host. The NFLOG
 group is configurable with `SMOKE_NFLOG_GROUP` (default `100`). The script
 accepts `COMPOSE_FILE` to select the base smoke compose file(s), and requires
-Docker Compose 2.24.4 or later, curl, jq and Python 3 on the host. It refuses
+Docker Engine 28.1+ and Compose with `interface_name` support (2.36.0+),
+curl, jq and Python 3 on the host. It refuses
 to take over an existing project, then removes only its own Compose project
 and volume when it exits.
+
+The starter prerequisite checks can be tested without a Docker daemon or running
+containers: `python3 scripts/bootstrap-starter.test.py`. These offline tests cover
+the Engine 28.1 boundary, unavailable Engine and Compose feature rejection.
 
 ## Scanning Gate Smoke
 
