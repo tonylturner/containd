@@ -305,7 +305,7 @@ func compileInfraServiceLocalInput(cfg *config.Config) []dprules.LocalServiceRul
 
 	// DHCP server: allow UDP/1067 on configured listen interfaces.
 	if cfg.Services.DHCP.Enabled && len(cfg.Services.DHCP.ListenIfaces) > 0 {
-		ifaces := resolveListenIfaces(cfg.Services.DHCP.ListenIfaces, cfg.Interfaces)
+		ifaces := resolveListenIfaces(cfg.Services.DHCP.ListenIfaces)
 		if len(ifaces) > 0 {
 			out = append(out, dprules.LocalServiceRule{
 				ID:     "auto-allow-dhcp",
@@ -353,7 +353,7 @@ func compileVPNLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 			Proto: "udp",
 			Port:  cfg.Services.VPN.WireGuard.ListenPort,
 		}
-		applyVPNListenTargets(&rule, cfg.Services.VPN.WireGuard.ListenZone, cfg.Services.VPN.WireGuard.ListenInterfaces, cfg.Interfaces, "wan")
+		applyVPNListenTargets(&rule, cfg.Services.VPN.WireGuard.ListenZone, cfg.Services.VPN.WireGuard.ListenInterfaces, "wan")
 		out = append(out, rule)
 	}
 
@@ -373,7 +373,7 @@ func compileVPNLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 				Proto: proto,
 				Port:  port,
 			}
-			applyVPNListenTargets(&rule, cfg.Services.VPN.OpenVPN.Server.ListenZone, cfg.Services.VPN.OpenVPN.Server.ListenInterfaces, cfg.Interfaces, "wan")
+			applyVPNListenTargets(&rule, cfg.Services.VPN.OpenVPN.Server.ListenZone, cfg.Services.VPN.OpenVPN.Server.ListenInterfaces, "wan")
 			out = append(out, rule)
 		}
 	}
@@ -415,8 +415,8 @@ func compileZoneBoundService(id, proto string, port int, zones []string) []dprul
 	return out
 }
 
-func applyVPNListenTargets(rule *dprules.LocalServiceRule, zone string, ifaces []string, cfgIfaces []config.Interface, defZone string) {
-	resolved := resolveListenIfaces(ifaces, cfgIfaces)
+func applyVPNListenTargets(rule *dprules.LocalServiceRule, zone string, ifaces []string, defZone string) {
+	resolved := resolveListenIfaces(ifaces)
 	if len(resolved) > 0 {
 		rule.Ifaces = resolved
 		return
@@ -428,23 +428,9 @@ func applyVPNListenTargets(rule *dprules.LocalServiceRule, zone string, ifaces [
 	rule.Zone = zone
 }
 
-func resolveListenIfaces(raw []string, ifaces []config.Interface) []string {
+func resolveListenIfaces(raw []string) []string {
 	if len(raw) == 0 {
 		return nil
-	}
-	lookup := map[string]string{}
-	for _, iface := range ifaces {
-		dev := strings.TrimSpace(iface.Device)
-		name := strings.TrimSpace(iface.Name)
-		if dev == "" {
-			dev = name
-		}
-		if name != "" && dev != "" {
-			lookup[name] = dev
-		}
-		if dev != "" {
-			lookup[dev] = dev
-		}
 	}
 	out := make([]string, 0, len(raw))
 	seen := map[string]struct{}{}
@@ -453,10 +439,7 @@ func resolveListenIfaces(raw []string, ifaces []config.Interface) []string {
 		if key == "" {
 			continue
 		}
-		dev := lookup[key]
-		if dev == "" {
-			dev = key
-		}
+		dev := key
 		if _, ok := seen[dev]; ok {
 			continue
 		}

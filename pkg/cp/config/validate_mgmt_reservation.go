@@ -45,29 +45,19 @@ func validateManagementCore(c *Config, r *mgmtpath.Reservation) error {
 	return nil
 }
 
-// ValidateManagementInterfaces permits exactly one unaddressed physical binding.
+// ValidateManagementInterfaces permits zero or one unaddressed physical row for the reserved NIC.
 // Names, zones and access flags are not pinned. No other row may reuse that NIC,
 // directly or through logical references in parent/member fields.
 func ValidateManagementInterfaces(ifaces []Interface, r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
-	devices := map[string]string{}
-	for _, v := range ifaces {
-		devices[strings.TrimSpace(v.Name)] = managementDevice(v)
-	}
-	resolve := func(s string) string {
-		s = strings.TrimSpace(s)
-		if d, ok := devices[s]; ok {
-			return d
-		}
-		return s
-	}
-	count := 0
 	for i, v := range ifaces {
 		field := fmt.Sprintf("interfaces[%d]", i)
 		if managementDevice(v) == r.Device {
-			count++
+			if v.Parent != "" || len(v.Members) != 0 {
+				return managementConflict(field + ".parent/members")
+			}
 			typ := strings.ToLower(strings.TrimSpace(v.Type))
 			if typ != "" && typ != "physical" {
 				return managementConflict(field + ".type")
@@ -75,14 +65,12 @@ func ValidateManagementInterfaces(ifaces []Interface, r *mgmtpath.Reservation) e
 			if len(v.Addresses) > 0 || strings.TrimSpace(v.AddressMode) != "" && !strings.EqualFold(strings.TrimSpace(v.AddressMode), "static") {
 				return managementConflict(field + ".addresses/addressMode")
 			}
-		} else if strings.TrimSpace(v.Name) == r.Device {
-			return managementConflict(field + ".name")
 		}
-		if resolve(v.Parent) == r.Device {
+		if strings.TrimSpace(v.Parent) == r.Device {
 			return managementConflict(field + ".parent")
 		}
 		for _, m := range v.Members {
-			if resolve(m) == r.Device {
+			if strings.TrimSpace(m) == r.Device {
 				return managementConflict(field + ".members")
 			}
 		}
@@ -92,15 +80,9 @@ func ValidateManagementInterfaces(ifaces []Interface, r *mgmtpath.Reservation) e
 			}
 		}
 	}
-	if count != 1 {
-		return managementConflict("interfaces.device (requires exactly one reserved physical binding)")
-	}
 	return nil
 }
 func managementDevice(v Interface) string {
-	if d := strings.TrimSpace(v.Device); d != "" {
-		return d
-	}
 	return strings.TrimSpace(v.Name)
 }
 

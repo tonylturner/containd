@@ -13,7 +13,7 @@ import (
 func reservationFixture() (*Config, *mgmtpath.Reservation) {
 	r := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10"), netip.MustParseAddr("10.99.99.3")}, Port: 8080}
 	c := DefaultConfig()
-	c.Interfaces = []Interface{{Name: "lan3", Device: "eth7", Zone: "lan"}, {Name: "wan", Device: "eth0", Zone: "wan"}}
+	c.Interfaces = []Interface{{Name: "eth7", Zone: "lan"}, {Name: "wan", Zone: "wan"}}
 	c.DataPlane.Enforcement = true
 	return c, r
 }
@@ -43,13 +43,11 @@ func TestManagementReservationRejections(t *testing.T) {
 		{"enforcement off", "enforcement", func(c *Config) { c.DataPlane.Enforcement = false }},
 		{"reserved static", "addresses", func(c *Config) { c.Interfaces[0].Addresses = []string{"192.0.2.2/24"} }},
 		{"reserved DHCP", "addressMode", func(c *Config) { c.Interfaces[0].AddressMode = "dhcp" }},
-		{"move binding", "interfaces.device", func(c *Config) { c.Interfaces[0].Device = "eth8" }},
-		{"duplicate binding", "interfaces.device", func(c *Config) { c.Interfaces = append(c.Interfaces, Interface{Name: "another", Device: "eth7"}) }},
 		{"virtual binding", "type", func(c *Config) { c.Interfaces[0].Type = "bridge" }},
 		{"bridge member", "members", func(c *Config) {
-			c.Interfaces = append(c.Interfaces, Interface{Name: "br0", Type: "bridge", Members: []string{"lan3"}})
+			c.Interfaces = append(c.Interfaces, Interface{Name: "br0", Type: "bridge", Members: []string{"eth7"}})
 		}},
-		{"vlan parent", "parent", func(c *Config) { c.Interfaces = append(c.Interfaces, Interface{Name: "vlan0", Parent: "lan3"}) }},
+		{"vlan parent", "parent", func(c *Config) { c.Interfaces = append(c.Interfaces, Interface{Name: "vlan0", Parent: "eth7"}) }},
 		{"local elsewhere", "addresses", func(c *Config) { c.Interfaces[1].Addresses = []string{"10.99.99.2/32"} }},
 		{"source takeover", "addresses", func(c *Config) { c.Interfaces[1].Addresses = []string{"10.99.99.10/32"} }},
 		{"mapped source alias", "addresses", func(c *Config) { c.Interfaces[1].Addresses = []string{"::ffff:10.99.99.10/128"} }},
@@ -155,5 +153,21 @@ func TestManagementListenersResolveBlankToDefault(t *testing.T) {
 		if err := ValidateManagementListeners(cfg.System, r); err == nil || !strings.Contains(err.Error(), tc.field) {
 			t.Errorf("port %d: err=%v, want %s conflict", tc.port, err, tc.field)
 		}
+	}
+}
+
+func TestManagementReservationWithoutInterfaceRow(t *testing.T) {
+	cfg, r := reservationFixture()
+	cfg.Interfaces = cfg.Interfaces[1:]
+	if err := ValidateManagementReservation(cfg, r); err != nil {
+		t.Fatal("zero reserved rows must be valid", err)
+	}
+	cfg.Interfaces = append(cfg.Interfaces, Interface{Name: r.Device, Addresses: []string{"192.0.2.2/24"}})
+	if err := ValidateManagementReservation(cfg, r); err == nil {
+		t.Fatal("addressed reserved row accepted")
+	}
+	cfg.Interfaces[len(cfg.Interfaces)-1] = Interface{Name: r.Device}
+	if err := ValidateManagementReservation(cfg, r); err != nil {
+		t.Fatal("unaddressed reserved row rejected", err)
 	}
 }

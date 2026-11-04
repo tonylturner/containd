@@ -35,9 +35,6 @@ func (e *RuntimeEnvironment) Prepare(_ context.Context, next *config.RunningSnap
 	if err != nil {
 		return convergence.Prepared{}, err
 	}
-	if config.ReservationForStore(e.Store) == nil {
-		bindUnboundDefaultInterfaceDevices(effective)
-	}
 	bundle, err := trust.LoadBundle(trustedCABundlePath(next.Config))
 	if err != nil {
 		return convergence.Prepared{}, err

@@ -165,7 +165,7 @@ func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
 	// Routing: converge owned entries, including empty intent. Resolve logical names
 	// using the current interface bindings before applying.
 	if st.routingSet {
-		resolved := resolveRoutingIfaces(st.routing, st.ifaces)
+		resolved := resolveRoutingIfaces(st.routing)
 		m.publishDelivery(protection.SubsystemRouting, false, false)
 		if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
 			m.publishDelivery(protection.SubsystemRouting, false, true)
@@ -304,10 +304,7 @@ func ownershipStatus(m *ownershipManager) map[string]any {
 	st := m.state.Load().(ownershipState)
 	ifaces := make([]string, 0, len(st.ifaces))
 	for _, i := range st.ifaces {
-		dev := strings.TrimSpace(i.Device)
-		if dev == "" {
-			dev = strings.TrimSpace(i.Name)
-		}
+		dev := strings.TrimSpace(i.Name)
 		if dev != "" {
 			ifaces = append(ifaces, dev)
 		}

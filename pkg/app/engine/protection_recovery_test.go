@@ -60,7 +60,7 @@ func TestProtectionRecoveryOrderAndAddressWarning(t *testing.T) {
 		addressCalls++
 		http.Error(w, "address unavailable", http.StatusBadRequest)
 	})
-	if w := protocolPost(address, m, "", `[{"name":"mgmt","device":"mgmt0","addresses":["192.0.2.1/24"]}]`); w.Code != 409 || addressCalls != 0 {
+	if w := protocolPost(address, m, "", `[{"name":"mgmt0","addresses":["192.0.2.1/24"]}]`); w.Code != 409 || addressCalls != 0 {
 		t.Fatalf("address before rules: %d %s", w.Code, w.Body)
 	}
 	if w := protocolPost(apply, m, "", string(body)); w.Code != 200 {
@@ -80,10 +80,10 @@ func TestProtectionRecoveryOrderAndAddressWarning(t *testing.T) {
 			t.Fatalf("ordinary phase %s: %d %s", phase, w.Code, w.Body)
 		}
 	}
-	if w := protocolPost(address, m, "", `[{"name":"mgmt","device":"other","addresses":["192.0.2.1/24"]}]`); w.Code != 409 {
+	if w := protocolPost(address, m, "", `[{"name":"other","addresses":["192.0.2.1/24"]}]`); w.Code != 409 {
 		t.Fatalf("unadmitted recovery address: %d %s", w.Code, w.Body)
 	}
-	if w := protocolPost(address, m, "", `[{"name":"mgmt","device":"mgmt0","addresses":["192.0.2.1/24"]}]`); w.Code != 400 || addressCalls != 1 {
+	if w := protocolPost(address, m, "", `[{"name":"mgmt0","addresses":["192.0.2.1/24"]}]`); w.Code != 400 || addressCalls != 1 {
 		t.Fatalf("address warning: %d %s", w.Code, w.Body)
 	}
 	after := dp.Protection()

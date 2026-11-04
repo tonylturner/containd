@@ -34,10 +34,8 @@ var cliCompletionHandlers = map[string]cliCompletionFunc{
 	"set interface":            completeSetInterface,
 	"set interface ip":         completeSetInterfaceIP,
 	"set interface zone":       completeSetInterfaceZone,
-	"set interface bind":       completeSetInterfaceBind,
 	"set interface bridge":     completeSetInterfaceBridge,
 	"set interface vlan":       completeSetInterfaceVLAN,
-	"assign interfaces":        completeAssignInterfaces,
 	"set firewall rule":        completeSetFirewallRule,
 	"set firewall ics-rule":    completeSetFirewallICSRule,
 	"add firewall rule":        completeAddFirewallRule,
@@ -91,7 +89,6 @@ var cliUsageHintHandlers = map[string]cliUsageHintFunc{
 	"set system ssh allow-password":          staticArgHints(0, "true", "false"),
 	"set system ssh authorized-keys-dir":     staticArgHints(0, "<dir>"),
 	"set interface ip":                       usageSetInterfaceIP,
-	"set interface bind":                     staticArgHints(1, "<os_iface>"),
 	"set interface bridge":                   staticArgHints(2, "<members_csv>"),
 	"set interface vlan":                     staticArgHints(3, "<vlan_id>"),
 	"set firewall rule":                      usageSetFirewallRule,
@@ -213,13 +210,6 @@ func completeSetInterfaceZone(ctx cliCompletionContext) []string {
 	}
 }
 
-func completeSetInterfaceBind(ctx cliCompletionContext) []string {
-	if ctx.argIndex == 0 {
-		return ctx.ifaces
-	}
-	return nil
-}
-
 func completeSetInterfaceBridge(ctx cliCompletionContext) []string {
 	switch {
 	case ctx.argIndex == 0:
@@ -253,10 +243,6 @@ func completeSetInterfaceVLAN(ctx cliCompletionContext) []string {
 	default:
 		return nil
 	}
-}
-
-func completeAssignInterfaces(ctx cliCompletionContext) []string {
-	return append([]string{"auto"}, ifaceAssignHints(ctx.ifaces)...)
 }
 
 var firewallRuleFieldHints = map[string][]string{
@@ -813,17 +799,6 @@ func gatewayAddresses(cfg *config.Config) []string {
 		if strings.TrimSpace(gw.Address) != "" {
 			out = append(out, gw.Address)
 		}
-	}
-	return out
-}
-
-func ifaceAssignHints(ifaces []string) []string {
-	out := make([]string, 0, len(ifaces))
-	for _, name := range ifaces {
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		out = append(out, name+"=")
 	}
 	return out
 }

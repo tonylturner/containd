@@ -29,7 +29,6 @@ func TestShowInterfacesMode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			iface := tc.iface
 			iface.Name = "test-iface"
-			iface.Device = "nonexistent-test-device"
 			iface.Zone = "test-zone"
 			store := &memStore{cfg: &config.Config{Interfaces: []config.Interface{iface}}}
 			client := &dispatchHTTPClient{
@@ -58,7 +57,7 @@ func TestShowInterfacesMode(t *testing.T) {
 					for _, line := range lines {
 						fields := strings.Fields(line)
 						if len(fields) >= 4 && fields[0] == iface.Name {
-							mode = fields[3]
+							mode = fields[2]
 						}
 					}
 					if mode != tc.want {

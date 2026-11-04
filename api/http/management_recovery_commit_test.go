@@ -46,7 +46,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"}}
+	cfg.Interfaces = []config.Interface{{Name: "mgmt0", Zone: "mgmt"}}
 	cfg.DataPlane.Enforcement = true
 	if err := store.Save(ctx, cfg); err != nil {
 		t.Fatal(err)

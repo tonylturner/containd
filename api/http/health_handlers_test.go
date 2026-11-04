@@ -44,7 +44,7 @@ func TestHealthReportsUnboundManagement(t *testing.T) {
 		}
 	}
 	check("unbound-appliance")
-	cfg.Interfaces[0].Device = "eth0"
+	cfg.Interfaces[0].Name = "eth0"
 	check("configured")
 	engine.state = []config.InterfaceState{{Name: "eth0", Up: false}, {Name: "eth1", Up: true}}
 	check("configured") // Administrative link-down is not an unbound appliance.
@@ -271,7 +271,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.DataPlane.Enforcement = true
-	cfg.Interfaces[0].Device = "eth0"
+	cfg.Interfaces[0].Name = "eth0"
 	if err := store.Save(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}

@@ -306,7 +306,7 @@ func (e *fakeEnvironment) Recovery(_ context.Context, state config.RunningState)
 	defer e.mu.Unlock()
 	recovery := e.recovery || state.Transition != nil && state.Transition.State != config.TransitionReapplyPending
 	return RecoveryPlan{Rules: rules.Snapshot{Version: config.ManagementRecoveryVersion, Default: rules.ActionDeny},
-		Addresses: []config.Interface{{Name: "mgmt", Device: "mgmt0", Addresses: []string{"192.0.2.1/24"}}}}, recovery, nil
+		Addresses: []config.Interface{{Name: "mgmt", Addresses: []string{"192.0.2.1/24"}}}}, recovery, nil
 }
 func (e *fakeEnvironment) Refresh(context.Context, *config.RunningSnapshot) error {
 	e.mu.Lock()

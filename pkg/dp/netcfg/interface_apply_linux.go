@@ -36,18 +36,12 @@ func (r interfaceResolver) resolveDev(ref string) string {
 		return ""
 	}
 	if iface, ok := r.byName[ref]; ok {
-		if dev := strings.TrimSpace(iface.Device); dev != "" {
-			return dev
-		}
 		return strings.TrimSpace(iface.Name)
 	}
 	return ref
 }
 
 func (r interfaceResolver) deviceFor(iface config.Interface) string {
-	if dev := strings.TrimSpace(iface.Device); dev != "" {
-		return dev
-	}
 	return strings.TrimSpace(iface.Name)
 }
 

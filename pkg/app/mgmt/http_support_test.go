@@ -30,7 +30,7 @@ func TestReservedHTTPGateSocketTupleAndSameAuth(t *testing.T) {
 	}
 	defer store.Close()
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "lan3", Device: "eth7", Access: config.InterfaceAccess{Mgmt: boolPtr(false), HTTP: boolPtr(false), HTTPS: boolPtr(false)}}}
+	cfg.Interfaces = []config.Interface{{Name: "eth7", Access: config.InterfaceAccess{Mgmt: boolPtr(false), HTTP: boolPtr(false), HTTPS: boolPtr(false)}}}
 	if err := store.Save(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -147,8 +147,7 @@ func TestIPInterfaceIndexLookupAndMgmtAccessHandler(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{{
-		Name:   "wan",
-		Device: "eth1",
+		Name: "eth1",
 		Access: config.InterfaceAccess{
 			Mgmt:  boolPtr(false),
 			HTTP:  boolPtr(false),
@@ -196,8 +195,7 @@ func TestMgmtAndSSHAllowedOnInterface(t *testing.T) {
 	cfg := &config.Config{
 		Interfaces: []config.Interface{
 			{
-				Name:   "wan",
-				Device: "eth1",
+				Name: "eth1",
 				Access: config.InterfaceAccess{
 					Mgmt:  boolPtr(false),
 					HTTP:  boolPtr(false),
@@ -206,8 +204,7 @@ func TestMgmtAndSSHAllowedOnInterface(t *testing.T) {
 				},
 			},
 			{
-				Name:   "lan1",
-				Device: "eth0",
+				Name: "eth0",
 				Access: config.InterfaceAccess{
 					Mgmt:  boolPtr(true),
 					HTTP:  boolPtr(true),

@@ -26,7 +26,7 @@ func TestUnsupportedPlatformHandlers(t *testing.T) {
 	ownership := newOwnershipManager(logger)
 
 	t.Run("interfaces apply", func(t *testing.T) {
-		payload := []config.Interface{{Name: "wan", Device: "eth0", Zone: "wan"}}
+		payload := []config.Interface{{Name: "wan", Zone: "wan"}}
 		raw, _ := json.Marshal(payload)
 
 		rec := httptest.NewRecorder()

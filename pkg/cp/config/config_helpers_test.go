@@ -73,29 +73,29 @@ func TestValidateInterfaceTypeHelpers(t *testing.T) {
 	if err := validateBridgeInterface(Interface{Name: "br1", Type: "bridge", Members: []string{"br0"}}, byName); err == nil {
 		t.Fatal("expected nested bridge validation error")
 	}
-	if err := validateVLANInterface(Interface{Name: "vlan10", Type: "vlan", Parent: "lan0", VLANID: 10}); err != nil {
+	if err := validateVLANInterface(Interface{Name: "vlan10", Type: "vlan", Parent: "lan0", VLANID: 10}, byName); err != nil {
 		t.Fatalf("validateVLANInterface(valid): %v", err)
 	}
-	if err := validateVLANInterface(Interface{Name: "vlan0", Type: "vlan", VLANID: 0}); err == nil {
+	if err := validateVLANInterface(Interface{Name: "vlan0", Type: "vlan", VLANID: 0}, nil); err == nil {
 		t.Fatal("expected invalid vlan validation error")
 	}
 }
 
 func TestValidateRoutingHelpers(t *testing.T) {
 	ifaces := []Interface{
-		{Name: "wan", Device: "eth0", Zone: "wan"},
-		{Name: "lan1", Device: "eth1", Zone: "lan"},
+		{Name: "wan", Zone: "wan"},
+		{Name: "lan1", Zone: "lan"},
 	}
 	ifaceSet := routingIfaceSet(ifaces)
-	if _, ok := ifaceSet["eth0"]; !ok {
-		t.Fatal("expected routingIfaceSet to include device bindings")
+	if _, ok := ifaceSet["wan"]; !ok {
+		t.Fatal("expected routingIfaceSet to include row names")
 	}
 
 	gwByName, err := validateGateways([]Gateway{{
 		Name:    "wan-gw",
 		Alias:   "upstream",
 		Address: "203.0.113.1",
-		Iface:   "eth0",
+		Iface:   "wan",
 	}}, ifaceSet)
 	if err != nil {
 		t.Fatalf("validateGateways(valid): %v", err)
@@ -107,7 +107,7 @@ func TestValidateRoutingHelpers(t *testing.T) {
 	if err := validateRoutes([]StaticRoute{{
 		Dst:     "default",
 		Gateway: "wan-gw",
-		Iface:   "eth0",
+		Iface:   "wan",
 		Table:   100,
 		Metric:  10,
 	}}, gwByName, ifaceSet); err != nil {

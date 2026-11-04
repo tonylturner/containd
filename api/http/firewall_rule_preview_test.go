@@ -120,7 +120,7 @@ func TestPreviewFirewallRuleErrors(t *testing.T) {
 
 func TestPreviewFirewallCandidateForwards(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "wan", Zone: "wan", Device: "wan0"}}
+	cfg.Interfaces = []config.Interface{{Name: "wan0", Zone: "wan"}}
 	cfg.Firewall.NAT.PortForwards = []config.PortForward{{ID: "candidate", Enabled: true, IngressZone: "wan", Proto: "tcp", ListenPort: 1502, DestIP: "10.0.0.2", DestPort: 502}, {ID: "disabled", IngressZone: "wan", Proto: "tcp", ListenPort: 1503, DestIP: "10.0.0.3"}}
 	eng := &previewMockEngine{}
 	rec := httptest.NewRecorder()

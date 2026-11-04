@@ -19,8 +19,7 @@ func interfacePatchStore(t *testing.T) *config.SQLiteStore {
 	enabled, disabled := true, false
 	err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 		cfg.Interfaces = append(cfg.Interfaces, config.Interface{
-			Name: "patch0", Alias: "Plant VLAN", Device: "eth9",
-			Type: "vlan", Parent: "eth8", VLANID: 123, Members: []string{"eth7"},
+			Name: "patch0", Alias: "Plant VLAN", Type: "vlan", Parent: "wan", VLANID: 123, Members: []string{"eth7"},
 			Zone: "spare", AddressMode: "static", Addresses: []string{"192.0.2.2/24"},
 			Gateway: "192.0.2.1",
 			Access:  config.InterfaceAccess{Mgmt: &enabled, HTTP: &disabled, HTTPS: &enabled, SSH: &disabled},
@@ -45,11 +44,11 @@ func TestInterfacePatchMerge(t *testing.T) {
 		}},
 		{"empty alias", `{"alias":""}`, func(i *config.Interface) { i.Alias = "" }},
 		{"null alias", `{"alias":null}`, func(i *config.Interface) { i.Alias = "" }},
-		{"empty device and zone", `{"device":"","zone":""}`, func(i *config.Interface) {
-			i.Device, i.Zone = "", ""
+		{"empty zone", `{"zone":""}`, func(i *config.Interface) {
+			i.Zone = ""
 		}},
-		{"null device and zone", `{"device":null,"zone":null}`, func(i *config.Interface) {
-			i.Device, i.Zone = "", ""
+		{"null zone", `{"zone":null}`, func(i *config.Interface) {
+			i.Zone = ""
 		}},
 		{"empty arrays", `{"members":[],"addresses":[]}`, func(i *config.Interface) {
 			// Empty slices are omitted when the store serializes the candidate.

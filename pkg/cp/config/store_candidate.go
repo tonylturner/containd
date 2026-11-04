@@ -109,6 +109,9 @@ func writeConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config) err
 }
 
 func writeReferencedConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config, id int64) error {
+	if err := persistInterfaceDeviceMigrationTx(ctx, tx, key, cfg.deviceMigration); err != nil {
+		return err
+	}
 	if err := persistScopeMigrationTx(ctx, tx, cfg.scopeMigration); err != nil {
 		return err
 	}
@@ -159,7 +162,7 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, expected *Revision, ttl
 	if err := s.checkWrite(running, candidate); err != nil {
 		return "", err
 	}
-	if candidate.scopeMigration != nil || candidate.modeMigration != nil || candidate.orderMigration != nil {
+	if candidate.scopeMigration != nil || candidate.modeMigration != nil || candidate.orderMigration != nil || candidate.deviceMigration != nil {
 		if err := writeConfigTx(ctx, tx, configKeyCandidate, candidate); err != nil {
 			return "", err
 		}
@@ -254,7 +257,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context, expected *Revision, ca
 	}
 	// Rollback restores previously accepted saved intent, not a new write.
 	// Profile projection still governs runtime policy for carried weak values.
-	if prev.scopeMigration != nil || prev.modeMigration != nil || prev.orderMigration != nil {
+	if prev.scopeMigration != nil || prev.modeMigration != nil || prev.orderMigration != nil || prev.deviceMigration != nil {
 		if err := writeConfigTx(ctx, tx, configKeyPrevious, prev); err != nil {
 			return "", err
 		}

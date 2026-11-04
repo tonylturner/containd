@@ -159,7 +159,7 @@ func routingHandler(logger *zap.SugaredLogger, ownership *ownershipManager) http
 		defer cancel()
 		resolved := routing
 		if ownership != nil {
-			resolved = resolveRoutingIfaces(routing, ownership.currentInterfaces())
+			resolved = resolveRoutingIfaces(routing)
 		}
 		if !resolvedPhaseInput(w, r, "routing", resolved) {
 			return

@@ -76,7 +76,6 @@ var mutationRouteClass = map[string]string{
 	"POST /api/v1/services/av":                             "config-writer",
 	"POST /api/v1/services/proxy/forward":                  "config-writer",
 	"POST /api/v1/services/proxy/reverse":                  "config-writer",
-	"POST /api/v1/interfaces/assign":                       "config-writer",
 	"POST /api/v1/interfaces/reconcile":                    "non-config",
 	"POST /api/v1/routing/reconcile":                       "non-config",
 	"POST /api/v1/auth/me/password":                        "non-config",

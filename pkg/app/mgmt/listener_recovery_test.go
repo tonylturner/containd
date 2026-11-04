@@ -57,7 +57,7 @@ func bootStores(t *testing.T, httpListen string) (mgmtStores, *config.Config) {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"}}
+	cfg.Interfaces = []config.Interface{{Name: "mgmt0", Zone: "mgmt"}}
 	cfg.System.Mgmt.ListenAddr = httpListen
 	cfg.System.Mgmt.HTTPListenAddr = httpListen
 	if err := store.Save(context.Background(), cfg); err != nil {

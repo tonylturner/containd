@@ -52,9 +52,6 @@ func Bind(ifaces []config.Interface) *Membership {
 }
 
 func device(i config.Interface) string {
-	if d := strings.TrimSpace(i.Device); d != "" {
-		return d
-	}
 	return strings.TrimSpace(i.Name)
 }
 

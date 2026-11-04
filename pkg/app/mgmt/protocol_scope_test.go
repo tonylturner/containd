@@ -101,7 +101,7 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 				cfg := config.DefaultConfig()
-				cfg.Interfaces = []config.Interface{{Name: "custom", Device: "scope-test", Zone: "lan"}}
+				cfg.Interfaces = []config.Interface{{Name: "custom", Zone: "lan"}}
 				cfg.DataPlane.Enforcement = true
 				if err := store.Save(ctx, cfg); err != nil {
 					t.Fatal(err)

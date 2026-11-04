@@ -17,63 +17,6 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/ids"
 )
 
-func assignInterfacesAPI(api *API) Command {
-	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) < 1 {
-			return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
-		}
-		mode := strings.ToLower(strings.TrimSpace(args[0]))
-		req := map[string]any{}
-		switch mode {
-		case "auto":
-			req["mode"] = "auto"
-		default:
-			mappings := map[string]string{}
-			for _, a := range args {
-				parts := strings.SplitN(a, "=", 2)
-				if len(parts) != 2 {
-					return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
-				}
-				iface := strings.TrimSpace(parts[0])
-				dev := strings.TrimSpace(parts[1])
-				if iface == "" {
-					continue
-				}
-				if dev == "" || strings.EqualFold(dev, "none") || dev == "-" {
-					dev = ""
-				}
-				mappings[iface] = dev
-			}
-			if len(mappings) == 0 {
-				return fmt.Errorf("usage: assign interfaces auto | assign interfaces <iface>=<dev> [more...]")
-			}
-			req["mode"] = "explicit"
-			req["mappings"] = mappings
-		}
-
-		var payload struct {
-			Interfaces []config.Interface `json:"interfaces"`
-		}
-		if err := api.mutateJSON(ctx, "POST", "/api/v1/interfaces/assign", req, &payload, nil); err != nil {
-			return err
-		}
-
-		if out == nil {
-			return nil
-		}
-		fmt.Fprintln(out, stagedMessage)
-		if len(payload.Interfaces) > 0 {
-			fmt.Fprintln(out)
-			t := newTable("NAME", "DEVICE", "ZONE", "CONFIG_ADDRS")
-			for _, iface := range payload.Interfaces {
-				t.addRow(iface.Name, firstNonEmpty(iface.Device, "—"), firstNonEmpty(iface.Zone, "—"), joinCSV(iface.Addresses))
-			}
-			t.render(out)
-		}
-		return nil
-	}
-}
-
 func factoryResetAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) != 1 || strings.TrimSpace(args[0]) != "NUCLEAR" {
@@ -163,16 +106,6 @@ func setInterfaceVLANAPI(api *API) Command {
 			Addresses: args[4:],
 		}
 		return api.postJSON(ctx, "/api/v1/interfaces", iface, out)
-	}
-}
-
-func setInterfaceBindAPI(api *API) Command {
-	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) < 2 {
-			return fmt.Errorf("usage: set interface bind <name> <os_iface>")
-		}
-		payload := map[string]any{"device": args[1]}
-		return patchExistingInterface(ctx, api, args[0], payload, out)
 	}
 }
 

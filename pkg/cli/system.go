@@ -173,11 +173,10 @@ func showMgmtListeners(api *API) Command {
 		})
 
 		fmt.Fprintln(out)
-		t := newTable("IFACE", "DEVICE", "MGMT", "HTTP", "HTTPS", "SSH")
+		t := newTable("IFACE", "MGMT", "HTTP", "HTTPS", "SSH")
 		for _, iface := range cfg.Interfaces {
 			t.addRow(
 				iface.Name,
-				firstNonEmpty(iface.Device, "—"),
 				yesNoStr(boolDefault(iface.Access.Mgmt, true)),
 				yesNoStr(boolDefault(iface.Access.HTTP, true)),
 				yesNoStr(boolDefault(iface.Access.HTTPS, true)),

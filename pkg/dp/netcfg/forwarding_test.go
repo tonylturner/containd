@@ -55,7 +55,7 @@ func TestRequiresIPv4Forwarding(t *testing.T) {
 		},
 		{
 			name:   "same device",
-			ifaces: []config.Interface{{Name: "wan", Device: "eth0", Zone: "wan"}, {Name: "lan", Device: "eth0", Zone: "lan"}},
+			ifaces: []config.Interface{{Name: "same0", Zone: "wan"}, {Name: "same0", Zone: "lan"}},
 		},
 		{
 			name:   "unassigned zone",

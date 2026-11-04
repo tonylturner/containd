@@ -186,7 +186,7 @@ func TestManagementKernelMatrix(t *testing.T) {
 		if config.ValidateManagementRouting(config.RoutingConfig{Rules: []config.PolicyRule{{Priority: 1, Table: 201}}}, r) == nil {
 			t.Fatal("accepted overlapping priority 1")
 		}
-		if config.ValidateManagementInterfaces([]config.Interface{{Name: "lan3", Device: "reserved"}, {Name: "wan", Device: "teaching", Addresses: []string{"10.99.99.10/32"}}}, r) == nil {
+		if config.ValidateManagementInterfaces([]config.Interface{{Name: "lan3"}, {Name: "wan", Addresses: []string{"10.99.99.10/32"}}}, r) == nil {
 			t.Fatal("accepted source address")
 		}
 		for _, routing := range []config.RoutingConfig{

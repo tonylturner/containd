@@ -104,20 +104,20 @@ func TestInferWANGatewayGuessesFromTheWANAddress(t *testing.T) {
 	} {
 		client := &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
 			"GET /api/v1/interfaces/state": func(*http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(200, []outboundIfaceState{{Name: "eth0", Addrs: []string{addr}}}, nil), nil
+				return jsonHTTPResponse(200, []outboundIfaceState{{Name: "wan", Addrs: []string{addr}}}, nil), nil
 			},
 		}}
 		api := &API{BaseURL: "http://test", Client: client}
 
-		dev, gw, err := inferWANGateway(context.Background(), api, []outboundIface{{Name: "wan", Device: "eth0", Zone: "wan"}})
+		dev, gw, err := inferWANGateway(context.Background(), api, []outboundIface{{Name: "wan", Zone: "wan"}})
 		if want == "" {
 			if err == nil {
 				t.Errorf("%s: inferWANGateway = %q, %q; want an error", addr, dev, gw)
 			}
 			continue
 		}
-		if err != nil || dev != "eth0" || gw != want {
-			t.Errorf("%s: inferWANGateway = %q, %q, %v; want eth0, %q", addr, dev, gw, err, want)
+		if err != nil || dev != "wan" || gw != want {
+			t.Errorf("%s: inferWANGateway = %q, %q, %v; want wan, %q", addr, dev, gw, err, want)
 		}
 	}
 }

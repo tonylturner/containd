@@ -167,12 +167,12 @@ func runDiagUDPProbe(ctx context.Context, t *table, req diagReachRequest) {
 
 func resolveSourceInterfaceIPv4(ctx context.Context, store config.Store, src string) (dev string, ip net.IP, err error) {
 	dev = src
-	// If the user passed a logical interface name and it's configured, prefer its binding.
+	// Preserve the configured row's spelling when selected case-insensitively.
 	if store != nil {
 		if cfg, err2 := store.Load(ctx); err2 == nil && cfg != nil {
 			for _, iface := range cfg.Interfaces {
 				if strings.EqualFold(strings.TrimSpace(iface.Name), src) {
-					if d := strings.TrimSpace(iface.Device); d != "" {
+					if d := strings.TrimSpace(iface.Name); d != "" {
 						dev = d
 					}
 					break
@@ -227,7 +227,7 @@ func resolveDestIPv4(ctx context.Context, store config.Store, dst string) (ip ne
 		if cfg, err2 := store.Load(ctx); err2 == nil && cfg != nil {
 			for _, iface := range cfg.Interfaces {
 				if strings.EqualFold(strings.TrimSpace(iface.Name), dst) {
-					dev2 := strings.TrimSpace(firstNonEmpty(iface.Device, iface.Name))
+					dev2 := strings.TrimSpace(iface.Name)
 					ip2, err3 := ipv4OnInterface(dev2)
 					if err3 == nil && ip2 != nil {
 						return ip2, true, dev2, nil

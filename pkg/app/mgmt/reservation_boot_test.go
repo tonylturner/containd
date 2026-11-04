@@ -38,7 +38,7 @@ func TestBootDecisionStoreCapability(t *testing.T) {
 		Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080,
 	}
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "custom", Device: r.Device, Zone: "lan"}}
+	cfg.Interfaces = []config.Interface{{Name: "custom", Zone: "lan"}}
 	cfg.DataPlane.Enforcement = true
 	store := &bootFaultRecordingStore{fault: "old fault"}
 	event, _, err := recordBootDecision(zap.NewNop().Sugar(), mgmtStores{store: store}, cfg, r)

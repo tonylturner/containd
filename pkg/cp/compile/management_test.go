@@ -12,7 +12,7 @@ import (
 
 func TestManagementUnboundInvariant(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Interfaces[0].Device = "disabled-device"
+	cfg.Interfaces[0].Name = "disabled-device"
 	off := false
 	cfg.Interfaces[0].Access = config.InterfaceAccess{Mgmt: &off, HTTP: &off, HTTPS: &off, SSH: &off}
 	locals := ManagementLocalInput(cfg)
@@ -20,8 +20,8 @@ func TestManagementUnboundInvariant(t *testing.T) {
 		t.Fatal("no recovery listeners")
 	}
 	for _, rule := range locals {
-		if !rule.RecoverUnbound || len(rule.Ifaces) != 0 || len(rule.DeniedIfaces) != 1 || rule.DeniedIfaces[0] != "disabled-device" {
-			t.Fatalf("logical names or disabled device leaked: %+v", rule)
+		if !rule.RecoverUnbound || len(rule.Ifaces) != len(cfg.Interfaces)-1 || len(rule.DeniedIfaces) != 1 || rule.DeniedIfaces[0] != "disabled-device" {
+			t.Fatalf("incorrect access membership: %+v", rule)
 		}
 	}
 	if len(UnboundManagementPorts(cfg, []string{"eth0", "disabled-device"})) == 0 {
@@ -50,15 +50,15 @@ func TestManagementUnboundInvariant(t *testing.T) {
 	}
 }
 
-func TestManagementCompilesOnlyBoundDevices(t *testing.T) {
+func TestManagementCompilesRowNames(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Interfaces[4].Device = "eth4"
+	cfg.Interfaces = []config.Interface{{Name: "mgmt0"}}
 	for _, rule := range ManagementLocalInput(cfg) {
-		if len(rule.Ifaces) != 1 || rule.Ifaces[0] != "eth4" {
-			t.Fatalf("not bound-only: %+v", rule)
+		if len(rule.Ifaces) != 1 || rule.Ifaces[0] != "mgmt0" {
+			t.Fatalf("not row names: %+v", rule)
 		}
 	}
-	if len(UnboundManagementPorts(cfg, []string{"eth4"})) != 0 {
+	if len(UnboundManagementPorts(cfg, []string{"mgmt0"})) != 0 {
 		t.Fatal("bound appliance reported as unbound")
 	}
 }

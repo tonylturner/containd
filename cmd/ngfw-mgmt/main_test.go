@@ -9,34 +9,34 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func TestMgmtAllowedOnInterface_UsesDeviceBinding(t *testing.T) {
+func TestMgmtAllowedOnInterface_UsesRowName(t *testing.T) {
 	f := false
 	cfg := &config.Config{
 		Interfaces: []config.Interface{
-			{Name: "wan", Device: "eth0", Access: config.InterfaceAccess{Mgmt: &f}},
+			{Name: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 		},
 	}
-	if mgmtAllowedOnInterface(cfg, "eth0", false) {
-		t.Fatalf("expected mgmt denied on eth0 due to wan binding")
+	if mgmtAllowedOnInterface(cfg, "wan", false) {
+		t.Fatalf("expected mgmt denied on the wan row")
 	}
 }
 
-func TestSSHAllowedOnInterface_UsesDeviceBinding(t *testing.T) {
+func TestSSHAllowedOnInterface_UsesRowName(t *testing.T) {
 	f := false
 	cfg := &config.Config{
 		Interfaces: []config.Interface{
-			{Name: "mgmt", Device: "eth1", Access: config.InterfaceAccess{SSH: &f}},
+			{Name: "mgmt", Access: config.InterfaceAccess{SSH: &f}},
 		},
 	}
-	if sshAllowedOnInterface(cfg, "eth1") {
-		t.Fatalf("expected ssh denied on eth1 due to mgmt binding")
+	if sshAllowedOnInterface(cfg, "mgmt") {
+		t.Fatalf("expected ssh denied on the mgmt row")
 	}
 }
 
 func TestMgmtAllowedOnInterface_UnknownDefaultsAllow(t *testing.T) {
 	cfg := &config.Config{
 		Interfaces: []config.Interface{
-			{Name: "wan", Device: "eth0"},
+			{Name: "wan"},
 		},
 	}
 	if !mgmtAllowedOnInterface(cfg, "does-not-exist", false) {

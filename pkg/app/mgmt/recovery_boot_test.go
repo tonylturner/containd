@@ -124,8 +124,8 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 	f := false
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{
-		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
-		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+		{Name: "mgmtnic", Zone: "mgmt"},
+		{Name: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 	}
 	cfg.DataPlane.Enforcement = true
 	if err := store.Save(ctx, cfg); err != nil {
@@ -275,7 +275,7 @@ func TestBootWithoutReservationClearsHistoricalFault(t *testing.T) {
 	}
 	ctx := context.Background()
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "custom", Device: "custom0", Zone: "lan"}}
+	cfg.Interfaces = []config.Interface{{Name: "custom", Zone: "lan"}}
 	if err := store.Save(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -321,8 +321,8 @@ func TestUnsupportedICSAddressesBootIntoRecovery(t *testing.T) {
 			f := false
 			cfg := config.DefaultConfig()
 			cfg.Interfaces = []config.Interface{
-				{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
-				{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+				{Name: "mgmtnic", Zone: "mgmt"},
+				{Name: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
 			}
 			cfg.DataPlane.Enforcement = true
 			cfg.DataPlane.DPIEnabled = true

@@ -14,7 +14,7 @@ import (
 
 func forwardConfig() *config.Config {
 	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "wan", Zone: "wan", Device: "wan0"}}
+	cfg.Interfaces = []config.Interface{{Name: "wan0", Zone: "wan"}}
 	cfg.Firewall.NAT.Enabled = false
 	cfg.Firewall.NAT.PortForwards = []config.PortForward{{ID: "f", Enabled: true, IngressZone: "wan", Proto: "tcp", ListenPort: 1502,
 		DestIP: "10.0.0.8", DestPort: 502, AllowedSources: []string{"198.51.100.3/24"}}}
@@ -51,17 +51,17 @@ func TestCompileForwardMatchesAndRuntimeInputs(t *testing.T) {
 	}
 	cfg.Firewall.Rules[0].ViaForwards[0] = "edited"
 	cfg.Firewall.NAT.PortForwards[0].AllowedSources[0] = "0.0.0.0/0"
-	cfg.Interfaces[0].Device = "edited"
+	cfg.Interfaces[0].Name = "edited"
 	in.LocalIPv4ByDevice["wan0"][0] = netip.MustParseAddr("192.0.2.1")
 	if snap.Firewall[0].ViaForwards[0] != "f" || !reflect.DeepEqual(snap.ForwardMatches["f"], want) || snap.LocalIPv4ByDevice["wan0"][1] != netip.MustParseAddr("203.0.113.2") {
 		t.Fatal("snapshot aliases input")
 	}
 }
 
-func TestCompileDisabledUnboundAndExplicitForward(t *testing.T) {
+func TestCompileDisabledMissingZoneAndExplicitForward(t *testing.T) {
 	for _, mutate := range []func(*config.Config){
 		func(c *config.Config) { c.Firewall.NAT.PortForwards[0].Enabled = false },
-		func(c *config.Config) { c.Interfaces[0].Device = "" },
+		func(c *config.Config) { c.Interfaces = nil },
 	} {
 		cfg := forwardConfig()
 		mutate(cfg)

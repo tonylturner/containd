@@ -18,7 +18,7 @@ func TestOwnershipManagerStub(t *testing.T) {
 	t.Parallel()
 
 	mgr := newOwnershipManager(zap.NewNop().Sugar())
-	mgr.setInterfaces([]config.Interface{{Name: "wan", Device: "eth0"}})
+	mgr.setInterfaces([]config.Interface{{Name: "wan"}})
 	mgr.setRouting(config.RoutingConfig{Routes: []config.StaticRoute{{Dst: "default", Gateway: "10.0.0.1"}}})
 	mgr.start(context.Background())
 	if got := mgr.currentInterfaces(); got != nil {

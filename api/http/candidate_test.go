@@ -193,7 +193,6 @@ func candidateEndpointCases() []candidateEndpointCase {
 		{"POST", "/interfaces", "/interfaces", map[string]any{"name": "new", "zone": "lan"}},
 		{"PATCH", "/interfaces/spare", "/interfaces", map[string]any{"description": "edited"}},
 		{"DELETE", "/interfaces/spare", "/interfaces", nil},
-		{"POST", "/interfaces/assign", "/interfaces", map[string]any{"mode": "explicit", "mappings": map[string]string{"wan": "eth0"}}},
 		{"POST", "/firewall/rules", "/firewall/rules", map[string]any{"id": "new", "action": "DENY"}},
 		{"PATCH", "/firewall/rules/old", "/firewall/rules", map[string]any{"description": "edited"}},
 		{"DELETE", "/firewall/rules/old", "/firewall/rules", nil},

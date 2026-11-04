@@ -383,9 +383,6 @@ func vpnValidationSets(ifaces []Interface, zones []Zone) (map[string]struct{}, m
 		if strings.TrimSpace(iface.Name) != "" {
 			ifaceSet[iface.Name] = struct{}{}
 		}
-		if strings.TrimSpace(iface.Device) != "" {
-			ifaceSet[iface.Device] = struct{}{}
-		}
 	}
 	return zoneSet, ifaceSet
 }

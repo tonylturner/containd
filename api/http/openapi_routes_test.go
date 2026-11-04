@@ -53,6 +53,9 @@ func TestOpenAPIRoutes(t *testing.T) {
 		routeInventoryServices{}, newMockUserStore(),
 	)
 	registered := openAPIOperations(full)
+	if registered["POST /interfaces/assign"] || documented["POST /interfaces/assign"] {
+		t.Fatal("retired interface assignment route is exposed")
+	}
 	for operation := range registered {
 		if !documented[operation] {
 			t.Errorf("registered operation missing from OpenAPI: %s", operation)

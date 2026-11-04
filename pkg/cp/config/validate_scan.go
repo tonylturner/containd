@@ -210,9 +210,6 @@ func ZoneDevices(ifaces []Interface) map[string][]string {
 			continue
 		}
 		name := iface.Name
-		if strings.TrimSpace(iface.Device) != "" {
-			name = iface.Device
-		}
 		out[iface.Zone] = append(out[iface.Zone], name)
 	}
 	for z, devs := range out {

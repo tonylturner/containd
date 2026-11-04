@@ -194,7 +194,7 @@ func TestSystemCommandsAndViews(t *testing.T) {
 				AuthorizedKeysDir: "/data/ssh/authorized_keys.d",
 			},
 		},
-		Interfaces: []config.Interface{{Name: "wan", Device: "eth0"}},
+		Interfaces: []config.Interface{{Name: "wan"}},
 	}
 	client := &dispatchHTTPClient{
 		t: t,
@@ -434,14 +434,14 @@ func TestInterfaceAndTemplateCommands(t *testing.T) {
 		handlers: map[string]func(*http.Request) (*http.Response, error){
 			"GET /api/v1/interfaces": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, []config.Interface{
-					{Name: "wan", Device: "eth6", Zone: "wan", AddressMode: "dhcp"},
-					{Name: "lan1", Device: "eth0", Zone: "mgmt"},
+					{Name: "wan", Zone: "wan", AddressMode: "dhcp"},
+					{Name: "lan1", Zone: "mgmt"},
 				}, nil), nil
 			},
 			"GET /api/v1/interfaces/state": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, []config.InterfaceState{
-					{Name: "eth6", Index: 7, Up: true, MTU: 1500, MAC: "00:11:22:33:44:55", Addrs: []string{"192.168.240.2/24"}},
-					{Name: "eth0", Index: 1, Up: true, MTU: 1500, MAC: "00:11:22:33:44:66", Addrs: []string{"192.168.241.2/24"}},
+					{Name: "wan", Index: 7, Up: true, MTU: 1500, MAC: "00:11:22:33:44:55", Addrs: []string{"192.168.240.2/24"}},
+					{Name: "lan1", Index: 1, Up: true, MTU: 1500, MAC: "00:11:22:33:44:66", Addrs: []string{"192.168.241.2/24"}},
 				}, nil), nil
 			},
 			"GET /api/v1/templates": func(req *http.Request) (*http.Response, error) {
@@ -469,7 +469,7 @@ func TestInterfaceAndTemplateCommands(t *testing.T) {
 	if err := showInterfacesStateAPI(api)(context.Background(), &state, nil); err != nil {
 		t.Fatalf("showInterfacesStateAPI: %v", err)
 	}
-	if !strings.Contains(state.String(), "eth6") || !strings.Contains(state.String(), "00:11:22:33:44:55") {
+	if !strings.Contains(state.String(), "wan") || !strings.Contains(state.String(), "00:11:22:33:44:55") {
 		t.Fatalf("unexpected interface state output: %q", state.String())
 	}
 	var templates bytes.Buffer

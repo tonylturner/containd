@@ -2426,7 +2426,6 @@ components:
         addressMode: {type: string}
         addresses: {items: {type: string}, type: array, nullable: true}
         alias: {type: string}
-        device: {type: string}
         gateway: {type: string}
         members: {items: {type: string}, type: array, nullable: true}
         name: {type: string}
@@ -2435,7 +2434,7 @@ components:
         vlanId: {type: integer}
         zone: {type: string}
       type: object
-      description: Logical interface configuration.
+      description: Interface configuration. The row name is its kernel device name; VLAN parents and bridge members name rows.
     InterfaceAccess:
       properties:
         http: {type: boolean}
@@ -2457,7 +2456,6 @@ components:
         addressMode: {type: string, nullable: true}
         addresses: {items: {type: string}, type: array, nullable: true}
         alias: {type: string, nullable: true}
-        device: {type: string, nullable: true}
         gateway: {type: string, nullable: true}
         members: {items: {type: string}, type: array, nullable: true}
         name: {type: string, nullable: true}
@@ -3450,12 +3448,6 @@ components:
       properties:
         confirm: {type: string, enum: [REPLACE]}
       required: [confirm]
-    InterfaceAssignRequest:
-      type: object
-      properties:
-        mode: {type: string, enum: [auto, explicit]}
-        mappings: {type: object, additionalProperties: {type: string}}
-      description: Stages device bindings. Mappings imply explicit mode when mode is omitted; none or - unbinds a device.
     IdentityMapping:
       type: object
       description: >-
@@ -4288,7 +4280,6 @@ paths:
                 required: [active]
                 properties:
                   active: {type: boolean}
-                  device: {type: string}
                   local: {type: string, description: Host address with prefix length}
                   sources: {type: array, items: {type: string, format: ipv4}}
                   port: {type: integer, minimum: 1, maximum: 65535}
@@ -4329,7 +4320,6 @@ paths:
                     required: [active, faults]
                     properties:
                       active: {type: boolean}
-                      device: {type: string}
                       local: {type: string}
                       sources: {type: array, items: {type: string, format: ipv4}}
                       port: {type: integer}
@@ -5309,7 +5299,7 @@ paths:
           Omitted fields use their normal defaults rather than saved values.
           The complete configuration must select at least one interface or
           zone; an empty selection is rejected. Logical interfaces resolve to
-          their Device when set, otherwise their Name, and the kernel device
+          their row name, and the kernel device
           must exist. Explicit interfaces that resolve to missing devices are
           rejected. Zones include only members with existing kernel devices;
           a zone with none is rejected with its name and unbound members.
@@ -7047,33 +7037,6 @@ paths:
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/InterfaceState'}}
-  /interfaces/assign:
-    post:
-      parameters:
-      - $ref: '#/components/parameters/IfRevision'
-      summary: Stage logical interface bindings (admin)
-      tags: [Interfaces]
-      description: Stages the shared candidate; commit to apply.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/InterfaceAssignRequest'}
-      responses:
-        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        '200':
-          description: Success
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  interfaces: {type: array, items: {$ref: '#/components/schemas/Interface'}}
-          headers:
-            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
-            X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /interfaces/reconcile:
     post:
       summary: Replace kernel interfaces from running config (admin)

@@ -199,11 +199,8 @@ func configReadableDuringDiscovery(ctx context.Context, store config.Store) erro
 func TestStagingDiscoveryDoesNotHoldStoreMutex(t *testing.T) {
 	store := stageStore(t)
 	server := NewServerWithEngineAndServices(store, nil, discoveryReadEngine{&mockEngine{}, store}, validationReadServices{store}, nil)
-	for _, path := range []string{"/services/dns", "/services/av", "/interfaces/assign"} {
+	for _, path := range []string{"/services/dns", "/services/av"} {
 		var body any = map[string]any{}
-		if path == "/interfaces/assign" {
-			body = map[string]any{"mode": "explicit", "mappings": map[string]string{"spare": "eth0"}}
-		}
 		rec := requestStage(t, server, "POST", path, body)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s discovery blocked: %d %s", path, rec.Code, rec.Body)

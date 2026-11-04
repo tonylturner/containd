@@ -10,17 +10,17 @@ import (
 )
 
 // ApplianceDefaults is the single first-boot/factory-reset configuration builder.
-// Discovery changes only the new in-memory config; callers preflight before any
+// Callers preflight the new in-memory config before any
 // persistence or destructive action.
 func ApplianceDefaults(r *mgmtpath.Reservation) *config.Config {
-	return applianceDefaults(r, AutoBindDefaultInterfaceDevicesReserved)
+	return applianceDefaults(r)
 }
 
 // WithApplianceListeners returns a copy of cfg whose management HTTP,
 // HTTPS and SSH listener settings are the appliance defaults for r. They
 // are what management binds when stored listener settings cannot serve.
 func WithApplianceListeners(cfg *config.Config, r *mgmtpath.Reservation) *config.Config {
-	defaults := applianceDefaults(r, func(*config.Config, *mgmtpath.Reservation) bool { return false })
+	defaults := applianceDefaults(r)
 	out := *cfg
 	out.System.Mgmt = defaults.System.Mgmt
 	out.System.Mgmt.TLSCertFile = cfg.System.Mgmt.TLSCertFile
@@ -29,7 +29,7 @@ func WithApplianceListeners(cfg *config.Config, r *mgmtpath.Reservation) *config
 	return &out
 }
 
-func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtpath.Reservation) bool) *config.Config {
+func applianceDefaults(r *mgmtpath.Reservation) *config.Config {
 	def := config.DefaultConfig()
 	config.ApplyBootstrapEnvDefaults(def)
 	def.System.Hostname = "containd"
@@ -58,6 +58,5 @@ func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtp
 			def.System.SSH.ListenAddr = "127.0.0.1:0"
 		}
 	}
-	bind(def, r)
 	return def
 }

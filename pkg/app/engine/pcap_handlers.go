@@ -109,9 +109,6 @@ func resolvePCAPConfig(cfg config.PCAPConfig, ifaces []config.Interface, lookup 
 
 	logical := make(map[string]string, len(ifaces))
 	kernelDevice := func(iface config.Interface) string {
-		if device := strings.TrimSpace(iface.Device); device != "" {
-			return device
-		}
 		return strings.TrimSpace(iface.Name)
 	}
 	for _, iface := range ifaces {

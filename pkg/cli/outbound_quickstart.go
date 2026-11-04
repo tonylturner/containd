@@ -19,9 +19,8 @@ type outboundIfaceState struct {
 }
 
 type outboundIface struct {
-	Name   string `json:"name"`
-	Device string `json:"device,omitempty"`
-	Zone   string `json:"zone,omitempty"`
+	Name string `json:"name"`
+	Zone string `json:"zone,omitempty"`
 }
 
 const (
@@ -45,7 +44,7 @@ func setOutboundQuickstartLANWAN(api *API) Command {
 		}
 		ifaces := make([]outboundIface, 0, len(snapshot.Interfaces))
 		for _, iface := range snapshot.Interfaces {
-			ifaces = append(ifaces, outboundIface{Name: iface.Name, Device: iface.Device, Zone: iface.Zone})
+			ifaces = append(ifaces, outboundIface{Name: iface.Name, Zone: iface.Zone})
 		}
 		wanDev, gwIP, err := inferWANGateway(ctx, api, ifaces)
 		if err != nil {
@@ -85,9 +84,9 @@ func inferWANGateway(ctx context.Context, api *API, ifaces []outboundIface) (str
 	if wan == nil {
 		return "", "", fmt.Errorf("could not determine wan interface (expected an interface named 'wan' or in zone 'wan')")
 	}
-	wanDev := strings.TrimSpace(firstNonEmpty(wan.Device, wan.Name))
+	wanDev := strings.TrimSpace(wan.Name)
 	if wanDev == "" {
-		return "", "", fmt.Errorf("wan interface has no device binding")
+		return "", "", fmt.Errorf("wan interface has no row name")
 	}
 	var states []outboundIfaceState
 	if err := api.getJSON(ctx, "/api/v1/interfaces/state", &states); err != nil {

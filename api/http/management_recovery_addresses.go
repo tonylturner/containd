@@ -36,17 +36,17 @@ func recoveryAddresses(stored *config.Config, input []rules.LocalServiceRule) []
 	}
 	var out []config.Interface
 	for _, iface := range stored.Interfaces {
-		dev := strings.TrimSpace(iface.Device)
+		dev := strings.TrimSpace(iface.Name)
 		kind := strings.ToLower(strings.TrimSpace(iface.Type))
 		switch {
-		case dev == "" || !admitted[dev] || members[dev] || members[strings.TrimSpace(iface.Name)]:
+		case dev == "" || !admitted[dev] || members[dev]:
 			continue
 		case kind != "" && kind != "physical":
 			continue
 		case strings.EqualFold(strings.TrimSpace(iface.AddressMode), "dhcp") || !staticPrefixes(iface.Addresses):
 			continue
 		}
-		out = append(out, config.Interface{Name: iface.Name, Device: dev, Addresses: append([]string(nil), iface.Addresses...)})
+		out = append(out, config.Interface{Name: iface.Name, Addresses: append([]string(nil), iface.Addresses...)})
 	}
 	return out
 }

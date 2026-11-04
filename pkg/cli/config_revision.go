@@ -51,6 +51,6 @@ func isConfigWrite(path string) bool {
 			return true
 		}
 	}
-	return path == "/api/v1/interfaces" || path == "/api/v1/interfaces/assign" ||
+	return path == "/api/v1/interfaces" ||
 		(strings.HasPrefix(path, "/api/v1/interfaces/") && path != "/api/v1/interfaces/reconcile")
 }

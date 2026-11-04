@@ -5,17 +5,14 @@ package mgmtapp
 
 import (
 	"context"
-	"net"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
 
-func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
+func TestStartupPreservesCandidateAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.db")
 	t.Setenv("CONTAIND_CONFIG_DB", path)
@@ -25,10 +22,10 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	initial := &config.Config{
 		System:     config.SystemConfig{Hostname: "running"},
 		Zones:      []config.Zone{{Name: "wan"}},
-		Interfaces: []config.Interface{{Name: "wan", Zone: "wan", Device: "stale-device"}},
+		Interfaces: []config.Interface{{Name: "wan", Zone: "wan"}},
 		IDS:        config.IDSConfig{Rules: config.DefaultIDSConfig().Rules[:1]},
 	}
-	wantDevice := startupRepairDevice(t, initial)
+	wantName := "wan"
 	store, err := config.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +62,7 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 		t.Fatalf("restart lost staged work: %+v", candidate)
 	}
 	for _, cfg := range []*config.Config{running, candidate} {
-		if cfg.Interfaces[0].Device != wantDevice || cfg.System.Mgmt.HTTPListenAddr != ":8080" {
+		if cfg.Interfaces[0].Name != wantName || cfg.System.Mgmt.HTTPListenAddr != ":8080" {
 			t.Fatalf("repair missing: %+v", cfg)
 		}
 	}
@@ -79,30 +76,22 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	promoted, err := stores.store.Load(ctx)
-	if err != nil || promoted.Interfaces[0].Device != wantDevice || promoted.System.Mgmt.HTTPListenAddr != ":8080" || promoted.System.Hostname != "staged-host" {
+	if err != nil || promoted.Interfaces[0].Name != wantName || promoted.System.Mgmt.HTTPListenAddr != ":8080" || promoted.System.Hostname != "staged-host" {
 		t.Fatalf("commit reverted startup repair: %+v %v", promoted, err)
 	}
 }
 
-func TestStartupPreservesConsistentBindingAndRunningRevision(t *testing.T) {
+func TestStartupPreservesRowsAndRunningRevision(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.db")
 	t.Setenv("CONTAIND_CONFIG_DB", path)
 	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))
 	t.Setenv("CONTAIND_USERS_DB", filepath.Join(dir, "users.db"))
-	for _, name := range config.DefaultPhysicalInterfaces() {
-		t.Setenv("CONTAIND_AUTO_"+strings.ToUpper(name)+"_SUBNET", "")
-		t.Setenv("CONTAIND_"+strings.ToUpper(name)+"_SUBNET", "")
-	}
-	ifaces, err := net.Interfaces()
-	if err != nil || len(ifaces) == 0 {
-		t.Fatalf("discover host interface for binding test: interfaces=%v err=%v", ifaces, err)
-	}
-	device := ifaces[0].Name
+	device := "wan"
 
 	ctx := context.Background()
 	initial := config.DefaultConfig()
-	initial.Interfaces = []config.Interface{{Name: "wan", Zone: "wan", Device: device}}
+	initial.Interfaces = []config.Interface{{Name: device, Zone: "wan"}}
 	store, err := config.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -134,39 +123,9 @@ func TestStartupPreservesConsistentBindingAndRunningRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after.RunningRevision != before.RunningRevision {
-		t.Fatalf("boot repair changed running revision: %q -> %q; device=%q before=%+v after=%+v", before.RunningRevision, after.RunningRevision, device, before.Running.Interfaces, running.Interfaces)
+		t.Fatalf("boot repair changed running revision: %q -> %q; row=%q before=%+v after=%+v", before.RunningRevision, after.RunningRevision, device, before.Running.Interfaces, running.Interfaces)
 	}
-	if len(running.Interfaces) != 1 || running.Interfaces[0].Device != device {
-		t.Fatalf("boot repair changed a present, uncontradicted binding: %+v", running.Interfaces)
+	if len(running.Interfaces) != 1 || running.Interfaces[0].Name != device {
+		t.Fatalf("startup changed row identity: %+v", running.Interfaces)
 	}
-}
-
-// Exercise the real startup autobinder against a local, IPv4-bearing device.
-// This needs no network mutation, privileged access or fixed host device names.
-func startupRepairDevice(t *testing.T, initial *config.Config) string {
-	t.Helper()
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, addr := range addrs {
-			ip, subnet, err := net.ParseCIDR(addr.String())
-			if err != nil || ip.To4() == nil {
-				continue
-			}
-			t.Setenv("CONTAIND_AUTO_WAN_SUBNET", subnet.String())
-			probe := *initial
-			probe.Interfaces = append([]config.Interface(nil), initial.Interfaces...)
-			if httpapi.AutoBindDefaultInterfaceDevices(&probe) {
-				return probe.Interfaces[0].Device
-			}
-		}
-	}
-	t.Fatal("startup autobind integration test needs an eligible local IPv4 interface")
-	return ""
 }

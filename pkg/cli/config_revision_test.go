@@ -142,7 +142,7 @@ func TestCLIRevisionReadsRejectMissingAuthority(t *testing.T) {
 
 func TestCLIRevisionDirectIntentsEstablishCommandBase(t *testing.T) {
 	for _, line := range []string{
-		"set zone dmz", "assign interfaces auto", "add firewall rule allow ALLOW",
+		"set zone dmz", "add firewall rule allow ALLOW",
 		"apply template modbus_read_only", "set syslog format json",
 		"set port-forward add web wan tcp 8080 192.0.2.5:80",
 		"delete firewall rule allow", "factory reset NUCLEAR",
