@@ -217,6 +217,25 @@ The starter prerequisite checks can be tested without a Docker daemon or running
 containers: `python3 scripts/bootstrap-starter.test.py`. These offline tests cover
 the Engine 28.1 boundary, unavailable Engine and Compose feature rejection.
 
+## Compose-Owned Interface Assignment Smoke
+
+`bash scripts/smoke-interfaces.sh` verifies that Compose `interface_name`
+attachments bind the matching interface rows through traffic enforcement. It
+tests reversed attachment priority, an independent project and data volume, a
+missing `lan1` degradation without rollback, and a late named network attachment
+that clears the fault without a commit. Each policy phase checks live traffic
+against its exact firewall rule counter. The late attachment uses Docker's
+`network connect --driver-opt com.docker.network.endpoint.ifname=lan1` option.
+
+The script requires Docker Engine 28.1+ and Compose with `interface_name`
+support, plus curl, jq and Python 3. It uses ephemeral management ports bound
+only to `127.0.0.1`, refuses to take over existing project resources, and removes
+only its own projects and named volumes. Set `CONTAIND_IMAGE` to the image under
+test; `COMPOSE_PROJECT_NAME` selects the first project. `SMOKE_WAN_NET` and
+`SMOKE_LAN_NET` choose the first project's unused three-octet subnet prefixes;
+`SMOKE_FRESH_WAN_NET` and `SMOKE_FRESH_LAN_NET` choose different prefixes for
+the second project.
+
 ## Scanning Gate Smoke
 
 CI runs this smoke against the just-built `containd/containd:ci` image, using a
