@@ -221,7 +221,7 @@ the Engine 28.1 boundary, unavailable Engine and Compose feature rejection.
 
 `bash scripts/smoke-interfaces.sh` verifies that Compose `interface_name`
 attachments bind the matching interface rows through traffic enforcement. It
-tests reversed attachment priority, an independent project and data volume, a
+tests a reversed attachment order (explicit network disconnect and reconnect), an independent project and data volume, a
 missing `lan1` degradation without rollback, and a late named network attachment
 that clears the fault without a commit. Each policy phase checks live traffic
 against its exact firewall rule counter. The late attachment uses Docker's
