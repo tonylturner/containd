@@ -3925,6 +3925,7 @@ components:
         Enabled: {type: boolean}
         Include: {items: {$ref: '#/components/schemas/RulesGateEntry'}, type: array}
         Exclude: {items: {$ref: '#/components/schemas/RulesGateEntry'}, type: array}
+        ReferencedZones: {items: {type: string}, type: array, uniqueItems: true, description: Sorted zones explicitly named as source or destination by enabled include entries; empty when disabled; any selections name no zone}
         Zones: {items: {$ref: '#/components/schemas/RulesGateZone'}, type: array, description: Every egress zone an include entry references}
         ICSDevices: {items: {type: string}, type: array, description: Devices of the ICS-marked zones}
         ICSCIDRs: {items: {type: string}, type: array, description: Subnets of the ICS-marked zones' interfaces and addresses of the ICS-marked assets}
