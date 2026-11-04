@@ -63,8 +63,15 @@ cleanup_files() {
   python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$WORK_DIR"
 }
 
+# A status read that races a state transition returns 502 with an
+# inconsistent-observation view; reread briefly before failing.
 protection_status() {
-  api_get /dataplane/protection
+  local _
+  for _ in 1 2 3 4 5; do
+    api_get /dataplane/protection && return 0
+    sleep 0.2
+  done
+  return 1
 }
 
 last_events() {
