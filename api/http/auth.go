@@ -27,6 +27,7 @@ const (
 const ctxRoleKey = "role"
 const ctxUserKey = "user"
 const ctxSessionKey = "session"
+const ctxActorKey = "actor"
 
 const (
 	idleTTL = 30 * time.Minute
@@ -84,6 +85,11 @@ func handleLabAuth(c *gin.Context, userStore users.Store, cfg authModeConfig) {
 		return
 	}
 	c.Set(ctxRoleKey, effectiveUserRole(cfg.lab, ""))
+	username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
+	if username == "" {
+		username = "containd"
+	}
+	actor := username
 	if userStore != nil {
 		var u *users.StoredUser
 		var err error
@@ -93,17 +99,15 @@ func handleLabAuth(c *gin.Context, userStore users.Store, cfg authModeConfig) {
 		// Session-less automation subjects need not name a local account.
 		// They retain the configured bootstrap identity, as do unsigned labs.
 		if u == nil && (err == nil || errors.Is(err, users.ErrNotFound)) {
-			username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
-			if username == "" {
-				username = "containd"
-			}
 			u, err = userStore.GetByUsername(c.Request.Context(), username)
 		}
 		if err == nil && u != nil {
 			c.Set(ctxUserKey, u.ID)
 			c.Set(ctxSessionKey, "lab")
+			actor = u.Username
 		}
 	}
+	c.Set(ctxActorKey, actor)
 	c.Next()
 }
 
@@ -119,9 +123,11 @@ func handleLegacyAuth(c *gin.Context, cfg authModeConfig) {
 	switch {
 	case cfg.adminToken != "" && tok == cfg.adminToken:
 		c.Set(ctxRoleKey, string(roleAdmin))
+		c.Set(ctxActorKey, "legacy-admin-token")
 		c.Next()
 	case cfg.auditorToken != "" && tok == cfg.auditorToken:
 		c.Set(ctxRoleKey, string(roleView))
+		c.Set(ctxActorKey, "legacy-auditor-token")
 		c.Next()
 	default:
 		abortJSON(c, http.StatusUnauthorized, "invalid token")
@@ -298,7 +304,7 @@ func setAuthenticatedContext(c *gin.Context, u *users.StoredUser, jti string) {
 	c.Set(ctxRoleKey, effectiveUserRole(false, u.Role))
 	c.Set(ctxUserKey, u.ID)
 	c.Set(ctxSessionKey, jti)
-	c.Set("actor", u.Username)
+	c.Set(ctxActorKey, u.Username)
 	// A password or MFA change made by this request keeps this session.
 	c.Request = c.Request.WithContext(users.WithActingSession(c.Request.Context(), jti))
 }

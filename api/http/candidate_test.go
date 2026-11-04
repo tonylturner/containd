@@ -265,7 +265,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("list did not return candidate: status=%d body=%s err=%v", rec.Code, rec.Body, err)
 			}
-			if len(audit.records) != 1 || audit.records[0].Actor != "stage-tester" || audit.records[0].Detail != "candidate" {
+			if len(audit.records) != 1 || audit.records[0].Actor != "legacy-admin-token" || audit.records[0].Detail != "candidate" {
 				t.Fatalf("want one actor/object/candidate audit, got %+v", audit.records)
 			}
 			rec = requestStage(t, server, "POST", "/config/commit", nil)

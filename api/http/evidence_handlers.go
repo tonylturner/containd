@@ -41,7 +41,7 @@ func evidenceProxy(store config.Store, engine EngineClient, path string) gin.Han
 			apiError(c, 400, "invalid or oversized evidence request")
 			return
 		}
-		response, err := client.Learn(c.Request.Context(), c.Request.Method, suffix, c.GetString("actor"), body)
+		response, err := client.Learn(c.Request.Context(), c.Request.Method, suffix, c.GetString(ctxActorKey), body)
 		if err != nil {
 			evidenceHTTPError(c, err)
 			return
@@ -121,7 +121,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			internalError(c, err)
 			return
 		}
-		frozen, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/resolve", c.GetString("actor"), body)
+		frozen, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/resolve", c.GetString(ctxActorKey), body)
 		if err != nil {
 			evidenceHTTPError(c, err)
 			return
@@ -186,7 +186,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 				return
 			}
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
-			_, releaseErr := client.Learn(cleanup, http.MethodPost, "/learn/stage/release", c.GetString("actor"), body)
+			_, releaseErr := client.Learn(cleanup, http.MethodPost, "/learn/stage/release", c.GetString(ctxActorKey), body)
 			cancel()
 			if releaseErr != nil {
 				apiError(c, 503, "stage release uncertain; retry requestId "+req.RequestID)
@@ -204,7 +204,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 		}
 		configRevisionResponse(c, revision)
 		configChangeResponse(c, "staged")
-		if _, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/complete", c.GetString("actor"), body); err != nil {
+		if _, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/complete", c.GetString(ctxActorKey), body); err != nil {
 			apiError(c, 503, "candidate durably staged; completion uncertain; retry requestId "+req.RequestID)
 			return
 		}

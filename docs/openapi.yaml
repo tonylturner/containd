@@ -15,6 +15,11 @@ info:
     User-management responses report stored account roles.
     Static admin/auditor bearer tokens are a
     fallback only when the user store or JWT secret is unavailable.
+    Suggestion approval and request audit attribution use the authenticated
+    username. Lab mode uses the resolved account's username, or
+    CONTAIND_DEFAULT_ADMIN_USERNAME (default containd) when no account resolves.
+    Static tokens use legacy-admin-token or legacy-auditor-token, respectively.
+    X-User cannot set or override the actor. Audit records without an actor use unknown.
     Persisted configuration edits stage a shared candidate. Reads of editable
     settings use that candidate; commit promotes and applies it.
     In strict, validation, candidate writes, imports and promotion reject newly
@@ -9524,7 +9529,7 @@ x-internal-paths:
         required: true
         schema:
           type: string
-        description: Authenticated actor set by management, not a caller-provided public header.
+        description: Authenticated actor set by management (session or lab username, or legacy-admin-token), not a caller-provided public header. X-User is ignored.
       requestBody:
         required: true
         content:

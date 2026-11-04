@@ -34,6 +34,13 @@ requires at least 32 characters and refuses static tokens and lab mode.
 `GET /health` and `GET /auth/me` include `profile: "training" | "strict"`.
 See [deployment profiles](deployment-profiles.md) for bootstrap credentials.
 
+Suggestion approval and request audit attribution use the authenticated username.
+In lab mode this is the resolved local account's username; if no account resolves,
+it is `CONTAIND_DEFAULT_ADMIN_USERNAME` (default `containd`).
+Static admin and auditor tokens use the fixed identities `legacy-admin-token` and
+`legacy-auditor-token`, respectively. `X-User` cannot set or override the actor.
+Audit records without an actor use `unknown`.
+
 When optional local-account MFA is enabled, `POST /auth/login` returns an MFA challenge instead of a session token, and `POST /auth/login/mfa` completes the login with a TOTP code.
 
 Admins can also require MFA for specific local accounts. When MFA is required for a user who has not enrolled yet, containd grants a 7-day grace period during which the user can still log in with a password and complete MFA setup. After that grace period expires, the user is restricted to account, logout, and MFA-enrollment endpoints until MFA is enabled.
