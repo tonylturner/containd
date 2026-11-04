@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const revision = "0123456789abcdef.1";
 const iface = {
-  name: "lan1", alias: "Inside", type: "physical", device: "eth2", zone: "lan",
+  name: "lan1", alias: "Inside", type: "physical", zone: "lan",
   addressMode: "static", addresses: ["192.0.2.2/24", "2001:db8::2/64"],
   access: { mgmt: true, ssh: true, http: true, https: true },
 };
@@ -19,7 +19,7 @@ test("interface inspect is keyboard operable and edit preserves the exact payloa
     const json = path.includes("/auth/") ? { id: "admin", username: "containd", role: "admin" }
       : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] }
       : path === "/api/v1/interfaces" ? [iface]
-      : path === "/api/v1/interfaces/state" ? [{ name: "eth2", up: true, mtu: 1500, mac: "02:00:00:00:00:02", addrs: ["198.51.100.2/24"] }]
+      : path === "/api/v1/interfaces/state" ? [{ name: "lan1", up: true, mtu: 1500, mac: "02:00:00:00:00:02", addrs: ["198.51.100.2/24"] }]
       : path === "/api/v1/zones" ? [{ name: "lan", alias: "Plant" }]
       : {};
     await route.fulfill({ json, headers: { "X-Containd-Revision": revision } });
@@ -41,7 +41,7 @@ test("interface inspect is keyboard operable and edit preserves the exact payloa
   await row.getByPlaceholder("alias (optional)").fill("Inside updated");
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => payload).toEqual({
-    alias: "Inside updated", type: iface.type, device: iface.device, zone: iface.zone,
+    alias: "Inside updated", type: iface.type, zone: iface.zone,
     addressMode: iface.addressMode, addresses: iface.addresses, access: iface.access, members: [], parent: "", vlanId: 0, gateway: "",
   });
   await expect(inspect).toBeFocused();
@@ -74,7 +74,7 @@ test("view-only operators can inspect network details without edit actions", asy
     const json = path.includes("/auth/") ? { id: "reader", username: "reader", role: "viewer" }
       : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] }
       : path === "/api/v1/interfaces" ? [iface]
-      : path === "/api/v1/interfaces/state" ? [{ name: "eth2", up: true, mtu: 1500, addrs: [] }]
+      : path === "/api/v1/interfaces/state" ? [{ name: "lan1", up: true, mtu: 1500, addrs: [] }]
       : path === "/api/v1/zones" ? [{ name: "lan" }]
       : {};
     await route.fulfill({ json, headers: { "X-Containd-Revision": revision } });

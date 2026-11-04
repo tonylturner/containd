@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { buildBlockItems } from "../app/config/config-utils";
 import { fieldChanges } from "../app/config/config-field-changes";
 import { observation, protectionAPI } from "./fixtures/protection-api";
 
@@ -112,5 +113,14 @@ test("unkeyed arrays, duplicate keys and container changes do not hide changes",
   ]);
   expect(fieldChanges([], {}, "settings")).toEqual([
     { kind: "value", label: "settings", before: "[]", after: "{}" },
+  ]);
+});
+
+test("interface summaries identify rows and zones without a separate device binding", () => {
+  expect(buildBlockItems("interfaces", { interfaces: [
+    { name: "lan1", alias: "Plant", zone: "ot" }, { name: "wan" },
+  ] })).toEqual([
+    { id: "lan1", label: "Plant (lan1)", meta: "ot" },
+    { id: "wan", label: "wan", meta: "no zone" },
   ]);
 });

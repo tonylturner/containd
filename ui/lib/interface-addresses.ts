@@ -12,7 +12,7 @@ export function runtimeFor(
   iface: Interface,
   state: InterfaceState[],
 ): InterfaceState | null {
-  return state.find((s) => s.name === (iface.device || iface.name)) ?? null;
+  return state.find((s) => s.name === iface.name) ?? null;
 }
 
 // Display only: never use these addresses in a configuration update.
@@ -39,4 +39,13 @@ export function interfaceAddresses(
       .filter((addr) => !/^fe[89ab][0-9a-f]:/i.test(addr))
       .sort((a, b) => Number(a.includes(":")) - Number(b.includes(":"))),
   };
+}
+
+export function interfaceAttachment(
+  iface: Interface,
+  state: InterfaceState[] | null,
+): "attached" | "down" | "not attached" | "unknown" {
+  if (state === null) return "unknown";
+  const runtime = runtimeFor(iface, state);
+  return runtime ? runtime.up ? "attached" : "down" : "not attached";
 }

@@ -217,7 +217,7 @@ export default function VPNPage() {
   const interfaceOptions = useMemo(() => {
     return (interfaces ?? [])
       .map((iface) => {
-        const value = (iface.device ?? iface.name ?? "").trim();
+        const value = iface.name;
         if (!value) return null;
         const label = iface.alias ? `${iface.alias} (${value})` : value;
         const zone = iface.zone ? ` · ${iface.zone}` : "";

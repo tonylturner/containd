@@ -51,7 +51,7 @@ test("the firewall node shows effects apart from deny and real hit counts", asyn
       "/api/v1/auth/session": { id: "admin", username: "containd", role: "admin" },
       "/api/v1/config": {
         zones: [{ name: "it" }, { name: "ot" }],
-        interfaces: [{ name: "lan1", device: "eth0", zone: "it", addresses: ["192.0.2.1/24"] }],
+        interfaces: [{ name: "lan1", zone: "it", addresses: ["192.0.2.1/24"] }],
         routing: { gateways: [], routes: [], rules: [] },
         firewall: { rules },
       },
@@ -88,7 +88,7 @@ test("topology reads health from the shared poll, not its own snapshot fetches",
       "/api/v1/health": { status: "ok", component: "fw-lab-7", build: "9.9.9", time: new Date(Date.now() - 3 * 3600_000).toISOString() },
       "/api/v1/config": {
         zones: [{ name: "it" }],
-        interfaces: [{ name: "lan1", device: "eth0", zone: "it", addresses: ["192.0.2.1/24"] }],
+        interfaces: [{ name: "lan1", zone: "it", addresses: ["192.0.2.1/24"] }],
         routing: { gateways: [], routes: [], rules: [] },
         firewall: { rules: [] },
       },

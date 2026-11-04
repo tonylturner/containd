@@ -109,7 +109,7 @@ export function buildBlockItems(
       return (cfg.interfaces ?? []).map((i: any): BlockItem => ({
         id: String(i.name),
         label: i.alias ? `${i.alias} (${i.name})` : String(i.name),
-        meta: [i.zone || "no zone", i.device || "no device"].join(" · "),
+        meta: i.zone || "no zone",
       }));
     case "firewall":
       return (cfg.firewall?.rules ?? []).map((r: any): BlockItem => ({

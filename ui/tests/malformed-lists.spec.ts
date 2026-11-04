@@ -203,7 +203,7 @@ test("topology PHYSICAL view reports malformed flows after a healthy load (poll)
   page.on("pageerror", (err) => pageErrors.push(String(err)));
   await page.clock.install();
   const list = await mockHealthyThenMalformed(page, "/api/v1/flows", {
-    "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", device: "eth0", zone: "it" }] },
+    "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", zone: "it" }] },
   });
   await page.goto("/topology/");
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/flows");

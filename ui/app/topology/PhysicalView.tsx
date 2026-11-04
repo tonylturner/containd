@@ -510,7 +510,7 @@ export default function PhysicalView() {
               : runtimeFor(ifc, data.ifaceState)?.addrs;
             return (
               <div key={ifc.name} className={`${s.ifacePill} ${s.ifacePillAmber}`}>
-                <span className={s.ifacePillName}>{ifc.device || ifc.name}</span>
+                <span className={s.ifacePillName}>{ifc.name}</span>
                 <span className={s.ifacePillIp}>
                   <TopologyAddress address={address} fullAddrs={fullAddrs} />
                 </span>

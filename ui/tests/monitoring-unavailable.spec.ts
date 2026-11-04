@@ -54,7 +54,7 @@ test("flow failure is not an empty flow set and Retry recovers", async ({ page }
 
 test("interface failure differs from a reachable engine with no interfaces", async ({ page }) => {
   let unavailable = true;
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "configured-lan", device: "eth0", addresses: ["192.0.2.1/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "configured-lan", addresses: ["192.0.2.1/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(unavailable
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
     : { json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
@@ -128,10 +128,10 @@ test("PCAP discovery distinguishes unavailable, empty and populated state withou
 test("Auto WAN setup retries unavailable discovery without staging fabricated routes", async ({ page }) => {
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   const staged: unknown[] = [];
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", index: 1, up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    : { json: phase === "empty" ? [] : [{ name: "wan", index: 1, up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/routing", (route) => {
     if (route.request().method() === "POST") {
       const next = route.request().postDataJSON();
@@ -157,8 +157,8 @@ test("Auto WAN setup retries unavailable discovery without staging fabricated ro
   await expect(page.getByText(/Gateway and default route staged/)).toBeVisible();
   expect(staged).toHaveLength(1);
   expect(staged[0]).toMatchObject({
-    gateways: [{ name: "wan-gw", address: "192.0.2.1", iface: "eth0" }],
-    routes: [{ dst: "default", gateway: "wan-gw", iface: "eth0", table: 0 }],
+    gateways: [{ name: "wan-gw", address: "192.0.2.1", iface: "wan" }],
+    routes: [{ dst: "default", gateway: "wan-gw", iface: "wan", table: 0 }],
   });
   phase = "unavailable";
   await autoWAN.click();
@@ -170,11 +170,11 @@ test("Auto WAN setup retries unavailable discovery without staging fabricated ro
 test("diagnostics keeps interface-state failure local and retries runtime address discovery", async ({ page }) => {
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [
-    { name: "lan", device: "eth0", zone: "lan" },
+    { name: "lan", zone: "lan" },
   ], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.10/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    : { json: phase === "empty" ? [] : [{ name: "lan", up: true, addrs: ["192.0.2.10/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/diagnostics/");
   const connectivity = page.getByRole("region", { name: "Interface Connectivity", exact: true });
   const unavailable = connectivity.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
@@ -204,7 +204,7 @@ for (const view of ["physical", "logical"] as const) {
     test(`${view} topology retries unavailable ${failedEndpoint} without rendering empty or stale runtime data`, async ({ page }) => {
       let phase: "unavailable" | "empty" | "populated" = "unavailable";
       await page.route("**/api/v1/config", (route) => route.fulfill({ json: {
-        interfaces: view === "logical" ? [{ name: "lan", device: "eth9", zone: "lan" }] : [],
+        interfaces: view === "logical" ? [{ name: "eth9", zone: "lan" }] : [],
         zones: [], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
       }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
       await page.route("**/api/v1/system/inspection", (route) => route.fulfill({ status: 503, json: { error: "inspection unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
@@ -256,10 +256,10 @@ for (const view of ["physical", "logical"] as const) {
 test("firewall quick-start rejects unavailable WAN discovery before staging any changes", async ({ page }) => {
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   const writes: { path: string; body: unknown }[] = [];
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    : { json: phase === "empty" ? [] : [{ name: "wan", up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   for (const [path, initial] of [
     ["/routing", { gateways: [], routes: [], rules: [] }],
     ["/firewall/nat", { enabled: false, sourceZones: [] }],

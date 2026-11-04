@@ -10,7 +10,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
       "/api/v1/auth/me": { id: "admin", username: "containd", role: "admin" },
       "/api/v1/auth/session": { id: "admin", username: "containd", role: "admin" },
       "/api/v1/config/diff": { changed: false, changedSections: [] },
-      "/api/v1/interfaces": [{ name: "lan3", device: "eth7", zone: "lan" }],
+      "/api/v1/interfaces": [{ name: "lan3", zone: "lan" }],
       "/api/v1/interfaces/state": [{ name: "eth7", up: true, addrs: ["10.99.99.2/24"] }],
       "/api/v1/zones": [{ name: "lan" }],
       "/api/v1/system/management-reservation": {

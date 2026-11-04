@@ -27,8 +27,8 @@ async function serve(page: Page) {
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] }
         : path === "/api/v1/zones" ? zones
-          : path === "/api/v1/interfaces" ? [{ name: "wan", device: "eth1", zone: "wan" }]
-          : path === "/api/v1/interfaces/state" ? [{ name: "eth1", up: true, addrs: [] }]
+          : path === "/api/v1/interfaces" ? [{ name: "wan", zone: "wan" }]
+          : path === "/api/v1/interfaces/state" ? [{ name: "wan", up: true, addrs: [] }]
           : path === "/api/v1/assets" ? [{ id: "plc-1", name: "plc-1", zone: "wan" }]
           : path === "/api/v1/firewall/nat" ? {
             enabled: true,

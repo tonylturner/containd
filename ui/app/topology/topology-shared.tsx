@@ -468,7 +468,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     const st = runtimeFor(ifc, ifaceState);
     const address = interfaceAddresses(ifc, ifaceState);
     return {
-      name: ifc.device || ifc.name,
+      name: ifc.name,
       address,
       fullAddrs: (address.source === "config" ? ifc.addresses : st?.addrs) || [],
       state: st?.up !== false ? "up" : "down",
@@ -615,7 +615,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
       label: name.toUpperCase(),
       nodeType: "zone",
       status,
-      iface: ifc?.device || ifc?.name || "\u2014",
+      iface: ifc?.name || "\u2014",
       subnet,
       ...zoneAddresses[name],
       hosts,

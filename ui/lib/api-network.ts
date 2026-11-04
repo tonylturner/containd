@@ -35,15 +35,6 @@ export const networkAPI = {
     getConfigJSON<Interface[]>("/api/v1/interfaces", "list", signal),
   listInterfaceState: (signal?: AbortSignal) =>
     getJSONList<InterfaceState>("/api/v1/interfaces/state", signal),
-  assignInterfaces: (
-    expectedRevision: string,
-    mode: "auto" | "explicit",
-    mappings?: Record<string, string>,
-  ) =>
-    postJSONResult<{ interfaces: Interface[] }>("/api/v1/interfaces/assign", {
-      mode,
-      mappings: mappings ?? {},
-    }, expectedRevision),
   reconcileInterfacesReplace: () =>
     postJSONResult<{ status: string }>("/api/v1/interfaces/reconcile", {
       confirm: "REPLACE",

@@ -15,7 +15,7 @@ import { useTelemetry } from "../hooks/useTelemetry";
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
-import { runtimeFor } from "../lib/interface-addresses";
+import { interfaceAttachment } from "../lib/interface-addresses";
 
 export type InterfaceBindings = {
   configured: Interface[];
@@ -60,7 +60,7 @@ export function SetupChecklist({
   isAdmin: boolean;
 }) {
   const interfaceCount = interfaceBindings?.configured.length ?? 0;
-  const missingBindings = interfaceBindings?.configured.filter((iface) => !runtimeFor(iface, interfaceBindings.runtime)).length ?? 0;
+  const missingBindings = interfaceBindings?.configured.filter((iface) => interfaceAttachment(iface, interfaceBindings.runtime) !== "attached").map(iface => iface.name) ?? [];
   const steps = [
     {
       title: "Create zones",
@@ -74,11 +74,9 @@ export function SetupChecklist({
       detail: interfaceBindings === null
         ? "Interface bindings unknown. Check configured interfaces and live devices."
         : interfaceCount === 0
-          ? "Assign zones to interfaces so policy can attach to ports."
-          : missingBindings > 0
-            ? `${missingBindings} of ${interfaceCount} configured interfaces not connected to network devices.`
-            : `${interfaceCount} of ${interfaceCount} bound to network devices.`,
-      complete: interfaceBindings === null ? null : interfaceCount > 0 && missingBindings === 0,
+          ? "0 of 0 interfaces attached. Assign zones to interfaces so policy can attach to ports."
+          : `${interfaceCount - missingBindings.length} of ${interfaceCount} interfaces attached${missingBindings.length ? `. Not attached: ${missingBindings.join(", ")}` : "."}`,
+      complete: interfaceBindings === null ? null : interfaceCount > 0 && missingBindings.length === 0,
       href: "/interfaces/",
       cta: (counts?.interfaces ?? 0) > 0 ? "Review interfaces" : "Bind interfaces",
     },

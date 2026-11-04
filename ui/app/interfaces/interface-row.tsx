@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Interface, InterfaceState, Zone } from "../../lib/api";
-import { interfaceAddresses, OS_ADDRESS_HINT } from "../../lib/interface-addresses";
+import { interfaceAddresses, interfaceAttachment, OS_ADDRESS_HINT } from "../../lib/interface-addresses";
 import { staticAssetURL } from "../../lib/api-core";
 import { zoneLabel, zoneName } from "../../lib/zones";
 
@@ -14,6 +14,7 @@ export function InterfaceRow({
   draft,
   iface,
   runtime,
+  runtimeKnown,
   zones,
   allIfaces,
   osState,
@@ -24,6 +25,7 @@ export function InterfaceRow({
   draft: ConfigFields;
   iface: Interface;
   runtime: InterfaceState | null;
+  runtimeKnown: boolean;
   zones: Zone[];
   allIfaces: Interface[];
   osState: InterfaceState[];
@@ -52,7 +54,6 @@ export function InterfaceRow({
   const [members, setMembers] = draft.field(`${JSON.stringify(iface.name)}.members`, (iface.members ?? []).join(", "));
   const [parent, setParent] = draft.field(`${JSON.stringify(iface.name)}.parent`, iface.parent ?? "");
   const [vlanId, setVlanId] = draft.field(`${JSON.stringify(iface.name)}.vlanId`, typeof iface.vlanId === "number" ? String(iface.vlanId) : "");
-  const [device, setDevice] = draft.field(`${JSON.stringify(iface.name)}.device`, iface.device ?? "");
   const [alias, setAlias] = draft.field(`${JSON.stringify(iface.name)}.alias`, iface.alias ?? "");
   const [zone, setZone] = draft.field(`${JSON.stringify(iface.name)}.zone`, iface.zone ?? "");
   const [mode, setMode] = draft.field(`${JSON.stringify(iface.name)}.mode`, iface.addressMode ?? "");
@@ -72,11 +73,8 @@ export function InterfaceRow({
     const logical = (allIfaces ?? [])
       .filter((x) => x.name !== iface.name)
       .map((x) => x.name);
-    const os = (osState ?? [])
-      .map((s) => s.name)
-      .filter((n) => n !== "lo");
-    return Array.from(new Set([...logical, ...os])).sort();
-  }, [allIfaces, osState, iface.name]);
+    return logical.sort();
+  }, [allIfaces, iface.name]);
 
   const parentCandidates = memberCandidates;
 
@@ -113,30 +111,17 @@ export function InterfaceRow({
             <span className="text-(--text)">{iface.alias || "—"}</span>
           )}
         </td>
-        <td data-label="Device" className="px-4 py-3">
-          {editing ? (
-            <input
-              value={device}
-              onChange={(e) => setDevice(e.target.value)}
-              disabled={!canEdit}
-              placeholder="Network device (e.g. eth0)"
-              className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
-            />
-          ) : (
-            <span className="text-(--text)">{iface.device || "—"}</span>
-          )}
-          <p className="mt-1 max-w-56 text-xs text-(--text-muted)">
-            {modeLabel} · {typeLabel()}{!runtime ? " · Live unknown" : !runtime.up ? " · Link down" : ""}
+        <td data-label="Settings" className="px-4 py-3">
+          <p className="max-w-56 text-xs text-(--text-muted)">
+            {modeLabel} · {typeLabel()}
             {Object.values(iface.access ?? {}).some(value => value === false) ? " · Access customized" : ""}
             {iface.gateway ? " · Gateway set" : ""}
           </p>
         </td>
-        <td data-label="Link" className="px-4 py-3">
-          {runtime ? (
-            <span className={chipClass(runtime.up)}>{runtime.up ? "up" : "down"}</span>
-          ) : (
-            <span className="text-(--text-muted)">—</span>
-          )}
+        <td data-label="Attachment" className="px-4 py-3">
+          <span className={chipClass(runtimeKnown && runtime?.up === true)}>
+            {interfaceAttachment(iface, runtimeKnown ? osState : null)}
+          </span>
         </td>
         <td data-label="Zone" className="px-4 py-3">
           {editing ? (
@@ -278,7 +263,6 @@ export function InterfaceRow({
                         itype === "vlan" && vlanId.trim()
                           ? Number.parseInt(vlanId, 10)
                           : 0,
-                      device: device.trim(),
                       zone,
                       addressMode: mode === (iface.addressMode ?? "") ? iface.addressMode : mode,
                       addresses:
@@ -313,7 +297,6 @@ export function InterfaceRow({
                     setVlanId(
                       typeof iface.vlanId === "number" ? String(iface.vlanId) : "",
                     );
-                    setDevice(iface.device ?? "");
                     setAlias(iface.alias ?? "");
                     setZone(iface.zone ?? "");
                     setMode(iface.addressMode ?? "");
@@ -490,7 +473,7 @@ export function InterfaceRow({
               <p>Gateway: {iface.gateway || "—"}</p>
               <p>MAC: {runtime?.mac || "Unknown"}</p>
               <p>MTU: {runtime?.mtu || "Unknown"}</p>
-              {runtime && !runtime.addrs?.length && <p>No OS/Docker IP detected yet (check device binding / link state).</p>}
+              {runtime && !runtime.addrs?.length && <p>No OS/Docker IP detected yet (check Compose interface_name / link state).</p>}
             </div>
           </div>
         </td>
