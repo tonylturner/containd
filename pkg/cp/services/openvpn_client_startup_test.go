@@ -95,6 +95,7 @@ func TestOpenVPNClientEarlyExitFails(t *testing.T) {
 	for _, marker := range []bool{false, true} {
 		t.Run(map[bool]string{false: "parse-error", true: "exit-after-marker"}[marker], func(t *testing.T) {
 			m, _ := openVPNFakeManager(t)
+			m.openVPNClientEarlyExitWindow = 10 * time.Second
 			body := "#!/bin/sh\n"
 			if marker {
 				body += "echo 'Initialization Sequence Completed'\n"

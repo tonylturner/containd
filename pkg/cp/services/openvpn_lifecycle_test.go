@@ -48,13 +48,18 @@ while true; do sleep 0.02; done
 	t.Cleanup(func() { m.applyMu.Lock(); defer m.applyMu.Unlock(); _ = m.stopOpenVPN() })
 	return m, starts
 }
-func openVPNStarts(t *testing.T, path string) int {
+func openVPNStarts(t *testing.T, path string, want int) int {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return len(strings.Fields(string(b)))
+	var starts int
+	waitFor(t, 5*time.Second, func() bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		starts = len(strings.Fields(string(b)))
+		return starts >= want
+	})
+	return starts
 }
 func openVPNApply(t *testing.T, m *VPNManager, cfg config.VPNConfig) {
 	t.Helper()
@@ -71,14 +76,14 @@ func TestOpenVPNMaterialRevisionLifecycle(t *testing.T) {
 	cfg := config.VPNConfig{OpenVPN: config.OpenVPNConfig{Enabled: true, Managed: &config.OpenVPNManagedClientConfig{Remote: "vpn.example.test", CA: "ca", Cert: "cert", Key: "key", Username: "alice", Password: testCredential("initial")}}}
 	openVPNApply(t, m, cfg)
 	openVPNApply(t, m, cfg)
-	if got := openVPNStarts(t, starts); got != 1 {
+	if got := openVPNStarts(t, starts, 1); got != 1 {
 		t.Fatalf("no-op restarted: %d", got)
 	}
 	for n, change := range []func(){func() { cfg.OpenVPN.Managed.Key = "new-key" }, func() { cfg.OpenVPN.Managed.Password = testCredential("changed") }, func() { cfg.OpenVPN.Managed.Remote = "other.example.test" }} {
 		change()
 		openVPNApply(t, m, cfg)
 		openVPNApply(t, m, cfg)
-		if got := openVPNStarts(t, starts); got != n+2 {
+		if got := openVPNStarts(t, starts, n+2); got != n+2 {
 			t.Fatalf("changed material restarts: %d want %d", got, n+2)
 		}
 	}
@@ -99,7 +104,7 @@ func TestOpenVPNMaterialRevisionLifecycle(t *testing.T) {
 	}
 	openVPNApply(t, m, cfg)
 	openVPNApply(t, m, cfg)
-	if got := openVPNStarts(t, starts); got != 6 {
+	if got := openVPNStarts(t, starts, 6); got != 6 {
 		t.Fatalf("same-path profile not restarted once: %d", got)
 	}
 	before, err := os.ReadFile(active)
@@ -114,7 +119,7 @@ func TestOpenVPNMaterialRevisionLifecycle(t *testing.T) {
 		t.Fatalf("untyped unsafe profile: %v", err)
 	}
 	after, err := os.ReadFile(active)
-	if err != nil || !bytes.Equal(before, after) || openVPNStarts(t, starts) != 6 {
+	if err != nil || !bytes.Equal(before, after) || openVPNStarts(t, starts, 6) != 6 {
 		t.Fatalf("refusal touched active files/process: %v", err)
 	}
 }
@@ -154,11 +159,11 @@ func TestOpenVPNRevokeRuntimeAndRollback(t *testing.T) {
 	if err != nil || !result.Revoked || !result.Applied {
 		t.Fatalf("revoke: %+v %v", result, err)
 	}
-	if openVPNStarts(t, starts) != 2 {
+	if openVPNStarts(t, starts, 2) != 2 {
 		t.Fatal("revoke did not restart exactly once")
 	}
 	result, err = m.RevokeOpenVPNClient(context.Background(), alice.ID)
-	if err != nil || !result.Applied || openVPNStarts(t, starts) != 2 {
+	if err != nil || !result.Applied || openVPNStarts(t, starts, 2) != 2 {
 		t.Fatalf("idempotent revoke restarted: %+v %v", result, err)
 	}
 	if _, err := m.DownloadOpenVPNClient(context.Background(), alice.ID); err == nil {
@@ -216,12 +221,12 @@ func TestOpenVPNCRLRenewsWhileRunning(t *testing.T) {
 		current, err := readOpenVPNInventory(inv.dir)
 		return err == nil && current.CRLNumber > oldNumber && current.crlCurrent(time.Now())
 	})
-	waitFor(t, 3*time.Second, func() bool { b, _ := os.ReadFile(starts); return len(strings.Fields(string(b))) == 2 })
+	openVPNStarts(t, starts, 2)
 	// Drain one more scheduler cycle: current CRLs do not disconnect clients.
 	m.applyMu.Lock()
 	err = m.applyVPNLocked(context.Background(), cfg)
 	m.applyMu.Unlock()
-	if err != nil || openVPNStarts(t, starts) != 2 {
+	if err != nil || openVPNStarts(t, starts, 2) != 2 {
 		t.Fatalf("renewal no-op restarted: %v", err)
 	}
 }
@@ -294,7 +299,7 @@ func TestOpenVPNCRLRenewsAfterReopen(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.stopOpenVPN() })
 	openVPNApply(t, reopened, cfg)
 	inv, err = readOpenVPNInventory(inv.dir)
-	if err != nil || inv.CRLNumber <= oldNumber || !inv.crlCurrent(time.Now()) || inv.Credentials[0].RevokedAt == nil || openVPNStarts(t, starts) != 3 {
+	if err != nil || inv.CRLNumber <= oldNumber || !inv.crlCurrent(time.Now()) || inv.Credentials[0].RevokedAt == nil || openVPNStarts(t, starts, 3) != 3 {
 		t.Fatalf("reopen lost renewal/revocation: %v", err)
 	}
 	if _, err := reopened.DownloadOpenVPNClient(context.Background(), alice.ID); err == nil {
@@ -337,7 +342,7 @@ func TestOpenVPNRevocationsAppliedLifecycle(t *testing.T) {
 	if result, err := m.RevokeOpenVPNClient(ctx, bob.ID); err == nil || !result.Revoked || result.Applied {
 		t.Fatalf("canceled revoke: %+v %v", result, err)
 	}
-	if !m.Status()["openvpn_running"].(bool) || openVPNStarts(t, starts) != 3 {
+	if !m.Status()["openvpn_running"].(bool) || openVPNStarts(t, starts, 3) != 3 {
 		t.Fatal("canceled revoke stopped the existing server")
 	}
 	assertOpenVPNRevocationsApplied(t, m, false)
