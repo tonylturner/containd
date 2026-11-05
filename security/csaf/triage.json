@@ -256,6 +256,20 @@
           "url": "https://packages.wolfi.dev/os/security.json"
         }
       ]
+    },
+    {
+      "cve": "CVE-2026-123158",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.0.0"
+      },
+      "when": "always",
+      "status": "known_not_affected",
+      "details": "*sshole affects OpenSSH's non-PAM Unix password authentication on musl, where crypt() returns \"*\" for an overlong password and matches a stored \"*\" password field. Containd ships no OpenSSH, dropbear or libssh. Its SSH service is the Go golang.org/x/crypto/ssh server in pkg/mp/sshserver, whose password callback checks containd's own user store with bcrypt.CompareHashAndPassword and never reads /etc/shadow or calls crypt(). The binaries are built with CGO_ENABLED=0 and the runtime base is Wolfi (glibc).",
+      "flag": "component_not_present"
     }
   ]
 }
