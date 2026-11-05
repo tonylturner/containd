@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CSAF advisory `containd-2026-001` revision 3 distinguishes affected management
+  0.1.16 from fixed management 0.1.17 without asserting engine impact from
+  runtime-base provenance alone. The advisory authoring template now uses
+  distinct affected and fixed versioned products.
+
 ## [0.1.42] - 2026-11-04
 
 ### Fixed
