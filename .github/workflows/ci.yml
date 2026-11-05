@@ -57,6 +57,22 @@ jobs:
       - name: Test release CI gate offline
         run: python3 scripts/release-ci-gate.test.py
 
+  csaf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Test CSAF tools
+        run: |
+          set -euo pipefail
+          for test in scripts/csaf/*.test.py; do python3 "$test"; done
+      - name: Validate published advisories (schema and mandatory tests)
+        run: bash scripts/csaf/validate.sh security/csaf/advisories
+      - name: Require advisory for security fixes
+        run: python3 scripts/csaf/gate.py
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -196,9 +212,12 @@ jobs:
         run: bash scripts/smoke-strict.sh
       - name: Trivy vulnerability scan
         run: |
+          mkdir -p "$RUNNER_TEMP/csaf"
+          python3 scripts/csaf/ignore.py --product containd --version "$(cat VERSION)" \
+            --output "$RUNNER_TEMP/csaf/ignore.yaml"
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}/.trivyignore:/root/.trivyignore:ro \
+            -v "$RUNNER_TEMP/csaf/ignore.yaml:/trivyignore.yaml:ro" \
             ghcr.io/aquasecurity/trivy:0.62.1 \
-            image --exit-code 1 --severity HIGH,CRITICAL --ignorefile /root/.trivyignore --format table \
+            image --exit-code 1 --severity HIGH,CRITICAL --ignorefile /trivyignore.yaml --format table \
             containd/containd:ci

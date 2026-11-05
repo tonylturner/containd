@@ -1,11 +1,10 @@
 {
-  "canonical_url": "https://raw.githubusercontent.com/tonylturner/containd/main/ui/public/.well-known/csaf/provider-metadata.json",
+  "canonical_url": "https://tonylturner.github.io/containd/.well-known/csaf/provider-metadata.json",
   "distributions": [
     {
-      "directory_url": "https://github.com/tonylturner/containd/tree/main/security/csaf/advisories"
+      "directory_url": "https://tonylturner.github.io/containd/.well-known/csaf/"
     }
   ],
-  "last_updated": "2026-03-14T03:59:12Z",
   "list_on_CSAF_aggregators": true,
   "metadata_version": "2.0",
   "mirror_on_CSAF_aggregators": true,
@@ -16,5 +15,5 @@
     "name": "containd project",
     "namespace": "https://github.com/tonylturner/containd"
   },
-  "role": "csaf_provider"
+  "role": "csaf_publisher"
 }

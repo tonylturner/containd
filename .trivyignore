@@ -1,3 +1,0 @@
-# Trivy CVE suppressions for Wolfi-based runtime image.
-# Add entries here only for upstream issues with no fix available.
-# Wolfi packages are actively patched; this file should stay minimal.

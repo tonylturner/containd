@@ -28,7 +28,7 @@ Official references:
 | 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
 | 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
 | 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
-| 6. CVE transparency | Met | CSAF 2.0 advisories with CWE, served provider metadata. |
+| 6. CVE transparency | Met | CSAF 2.0 advisories with CWE and per-release VEX archives. |
 | 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding of audit records and events, and metrics in the base product. Event forwarding is best-effort. |
 
 - **Met**: the design and its defaults deliver the goal.
@@ -186,7 +186,8 @@ What the design delivers by default:
   unsafe requests must be same-origin. Sensitive endpoints are rate-limited.
 - **Build gates.** CI runs race-enabled tests, golangci-lint and Semgrep. It
   fails on unsuppressed HIGH/CRITICAL Trivy findings in the management image
-  (suppressions are in `.trivyignore`). A clean scan is not proof that no
+  (suppressions are generated from justified, product/version-scoped vendor
+  statements in `security/csaf/triage.json`). A clean scan is not proof that no
   vulnerability exists.
 
 ### 4. Security Patches
@@ -213,8 +214,12 @@ canonical disclosure policy. The appliance serves `/.well-known/security.txt`.
 
 ### 6. CVE Transparency and Completeness
 
-containd publishes CSAF 2.0 advisories with CWE classification, and the appliance
-serves CSAF provider metadata at `/.well-known/csaf/provider-metadata.json`.
+containd publishes CSAF 2.0 advisories with CWE classification and release VEX
+from unsuppressed image scans. Untriaged findings remain `under_investigation`.
+The appliance security.txt points to the canonical external metadata URL;
+metadata and documents are available in release archives, not embedded in the
+appliance. The canonical directory is deployed to Pages after stable promotion
+(see the maintainer setup in [Advisories and CSAF](advisories.md)).
 Release notes and the changelog name security-relevant fixes. Published
 advisories, including `containd-2026-001`, are indexed in
 [Advisories and CSAF](advisories.md).

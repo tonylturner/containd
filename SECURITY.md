@@ -7,7 +7,7 @@ Machine-readable discovery:
 - `/.well-known/security.txt` when served from the appliance UI
 - [`ui/public/.well-known/security.txt`](ui/public/.well-known/security.txt) in the repository
 
-The `.well-known` segment is the literal standards-defined URL path for these files. This repository stores them under `ui/public/.well-known/...` so shipped UI builds serve the same `/.well-known/...` paths at runtime.
+The appliance serves security.txt from `ui/public/.well-known/security.txt`. Its CSAF entry points to the canonical external directory, not appliance-local advisory files.
 
 ## Supported Versions
 
@@ -106,7 +106,7 @@ When the project publishes a security fix, the preferred public artifacts are:
 - a GitHub release with clear release notes
 - a GitHub Security Advisory when appropriate
 - a CVE record when appropriate and available
-- a CSAF document when the issue warrants a machine-readable advisory record
+- a CSAF advisory marking the fixed version when its changelog has a `### Security` section
 
 Project goals for advisories and CVE publication:
 
@@ -118,11 +118,11 @@ Project goals for advisories and CVE publication:
 Machine-readable publication points:
 
 - `/.well-known/security.txt`
-- `/.well-known/csaf/provider-metadata.json`
+- [canonical CSAF metadata URL](https://tonylturner.github.io/containd/.well-known/csaf/provider-metadata.json) (external, not served by the appliance)
 - [`security/csaf/advisories/`](security/csaf/advisories/) in the repository for published CSAF documents
 
 Published advisory: [containd-2026-001](security/csaf/advisories/containd-2026-001.json).
-See the [CSAF index](security/csaf/README.md) for discovery and publication details.
+Each release attaches generated provider metadata, published advisories and, when there are findings or applicable vendor statements, a digest-bound VEX document in `csaf-documents.tgz`. Untriaged scan findings remain `under_investigation`; that status is not a suppression. The directory is deployed to GitHub Pages after stable release promotion; release archives remain the historical download source. See the [CSAF index](security/csaf/README.md) for discovery and publication details.
 
 The presence of CVEs is not treated as a failure by itself. The project cares more about root-cause reduction, clarity, and remediation quality than raw counts.
 

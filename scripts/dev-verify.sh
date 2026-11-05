@@ -78,6 +78,7 @@ shellcheck_targets=(
     scripts/containd-connect
     scripts/coverage-report.sh
     scripts/dev-verify.sh
+    scripts/csaf/validate.sh
     scripts/perf-baseline.sh
     scripts/preflight-iec104-helpers.sh
     scripts/preflight-iec104.sh
@@ -159,11 +160,14 @@ mkdocs build -f docs/mkdocs.yml -d /tmp/containd-dev-verify-docs
 
 if [ "$with_trivy" -eq 1 ]; then
     run_step "trivy fs"
+    mkdir -p "$repo_root/build/csaf"
+    ignorefile="$repo_root/build/csaf/filesystem-ignore.yaml"
+    python3 scripts/csaf/ignore.py --product containd --version "$(cat VERSION)" --output "$ignorefile"
     if command -v trivy >/dev/null 2>&1; then
         trivy fs \
             --scanners vuln \
             --severity HIGH,CRITICAL \
-            --ignorefile .trivyignore \
+            --ignorefile "$ignorefile" \
             --skip-dirs ui/node_modules \
             --skip-dirs .git \
             --skip-dirs .gocache \
@@ -174,12 +178,12 @@ if [ "$with_trivy" -eq 1 ]; then
         docker run --rm \
             -v "$repo_root:/src" \
             -w /src \
-            -v "$repo_root/.trivyignore:/root/.trivyignore:ro" \
+            -v "$ignorefile:/trivyignore.yaml:ro" \
             ghcr.io/aquasecurity/trivy:0.62.1 \
             fs \
             --scanners vuln \
             --severity HIGH,CRITICAL \
-            --ignorefile /root/.trivyignore \
+            --ignorefile /trivyignore.yaml \
             --skip-dirs ui/node_modules \
             --skip-dirs .git \
             --skip-dirs .gocache \

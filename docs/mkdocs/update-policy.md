@@ -10,7 +10,9 @@
 ## Release artifacts and security information
 
 Releases include signed images, SBOMs, image digests, and packaged CSAF provider
-metadata and published advisory JSON. Read GitHub Releases and the
+metadata, published advisory JSON, and digest-bound VEX when there are findings
+or applicable vendor statements. VEX `under_investigation` is unresolved, not a
+claim of safety. Read GitHub Releases and the
 [Changelog](https://github.com/tonylturner/containd/blob/main/CHANGELOG.md) for
 changes. See [Advisories](advisories.md) for machine-readable security information
 and [SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) for

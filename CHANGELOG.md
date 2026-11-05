@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic per-release CSAF VEX for both images and platforms, generated
+  from exact release digests, unsuppressed Trivy findings and vendor triage.
+  Untriaged findings remain `under_investigation` in the release archive.
+- Full CSAF schema and mandatory-test validation in CI and releases, plus an
+  advisory requirement for releases with a `Security` changelog section.
+- A browsable CSAF directory builder combining current advisories with archived
+  release VEX, including indexes and hashes, deployed to GitHub Pages after
+  stable promotion. Release archives remain the historical download source.
+
 ### Changed
 
-- CSAF advisory `containd-2026-001` revision 3 distinguishes affected management
-  0.1.16 from fixed management 0.1.17 without asserting engine impact from
-  runtime-base provenance alone. The advisory authoring template now uses
-  distinct affected and fixed versioned products.
+- Scanner suppressions now come only from justified, product/version-scoped
+  `known_not_affected` statements in `security/csaf/triage.json`.
+- CSAF discovery points outside the appliance; provider metadata is no longer
+  embedded in its UI. Advisory `containd-2026-001` revision 3 distinguishes
+  affected management 0.1.16 from fixed management 0.1.17 without asserting
+  engine impact from runtime-base provenance alone. The authoring template also
+  uses distinct affected and fixed versioned products.
 
 ## [0.1.42] - 2026-11-04
 
