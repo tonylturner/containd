@@ -10,9 +10,61 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/protection"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
+
+func sameProtectionSemantics(a, b ProtectionStatus) bool {
+	a.ObservedAt, b.ObservedAt = time.Time{}, time.Time{}
+	for i := range a.Components {
+		a.Components[i].Since = time.Time{}
+	}
+	for i := range b.Components {
+		b.Components[i].Since = time.Time{}
+	}
+	for i := range a.Subsystems {
+		a.Subsystems[i].ObservedAt = time.Time{}
+	}
+	for i := range b.Subsystems {
+		b.Subsystems[i].ObservedAt = time.Time{}
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func TestProtectionSemanticComparisonDetectsRetiredSourceChange(t *testing.T) {
+	observed := time.Now()
+	before := ProtectionStatus{
+		State: "pending",
+		Components: []ProtectionComponent{{
+			Name: "nfqueue:101", State: "pending", Reason: "awaiting queue bind",
+			Since: observed,
+		}},
+		Subsystems: []protection.OwnerOutcome{{
+			Name: protection.SubsystemName("nfqueue:101"), State: protection.DeliveryPending,
+			Reason: "awaiting queue bind", ObservedAt: observed,
+		}},
+		ObservedAt: observed,
+	}
+	after := before
+	after.Components = append([]ProtectionComponent(nil), before.Components...)
+	after.Subsystems = append([]protection.OwnerOutcome(nil), before.Subsystems...)
+	after.ObservedAt = observed.Add(time.Second)
+	after.Components[0].Since = observed.Add(time.Second)
+	after.Subsystems[0].ObservedAt = observed.Add(time.Second)
+	if !sameProtectionSemantics(before, after) {
+		t.Fatal("timestamp-only recompute changed protection semantics")
+	}
+
+	after.State = "failed"
+	after.Components[0].State = "failed"
+	after.Components[0].Reason = "nfqueue:101: stale terminal event"
+	after.Subsystems[0].State = protection.DeliveryFailed
+	after.Subsystems[0].Reason = after.Components[0].Reason
+	if sameProtectionSemantics(before, after) {
+		t.Fatal("semantic comparison ignored injected retired-source state change")
+	}
+}
 
 type joiningCapture struct {
 	bindCapture
@@ -81,9 +133,8 @@ func TestProtectionRetryJoinsDeadRunBeforeCreatingReplacement(t *testing.T) {
 	assertUnchanged := func() {
 		t.Helper()
 		after := e.Protection()
-		before.ObservedAt = after.ObservedAt
-		if !reflect.DeepEqual(before, after) {
-			t.Fatalf("retired source changed observation: %+v", after)
+		if !sameProtectionSemantics(before, after) {
+			t.Fatalf("retired source changed protection semantics: before=%+v after=%+v", before, after)
 		}
 	}
 	assertUnchanged()
@@ -138,9 +189,8 @@ func TestProtectionFailedReplacementStillFencesRetiredCallbacks(t *testing.T) {
 	before := e.Protection()
 	old.onSource(capture.SourceEvent{Ready: true})
 	after := e.Protection()
-	before.ObservedAt = after.ObservedAt
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("failed replacement allowed retired callbacks to advance observation")
+	if !sameProtectionSemantics(before, after) {
+		t.Fatalf("failed replacement allowed retired callbacks to change protection semantics: before=%+v after=%+v", before, after)
 	}
 	e.gate.mu.Lock()
 	owned := e.gate.owned
