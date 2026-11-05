@@ -11,6 +11,7 @@ artifacts.
 | --- | --- | --- | --- |
 | [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in the v0.1.16 management image | HIGH | v0.1.17 (Wolfi migration) or later |
 | [containd-2026-002](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json) | Forged audit and lab review actors through X-User in management lab/static-token sessions | LOW (CVSS 3.1: 2.7) | v0.1.42 |
+| [containd-2026-003](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-003.json) | Seven bundled ClamAV parser vulnerabilities exposed by HTTP antivirus scanning | HIGH (Cisco CNA CVSS 3.1: 7.5) | None available; workarounds below |
 
 Use the advisory JSON for affected products/versions, remediation, references,
 and revision history. A project identifier can exist before a CVE/GHSA is
@@ -29,6 +30,19 @@ management modes. Upgrade management to 0.1.42, use normal user sessions with la
 mode disabled, or strip incoming `X-User` at a trusted reverse proxy that clients
 cannot bypass. This advisory covers actor attribution only, not other audit
 metadata.
+
+Advisory 003 covers the SBOM-evidenced management releases 0.1.17–0.1.23 and
+0.1.25–0.1.42, and engine releases 0.1.35–0.1.42, for all seven CVEs.
+Management 0.1.16 is affected by five; its ClamAV 1.4.3 lacks the vulnerable
+1.5-only ZIP code for CVE-2026-20337/20338. No claim is made for releases without
+SBOM evidence, unpublished releases or inventories without ClamAV.
+In **System > Services > Antivirus**, clear **Scan HTTP uploads** and
+**Scan HTTP downloads**, or disable **Enable AV/ICAP scanning**; save the
+candidate and commit it. Alternatively use **Remote scanner (ICAP)** with an
+independently maintained backend. Disabling inspection removes that protection.
+No fixed containd release is available as of 2026-11-05; upstream fixes are
+ClamAV 1.5.4/1.4.6, and a fixed image follows once Wolfi publishes the updated
+1.5 package. See [AV settings](services.md#av) and the advisory for exact scope.
 
 ## Discovery and downloads
 

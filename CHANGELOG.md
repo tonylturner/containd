@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CSAF advisory `containd-2026-003` for seven bundled ClamAV parser CVEs,
+  with SBOM-evidenced management/engine release scope, Cisco CNA CVSS 3.1
+  scores and HTTP antivirus scanning workarounds pending a fixed image.
 - CSAF advisory `containd-2026-002` for X-User actor spoofing in management lab
   and static-token sessions from 0.1.2-beta through 0.1.41, fixed in 0.1.42.
 - Deterministic per-release CSAF VEX for both images and platforms, generated
