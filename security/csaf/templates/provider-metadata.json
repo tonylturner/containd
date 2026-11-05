@@ -11,7 +11,7 @@
   "publisher": {
     "category": "vendor",
     "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
-    "issuing_authority": "The containd project currently publishes CSAF provider metadata and will publish CSAF advisory documents for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts when such advisories exist.",
+    "issuing_authority": "The containd project publishes a CSAF VEX document for each release and CSAF security advisories for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
     "name": "containd project",
     "namespace": "https://github.com/tonylturner/containd"
   },
