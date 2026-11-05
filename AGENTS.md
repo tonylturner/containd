@@ -122,6 +122,7 @@ python3 scripts/csaf/gate.py
 Validation uses gocsaf v3.7.1 with a local container running the digest-pinned
 Secvisogram validator service v3.0.3 image; Docker and Go are required.
 The validator's `basic` preset checks strict schema and mandatory CSAF tests.
-After stable promotion, the workflow builds, validates and deploys the aggregate
-directory to Pages. The Pages upload explicitly includes hidden files to retain
+When CSAF sources or tools merge to main, after each successful Release run and
+on manual dispatch, the CSAF Pages workflow builds, validates and deploys the
+aggregate directory to Pages. The Pages upload explicitly includes hidden files to retain
 `.well-known`. The maintainer must enable Pages with build type GitHub Actions.

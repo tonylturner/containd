@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changelog section. Missing coverage appears in GitHub annotations and step
   summaries without blocking publication; malformed inputs still fail.
 - A browsable CSAF directory builder combining current advisories with archived
-  release VEX, including indexes and hashes, deployed to GitHub Pages after
-  stable promotion. Release archives remain the historical download source.
+  release VEX, including indexes and hashes, deployed to GitHub Pages when
+  advisories merge to main and after each release. Release archives remain the historical download source.
 - Scan-conditional package assessments and unconditional vendor statements,
   including non-CVE identifiers and multiple remediations. Initial 0.1.42 triage
   identifies seven ClamAV parser CVEs as affected in both images when ClamAV-mode

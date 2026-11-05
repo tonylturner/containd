@@ -99,8 +99,10 @@ all unresolved and known-affected entries.
 the release VEX, with a directory index and hashes. Archives on published
 GitHub releases are the historical VEX store; CI never commits them to main.
 
-After stable promotion the workflow builds, validates and deploys an aggregate directory
-from every published release's VEX archive plus current source advisories.
+When CSAF sources or tools merge to main, after each successful Release run and on
+manual dispatch, `.github/workflows/csaf-pages.yml` builds, validates and deploys an
+aggregate directory from every published release's VEX archive plus current source
+advisories, so an advisory is published when it merges, not only at the next release.
 Source advisory revisions win on ID clashes. `build_site.py` writes
 `.well-known/csaf/` with initial-release-year folders, `index.txt`, headerless
 newest-first `changes.csv`, SHA-256/SHA-512 files and HTML directory listings.

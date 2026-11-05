@@ -218,7 +218,7 @@ containd publishes CSAF 2.0 advisories with CWE classification and release VEX
 from unsuppressed image scans. Untriaged findings remain `under_investigation`.
 The appliance security.txt points to the canonical external metadata URL;
 metadata and documents are available in release archives, not embedded in the
-appliance. The canonical directory is deployed to Pages after stable promotion
+appliance. The canonical directory is deployed to Pages when advisories merge and after each release
 (see the maintainer setup in [Advisories and CSAF](advisories.md)).
 Release notes and the changelog name security-relevant fixes. Published
 advisories, including `containd-2026-001`, are indexed in

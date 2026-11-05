@@ -84,8 +84,9 @@ server APIs reachable; reachability alone does not establish the mask-key flaw.
 The exact rationale and remediation statements are in
 [`triage.json`](https://github.com/tonylturner/containd/blob/main/security/csaf/triage.json).
 
-After stable promotion, the release workflow builds, validates and deploys a directory
-from current advisories and all published release VEX archives. It has year
+When an advisory or CSAF tool change merges to main, after each successful release,
+and on manual dispatch, a workflow builds, validates and deploys a directory from
+current advisories and all published release VEX archives. It has year
 folders, `index.txt`, newest-first `changes.csv`, hashes and browsable listings.
 Current source advisory revisions supersede archived copies. The metadata role
 is `csaf_publisher`, not a claim of domain-root provider discovery.
