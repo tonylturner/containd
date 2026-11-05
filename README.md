@@ -168,7 +168,7 @@ CONTAIND_PROFILE=training CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_U
 - Cosign-signed container images with CycloneDX SBOM attestation
 - Trivy vulnerability scanning in CI with a HIGH/CRITICAL gate
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for CISA alignment, and [Advisories and CSAF](docs/mkdocs/advisories.md) for advisories and per-release CSAF VEX downloads.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for CISA alignment, and [Advisories and CSAF](docs/mkdocs/advisories.md) for advisories and per-release CSAF VEX downloads. Missing advisory coverage produces a warning, not a release block.
 
 ## Documentation
 

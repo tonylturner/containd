@@ -38,8 +38,10 @@ Release VEX combines every scan finding with applicable vendor triage. Untriaged
 findings remain `under_investigation`; this does not mean safe or suppressed.
 `known_affected` entries include remediation guidance. Only justified
 `known_not_affected` vendor statements suppress scanner findings, scoped to a
-product and release range. CI requires an advisory marking the release fixed
-when its versioned changelog section contains `### Security`.
+product and release range. CI and release warn when the versioned changelog has
+`### Security` without an advisory marking that version fixed. This warning
+appears in GitHub annotations and the step summary but does not block publication.
+Malformed inputs still fail.
 
 Package assessments are scan-conditional: they appear only for the image and
 platform where the scanner reports that identifier. Unconditional vendor

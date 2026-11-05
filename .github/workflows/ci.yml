@@ -70,7 +70,7 @@ jobs:
           for test in scripts/csaf/*.test.py; do python3 "$test"; done
       - name: Validate published advisories (schema and mandatory tests)
         run: bash scripts/csaf/validate.sh security/csaf/advisories
-      - name: Require advisory for security fixes
+      - name: Report advisory coverage for security fixes
         run: python3 scripts/csaf/gate.py
 
   docs:

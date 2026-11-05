@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Require a fixed-version advisory for the current release's Security changelog."""
+"""Warn when the current release's Security changelog lacks a fixed-version advisory."""
 import argparse
+import os
 import re
 from pathlib import Path
 from common import CONFIG, ROOT, read_json, version_key
@@ -28,21 +29,40 @@ def products(tree):
 
 def check(version, changelog, advisories):
     version_key(version)
+    fixed = {}
+    for advisory in advisories:
+        try:
+            category = advisory['document']['category']
+            identifier = advisory['document']['tracking']['id']
+            versions = products(advisory['product_tree'])
+            vulnerabilities = advisory['vulnerabilities']
+            if (not isinstance(category, str) or not category or
+                    not isinstance(identifier, str) or not identifier or
+                    not isinstance(vulnerabilities, list) or not vulnerabilities):
+                raise ValueError('Invalid advisory category, tracking ID or vulnerabilities')
+            for vulnerability in vulnerabilities:
+                statuses = vulnerability['product_status']
+                if not isinstance(statuses, dict) or not statuses:
+                    raise ValueError('Invalid advisory product_status')
+                for ids in statuses.values():
+                    if (not isinstance(ids, list) or not ids or
+                            any(not isinstance(pid, str) or pid not in versions for pid in ids)):
+                        raise ValueError('Invalid advisory product reference')
+                if category == 'csaf_security_advisory':
+                    for pid in statuses.get('fixed', []):
+                        fixed.setdefault(versions[pid], identifier)
+        except (KeyError, TypeError, AttributeError) as error:
+            raise ValueError(f'Malformed advisory input: {error}') from error
     match = re.search(r'^## \[' + re.escape(version) + r'\][^\n]*\n(.*?)(?=^## \[|\Z)', changelog, re.M | re.S)
     if not match:
         raise ValueError(f'Missing CHANGELOG section for VERSION {version}')
     if not re.search(r'^### Security\s*$', match[1], re.M):
         return f'{version}: no Security section; no advisory required.'
-    for advisory in advisories:
-        if advisory['document']['category'] != 'csaf_security_advisory':
-            continue
-        versions = products(advisory.get('product_tree', {}))
-        for vulnerability in advisory.get('vulnerabilities', []):
-            if any(versions.get(pid) == version for pid in vulnerability.get('product_status', {}).get('fixed', [])):
-                return f'{version}: fixed advisory {advisory["document"]["tracking"]["id"]}.'
-    raise ValueError(f'An advisory is required: CHANGELOG {version} has ### Security, but no advisory '
-                     f'under security/csaf/advisories marks product_version {version} fixed. '
-                     'For hardening rather than a vulnerability fix, move the entry to Changed/Fixed.')
+    if version in fixed:
+        return f'{version}: fixed advisory {fixed[version]}.'
+    return (f'::warning::CHANGELOG {version} has ### Security, but no advisory under '
+            f'security/csaf/advisories marks product_version {version} fixed. '
+            'Discuss advisory coverage with the maintainer; this warning does not block publication.')
 
 
 def main():
@@ -52,8 +72,14 @@ def main():
     parser.add_argument('--advisories', type=Path, default=CONFIG / 'advisories')
     args = parser.parse_args()
     try:
-        print(check(args.version_file.read_text().strip(), args.changelog.read_text(),
-                    [read_json(p) for p in sorted(args.advisories.glob('*.json'))]))
+        if not args.advisories.is_dir():
+            raise ValueError(f'Missing advisories directory: {args.advisories}')
+        message = check(args.version_file.read_text().strip(), args.changelog.read_text(),
+                        [read_json(p) for p in sorted(args.advisories.glob('*.json'))])
+        print(message)
+        if summary := os.environ.get('GITHUB_STEP_SUMMARY'):
+            with Path(summary).open('a', encoding='utf-8') as stream:
+                stream.write('### Advisory coverage\n\n' + message.removeprefix('::warning::') + '\n')
     except ValueError as error:
         parser.exit(1, f'{error}\n')
 

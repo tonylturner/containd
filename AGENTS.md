@@ -104,9 +104,10 @@ Package statements use `when: "scan"` and apply only to platforms reporting the
 exact identifier; `when: "always"` also emits a vendor statement without a scan
 hit. Non-CVE identifiers use a single CSAF `ids` entry. Known-affected statements
 carry a `remediations` array, which can include both workaround and fix status.
-If the CHANGELOG section for `VERSION` contains `### Security`, an advisory under
-`security/csaf/advisories/` must mark that product version `fixed`; CI and release
-both enforce this. `[Unreleased]` is not checked by this gate. Before tagging,
+If the CHANGELOG section for `VERSION` contains `### Security` without an advisory
+under `security/csaf/advisories/` marking that product version `fixed`, CI and
+release emit a GitHub warning and step-summary notice, but do not block
+publication. Malformed inputs still fail. `[Unreleased]` is not checked. Before tagging,
 review `under_investigation` / `known_affected` entries and decide on an advisory
 with the maintainer.
 

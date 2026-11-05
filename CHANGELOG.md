@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic per-release CSAF VEX for both images and platforms, generated
   from exact release digests, unsuppressed Trivy findings and vendor triage.
   Untriaged findings remain `under_investigation` in the release archive.
-- Full CSAF schema and mandatory-test validation in CI and releases, plus an
-  advisory requirement for releases with a `Security` changelog section.
+- Full CSAF schema and mandatory-test validation in CI and releases, plus
+  warning-only advisory coverage checks for releases with a `Security`
+  changelog section. Missing coverage appears in GitHub annotations and step
+  summaries without blocking publication; malformed inputs still fail.
 - A browsable CSAF directory builder combining current advisories with archived
   release VEX, including indexes and hashes, deployed to GitHub Pages after
   stable promotion. Release archives remain the historical download source.

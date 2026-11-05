@@ -62,7 +62,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Require advisory for security fixes
+      - name: Report advisory coverage for security fixes
         run: python3 scripts/csaf/gate.py
 
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0

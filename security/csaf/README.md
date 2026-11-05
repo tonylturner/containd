@@ -57,9 +57,11 @@ release version. Unresolved statements are never scanner suppressions.
 Use one advisory per vulnerability or tightly related cluster. Include scope,
 versioned product branches, distinct affected and fixed product IDs,
 remediations, revision history and references. A release whose `VERSION`
-changelog section contains `### Security` must have a source advisory marking
-that exact `product_version` fixed. For hardening rather than a vulnerability
-fix, use Changed/Fixed. The gate does not inspect `[Unreleased]`.
+changelog section contains `### Security` is checked for a source advisory marking
+that exact `product_version` fixed. Missing coverage emits a GitHub `::warning::`
+and step-summary notice and exits successfully; it does not block CI or release.
+Malformed inputs still fail. For hardening rather than a vulnerability fix, use
+Changed/Fixed. The check does not inspect `[Unreleased]`.
 
 Filenames follow CSAF 2.0 section 5.1: normalize the lowercase tracking ID by
 replacing runs outside `[+\-a-z0-9]` with `_`, then append `.json`. For example,
