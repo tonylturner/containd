@@ -21,18 +21,31 @@ requires:
 
 | Field | Meaning |
 | --- | --- |
-| `cve` | A CVE identifier |
+| `cve` or `ids` | One exact scanner identifier: a CVE string, or a single-element CSAF `ids` array (`system_name`, `text`) for a non-CVE identifier such as GHSA or GO |
 | `products` | Nonempty subset of `containd`, `containd-engine` |
+| `when` | `scan`: only where that identifier appears in the product/platform scan; `always`: unconditional vendor statement, including with no scan hit |
 | `version_range.introduced` | Inclusive SemVer lower bound |
 | `version_range.before` | Optional exclusive SemVer upper bound |
 | `status` | `known_not_affected`, `known_affected`, `fixed`, or `under_investigation` |
 | `details` | Nonempty vendor rationale; also the scanner suppression statement |
 
 `known_not_affected` additionally requires a valid CSAF `flag` or an impact
-`threat` string. `known_affected` requires a `remediation` object with `category`
-and `details` (optional HTTPS `url`); `none_available` and `no_fix_planned` are
-valid categories. Overlapping statements for the same CVE and product are
-rejected, including overlaps that assign the same status.
+`threat` string. `known_affected` requires a nonempty `remediations` array of
+objects with `category` and `details` (optional HTTPS `url`); `none_available` and
+`no_fix_planned` are valid categories. Multiple entries can describe a workaround
+and the absence of a vendor fix separately. Overlapping statements for the same
+identifier and product are rejected, including scan/always overlaps and overlaps
+that assign the same status.
+
+Use `when: "scan"` for package findings: a package removed or fixed in an image
+must not leave a stale VEX statement behind. Matching is by exact vulnerability
+identifier, not an inferred alias. A conditional statement does not expand a
+single-platform hit to other platforms or the image index. Use `when: "always"`
+for vendor statements that apply even when a scanner does not report them.
+Both modes still require a matching release range and product. Select bounds
+supported by the assessment, not hypothetical future versions. The initial real
+assessments cover only 0.1.42 (`introduced: "0.1.42"`, `before: "0.1.43-0"`).
+The `-0` upper bound excludes all next-patch prereleases as well.
 
 Only `known_not_affected` statements suppress scanner findings. A finding in a
 purportedly `fixed` release is not silently ignored. `scripts/csaf/ignore.py`
@@ -74,8 +87,8 @@ is no offline exit-code exception or dependency on a public validator service.
 
 The release workflow scans both exact image index digests for `linux/amd64` and
 `linux/arm64` with Trivy 0.62.1, without suppressions. `generate.py` verifies scan
-identity/platform, emits every finding and every applicable vendor statement,
-and leaves untriaged findings `under_investigation`. Non-CVE scanner identifiers
+identity/platform, emits every finding and every applicable unconditional vendor
+statement, and leaves untriaged findings `under_investigation`. Non-CVE scanner identifiers
 are preserved as CSAF `ids`. No findings and no statements means no VEX document.
 Dates come from the release commit, not the current clock. Job summaries list
 all unresolved and known-affected entries.

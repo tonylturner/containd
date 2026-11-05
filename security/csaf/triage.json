@@ -1,4 +1,261 @@
 {
   "schema_version": 1,
-  "statements": []
+  "statements": [
+    {
+      "ids": [
+        {
+          "system_name": "GHSA",
+          "text": "GHSA-w67g-5rqw-f597"
+        }
+      ],
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_not_affected",
+      "details": "Both images ship the same binary with github.com/gorilla/websocket v1.5.1. The weak client-frame mask-key implementation is not present: v1.5.1 initializes maskRand from crypto/rand.Reader. Containd only uses websocket.Upgrader as a server for the authenticated, single-use-ticket /api/v1/cli/ws endpoint (api/http/cli_handlers.go and api/http/server.go); server writes do not generate masks.",
+      "flag": "vulnerable_code_not_present",
+      "threat": "The advisory concerns predictable client-frame mask keys. Govulncheck v1.9.0 reports broad websocket symbols (GO-2026-6278), including server methods, as reachable. Source inspection of v1.5.1 conn.go shows crypto/rand mask generation and the !isServer guard on mask generation. Containd does not create WebSocket clients; the scanner version match does not establish vulnerable mask generation."
+    },
+    {
+      "cve": "CVE-2026-78661",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_not_affected",
+      "details": "GO-2026-6860 affects golang.org/x/net/html Parse/ParseFragment and parser.addText/fosterParent. Containd directly uses x/net for network diagnostics; its mimetype dependency also imports html tokenization for charset detection. The affected parser/renderer code is not linked into either image binary. Linux amd64 and arm64 govulncheck v1.9.0 symbol-level analysis finds module/package matches but no affected-symbol call traces; symbol tables confirm the affected parser/renderer symbols are absent.",
+      "flag": "vulnerable_code_not_present",
+      "threat": "The presence of the x/net module and HTML tokenizer does not make the affected HTML tree parser or renderer present. The transitive import is github.com/gabriel-vasile/mimetype/internal/charset, which uses html.NewTokenizer, not the affected parsing/rendering APIs."
+    },
+    {
+      "cve": "CVE-2026-97045",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_not_affected",
+      "details": "GO-2026-6866 affects golang.org/x/net/html Render and childTextNodesAreLiteral. Containd directly uses x/net for network diagnostics; its mimetype dependency also imports html tokenization for charset detection. The affected parser/renderer code is not linked into either image binary. Linux amd64 and arm64 govulncheck v1.9.0 symbol-level analysis finds module/package matches but no affected-symbol call traces; symbol tables confirm the affected parser/renderer symbols are absent.",
+      "flag": "vulnerable_code_not_present",
+      "threat": "The presence of the x/net module and HTML tokenizer does not make the affected HTML tree parser or renderer present. The transitive import is github.com/gabriel-vasile/mimetype/internal/charset, which uses html.NewTokenizer, not the affected parsing/rendering APIs."
+    },
+    {
+      "ids": [
+        {
+          "system_name": "Go",
+          "text": "GO-2026-5932"
+        }
+      ],
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_not_affected",
+      "details": "Containd uses golang.org/x/crypto for SSH and bcrypt, not OpenPGP. Neither the direct nor transitive Linux dependency graph imports golang.org/x/crypto/openpgp or its subpackages. Govulncheck v1.9.0 symbol-level analysis reports only a module match; both architecture symbol tables contain no OpenPGP code.",
+      "flag": "vulnerable_code_not_present",
+      "threat": "The unmaintained OpenPGP implementation is not linked into the shared containd binary in either image. The x/crypto module version alone is not evidence of OpenPGP exposure."
+    },
+    {
+      "cve": "CVE-2026-20337",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The ZIP parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected ZIP parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20338",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The ZIP parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected ZIP parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20339",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The PESpin parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected PESpin parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20345",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The GPT parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected GPT parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20346",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The PDF parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected PDF parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20347",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The Mach-O parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected Mach-O parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20348",
+      "products": [
+        "containd",
+        "containd-engine"
+      ],
+      "version_range": {
+        "introduced": "0.1.42",
+        "before": "0.1.43-0"
+      },
+      "when": "scan",
+      "status": "known_affected",
+      "details": "The XAR parser in Wolfi clamav-1.5 1.5.2-r7 is affected (secdb fixed version 1.5.4-r2). Both release images contain this package. The management image defaults to combined mode; the standalone engine also runs the AV owner, supervises clamd/FreshClam and serves the HTTP scanning gate (pkg/app/engine/engine.go). With AV enabled in ClamAV mode and HTTP upload or download scanning enabled, complete HTTP bodies reach clamd via INSTREAM (pkg/dp/httpgate/transaction.go, response.go; pkg/cp/services/av_scan.go and clamav.go).",
+      "threat": "Adversary-controlled HTTP upload/download bodies can reach the affected XAR parser when ClamAV-mode HTTP scanning is enabled. Engine-only deployment does not remove this exposure: the engine owns both the gate and clamd. AV disabled or ICAP mode does not send these HTTP objects to the local ClamAV parser.",
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "Disable ClamAV-mode HTTP upload and download scanning (or disable AV), or use ICAP mode with an independently maintained scanner, until a fixed containd image ships. Disabling scanning removes this inspection protection; assess the resulting policy exposure."
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd image is available for this finding. As checked on 2026-11-05, Wolfi secdb lists clamav-1.5 1.5.4-r2 as fixed, but the x86_64 and aarch64 package indexes publish only versions through 1.5.2-r7. A secdb fixed-version entry is not an available image update.",
+          "url": "https://packages.wolfi.dev/os/security.json"
+        }
+      ]
+    }
+  ]
 }

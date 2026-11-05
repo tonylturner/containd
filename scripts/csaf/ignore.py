@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Render a Trivy YAML ignorefile from justified, release-scoped vendor triage."""
 import argparse
-from common import CONFIG, PRODUCTS, includes, load_triage, version_key, write_json
+from common import CONFIG, PRODUCTS, includes, load_triage, statement_id, version_key, write_json
 
 
 def ignorefile(statements, product, version):
@@ -10,8 +10,8 @@ def ignorefile(statements, product, version):
         raise ValueError(f'Unknown product: {product}')
     # JSON is YAML 1.2. Do not suppress unresolved or purportedly fixed findings.
     return {'vulnerabilities': [
-        {'id': s['cve'], 'statement': s['details']}
-        for s in sorted(statements, key=lambda s: s['cve'])
+        {'id': statement_id(s), 'statement': s['details']}
+        for s in sorted(statements, key=statement_id)
         if product in s['products'] and includes(s, version) and s['status'] == 'known_not_affected'
     ]}
 

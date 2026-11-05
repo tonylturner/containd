@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 from common import (CONFIG, PRODUCTS, includes, load_triage, provider_template,
-                    csaf_filename, read_json, timestamp, version_key, write_csaf)
+                    csaf_filename, read_json, statement_id, timestamp, version_key, write_csaf)
 
 ARCHES = ('amd64', 'arm64')
 
@@ -69,8 +69,9 @@ def generate(version, images_path, scans_dir, statements, created):
                     entry.setdefault(product, set()).add(arch)
     active = [s for s in statements if includes(s, version)]
     for s in active:
-        for product in s['products']:
-            findings.setdefault(s['cve'], {}).setdefault(product, set()).update(ARCHES)
+        if s['when'] == 'always':
+            for product in s['products']:
+                findings.setdefault(statement_id(s), {}).setdefault(product, set()).update(ARCHES)
     if not findings:
         return None, 'No scan findings or applicable triage statements; no VEX document generated.\n'
     vulnerabilities, summary = [], ['## Release vulnerability status', '']
@@ -80,9 +81,10 @@ def generate(version, images_path, scans_dir, statements, created):
         if re.fullmatch(r'CVE-\d{4}-\d{4,}', identifier):
             vuln['cve'] = identifier
         else:
-            vuln['ids'] = [{'system_name': 'Trivy', 'text': identifier}]
+            identity = next((s for s in active if statement_id(s) == identifier), None)
+            vuln['ids'] = identity['ids'] if identity else [{'system_name': 'Trivy', 'text': identifier}]
         for product, arches in sorted(products.items()):
-            s = next((s for s in active if s['cve'] == identifier and product in s['products']), None)
+            s = next((s for s in active if statement_id(s) == identifier and product in s['products']), None)
             status = s['status'] if s else 'under_investigation'
             ids = [product_id(product, version, arch) for arch in sorted(arches)]
             # A status for an index applies to all its supported platforms only.
@@ -95,8 +97,8 @@ def generate(version, images_path, scans_dir, statements, created):
                     vuln.setdefault('flags', []).append({'label': s['flag'], 'product_ids': ids})
                 if s.get('threat'):
                     vuln.setdefault('threats', []).append({'category': 'impact', 'details': s['threat'], 'product_ids': ids})
-                if s.get('remediation'):
-                    vuln.setdefault('remediations', []).append(dict(s['remediation'], product_ids=ids))
+                for remediation in s.get('remediations', []):
+                    vuln.setdefault('remediations', []).append(dict(remediation, product_ids=ids))
             if status in {'under_investigation', 'known_affected'}:
                 summary.append(f'- {identifier}: {product} {version} ({", ".join(sorted(arches))}) — {status}')
         vulnerabilities.append(vuln)

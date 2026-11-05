@@ -14,7 +14,7 @@ CVE = 'CVE-2026-20337'
 
 
 def statement(status='known_not_affected'):
-    return {'cve': CVE, 'products': ['containd'],
+    return {'cve': CVE, 'products': ['containd'], 'when': 'scan',
             'version_range': {'introduced': VERSION, 'before': '0.1.43'},
             'status': status, 'details': 'The vulnerable component is not present.',
             'flag': 'component_not_present'}
@@ -78,7 +78,7 @@ class GeneratorTest(unittest.TestCase):
             with self.subTest(status=status):
                 s = statement(status)
                 if status == 'known_affected':
-                    s['remediation'] = {'category': 'none_available', 'details': 'Investigation continues.'}
+                    s['remediations'] = [{'category': 'none_available', 'details': 'Investigation continues.'}]
                 doc, summary = self.run_generator(self.load([s]))
                 v = doc['vulnerabilities'][0]
                 self.assertIn('containd-0.1.42', v['product_status'][status])
@@ -91,7 +91,10 @@ class GeneratorTest(unittest.TestCase):
     def test_triage_without_hit_and_empty_document(self):
         self.empty_scans()
         self.assertIsNone(self.run_generator()[0])
-        doc, _ = self.run_generator([statement()])
+        self.assertIsNone(self.run_generator(self.load([statement()]))[0])
+        unconditional = statement()
+        unconditional['when'] = 'always'
+        doc, _ = self.run_generator(self.load([unconditional]))
         self.assertEqual(doc['vulnerabilities'][0]['cve'], CVE)
         self.assertEqual(len(doc['vulnerabilities'][0]['product_status']['known_not_affected']), 3)
 
@@ -102,14 +105,90 @@ class GeneratorTest(unittest.TestCase):
         self.assertTrue(includes(s, VERSION))
         self.assertFalse(includes(s, '0.1.43'))
         self.assertFalse(ignorefile([s], 'containd', '0.1.43')['vulnerabilities'])
+        s['version_range']['before'] = '0.1.43-0'
+        self.assertTrue(includes(s, VERSION))
+        self.assertFalse(includes(s, '0.1.43-0'))
+        self.assertFalse(includes(s, '0.1.43-rc.1'))
         self.assertLess(version_key('1.0.0-rc.2'), version_key('1.0.0-rc.10'))
         self.assertLess(version_key('1.0.0-rc.10'), version_key('1.0.0'))
         with self.assertRaises(ValueError):
             version_key('1.0.0-01')
 
+    def test_conditional_scope_never_expands_scan_platforms(self):
+        s = statement('known_affected')
+        s['products'] = ['containd', 'containd-engine']
+        s['remediations'] = [{'category': 'workaround', 'details': 'Disable the fixture feature.'},
+                             {'category': 'none_available', 'details': 'No fixture vendor fix.'}]
+        for path in self.root.glob('trivy-*.json'):
+            if path.name != 'trivy-containd-amd64.json':
+                scan = json.loads(path.read_text())
+                scan['Results'] = []
+                path.write_text(json.dumps(scan))
+        doc, summary = self.run_generator(self.load([s]))
+        v = doc['vulnerabilities'][0]
+        ids = ['containd-0.1.42-amd64']
+        self.assertEqual(v['product_status'], {'known_affected': ids})
+        self.assertEqual([r['category'] for r in v['remediations']], ['workaround', 'none_available'])
+        self.assertTrue(all(r['product_ids'] == ids for r in v['remediations']))
+        self.assertNotIn('containd-engine', summary)
+        self.empty_scans()
+        self.assertIsNone(self.run_generator(self.load([s]))[0])
+        s['when'] = 'always'
+        doc, _ = self.run_generator(self.load([s]))
+        self.assertEqual(len(doc['vulnerabilities'][0]['product_status']['known_affected']), 6)
+
+    def test_non_cve_triage_conditional_and_unconditional(self):
+        for identifier, system in [('GHSA-w67g-5rqw-f597', 'GHSA'), ('GO-2026-5932', 'Go')]:
+            with self.subTest(identifier=identifier):
+                self.empty_scans()
+                s = statement()
+                del s['cve']
+                s['ids'] = [{'system_name': system, 'text': identifier}]
+                self.assertIsNone(self.run_generator(self.load([s]))[0])
+                s['when'] = 'always'
+                doc, _ = self.run_generator(self.load([s]))
+                self.assertNotIn('cve', doc['vulnerabilities'][0])
+                self.assertEqual(doc['vulnerabilities'][0]['ids'], s['ids'])
+                s['when'] = 'scan'
+                path = self.root / 'trivy-containd-arm64.json'
+                scan = json.loads(path.read_text())
+                scan['Results'] = [{'Vulnerabilities': [{'VulnerabilityID': identifier,
+                                    'PkgIdentifier': {'PURL': 'pkg:golang/example.org/package@v1.0.0'}}]}]
+                path.write_text(json.dumps(scan))
+                doc, _ = self.run_generator(self.load([s]))
+                v = doc['vulnerabilities'][0]
+                self.assertEqual(v['ids'], s['ids'])
+                self.assertEqual(v['product_status']['known_not_affected'], ['containd-0.1.42-arm64'])
+                self.assertEqual(ignorefile([s], 'containd', VERSION),
+                                 {'vulnerabilities': [{'id': identifier, 'statement': s['details']}]})
+
+    def test_identifier_and_condition_contract(self):
+        for changes in [{'ids': []}, {'ids': [{'system_name': 'Go', 'text': ''}]},
+                        {'ids': [{'system_name': 'CVE', 'text': CVE}]},
+                        {'ids': [{'system_name': 'Go', 'text': 'GO-2026-5932'}] * 2}]:
+            s = statement()
+            del s['cve']
+            s.update(changes)
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.load([s])
+        s = statement()
+        s['ids'] = [{'system_name': 'Go', 'text': 'GO-2026-5932'}]
+        with self.assertRaises(ValueError):
+            self.load([s])
+        s = statement()
+        del s['when']
+        with self.assertRaises(ValueError):
+            self.load([s])
+        s = statement()
+        other = copy.deepcopy(s)
+        other['when'] = 'always'
+        with self.assertRaises(ValueError):
+            self.load([s, other])
+
     def test_reject_bad_triage(self):
         for field, value in [('details', ''), ('flag', 'wrong'), ('status', 'ignored'),
-                             ('products', ['other']), ('version_range', {'introduced': 'latest'})]:
+                             ('products', ['other']), ('version_range', {'introduced': 'latest'}),
+                             ('when', 'sometimes'), ('remediations', [])]:
             s = statement()
             s[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):

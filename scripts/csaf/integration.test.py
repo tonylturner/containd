@@ -27,12 +27,15 @@ class FullValidationTest(unittest.TestCase):
             docs.mkdir()
             for status in ('known_not_affected', 'known_affected', 'fixed', 'under_investigation'):
                 statement = {'cve': 'CVE-2026-1111', 'products': ['containd'],
+                             'when': 'always',
                              'version_range': {'introduced': '1.2.3'}, 'status': status,
                              'details': 'Synthetic validation fixture; not a vendor assessment.'}
                 if status == 'known_not_affected':
                     statement['flag'] = 'component_not_present'
                 if status == 'known_affected':
-                    statement['remediation'] = {'category': 'none_available', 'details': 'Synthetic fixture.'}
+                    statement['remediations'] = [
+                        {'category': 'workaround', 'details': 'Synthetic workaround.'},
+                        {'category': 'none_available', 'details': 'Synthetic fixture.'}]
                 doc, _ = generate('1.2.3', manifest, root, [statement], '2026-01-01T00:00:00Z')
                 doc['document']['tracking']['id'] += '-' + status
                 write_csaf(docs / csaf_filename(doc['document']['tracking']['id']), doc)

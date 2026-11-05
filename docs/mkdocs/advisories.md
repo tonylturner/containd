@@ -41,6 +41,37 @@ findings remain `under_investigation`; this does not mean safe or suppressed.
 product and release range. CI requires an advisory marking the release fixed
 when its versioned changelog section contains `### Security`.
 
+Package assessments are scan-conditional: they appear only for the image and
+platform where the scanner reports that identifier. Unconditional vendor
+statements can also cover a release range without a scanner hit.
+
+### v0.1.42 package assessments
+
+The vendor triage covers both images at 0.1.42, not future releases:
+
+- Seven ClamAV parser CVEs (CVE-2026-20337, -20338, -20339, -20345, -20346,
+  -20347 and -20348) are `known_affected` when ClamAV-mode HTTP upload/download
+  scanning is enabled. Both images ship the package; the standalone engine owns
+  clamd and the HTTP scanning gate, just as the engine in the combined appliance
+  does. Disable ClamAV-mode HTTP scanning or use an independently maintained
+  ICAP backend until a fixed image is available. Disabling scanning removes
+  that inspection protection. On 2026-11-05 the Wolfi security database lists
+  1.5.4-r2 as fixed, but neither architecture's package index publishes it.
+- GHSA-w67g-5rqw-f597 is `known_not_affected`: the shared binary uses WebSockets
+  only as a server, and v1.5.1 uses cryptographic randomness for client masks.
+- CVE-2026-78661 and CVE-2026-97045 are `known_not_affected`: a transitive
+  dependency uses the HTML tokenizer, but the affected tree parser/renderer
+  symbols are absent from the binaries. This is not a claim that the entire
+  `x/net/html` package is absent.
+- GO-2026-5932 is `known_not_affected`: the OpenPGP packages are not imported
+  or linked; `x/crypto` is used for SSH and bcrypt.
+
+The Go assessments combine govulncheck v1.9.0 symbol-level analysis for Linux
+amd64/arm64 with source inspection. The WebSocket database entry marks broad
+server APIs reachable; reachability alone does not establish the mask-key flaw.
+The exact rationale and remediation statements are in
+[`triage.json`](https://github.com/tonylturner/containd/blob/main/security/csaf/triage.json).
+
 After stable promotion, the release workflow builds, validates and deploys a directory
 from current advisories and all published release VEX archives. It has year
 folders, `index.txt`, newest-first `changes.csv`, hashes and browsable listings.
