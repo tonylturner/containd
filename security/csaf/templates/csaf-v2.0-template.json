@@ -54,23 +54,51 @@
     "branches": [
       {
         "category": "vendor",
-        "name": "containd",
+        "name": "containd project",
         "branches": [
           {
             "category": "product_name",
-            "name": "containd management appliance",
-            "product": {
-              "name": "containd",
-              "product_id": "containd"
-            }
+            "name": "containd",
+            "branches": [
+              {
+                "category": "product_version",
+                "name": "0.0.0",
+                "product": {
+                  "name": "containd 0.0.0",
+                  "product_id": "containd-0.0.0"
+                }
+              },
+              {
+                "category": "product_version",
+                "name": "0.0.1",
+                "product": {
+                  "name": "containd 0.0.1",
+                  "product_id": "containd-0.0.1"
+                }
+              }
+            ]
           },
           {
             "category": "product_name",
-            "name": "containd engine appliance",
-            "product": {
-              "name": "containd-engine",
-              "product_id": "containd-engine"
-            }
+            "name": "containd-engine",
+            "branches": [
+              {
+                "category": "product_version",
+                "name": "0.0.0",
+                "product": {
+                  "name": "containd-engine 0.0.0",
+                  "product_id": "containd-engine-0.0.0"
+                }
+              },
+              {
+                "category": "product_version",
+                "name": "0.0.1",
+                "product": {
+                  "name": "containd-engine 0.0.1",
+                  "product_id": "containd-engine-0.0.1"
+                }
+              }
+            ]
           }
         ]
       }
@@ -109,10 +137,10 @@
       ],
       "product_status": {
         "first_affected": [
-          "containd"
+          "containd-0.0.0"
         ],
         "fixed": [
-          "containd"
+          "containd-0.0.1"
         ]
       },
       "references": [
@@ -127,7 +155,7 @@
           "category": "vendor_fix",
           "details": "Upgrade to the fixed release listed in this advisory.",
           "product_ids": [
-            "containd"
+            "containd-0.0.0"
           ],
           "url": "https://github.com/tonylturner/containd/releases"
         }
@@ -141,7 +169,7 @@
             "version": "3.1"
           },
           "products": [
-            "containd"
+            "containd-0.0.0"
           ]
         }
       ],

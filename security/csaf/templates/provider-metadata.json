@@ -1,0 +1,19 @@
+{
+  "canonical_url": "https://tonylturner.github.io/containd/.well-known/csaf/provider-metadata.json",
+  "distributions": [
+    {
+      "directory_url": "https://tonylturner.github.io/containd/.well-known/csaf/"
+    }
+  ],
+  "list_on_CSAF_aggregators": true,
+  "metadata_version": "2.0",
+  "mirror_on_CSAF_aggregators": true,
+  "publisher": {
+    "category": "vendor",
+    "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
+    "issuing_authority": "The containd project publishes a CSAF VEX document for each release and CSAF security advisories for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
+    "name": "containd project",
+    "namespace": "https://github.com/tonylturner/containd"
+  },
+  "role": "csaf_publisher"
+}

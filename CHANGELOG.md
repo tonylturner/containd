@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CSAF advisory `containd-2026-003` for seven bundled ClamAV parser CVEs,
+  with SBOM-evidenced management/engine release scope, Cisco CNA CVSS 3.1
+  scores and HTTP antivirus scanning workarounds pending a fixed image.
+- CSAF advisory `containd-2026-002` for X-User actor spoofing in management lab
+  and static-token sessions from 0.1.2-beta through 0.1.41, fixed in 0.1.42.
+- Deterministic per-release CSAF VEX for both images and platforms, generated
+  from exact release digests, unsuppressed Trivy findings and vendor triage.
+  Untriaged findings remain `under_investigation` in the release archive.
+- Full CSAF schema and mandatory-test validation in CI and releases, plus
+  warning-only advisory coverage checks for releases with a `Security`
+  changelog section. Missing coverage appears in GitHub annotations and step
+  summaries without blocking publication; malformed inputs still fail.
+- A browsable CSAF directory builder combining current advisories with archived
+  release VEX, including indexes and hashes, deployed to GitHub Pages when
+  advisories merge to main and after each release. Release archives remain the historical download source.
+- Scan-conditional package assessments and unconditional vendor statements,
+  including non-CVE identifiers and multiple remediations. Initial 0.1.42 triage
+  identifies seven ClamAV parser CVEs as affected in both images when ClamAV-mode
+  HTTP scanning is enabled, with workarounds, and four Go findings as not
+  affected based on symbol-level analysis and source inspection.
+
+### Changed
+
+- Scanner suppressions now come only from justified, product/version-scoped
+  `known_not_affected` statements in `security/csaf/triage.json`.
+- CSAF discovery points outside the appliance; provider metadata is no longer
+  embedded in its UI. Advisory `containd-2026-001` revision 3 distinguishes
+  affected management 0.1.16 from fixed management 0.1.17 without asserting
+  engine impact from runtime-base provenance alone. The authoring template also
+  uses distinct affected and fixed versioned products.
+
+### Fixed
+
+- Update gorilla/websocket, golang.org/x/net and golang.org/x/crypto to
+  versions outside GHSA-w67g-5rqw-f597, CVE-2026-78661, CVE-2026-97045 and
+  GO-2026-5932. None of these were reachable in 0.1.42.
+
 ## [0.1.42] - 2026-11-04
 
 ### Fixed

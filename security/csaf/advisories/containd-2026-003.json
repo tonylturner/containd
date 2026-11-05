@@ -1,0 +1,804 @@
+{
+  "document": {
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "lang": "en-US",
+    "title": "Bundled ClamAV parser vulnerabilities in HTTP antivirus scanning",
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
+      "issuing_authority": "The containd project publishes a CSAF VEX document for each release and CSAF security advisories for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
+      "name": "containd project",
+      "namespace": "https://github.com/tonylturner/containd"
+    },
+    "aggregate_severity": {
+      "namespace": "https://www.first.org/cvss/v3.1",
+      "text": "HIGH"
+    },
+    "tracking": {
+      "id": "containd-2026-003",
+      "status": "final",
+      "version": "1",
+      "initial_release_date": "2026-11-05T00:00:00Z",
+      "current_release_date": "2026-11-05T00:00:00Z",
+      "revision_history": [
+        {
+          "number": "1",
+          "date": "2026-11-05T00:00:00Z",
+          "summary": "Initial publication of seven bundled ClamAV parser vulnerabilities, evidenced release scope and scanning workarounds."
+        }
+      ]
+    },
+    "notes": [
+      {
+        "category": "summary",
+        "text": "Seven parser vulnerabilities in bundled ClamAV can terminate the scanning process when untrusted content is scanned. Both the combined management appliance and standalone engine can expose these parsers through ClamAV-mode HTTP upload/download scanning. No fixed containd image is available as of this advisory."
+      },
+      {
+        "category": "general",
+        "title": "Release and package evidence",
+        "text": "Scope was established from 72 published sbom-*.cdx.json assets across 36 releases. Management 0.1.16 contains Debian clamav 1.4.3+dfsg-1~deb12u2. Management 0.1.17 and 0.1.18 contain Wolfi clamav-1.5 1.5.2-r4; subsequent published management releases through 0.1.42 contain 1.5.2-r7. Engine releases 0.1.35 through 0.1.42 contain Wolfi clamav-1.5 1.5.2-r7. Package purls in these historical inventories identify amd64/x86_64. The management version ranges are split to exclude unpublished 0.1.24. No claim is made for releases lacking SBOM evidence (0.1.2-beta through 0.1.4-beta), unpublished 0.1.8/0.1.24, or inventories without ClamAV. The stated ranges cover the evidenced published stable releases, not hypothetical intervening or future releases."
+      },
+      {
+        "category": "general",
+        "title": "Upstream and distribution scope",
+        "text": "The Cisco CNA and ClamAV release advisory identify CVE-2026-20337 and CVE-2026-20338 as affecting only ClamAV 1.5.0 through 1.5.3, fixed in 1.5.4. The other five vulnerabilities affect ClamAV 1.4.0 through 1.4.5 and 1.5.0 through 1.5.3, fixed in 1.4.6 and 1.5.4 respectively. Debian bookworm clamav 1.4.3+dfsg-1~deb12u2 is vulnerable to those five; its fixed package is 1.4.6+dfsg-0+deb12u1. The two ZIP nonaffected statements for management 0.1.16 follow the upstream 1.5-only scope, not a Debian NOT-FOR-US classification."
+      },
+      {
+        "category": "general",
+        "title": "Score source",
+        "text": "All seven CVSS 3.1 base scores and vectors are supplied by Cisco as the CVE Numbering Authority (CNA): 7.5 HIGH, CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H. NVD republishes the Cisco CNA assessment; this is not an independent NVD score. Scores are not inferred from scanner severity labels."
+      }
+    ],
+    "references": [
+      {
+        "category": "self",
+        "summary": "This advisory",
+        "url": "https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-003.json"
+      },
+      {
+        "category": "external",
+        "summary": "Cisco CNA advisory and CVSS 3.1 assessment",
+        "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+      },
+      {
+        "category": "external",
+        "summary": "ClamAV upstream affected ranges and 1.5.4/1.4.6 fixes",
+        "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+      },
+      {
+        "category": "external",
+        "summary": "Published release SBOM assets establishing containd package scope",
+        "url": "https://github.com/tonylturner/containd/releases"
+      },
+      {
+        "category": "external",
+        "summary": "Wolfi package security database",
+        "url": "https://packages.wolfi.dev/os/security.json"
+      },
+      {
+        "category": "external",
+        "summary": "Antivirus configuration and HTTP scanning controls",
+        "url": "https://tonylturner.github.io/containd/services/#av"
+      }
+    ]
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "product_name",
+        "name": "containd",
+        "branches": [
+          {
+            "category": "product_version",
+            "name": "0.1.16",
+            "product": {
+              "product_id": "containd-management-0.1.16",
+              "name": "containd management 0.1.16 (Debian ClamAV 1.4.3)"
+            }
+          },
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.17|<=0.1.23",
+            "product": {
+              "product_id": "containd-management-0.1.17-through-0.1.23",
+              "name": "containd management published releases 0.1.17 through 0.1.23 (Wolfi ClamAV 1.5.2)"
+            }
+          },
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.25|<=0.1.42",
+            "product": {
+              "product_id": "containd-management-0.1.25-through-0.1.42",
+              "name": "containd management published releases 0.1.25 through 0.1.42 (Wolfi ClamAV 1.5.2)"
+            }
+          }
+        ]
+      },
+      {
+        "category": "product_name",
+        "name": "containd-engine",
+        "branches": [
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.35|<=0.1.42",
+            "product": {
+              "product_id": "containd-engine-0.1.35-through-0.1.42",
+              "name": "containd-engine published releases 0.1.35 through 0.1.42 (Wolfi ClamAV 1.5.2)"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2026-20337",
+      "title": "ClamAV ZIP catalogue heap write",
+      "cwe": {
+        "id": "CWE-120",
+        "name": "Buffer Copy without Checking Size of Input ('Classic Buffer Overflow')"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the zip archive parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition on an affected device.\n\nThis vulnerability is due to improper boundary checks for content in zip files during scanning, which may result in an out-of-bounds write condition. An attacker could exploit this vulnerability by submitting a crafted zip file for scanning. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        },
+        {
+          "category": "general",
+          "text": "Management 0.1.16 bundles ClamAV 1.4.3, which does not contain the vulnerable 1.5-only ZIP code. Its known_not_affected status derives from upstream affected-version evidence; the other five parser vulnerabilities in this advisory do affect that release."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ],
+        "known_not_affected": [
+          "containd-management-0.1.16"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20337"
+        }
+      ],
+      "flags": [
+        {
+          "label": "vulnerable_code_not_present",
+          "product_ids": [
+            "containd-management-0.1.16"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20338",
+      "title": "ClamAV ZIP catalogue double-free",
+      "cwe": {
+        "id": "CWE-415",
+        "name": "Double Free"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the zip archive parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition on an affected device.\n\nThis vulnerability is due to improper memory handling when processing content in zip files during scanning. An attacker could exploit this vulnerability by submitting a crafted zip file for scanning. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate as a result of a memory double-free, resulting in a DoS condition on the affected software."
+        },
+        {
+          "category": "general",
+          "text": "Management 0.1.16 bundles ClamAV 1.4.3, which does not contain the vulnerable 1.5-only ZIP code. Its known_not_affected status derives from upstream affected-version evidence; the other five parser vulnerabilities in this advisory do affect that release."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ],
+        "known_not_affected": [
+          "containd-management-0.1.16"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20338"
+        }
+      ],
+      "flags": [
+        {
+          "label": "vulnerable_code_not_present",
+          "product_ids": [
+            "containd-management-0.1.16"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20339",
+      "title": "ClamAV PESpin unpacker integer overflow",
+      "cwe": {
+        "id": "CWE-190",
+        "name": "Integer Overflow or Wraparound"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the PESpin file format parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition or possibly other expanded impacts as a result of memory corruption on an affected device.\n\nThis vulnerability is due to improper boundary checks for content in PESpin files during scanning, which may result in an integer overflow. An attacker could exploit this vulnerability by submitting a crafted file that contains PESpin content to be scanned by ClamAV on an affected device. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.16",
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20339"
+        },
+        {
+          "category": "external",
+          "summary": "Debian bookworm vulnerable and fixed package versions",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-20339"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20345",
+      "title": "ClamAV GPT partition-name conversion stack buffer overflow",
+      "cwe": {
+        "id": "CWE-121",
+        "name": "Stack-based Buffer Overflow"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the GPT file format parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition or possibly other expanded impacts as a result of memory corruption on an affected device.\n\nThis vulnerability is due to improper handling of an endian conversion operation, which may result in an out-of-bounds buffer write. An attacker could exploit this vulnerability by submitting a crafted GPT file to be scanned by ClamAV on an affected device. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.16",
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20345"
+        },
+        {
+          "category": "external",
+          "summary": "Debian bookworm vulnerable and fixed package versions",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-20345"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20346",
+      "title": "ClamAV PDF hex-string parser out-of-bounds read",
+      "cwe": {
+        "id": "CWE-125",
+        "name": "Out-of-bounds Read"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the PDF file format parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition or possibly other expanded impacts as a result of memory corruption on an affected device.\n\nThis vulnerability is due to improper boundary checks for content in PDF files during scanning, which may result in an out-of-bounds buffer read. An attacker could exploit this vulnerability by submitting a crafted PDF file to be scanned by ClamAV on an affected device. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.16",
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20346"
+        },
+        {
+          "category": "external",
+          "summary": "Debian bookworm vulnerable and fixed package versions",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-20346"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20347",
+      "title": "ClamAV Mach-O parser out-of-bounds read",
+      "cwe": {
+        "id": "CWE-125",
+        "name": "Out-of-bounds Read"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the Mach-O file format parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition or possibly other expanded impacts as a result of memory corruption on an affected device.\n\nThis vulnerability is due to improper boundary checks for content in Mach-O files during scanning, which may result in an out-of-bounds buffer read. An attacker could exploit this vulnerability by submitting a crafted Mach-O file to be scanned by ClamAV on an affected device. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.16",
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20347"
+        },
+        {
+          "category": "external",
+          "summary": "Debian bookworm vulnerable and fixed package versions",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-20347"
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2026-20348",
+      "title": "ClamAV XAR table-of-contents decompression buffer overflow",
+      "cwe": {
+        "id": "CWE-120",
+        "name": "Buffer Copy without Checking Size of Input ('Classic Buffer Overflow')"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "A vulnerability in the XAR file format parser of ClamAV could allow an unauthenticated, remote attacker to cause a DoS condition or possibly other expanded impacts as a result of memory corruption on an affected device.\n\nThis vulnerability is due to improper boundary checks for content in XAR files during scanning. An attacker could exploit this vulnerability by submitting a crafted file that contains XAR content to be scanned by ClamAV on an affected device. A successful exploit could allow the attacker to cause the ClamAV scanning process to terminate, resulting in a DoS condition on the affected software."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.16",
+          "containd-management-0.1.17-through-0.1.23",
+          "containd-management-0.1.25-through-0.1.42",
+          "containd-engine-0.1.35-through-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "threats": [
+        {
+          "category": "impact",
+          "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "workaround",
+          "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        },
+        {
+          "category": "none_available",
+          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "product_ids": [
+            "containd-management-0.1.16",
+            "containd-management-0.1.17-through-0.1.23",
+            "containd-management-0.1.25-through-0.1.42",
+            "containd-engine-0.1.35-through-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Cisco CNA score and vulnerability advisory",
+          "url": "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-clamav-WuuvVd26"
+        },
+        {
+          "category": "external",
+          "summary": "ClamAV affected ranges and upstream fixes",
+          "url": "https://blog.clamav.net/2026/08/clamav-154-and-146-security-patch.html"
+        },
+        {
+          "category": "external",
+          "summary": "CVE CNA record",
+          "url": "https://www.cve.org/CVERecord?id=CVE-2026-20348"
+        },
+        {
+          "category": "external",
+          "summary": "Debian bookworm vulnerable and fixed package versions",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-20348"
+        }
+      ]
+    }
+  ]
+}

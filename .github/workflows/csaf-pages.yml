@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+name: CSAF Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - security/csaf/**
+      - scripts/csaf/**
+      - .github/workflows/csaf-pages.yml
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  csaf-directory:
+    # workflow_run runs on the default branch, which the github-pages
+    # environment allows; a tag-triggered release job would be refused.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: csaf-directory
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main # Current source advisories supersede archived revisions.
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Collect every published release's CSAF archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases.json"
+          python3 scripts/csaf/fetch_archives.py --releases "$RUNNER_TEMP/releases.json" \
+            --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/csaf-archives"
+      - name: Build and validate aggregate CSAF directory
+        run: |
+          set -euo pipefail
+          python3 scripts/csaf/build_site.py --archives "$RUNNER_TEMP/csaf-archives" \
+            --output "$RUNNER_TEMP/csaf-site"
+          bash scripts/csaf/validate.sh "$RUNNER_TEMP/csaf-site"
+      - name: Upload CSAF Pages directory (including discovery files)
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/csaf-site
+          include-hidden-files: true
+      - name: Deploy CSAF directory
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

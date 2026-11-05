@@ -95,3 +95,34 @@ with a bounded wait; missing or unsuccessful CI fails promotion visibly.
 A manual workflow run can promote an existing eligible tag without rebuilding
 the images, subject to the same CI gate. See
 [Update Policy](docs/mkdocs/update-policy.md#when-latest-moves).
+
+Release vulnerability statements and scanner suppressions share
+`security/csaf/triage.json`. Only justified `known_not_affected` statements suppress
+findings, scoped to the product and release range. Every untriaged release-image
+finding is emitted as `under_investigation` in the release VEX.
+Package statements use `when: "scan"` and apply only to platforms reporting the
+exact identifier; `when: "always"` also emits a vendor statement without a scan
+hit. Non-CVE identifiers use a single CSAF `ids` entry. Known-affected statements
+carry a `remediations` array, which can include both workaround and fix status.
+If the CHANGELOG section for `VERSION` contains `### Security` without an advisory
+under `security/csaf/advisories/` marking that product version `fixed`, CI and
+release emit a GitHub warning and step-summary notice, but do not block
+publication. Malformed inputs still fail. `[Unreleased]` is not checked. Before tagging,
+review `under_investigation` / `known_affected` entries and decide on an advisory
+with the maintainer.
+
+Run the CSAF tools and full document validation with:
+
+```bash
+for test in scripts/csaf/*.test.py; do python3 "$test" || exit; done
+bash scripts/csaf/validate.sh security/csaf/advisories
+python3 scripts/csaf/gate.py
+```
+
+Validation uses gocsaf v3.7.1 with a local container running the digest-pinned
+Secvisogram validator service v3.0.3 image; Docker and Go are required.
+The validator's `basic` preset checks strict schema and mandatory CSAF tests.
+When CSAF sources or tools merge to main, after each successful Release run and
+on manual dispatch, the CSAF Pages workflow builds, validates and deploys the
+aggregate directory to Pages. The Pages upload explicitly includes hidden files to retain
+`.well-known`. The maintainer must enable Pages with build type GitHub Actions.

@@ -1,0 +1,163 @@
+{
+  "document": {
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "lang": "en-US",
+    "title": "Untrusted X-User header can forge management audit and lab review actors",
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
+      "issuing_authority": "The containd project publishes a CSAF VEX document for each release and CSAF security advisories for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
+      "name": "containd project",
+      "namespace": "https://github.com/tonylturner/containd"
+    },
+    "aggregate_severity": {
+      "namespace": "https://www.first.org/cvss/v3.1",
+      "text": "LOW"
+    },
+    "tracking": {
+      "id": "containd-2026-002",
+      "status": "final",
+      "version": "1",
+      "initial_release_date": "2026-11-05T00:00:00Z",
+      "current_release_date": "2026-11-05T00:00:00Z",
+      "revision_history": [
+        {
+          "number": "1",
+          "date": "2026-11-05T00:00:00Z",
+          "summary": "Initial publication of affected management versions and the 0.1.42 fix."
+        }
+      ]
+    },
+    "notes": [
+      {
+        "category": "summary",
+        "text": "Management API requests in lab mode or authenticated with static API tokens could use a caller-controlled X-User header as the audit actor. In lab mode that actor was also forwarded for learn-suggestion review. Normal authenticated user sessions overwrote this value and were unaffected."
+      }
+    ],
+    "references": [
+      {
+        "category": "self",
+        "summary": "This advisory",
+        "url": "https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json"
+      }
+    ]
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "product_name",
+        "name": "containd",
+        "branches": [
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.2-beta|<0.1.42",
+            "product": {
+              "product_id": "containd-management-before-0.1.42",
+              "name": "containd management releases from 0.1.2-beta through 0.1.41"
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "0.1.42",
+            "product": {
+              "product_id": "containd-0.1.42",
+              "name": "containd management 0.1.42"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "title": "Management actor attribution trusts X-User in lab and static-token sessions",
+      "ids": [
+        {
+          "system_name": "containd advisory",
+          "text": "containd-2026-002"
+        }
+      ],
+      "cwe": {
+        "id": "CWE-348",
+        "name": "Use of Less Trusted Source"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "The audit middleware read X-User into the actor context, and audit logging also fell back to the request header. Lab mode (CONTAIND_LAB_MODE=1) and static API token authentication did not overwrite that context with an authenticated actor. A caller with the privileges needed for a management operation could attribute its audit record to a forged identity; lab-mode learn-suggestion requests also forwarded that actor for review. This is an attribution integrity flaw, not a bypass of the operation permission checks. Normal JWT user sessions set the authenticated username and were unaffected."
+        },
+        {
+          "category": "general",
+          "title": "Version evidence",
+          "text": "Commit a707237b introduced the X-User reads. Every repository tag from the first containing tag, v0.1.2-beta, through v0.1.41 contains the reads and lacks the fix. v0.1.42 contains bdf001dc through merge 9a0614a5: authentication sets the actor for lab and static-token sessions, and the audit header fallback is removed."
+        },
+        {
+          "category": "general",
+          "title": "Product and operating-mode scope",
+          "text": "This advisory concerns the management API of the containd management product. The supported standalone containd-engine deployment uses engine mode and does not register the management API. Both images contain a multi-mode executable; this exclusion is not a claim that overriding the engine image command to mgmt or all makes management API behavior impossible."
+        },
+        {
+          "category": "general",
+          "title": "Scope of the fix",
+          "text": "This revision covers only X-User actor attribution. It does not claim that other caller-controlled audit metadata is fixed."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-before-0.1.42"
+        ],
+        "fixed": [
+          "containd-0.1.42"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:N/I:L/A:N",
+            "baseScore": 2.7,
+            "baseSeverity": "LOW"
+          },
+          "products": [
+            "containd-management-before-0.1.42"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade the management product to containd 0.1.42 or later.",
+          "product_ids": [
+            "containd-management-before-0.1.42"
+          ],
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.42"
+        },
+        {
+          "category": "workaround",
+          "details": "Disable lab mode and use normal authenticated JWT user sessions instead of static API tokens. If an affected authentication mode must remain in use, strip the incoming X-User header at a trusted reverse proxy and prevent clients from bypassing that proxy to reach management directly. Header stripping prevents this spoofing but does not supply a verified per-user actor for static-token or lab requests, and historical lab review operations may be unavailable without an actor.",
+          "product_ids": [
+            "containd-management-before-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Introduction of X-User reads",
+          "url": "https://github.com/tonylturner/containd/commit/a707237b46c2ddbf50ab9bd4dbc1ab53c4933b08"
+        },
+        {
+          "category": "external",
+          "summary": "Authenticated actor fix",
+          "url": "https://github.com/tonylturner/containd/commit/bdf001dcb544753af6296a781062d396445b5934"
+        },
+        {
+          "category": "external",
+          "summary": "Fix merged for 0.1.42",
+          "url": "https://github.com/tonylturner/containd/commit/9a0614a58b380cc36603268a8b74db8e06173d55"
+        }
+      ]
+    }
+  ]
+}
