@@ -10,6 +10,7 @@ artifacts.
 | ID | Issue | Severity | Fixed version |
 | --- | --- | --- | --- |
 | [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in the v0.1.16 management image | HIGH | v0.1.17 (Wolfi migration) or later |
+| [containd-2026-002](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json) | Forged audit and lab review actors through X-User in management lab/static-token sessions | LOW (CVSS 3.1: 2.7) | v0.1.42 |
 
 Use the advisory JSON for affected products/versions, remediation, references,
 and revision history. A project identifier can exist before a CVE/GHSA is
@@ -19,6 +20,15 @@ Revision 3 distinguishes management 0.1.16 (affected) from 0.1.17 (fixed).
 The engine existed in those releases, but its exact affected package set is not
 established by runtime-base provenance alone; the advisory makes no engine
 affected/fixed assertion.
+
+Advisory 002 covers management releases from 0.1.2-beta through 0.1.41.
+Authenticated user sessions were unaffected; lab mode and static API tokens did
+not overwrite the header-supplied audit actor. The supported engine-only service
+does not register the management API, although its executable also supports
+management modes. Upgrade management to 0.1.42, use normal user sessions with lab
+mode disabled, or strip incoming `X-User` at a trusted reverse proxy that clients
+cannot bypass. This advisory covers actor attribution only, not other audit
+metadata.
 
 ## Discovery and downloads
 

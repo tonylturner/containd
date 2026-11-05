@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CSAF advisory `containd-2026-002` for X-User actor spoofing in management lab
+  and static-token sessions from 0.1.2-beta through 0.1.41, fixed in 0.1.42.
 - Deterministic per-release CSAF VEX for both images and platforms, generated
   from exact release digests, unsuppressed Trivy findings and vendor triage.
   Untriaged findings remain `under_investigation` in the release archive.
