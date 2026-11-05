@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine impact from runtime-base provenance alone. The authoring template also
   uses distinct affected and fixed versioned products.
 
+### Fixed
+
+- Update gorilla/websocket, golang.org/x/net and golang.org/x/crypto to
+  versions outside GHSA-w67g-5rqw-f597, CVE-2026-78661, CVE-2026-97045 and
+  GO-2026-5932. None of these were reachable in 0.1.42.
+
 ## [0.1.42] - 2026-11-04
 
 ### Fixed
