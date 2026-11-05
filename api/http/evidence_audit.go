@@ -10,9 +10,6 @@ func withAuditStore(store audit.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store != nil {
 			c.Set("auditStore", store)
-			if actor := c.GetHeader("X-User"); actor != "" {
-				c.Set("actor", actor)
-			}
 			if source := c.GetHeader("X-Source"); source != "" {
 				c.Set("source", source)
 			}
@@ -34,9 +31,7 @@ func auditLog(c *gin.Context, rec audit.Record) {
 		return
 	}
 	if rec.Actor == "" {
-		if actor := c.GetString("actor"); actor != "" {
-			rec.Actor = actor
-		} else if actor := c.GetHeader("X-User"); actor != "" {
+		if actor := c.GetString(ctxActorKey); actor != "" {
 			rec.Actor = actor
 		} else {
 			rec.Actor = "unknown"

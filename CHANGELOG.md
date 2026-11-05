@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-11-04
+
+### Fixed
+
+- Reviewing a learned suggestion failed with "authenticated actor required"
+  under lab mode (`CONTAIND_LAB_MODE=1`) and legacy token authentication. Lab
+  requests now act as the resolved account or the bootstrap username; legacy
+  tokens act as `legacy-admin-token` or `legacy-auditor-token`.
+
+### Security
+
+- The `X-User` request header no longer sets the review or audit actor; the
+  actor always comes from authentication.
+
 ## [0.1.41] - 2026-11-04
 
 ### Breaking
@@ -2719,7 +2733,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.41...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.42...HEAD
+[0.1.42]: https://github.com/tonylturner/containd/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/tonylturner/containd/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/tonylturner/containd/compare/v0.1.38...v0.1.39

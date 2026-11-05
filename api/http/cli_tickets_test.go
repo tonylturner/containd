@@ -105,7 +105,7 @@ func TestCLITicketPendingIssuanceDoesNotStarveLabUsers(t *testing.T) {
 	r := gin.New()
 	r.POST("/ticket", authMiddleware(us), tickets.issue())
 	r.GET("/redeem", tickets.redeem(), authMiddleware(us), verifyCLITicketIdentity, func(c *gin.Context) {
-		if cliIdentityFor(c) != (cliIdentity{user: uid, role: "admin", session: "lab"}) {
+		if cliIdentityFor(c) != (cliIdentity{user: uid, role: "admin", session: "lab", actor: "containd"}) {
 			t.Errorf("lab identity changed: %+v", cliIdentityFor(c))
 		}
 		c.Status(http.StatusNoContent)
@@ -320,18 +320,18 @@ func TestCLITicketLabSessionlessJWT(t *testing.T) {
 	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
 	t.Setenv("CONTAIND_LAB_MODE", "1")
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "rangerdanger-backend", "role": "admin",
+		"sub": "automation", "role": "admin",
 		"exp": time.Now().Add(time.Minute).Unix(),
 	}).SignedString([]byte(testJWTSecret))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// No user/session lookup is possible: this is RangerDanger's lab contract.
+	// A session-less lab token still has an authenticated bootstrap actor.
 	tickets := newCLITickets()
 	r := gin.New()
 	r.POST("/ticket", authMiddleware(nil), tickets.issue())
 	r.GET("/ws", tickets.redeem(), authMiddleware(nil), verifyCLITicketIdentity, func(c *gin.Context) {
-		if cliIdentityFor(c) != (cliIdentity{role: "admin"}) {
+		if cliIdentityFor(c) != (cliIdentity{role: "admin", actor: "containd"}) {
 			t.Error("lab context changed")
 		}
 		c.Status(http.StatusNoContent)

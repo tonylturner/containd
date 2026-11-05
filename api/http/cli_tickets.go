@@ -24,7 +24,7 @@ type cliIdentity struct {
 func cliIdentityFor(c *gin.Context) cliIdentity {
 	return cliIdentity{
 		user: c.GetString(ctxUserKey), role: c.GetString(ctxRoleKey),
-		session: c.GetString(ctxSessionKey), actor: c.GetString("actor"),
+		session: c.GetString(ctxSessionKey), actor: c.GetString(ctxActorKey),
 	}
 }
 

@@ -200,7 +200,7 @@ func authSessionHandler(userStore users.Store) gin.HandlerFunc {
 			"idleTTLSeconds":  int(idleTTL.Seconds()),
 			"maxTTLSeconds":   int(maxTTL.Seconds()),
 			"clientIP":        c.ClientIP(),
-			"authenticatedAs": c.GetString("actor"),
+			"authenticatedAs": c.GetString(ctxActorKey),
 		}
 
 		if userStore != nil {
