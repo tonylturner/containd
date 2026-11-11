@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounded frame parsing and HPACK decoding report per-stream method, path,
   `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains
   ALPN metadata only.
+- HTTP/1 inspection follows each connection as a stream, correlates responses
+  with requests (HEAD, 1xx, 204 and 304 carry no body) and recognises CONNECT
+  and `Upgrade` tunnels. After a framing error, reassembly loss or a tunnel it
+  reports one `malformed` event at most and resumes at the next in-order packet
+  that starts with a valid request or status line. Tunnel or body data that
+  begins a packet with such a line can therefore produce events.
 - HTTP requests and responses report `content_type`, usable in native IDS rule
   conditions and Sigma rules.
 - SMB events report the offered dialects (`dialects_offered`) and the
