@@ -246,7 +246,7 @@ export default function SecurityView() {
                       aria-label={`Add ${z.name} zone`}
                       onClick={() => addZone(z.id)}
                     >
-                      <div className={s.zoneDropdownDot} style={{ background: z.color }} />
+                      <span className={s.zoneDropdownDot} style={{ background: z.color }} />
                       <span className={s.zoneDropdownName} style={{ color: z.color }}>{z.name}</span>
                       <span className={s.zoneDropdownSl} style={{ color: sc }}>SL{sl_a}/{z.sl_t}</span>
                     </button>
