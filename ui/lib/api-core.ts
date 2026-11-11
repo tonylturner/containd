@@ -49,6 +49,27 @@ const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";
 const AUTH_ERROR_KEY = "containd.auth.last_error";
 
+export type StoredRoleSnapshot = "unknown" | "admin" | "view" | "guest";
+
+let storedRoleSnapshot: StoredRoleSnapshot = "unknown";
+const storedRoleListeners = new Set<() => void>();
+
+function publishStoredRole(role: StoredRoleSnapshot) {
+  if (storedRoleSnapshot === role) return;
+  storedRoleSnapshot = role;
+  storedRoleListeners.forEach((notify) => notify());
+}
+
+function readStoredRoleSnapshot(): StoredRoleSnapshot {
+  return getStoredRole() ?? "guest";
+}
+
+function onStoredRoleChange(event: StorageEvent) {
+  if (event.key === null || event.key === ROLE_KEY) {
+    publishStoredRole(readStoredRoleSnapshot());
+  }
+}
+
 let authExpiredEmitted = false;
 let authExpiredTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -92,6 +113,30 @@ export function setStoredRole(role: string | null) {
     if (!role) localStorage.removeItem(ROLE_KEY);
     else localStorage.setItem(ROLE_KEY, role);
   } catch {}
+  publishStoredRole(role === "admin" || role === "view" ? role : "guest");
+}
+
+/** Client snapshot hydration starts unknown, then reads local storage after mount. */
+export function subscribeStoredRole(notify: () => void) {
+  storedRoleListeners.add(notify);
+  if (storedRoleListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onStoredRoleChange);
+    publishStoredRole(readStoredRoleSnapshot());
+  }
+  return () => {
+    storedRoleListeners.delete(notify);
+    if (storedRoleListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onStoredRoleChange);
+    }
+  };
+}
+
+export function getStoredRoleSnapshot(): StoredRoleSnapshot {
+  return storedRoleSnapshot;
+}
+
+export function getServerStoredRoleSnapshot(): StoredRoleSnapshot {
+  return "unknown";
 }
 
 export function clearLocalAuth() {

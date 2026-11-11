@@ -1,9 +1,10 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import type { ShadowCounters } from "../../lib/api-shadow-counters";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
-import { isAdmin, type FirewallRule, type Position, type Zone } from "../../lib/api";
+import { type FirewallRule, type Position, type Zone } from "../../lib/api";
 import { MoveRuleDialog } from "./firewall-rule-position";
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { FirewallDefaultRow, type DefaultAction } from "./firewall-default-row";
@@ -100,6 +101,7 @@ export function FirewallRuleTable({
   onMove: (id: string, position: Position) => void;
   moving: boolean;
 }) {
+  const isAdmin = useIsAdmin();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [moveTarget, setMoveTarget] = useState<FirewallRule | null>(null);
   const moveControl = useRef<HTMLButtonElement | null>(null);
@@ -147,7 +149,7 @@ export function FirewallRuleTable({
                     <td role="cell" data-label="Order" className="px-3 py-3 font-mono">
                       <div className="flex items-center gap-1 whitespace-nowrap">
                         <span aria-label={`Position ${index + 1}`} className="mr-1">{index + 1}</span>
-                        {isAdmin() && (
+                        {isAdmin && (
                           <>
                             <button disabled={!available || moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
                             <button disabled={!available || moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
@@ -180,7 +182,7 @@ export function FirewallRuleTable({
                       <RuleCountersCell rule={r} counters={counters} compact />
                     </td>
                     <td role="cell" data-label="Actions" className="px-3 py-3 text-right">
-                      {isAdmin() && (
+                      {isAdmin && (
                         <>
                           <div className="mb-2 flex items-center justify-end gap-2">
                             <button disabled={!available || moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>

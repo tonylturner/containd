@@ -1,8 +1,9 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
-import { isAdmin, listPcaps, type PcapItem } from "../../lib/api";
+import { listPcaps, type PcapItem } from "../../lib/api";
 import {
   analyzeUpload,
   learner,
@@ -25,7 +26,8 @@ import { formatEvidenceTime } from "./evidence-time";
 import styles from "./collection-tabs.module.css";
 
 export default function PcapAnalysisPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const confirm = useConfirm();
   const [notice, setNotice] = useState("");
   const [datasets, setDatasets] = useState<LearnPage<LearnDataset> | null>(

@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import { useConfigView } from "../../lib/use-config-revision";
@@ -12,7 +13,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
+import { api, type Asset, type Zone } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { validateIPOrCIDRList } from "../../lib/validate";
@@ -29,6 +30,7 @@ const criticalityVariant = (c: string) =>
     : "neutral" as const;
 
 export default function AssetsPage() {
+  const isAdmin = useIsAdmin();
   const { readConfig, write, data: assets, revisionNotice } = useConfigView<Asset[]>([]);
   const toast = useToast();
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
@@ -122,7 +124,7 @@ export default function AssetsPage() {
 
   return (
     <Shell title="Assets" actions={<button onClick={refresh} className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui">Refresh</button>}>
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
@@ -133,7 +135,7 @@ export default function AssetsPage() {
           {error}
         </div>
       )}
-      {isAdmin() && (
+      {isAdmin && (
       <Card title="Create asset" padding="lg">
         <div className="grid gap-3 md:grid-cols-3">
           <input
@@ -261,7 +263,7 @@ export default function AssetsPage() {
                   ) : "\u2014"}
                 </td>
                 <td data-label="Actions" className="px-4 py-3 text-right">
-                  {isAdmin() && (
+                  {isAdmin && (
                     <>
                       <button
                         onClick={() => setEditing(a)}
@@ -294,7 +296,7 @@ export default function AssetsPage() {
 
       <IEC104Inventory refreshKey={inventoryRefresh} />
 
-      {editing && isAdmin() && (
+      {editing && isAdmin && (
         <EditAssetModal
           asset={editing}
           zones={zones}

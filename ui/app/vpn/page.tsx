@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -14,7 +15,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   api,
-  isAdmin,
   type OpenVPNConfig,
   type Zone,
   type Interface,
@@ -51,7 +51,8 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
 
 export default function VPNPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();

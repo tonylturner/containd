@@ -1,7 +1,10 @@
+"use client";
+
+import { useIsAdmin } from "../../hooks/useIsAdmin";
+
 import { StatusBadge } from "../../components/StatusBadge";
 import { isRecord } from "../../lib/api-request";
 import styles from "./firewall-rule-table.module.css";
-import { isAdmin } from "../../lib/api";
 import { FirewallDefaultControl } from "./firewall-default-control";
 
 export type DefaultAction = "ALLOW" | "DENY" | "unknown";
@@ -18,6 +21,7 @@ export function effectiveDefaultAction(config: unknown): DefaultAction {
 export function FirewallDefaultRow({ action, available, revision, onSaved }: {
   action: DefaultAction; available: boolean; revision: string; onSaved: () => void;
 }) {
+  const isAdmin = useIsAdmin();
   return (
     <tr role="row" className={`${styles.ruleRow} border-t bg-(--surface2)`} aria-label="Default policy">
       <th role="rowheader" scope="row" className="px-3 py-3 text-left font-semibold">Default</th>
@@ -32,7 +36,7 @@ export function FirewallDefaultRow({ action, available, revision, onSaved }: {
       </td>
       <td role="cell" data-label="Hits" className="px-3 py-3">—</td>
       <td role="cell" data-label="Actions" className="px-3 py-3 text-right text-xs text-(--text-muted)">
-        {isAdmin() ? <FirewallDefaultControl available={available && action !== "unknown"} revision={revision} onSaved={onSaved} /> : "Read-only"}
+        {isAdmin ? <FirewallDefaultControl available={available && action !== "unknown"} revision={revision} onSaved={onSaved} /> : "Read-only"}
       </td>
     </tr>
   );

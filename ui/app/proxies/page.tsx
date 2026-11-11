@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -14,7 +15,6 @@ import Image from "next/image";
 
 import {
   api,
-  isAdmin,
   type ForwardProxyConfig,
   type ReverseProxyConfig,
   type ReverseProxySite,
@@ -35,7 +35,8 @@ import { Card } from "../../components/Card";
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();

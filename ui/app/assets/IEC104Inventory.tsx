@@ -1,9 +1,10 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useCallback, useState, type ReactNode } from "react";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { api, isAdmin, type IEC104Inventory as Inventory } from "../../lib/api";
+import { api, type IEC104Inventory as Inventory } from "../../lib/api";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -29,6 +30,7 @@ export function IEC104Inventory({ refreshKey }: { refreshKey: number }) {
 }
 
 function InventoryContent() {
+  const isAdmin = useIsAdmin();
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">("loading");
 
@@ -45,7 +47,7 @@ function InventoryContent() {
   return (
     <Card title="Passive IEC 104 inventory" className="mt-6">
       <ConfirmDialog {...confirm.props} />
-      {isAdmin() && <button className="mb-3 rounded-xs border px-3 py-1.5 text-sm" disabled={busy} onClick={() => confirm.open({
+      {isAdmin && <button className="mb-3 rounded-xs border px-3 py-1.5 text-sm" disabled={busy} onClick={() => confirm.open({
         title: "Clear observed inventory?",
         message: "Immediately clear all passive inventory, including IEC 104 stations, points and overflow counters. Configured assets and learner datasets are unchanged. New traffic can repopulate inventory. This cannot be undone and does not require a commit.",
         confirmLabel: "Clear inventory",

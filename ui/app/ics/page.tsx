@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import type { ConfigBase } from "../../lib/config-boundary";
@@ -17,7 +18,6 @@ import Link from "next/link";
 import {
   api,
   fetchDataPlane,
-  isAdmin,
   type DataPlaneConfig,
   type FirewallRule,
   type ICSPredicatePatch,
@@ -49,8 +49,9 @@ import { useICSCoverage } from "./use-ics-coverage";
 /* -- Page ----------------------------------------------------------------- */
 
 export default function ICSPolicyPage() {
+  const isAdmin = useIsAdmin();
   const toast = useToast();
-  const canEdit = isAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const view = useConfigView({ rules: [] as FirewallRule[], dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
   const { readConfig } = view;

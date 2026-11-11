@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { upsertRow } from "../../lib/config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
@@ -12,7 +13,6 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Shell } from "../../components/Shell";
 import {
   api,
-  isAdmin,
   type IDSConfig,
   type IDSRule,
   type IDSRuleSource,
@@ -38,7 +38,8 @@ import { ImportResult } from "./ids-import-result";
 /* ── Page ── */
 
 export default function IDSPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] }, false);
   const { conflictProps, editor, cfg: ids, setCfg: setIds, readConfig: adoptConfig, write, writeRefresh, text, setText, clearText } = draft;
