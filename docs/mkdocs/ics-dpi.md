@@ -711,14 +711,41 @@ For a `cip` IDS rule, this condition matches a connected-data CPF item using
 {"field": "attr.cpf_item_types", "op": "contains", "value": "0x00b1"}
 ```
 
-The TLS decoder emits a `client_hello` event with `sni`, `alpn`,
-`tls_version`, `cipher_suites`, `extensions`, `ja3`, `ja3_hash`, `src_port`,
-`dst_port` and `transport`. `ja3` follows the JA3 layout but is **not
-reference JA3**: it holds the ClientHello version, at most 50 cipher suites and
-the extension types. GREASE values are not removed, and the elliptic-curve and
-point-format fields are always empty. `ja3_hash` is the MD5 of that string. Do
-not compare it with JA3 values from other tools. `tls_version` is the
-ClientHello version field, so TLS 1.3 clients usually show `TLS1.2`.
+### TLS metadata
+
+The TLS decoder emits `tls/client_hello` with `sni`, `alpn`,
+`tls_legacy_version`, `tls_offered_versions`, `cipher_suites`, `extensions`,
+`ja3`, `ja3_hash`, `src_port`, `dst_port` and `transport`. TCP reassembly
+makes the fingerprint independent of packet boundaries; handshakes spanning
+TLS records are also supported. Incomplete hellos do not emit partial metadata.
+A handshake is limited to 64 KiB; individual cipher/extension lists are not
+truncated.
+
+`ja3` is the reference [JA3](https://github.com/salesforce/ja3) string:
+`SSLVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats`,
+preserving wire order and removing RFC 8701 GREASE values from each applicable
+list. `ja3_hash` is its lowercase MD5 digest, suitable for correlation with
+external JA3 tools and feeds (not a security hash). `cipher_suites` and
+`extensions` are ordered numeric lists with GREASE removed. JA3 uses the wire
+ClientHello version, **not** the highest offered or negotiated version.
+
+Version attributes replace the ambiguous `tls_version`:
+
+- `tls_legacy_version`: the hello's legacy version, for example `TLS1.2`
+  for a TLS 1.3 ClientHello or ServerHello. This is not a negotiation result.
+- `tls_offered_versions`: an ordered string list from ClientHello
+  `supported_versions`, excluding GREASE, for example `["TLS1.3", "TLS1.2"]`.
+  It is empty when that extension is absent; legacy offers are not inferred.
+- `tls_selected_version`: emitted on `tls/server_hello` only. It is the
+  ServerHello `supported_versions` selection when present, otherwise the
+  ServerHello version (TLS 1.2 and earlier). That event also carries
+  `tls_legacy_version`, ports and transport. A client offer alone never
+  establishes the selected version; this is a server selection, not proof
+  that the handshake completed. JA3S is not emitted.
+
+Known versions are `TLS1.0`, `TLS1.1`, `TLS1.2`, `TLS1.3`; other values use
+`0xNNNN`. TLS-encrypted HTTP/2 remains visible only through TLS metadata such
+as the ALPN offer `h2`; headers, streams and content are not decrypted.
 
 ## ICS Firewall Rule Predicates
 
