@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 	"unicode/utf16"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -26,12 +25,15 @@ const (
 
 type smbNegotiation struct {
 	dialects []string
-	updated  time.Time
+	previous string
+	next     string
 }
 
 type SMBDecoder struct {
-	mu           sync.Mutex
-	negotiations map[string]smbNegotiation
+	mu              sync.Mutex
+	negotiations    map[string]*smbNegotiation
+	negotiationHead string
+	negotiationTail string
 }
 
 func NewSMBDecoder() *SMBDecoder { return &SMBDecoder{} }
@@ -123,7 +125,7 @@ func (d *SMBDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 func (d *SMBDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
 	if state != nil {
 		d.mu.Lock()
-		delete(d.negotiations, smbNegotiationKey(state.Key))
+		d.removeSMB1Negotiation(smbNegotiationKey(state.Key))
 		d.mu.Unlock()
 	}
 	return nil, nil
@@ -290,35 +292,78 @@ func (d *SMBDecoder) storeSMB1Dialects(state *flow.State, dialects []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.negotiations == nil {
-		d.negotiations = make(map[string]smbNegotiation)
+		d.negotiations = make(map[string]*smbNegotiation)
+	}
+	if negotiation, exists := d.negotiations[key]; exists {
+		negotiation.dialects = append([]string(nil), dialects...)
+		return
 	}
 	if len(d.negotiations) >= maxSMBNegotiationMap {
-		var oldestKey string
-		var oldest time.Time
-		for candidate, negotiation := range d.negotiations {
-			if oldest.IsZero() || negotiation.updated.Before(oldest) {
-				oldestKey, oldest = candidate, negotiation.updated
-			}
-		}
-		delete(d.negotiations, oldestKey)
+		d.removeSMB1Negotiation(d.negotiationHead)
 	}
-	d.negotiations[key] = smbNegotiation{dialects: append([]string(nil), dialects...), updated: time.Now()}
+	negotiation := &smbNegotiation{
+		dialects: append([]string(nil), dialects...),
+		previous: d.negotiationTail,
+	}
+	if d.negotiationTail == "" {
+		d.negotiationHead = key
+	} else {
+		d.negotiations[d.negotiationTail].next = key
+	}
+	d.negotiationTail = key
+	d.negotiations[key] = negotiation
 }
 
 func (d *SMBDecoder) selectedSMB1Dialect(state *flow.State, smb []byte) (string, bool) {
-	if state == nil || len(smb) < 35 || smb[32] != 1 {
+	if state == nil {
 		return "", false
 	}
-	index := int(binary.LittleEndian.Uint16(smb[33:35]))
 	key := smbNegotiationKey(state.Key)
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	negotiation, ok := d.negotiations[key]
-	delete(d.negotiations, key)
-	if !ok || index >= len(negotiation.dialects) {
+	negotiation := d.negotiations[key]
+	d.removeSMB1Negotiation(key)
+	d.mu.Unlock()
+
+	if negotiation == nil || len(smb) < 35 {
+		return "", false
+	}
+	wordCount := int(smb[32])
+	if wordCount != 1 && wordCount != 13 && wordCount != 17 {
+		return "", false
+	}
+	byteCountOffset := 33 + wordCount*2
+	if len(smb) < byteCountOffset+2 {
+		return "", false
+	}
+	byteCount := int(binary.LittleEndian.Uint16(smb[byteCountOffset : byteCountOffset+2]))
+	if byteCount > len(smb)-(byteCountOffset+2) {
+		return "", false
+	}
+	index := binary.LittleEndian.Uint16(smb[33:35])
+	if index == 0xFFFF || int(index) >= len(negotiation.dialects) {
 		return "", false
 	}
 	return negotiation.dialects[index], true
+}
+
+// removeSMB1Negotiation unlinks one pending offer in constant time. The caller
+// must hold d.mu.
+func (d *SMBDecoder) removeSMB1Negotiation(key string) {
+	negotiation, exists := d.negotiations[key]
+	if !exists {
+		return
+	}
+	if negotiation.previous == "" {
+		d.negotiationHead = negotiation.next
+	} else {
+		d.negotiations[negotiation.previous].next = negotiation.next
+	}
+	if negotiation.next == "" {
+		d.negotiationTail = negotiation.previous
+	} else {
+		d.negotiations[negotiation.next].previous = negotiation.previous
+	}
+	delete(d.negotiations, key)
 }
 
 func smbNegotiationKey(key flow.Key) string {

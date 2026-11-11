@@ -177,7 +177,7 @@ func FuzzSMBDecoderOnPacket(f *testing.F) {
 	f.Add(buildSMB2NegotiateResponse(0x0311))
 	f.Add(buildSMBv2Packet(0x0009))
 	f.Add(buildSMB1NegotiateRequest("NT LM 0.12", "SMB 2.???"))
-	f.Add(buildSMB1NegotiateResponse(0))
+	f.Add(buildSMB1NegotiateResponse(17, 0))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {

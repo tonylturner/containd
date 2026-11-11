@@ -141,12 +141,13 @@ func buildSMB1NegotiateRequest(dialects ...string) []byte {
 	return addNetBIOSHeader(smb)
 }
 
-func buildSMB1NegotiateResponse(index uint16) []byte {
-	smb := make([]byte, 37)
+func buildSMB1NegotiateResponse(wordCount byte, index uint16) []byte {
+	byteCountOffset := 33 + int(wordCount)*2
+	smb := make([]byte, byteCountOffset+2)
 	copy(smb, []byte{0xFF, 'S', 'M', 'B'})
 	smb[4] = 0x72
 	smb[9] = 0x80
-	smb[32] = 1
+	smb[32] = wordCount
 	binary.LittleEndian.PutUint16(smb[33:35], index)
 	return addNetBIOSHeader(smb)
 }
@@ -211,7 +212,7 @@ func TestSMB2SelectedDialect(t *testing.T) {
 	}
 }
 
-func TestSMB1NegotiateDialectSelection(t *testing.T) {
+func TestSMB1NegotiateDialectOffer(t *testing.T) {
 	d := NewSMBDecoder()
 	request := &dpi.ParsedPacket{
 		Payload: buildSMB1NegotiateRequest("NT LM 0.12", "SMB 2.???"),
@@ -227,18 +228,128 @@ func TestSMB1NegotiateDialectSelection(t *testing.T) {
 		t.Errorf("dialects_offered=%v", got)
 	}
 
-	response := &dpi.ParsedPacket{
-		Payload: buildSMB1NegotiateResponse(1),
-		Proto:   "tcp",
-		SrcPort: 445,
-		DstPort: 49152,
+	if len(d.negotiations) != 1 {
+		t.Fatalf("pending offers=%d, want one", len(d.negotiations))
 	}
-	events, err = d.OnPacket(smbReplyFlowState(445, 49152), response)
-	if err != nil || len(events) != 1 {
-		t.Fatalf("response OnPacket = %v, %v; want one event", events, err)
+}
+
+func TestSMB1NegotiateResponseLayoutsAndCleanup(t *testing.T) {
+	tests := []struct {
+		name      string
+		wordCount byte
+		index     uint16
+		truncate  bool
+		want      string
+	}{
+		{name: "core", wordCount: 1, index: 0, want: "NT LM 0.12"},
+		{name: "NT LM 0.12", wordCount: 17, index: 0, want: "NT LM 0.12"},
+		{name: "LAN Manager", wordCount: 13, index: 1, want: "LANMAN2.1"},
+		{name: "no dialect", wordCount: 1, index: 0xFFFF},
+		{name: "unsupported word count", wordCount: 2, index: 0},
+		{name: "invalid dialect index", wordCount: 17, index: 3},
+		{name: "truncated layout", wordCount: 17, index: 0, truncate: true},
 	}
-	if got := events[0].Attributes["dialect"]; got != "SMB 2.???" {
-		t.Errorf("dialect=%v, want selected SMB 2.???", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewSMBDecoder()
+			request := &dpi.ParsedPacket{
+				Payload: buildSMB1NegotiateRequest("NT LM 0.12", "LANMAN2.1"),
+				Proto:   "tcp",
+				SrcPort: 49152,
+				DstPort: 445,
+			}
+			if _, err := d.OnPacket(smbFlowState(49152, 445), request); err != nil {
+				t.Fatal(err)
+			}
+			response := buildSMB1NegotiateResponse(tc.wordCount, tc.index)
+			if tc.truncate {
+				response = response[:len(response)-1]
+			}
+			events, err := d.OnPacket(smbReplyFlowState(445, 49152), &dpi.ParsedPacket{
+				Payload: response,
+				Proto:   "tcp",
+				SrcPort: 445,
+				DstPort: 49152,
+			})
+			if err != nil || len(events) != 1 {
+				t.Fatalf("response OnPacket = %v, %v; want one event", events, err)
+			}
+			got, exists := events[0].Attributes["dialect"]
+			if tc.want == "" {
+				if exists {
+					t.Errorf("unexpected selected dialect %v", got)
+				}
+			} else if got != tc.want {
+				t.Errorf("dialect=%v, want %q", got, tc.want)
+			}
+			if len(d.negotiations) != 0 {
+				t.Errorf("response left %d pending negotiations", len(d.negotiations))
+			}
+		})
+	}
+}
+
+func TestSMBNegotiationEvictionFIFO(t *testing.T) {
+	d := NewSMBDecoder()
+	states := make([]*flow.State, maxSMBNegotiationMap+1)
+	for i := range states {
+		states[i] = flow.NewState(flow.Key{
+			SrcIP:   net.IPv4(10, byte(i>>16), byte(i>>8), byte(i)),
+			DstIP:   net.ParseIP("192.0.2.1"),
+			SrcPort: uint16(20000 + i),
+			DstPort: 445,
+			Proto:   6,
+		}, time.Now())
+		d.storeSMB1Dialects(states[i], []string{"NT LM 0.12"})
+	}
+	if len(d.negotiations) != maxSMBNegotiationMap {
+		t.Fatalf("pending offers=%d, want cap %d", len(d.negotiations), maxSMBNegotiationMap)
+	}
+	if _, exists := d.negotiations[smbNegotiationKey(states[0].Key)]; exists {
+		t.Fatal("oldest offer was not evicted")
+	}
+	if _, exists := d.negotiations[smbNegotiationKey(states[maxSMBNegotiationMap].Key)]; !exists {
+		t.Fatal("newest offer is missing")
+	}
+	if d.negotiationHead != smbNegotiationKey(states[1].Key) {
+		t.Fatal("FIFO head did not advance past the evicted offer")
+	}
+}
+
+func TestSMBNegotiationRemovalKeepsFIFOLinked(t *testing.T) {
+	d := NewSMBDecoder()
+	states := make([]*flow.State, 3)
+	for i := range states {
+		states[i] = flow.NewState(flow.Key{
+			SrcIP:   net.IPv4(10, 0, 0, byte(i+1)),
+			DstIP:   net.ParseIP("192.0.2.1"),
+			SrcPort: uint16(20000 + i),
+			DstPort: 445,
+			Proto:   6,
+		}, time.Now())
+		d.storeSMB1Dialects(states[i], []string{"NT LM 0.12"})
+	}
+	if _, err := d.OnFlowEnd(states[1]); err != nil {
+		t.Fatal(err)
+	}
+	first, last := smbNegotiationKey(states[0].Key), smbNegotiationKey(states[2].Key)
+	if d.negotiationHead != first || d.negotiationTail != last {
+		t.Fatalf("queue endpoints = %q .. %q, want %q .. %q", d.negotiationHead, d.negotiationTail, first, last)
+	}
+	if d.negotiations[first].next != last || d.negotiations[last].previous != first {
+		t.Fatal("removing a middle offer did not reconnect the FIFO neighbors")
+	}
+	if _, err := d.OnFlowEnd(states[0]); err != nil {
+		t.Fatal(err)
+	}
+	if d.negotiationHead != last || d.negotiationTail != last {
+		t.Fatal("removing the FIFO head did not advance both endpoints")
+	}
+	if _, err := d.OnFlowEnd(states[2]); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.negotiations) != 0 || d.negotiationHead != "" || d.negotiationTail != "" {
+		t.Fatal("empty negotiation queue retained stale state")
 	}
 }
 
