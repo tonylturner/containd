@@ -4,6 +4,7 @@
 package itdpi
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -66,14 +67,23 @@ func TestSNMPv2cGetRequest(t *testing.T) {
 	if v := ev.Attributes["version"]; v != "v2c" {
 		t.Errorf("version=%v, want v2c", v)
 	}
+	if v := ev.Attributes["community"]; v != "public" {
+		t.Errorf("community=%v, want public", v)
+	}
 	if v := ev.Attributes["request_id"]; v != int64(1234) {
 		t.Errorf("request_id=%v, want 1234", v)
 	}
 	if v := ev.Attributes["error_status"]; v != "noError" {
 		t.Errorf("error_status=%v, want noError", v)
 	}
-	if v := ev.Attributes["first_oid"]; v != "1.3.6.1.2.1.1.1.0" {
-		t.Errorf("first_oid=%v, want 1.3.6.1.2.1.1.1.0", v)
+	if v := fmt.Sprint(ev.Attributes["oids"]); v != "[1.3.6.1.2.1.1.1.0]" {
+		t.Errorf("oids=%v", v)
+	}
+	if _, ok := ev.Attributes["community_auth"]; ok {
+		t.Error("community_auth must not be emitted")
+	}
+	if _, ok := ev.Attributes["first_oid"]; ok {
+		t.Error("first_oid must be replaced by the complete oids list")
 	}
 }
 
@@ -99,6 +109,12 @@ func TestSNMPv2cGetResponse(t *testing.T) {
 	}
 	if v := ev.Attributes["version"]; v != "v2c" {
 		t.Errorf("version=%v, want v2c", v)
+	}
+	if v := ev.Attributes["community"]; v != "public" {
+		t.Errorf("community=%v, want public", v)
+	}
+	if got := fmt.Sprint(ev.Attributes["oids"]); got != "[1.3.6.1.2.1.1.1.0]" {
+		t.Errorf("response oids=%v", got)
 	}
 }
 
@@ -128,6 +144,40 @@ func TestSNMPv1Trap(t *testing.T) {
 	}
 	if v := ev.Attributes["pdu_type"]; v != "trap" {
 		t.Errorf("pdu_type=%v, want trap", v)
+	}
+	if v := ev.Attributes["community"]; v != "public" {
+		t.Errorf("community=%v, want public", v)
+	}
+	if got := ev.Attributes["enterprise_oid"]; got != "1.3.6.1.4.1.99" {
+		t.Errorf("enterprise_oid=%v", got)
+	}
+	if got := ev.Attributes["generic_trap"]; got != int64(6) {
+		t.Errorf("generic_trap=%v", got)
+	}
+	if got := ev.Attributes["specific_trap"]; got != int64(1) {
+		t.Errorf("specific_trap=%v", got)
+	}
+	if got := fmt.Sprint(ev.Attributes["oids"]); got != "[1.3.6.1.2.1.1.3.0]" {
+		t.Errorf("trap oids=%v", got)
+	}
+}
+
+func TestSNMPv2TrapOID(t *testing.T) {
+	d := NewSNMPDecoder()
+	st := snmpFlowState(32768, 162)
+	packet := buildSNMPv2TrapPacket("public", "1.3.6.1.6.3.1.1.5.3")
+	events, err := d.OnPacket(st, &dpi.ParsedPacket{
+		Payload: packet, Proto: "udp", SrcPort: 32768, DstPort: 162,
+	})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("OnPacket = %v, %v; want one event", events, err)
+	}
+	attrs := events[0].Attributes
+	if attrs["community"] != "public" || attrs["trap_oid"] != "1.3.6.1.6.3.1.1.5.3" {
+		t.Errorf("trap attributes = %#v", attrs)
+	}
+	if got := fmt.Sprint(attrs["oids"]); got != "[1.3.6.1.6.3.1.1.4.1.0]" {
+		t.Errorf("varbind OIDs=%v", got)
 	}
 }
 
@@ -206,7 +256,17 @@ func TestSNMPMalformedBER(t *testing.T) {
 	}
 }
 
-func TestSNMPCommunityRedaction(t *testing.T) {
+func TestReadBEROIDLargeSecondArc(t *testing.T) {
+	oid, _, ok := readBEROID(berTLV(0x06, []byte{0x88, 0x37, 0x03}), 0)
+	if !ok || oid != "2.999.3" {
+		t.Fatalf("readBEROID = %q, %t; want 2.999.3", oid, ok)
+	}
+	if _, _, ok := readBEROID(berTLV(0x06, []byte{0x2B, 0x80}), 0); ok {
+		t.Fatal("accepted an unterminated OID subidentifier")
+	}
+}
+
+func TestSNMPCommunityVisible(t *testing.T) {
 	d := NewSNMPDecoder()
 	st := snmpFlowState(32768, 161)
 	community := "my_secret_community"
@@ -225,16 +285,74 @@ func TestSNMPCommunityRedaction(t *testing.T) {
 	}
 	ev := events[0]
 
-	// Verify community_length is present and correct.
-	if v, ok := ev.Attributes["community_length"]; !ok || v != len(community) {
-		t.Errorf("community_length=%v, want %d", v, len(community))
+	if got := ev.Attributes["community"]; got != community {
+		t.Errorf("community=%v, want cleartext community %q", got, community)
 	}
+	if _, ok := ev.Attributes["community_auth"]; ok {
+		t.Error("community_auth must not be emitted")
+	}
+}
 
-	// Verify the actual community string does NOT appear in any attribute.
-	for k, v := range ev.Attributes {
-		if s, ok := v.(string); ok && s == community {
-			t.Errorf("community string leaked in attribute %q", k)
+func TestSNMPv3VisibleHeaderAndScopedPDU(t *testing.T) {
+	d := NewSNMPDecoder()
+	state := snmpFlowState(32768, 161)
+	packet := buildSNMPv3Packet(0x01, "monitor", false, "1.3.6.1.2.1.1.1.0")
+	events, err := d.OnPacket(state, &dpi.ParsedPacket{
+		Payload: packet, Proto: "udp", SrcPort: 32768, DstPort: 161,
+	})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("OnPacket = %v, %v; want one event", events, err)
+	}
+	attrs := events[0].Attributes
+	for key, want := range map[string]any{
+		"version": "v3", "msg_security_model": int64(3),
+		"msg_flags_auth": true, "msg_flags_priv": false, "user_name": "monitor",
+	} {
+		if attrs[key] != want {
+			t.Errorf("%s=%v, want %v", key, attrs[key], want)
 		}
+	}
+	if got := fmt.Sprint(attrs["oids"]); got != "[1.3.6.1.2.1.1.1.0]" {
+		t.Errorf("v3 scoped OIDs=%v", got)
+	}
+}
+
+func TestSNMPv3EncryptedScopedPDUIsNotParsed(t *testing.T) {
+	d := NewSNMPDecoder()
+	state := snmpFlowState(32768, 161)
+	packet := buildSNMPv3Packet(0x03, "monitor", true, "1.3.6.1.2.1.1.1.0")
+	events, err := d.OnPacket(state, &dpi.ParsedPacket{
+		Payload: packet, Proto: "udp", SrcPort: 32768, DstPort: 161,
+	})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("OnPacket = %v, %v; want one event", events, err)
+	}
+	attrs := events[0].Attributes
+	if attrs["msg_flags_auth"] != true || attrs["msg_flags_priv"] != true || attrs["user_name"] != "monitor" {
+		t.Errorf("v3 header attributes = %#v", attrs)
+	}
+	if _, ok := attrs["oids"]; ok {
+		t.Errorf("encrypted scoped PDU must not expose OIDs: %#v", attrs)
+	}
+}
+
+func TestSNMPVarbindOIDLimit(t *testing.T) {
+	var bindings []byte
+	for i := 0; i < maxSNMPOIDs+1; i++ {
+		bindings = append(bindings, berSequence(append(berOID("1.3.6.1.2.1.1.1.0"), berNull()...))...)
+	}
+	packet := buildSNMPMessageWithPDU(1, "public", pduGetRequest, bindings)
+	events, err := NewSNMPDecoder().OnPacket(snmpFlowState(32768, 161), &dpi.ParsedPacket{
+		Payload: packet, Proto: "udp", SrcPort: 32768, DstPort: 161,
+	})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("OnPacket = %v, %v; want one event", events, err)
+	}
+	if got := len(events[0].Attributes["oids"].([]string)); got != maxSNMPOIDs {
+		t.Errorf("oids count=%d, want bound %d", got, maxSNMPOIDs)
+	}
+	if events[0].Attributes["oids_truncated"] != true {
+		t.Error("oids_truncated not set when additional bindings are present")
 	}
 }
 
@@ -374,15 +492,25 @@ func berNull() []byte {
 func buildSNMPv2cPacket(version int64, community string, pduType byte, requestID int64, errStatus, errIndex int64, oid string) []byte {
 	// Variable binding: SEQUENCE { OID, NULL }.
 	binding := berSequence(append(berOID(oid), berNull()...))
-	// Variable bindings: SEQUENCE of bindings.
-	varbinds := berSequence(binding)
+	return buildSNMPMessageWithPDU(version, community, pduType, binding, requestID, errStatus, errIndex)
+}
 
-	// PDU body: request-id, error-status, error-index, varbinds.
+func buildSNMPMessageWithPDU(version int64, community string, pduType byte, bindings []byte, requestIDs ...int64) []byte {
+	requestID, errStatus, errIndex := int64(1), int64(0), int64(0)
+	if len(requestIDs) > 0 {
+		requestID = requestIDs[0]
+	}
+	if len(requestIDs) > 1 {
+		errStatus = requestIDs[1]
+	}
+	if len(requestIDs) > 2 {
+		errIndex = requestIDs[2]
+	}
 	var pduBody []byte
 	pduBody = append(pduBody, berInteger(requestID)...)
 	pduBody = append(pduBody, berInteger(errStatus)...)
 	pduBody = append(pduBody, berInteger(errIndex)...)
-	pduBody = append(pduBody, varbinds...)
+	pduBody = append(pduBody, berSequence(bindings)...)
 
 	pdu := berTLV(pduType, pduBody)
 
@@ -391,8 +519,51 @@ func buildSNMPv2cPacket(version int64, community string, pduType byte, requestID
 	msgBody = append(msgBody, berInteger(version)...)
 	msgBody = append(msgBody, berOctetString(community)...)
 	msgBody = append(msgBody, pdu...)
-
 	return berSequence(msgBody)
+}
+
+func buildSNMPv2TrapPacket(community, trapOID string) []byte {
+	binding := berSequence(append(berOID(snmpTrapOID), berOID(trapOID)...))
+	var pduBody []byte
+	pduBody = append(pduBody, berInteger(1234)...)
+	pduBody = append(pduBody, berInteger(0)...)
+	pduBody = append(pduBody, berInteger(0)...)
+	pduBody = append(pduBody, berSequence(binding)...)
+	pdu := berTLV(pduSNMPv2Trap, pduBody)
+	msgBody := append(berInteger(1), berOctetString(community)...)
+	msgBody = append(msgBody, pdu...)
+	return berSequence(msgBody)
+}
+
+func buildSNMPv3Packet(flags byte, username string, encrypted bool, oid string) []byte {
+	header := append(berInteger(1), berInteger(65507)...)
+	header = append(header, berTLV(0x04, []byte{flags})...)
+	header = append(header, berInteger(3)...)
+
+	usm := append(berOctetString("\x80\x00\x00\x01"), berInteger(1)...)
+	usm = append(usm, berInteger(30)...)
+	usm = append(usm, berOctetString(username)...)
+	usm = append(usm, berOctetString("auth")...)
+	usm = append(usm, berOctetString("priv")...)
+	securityParameters := berOctetString(string(berSequence(usm)))
+
+	var scoped []byte
+	if encrypted {
+		scoped = berOctetString("ciphertext")
+	} else {
+		binding := berSequence(append(berOID(oid), berNull()...))
+		var pduBody []byte
+		pduBody = append(pduBody, berInteger(42)...)
+		pduBody = append(pduBody, berInteger(0)...)
+		pduBody = append(pduBody, berInteger(0)...)
+		pduBody = append(pduBody, berSequence(binding)...)
+		pdu := berTLV(pduGetRequest, pduBody)
+		scoped = berSequence(append(berOctetString("\x80\x00\x00\x01"), append(berOctetString(""), pdu...)...))
+	}
+	message := append(berInteger(3), berSequence(header)...)
+	message = append(message, securityParameters...)
+	message = append(message, scoped...)
+	return berSequence(message)
 }
 
 // buildSNMPv1TrapPacket constructs a minimal SNMPv1 Trap packet.
@@ -405,7 +576,8 @@ func buildSNMPv1TrapPacket(community string) []byte {
 	trapBody = append(trapBody, berInteger(6)...)              // generic-trap: enterpriseSpecific
 	trapBody = append(trapBody, berInteger(1)...)              // specific-trap
 	trapBody = append(trapBody, berTLV(0x43, []byte{0x00})...) // TimeTicks
-	trapBody = append(trapBody, berSequence(nil)...)           // empty varbinds
+	binding := berSequence(append(berOID("1.3.6.1.2.1.1.3.0"), berNull()...))
+	trapBody = append(trapBody, berSequence(binding)...)
 
 	pdu := berTLV(pduTrapV1, trapBody)
 

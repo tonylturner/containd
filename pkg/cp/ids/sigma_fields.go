@@ -56,9 +56,11 @@ func decoderAttribute(field string) bool {
 		"reference_id", "risk", "root_delay", "root_dispersion", "stratum",
 		"stratum_name", "version", "cookie",
 		"security_concern", "security_level", "selected_protocol", "stage",
-		"command", "session_id", "share", "community_auth", "community_length",
-		"error_status", "first_oid", "msg_security_model", "pdu_type", "request_id",
-		"write_operation", "comments", "encryption", "kex_algorithm", "software":
+		"command", "session_id", "share", "dialect", "community", "error_status",
+		"enterprise_oid", "generic_trap", "specific_trap", "trap_oid",
+		"msg_flags_auth", "msg_flags_priv", "msg_security_model", "pdu_type",
+		"request_id", "user_name", "write_operation", "comments", "encryption",
+		"kex_algorithm", "software":
 		return true
 	// Shared ICS keys emitted by modbus, dnp3 and iec104, including the
 	// information-object fields in iec104/asdu.go.
