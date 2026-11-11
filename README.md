@@ -83,7 +83,7 @@ Traditional IT firewalls don't understand ICS protocols. They can't distinguish 
 
 **Firewall** -- Zone-based with first-match ordered rules, nftables enforcement, NAT (SNAT + DNAT), and default-deny posture. Port forwards translate traffic; they need an explicit allow rule.
 
-**ICS/OT Deep Packet Inspection** -- Native Go decoders for Modbus, DNP3, CIP/EtherNet/IP, IEC 60870-5-104, plus DNS, TLS (SNI, partial JA3), HTTP, SSH, RDP, SMB, SNMP, NTP. Per-protocol enable/disable, independent monitor/enforce mode per ICS rule, function code and register-level visibility. IEC 104 evidence identifies types outside containd's supported type set.
+**ICS/OT Deep Packet Inspection** -- Native Go decoders for Modbus, DNP3, CIP/EtherNet/IP, IEC 60870-5-104, plus DNS, TLS (SNI, JA3), HTTP, SSH, RDP, SMB, SNMP, NTP. Per-protocol enable/disable, independent monitor/enforce mode per ICS rule, function code and register-level visibility. IEC 104 evidence identifies types outside containd's supported type set.
 
 **ICS Security** -- Asset auto-discovery from traffic, PCAP-based allowlist suggestions, protocol anomaly detection, built-in ICS threat signatures, Sigma-like IDS rules, PCAP offline analysis.
 

@@ -56,17 +56,18 @@ func FuzzDNSDecoderOnPacket(f *testing.F) {
 }
 
 func FuzzHTTPDecoderOnPacket(f *testing.F) {
-	dec := NewHTTPDecoder()
 	state := httpFlowState(12345, 80)
 
 	f.Add([]byte("GET /index.html HTTP/1.1\r\nHost: example.com\r\n\r\n"))
 	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nok"))
 	f.Add([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
+	f.Add([]byte("POST / HTTP/1.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n"))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = parseHTTP(data)
-		_, _ = dec.OnPacket(state, &dpi.ParsedPacket{
+		fuzzITStream(data, NewHTTPDecoder(), state)
+		_, _ = NewHTTPDecoder().OnPacket(state, &dpi.ParsedPacket{
 			Payload: data,
 			Proto:   "tcp",
 			SrcPort: 12345,
@@ -76,7 +77,6 @@ func FuzzHTTPDecoderOnPacket(f *testing.F) {
 }
 
 func FuzzTLSDecoderOnPacket(f *testing.F) {
-	dec := NewTLSDecoder()
 	state := tlsFlowState(12345, 443)
 
 	f.Add(buildClientHello("example.com", nil))
@@ -85,12 +85,13 @@ func FuzzTLSDecoderOnPacket(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = dec.OnPacket(state, &dpi.ParsedPacket{
+		_, _ = NewTLSDecoder().OnPacket(state, &dpi.ParsedPacket{
 			Payload: data,
 			Proto:   "tcp",
 			SrcPort: 12345,
 			DstPort: 443,
 		})
+		fuzzITStream(data, NewTLSDecoder(), state)
 		if len(data) >= 5 && data[0] == 0x16 {
 			recLen := int(data[3])<<8 | int(data[4])
 			if recLen > len(data)-5 {
@@ -232,4 +233,19 @@ func FuzzNTPDecoderOnPacket(f *testing.F) {
 			_ = formatRefID(data[:4], uint8(len(data)))
 		}
 	})
+}
+
+// Exercise manager reassembly/lifecycle as well as packet-local parsing. Each
+// input gets its own compression/encryption state, independent of fuzz order.
+func fuzzITStream(data []byte, decoder dpi.Decoder, state *flow.State) {
+	mgr := dpi.NewManager(decoder)
+	split := len(data) / 2
+	for i, p := range [][]byte{data[:split], data[split:]} {
+		off := int64(0)
+		if i == 1 {
+			off = int64(split)
+		}
+		mgr.Inspect(state, &dpi.ParsedPacket{Payload: p, Proto: "tcp", HasOffset: true, Session: "fuzz", Dir: dpi.ClientToServer, Offset: off})
+	}
+	mgr.EndStream("fuzz")
 }
