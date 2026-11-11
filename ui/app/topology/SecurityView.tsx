@@ -214,7 +214,14 @@ export default function SecurityView() {
               );
             })}
           </div>
-          <div className={s.zoneSearchWrap}>
+          <div
+            className={s.zoneSearchWrap}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropdownOpen(false);
+              }
+            }}
+          >
             <input
               ref={searchRef}
               className={s.zoneSearch}
@@ -222,7 +229,6 @@ export default function SecurityView() {
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setDropdownOpen(true); }}
               onFocus={() => setDropdownOpen(true)}
-              onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
               onKeyDown={(e) => { if (e.key === "Escape") { setDropdownOpen(false); searchRef.current?.blur(); } }}
             />
             {dropdownOpen && (
@@ -233,11 +239,17 @@ export default function SecurityView() {
                   const { sl_a } = scoreZone(z, conduits);
                   const sc = slColor(sl_a, z.sl_t);
                   return (
-                    <div key={z.id} className={s.zoneDropdownItem} onMouseDown={() => addZone(z.id)}>
+                    <button
+                      key={z.id}
+                      type="button"
+                      className={s.zoneDropdownItem}
+                      aria-label={`Add ${z.name} zone`}
+                      onClick={() => addZone(z.id)}
+                    >
                       <div className={s.zoneDropdownDot} style={{ background: z.color }} />
                       <span className={s.zoneDropdownName} style={{ color: z.color }}>{z.name}</span>
                       <span className={s.zoneDropdownSl} style={{ color: sc }}>SL{sl_a}/{z.sl_t}</span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
