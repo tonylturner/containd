@@ -354,19 +354,22 @@ container command. The `pkg/dp/netcfg` management kernel test also needs a
 TUN device, OpenVPN and reverse-path filtering;
 `bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
 
-The protection-bind (`TestProtectionBindKernel` in `pkg/dp/engine`) and
-scanning-gate kernel tests run together with
-`bash scripts/gate-kernel-tests.sh`: the nft steering (`TestGateKernel`) and
-the nft load of every golden ruleset (`TestKernelNFTLoadsGoldens`) in
-`pkg/dp/enforce`, the gate policy routing (`TestGateRoutingKernel`) in
-`pkg/dp/netcfg` and the gate manager (`TestGateManagerKernel`) in
-`pkg/app/engine`. The script builds a `golang` image with nftables,
-iproute2 and Python, runs it with `NET_ADMIN`, `NET_RAW` and `SYS_ADMIN`
-(network namespaces need the last one), keeps the build and module caches in
-named Docker volumes, and passes extra arguments to `go test`. It runs the
-packages one at a time (`go test -p 1`) because the netcfg and engine tests
-install the gate's policy routing in the namespace-global table 104010 and
-would remove each other's objects in parallel.
+`bash scripts/gate-kernel-tests.sh` runs protection-bind
+(`TestProtectionBindKernel` in `pkg/dp/engine`), scanning-gate and
+management-routing kernel tests. The default filter includes
+`TestManagementKernelMatrix` in `pkg/dp/netcfg`, which exercises OpenVPN source
+takeover; the other tests cover nft steering (`TestGateKernel`) and every
+golden nft ruleset (`TestKernelNFTLoadsGoldens`) in `pkg/dp/enforce`, gate
+policy routing (`TestGateRoutingKernel`) in `pkg/dp/netcfg`, and the gate
+manager (`TestGateManagerKernel`) in `pkg/app/engine`. The script builds a
+`golang` image with nftables, iproute2, Python and OpenVPN, passes
+`/dev/net/tun` into the container, and runs it with `NET_ADMIN`, `NET_RAW` and
+`SYS_ADMIN` (network namespaces need the last one). It keeps the build and
+module caches in named Docker volumes and passes extra arguments to `go test`;
+`KERNEL_TEST_RUN` overrides its default test filter. It runs the packages one
+at a time (`go test -p 1`) because the netcfg and engine tests install the
+gate's policy routing in the namespace-global table 104010 and would remove
+each other's objects in parallel.
 
 Repeated real-exhaustion protection runs need an explicit longer timeout:
 
