@@ -38,13 +38,13 @@ func TestHTTPMethodCorrelationBoundAndCleanup(t *testing.T) {
 	}
 	s := d.streams[httpStreamKey{"bounded", dpi.ClientToServer}]
 	if len(s.peer.methods) != maxHTTPRequestMethods || cap(s.peer.methods) > 128 ||
-		s.peer.dropped != requests-maxHTTPRequestMethods || s.stopped || s.peer.opaque {
+		s.peer.dropped != requests-maxHTTPRequestMethods || s.resync {
 		t.Fatalf("queue overflow lost coverage or its bound: %+v", s.peer)
 	}
-	if s.peer.pending().method != "" {
-		t.Fatal("uncertain request method used for correlation")
+	if s.peer.pending().method != "GET" {
+		t.Fatal("overflow discarded the known FIFO prefix")
 	}
-	reply := []byte("HTTP/1.1 200 OK\r\nContent-Length: 4096\r\n\r\n")
+	reply := []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
 	server := httpFlowState(80, 12345)
 	for i := 0; i < requests; i++ {
 		r, err := d.ParseStream(server, dpi.StreamView{Session: "bounded", Dir: dpi.ServerToClient, Base: int64(i * len(reply)), Bytes: reply})

@@ -67,6 +67,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		TCPHandshake: handshakeMarked(pkt),
 		TCPFin:       pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagFIN != 0,
 		TCPRst:       pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagRST != 0,
+		Role:         e.streamTransportRole(state, pkt),
 	}
 	if parsed.TCPSyn {
 		parsed.TCPSeq++
@@ -171,6 +172,36 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		return d
 	}
 	return acceptDecision
+}
+
+// Transport roles require CT authority or an observed handshake, never arrival
+// order or a service-port guess. Reassembly direction remains wire-oriented.
+func (e *Engine) streamTransportRole(state *flow.State, pkt capture.Packet) dpi.StreamDir {
+	if pkt.Proto != 6 {
+		return dpi.DirUnknown
+	}
+	dir, known := handshakeDirection(pkt)
+	if c := state.Connection.Load(); c.Verified() {
+		dir, known = c.Direction(state.Key), true
+	}
+	if !known {
+		e.flowMu.Lock()
+		key := state.Key
+		if key.Dir == flow.DirReverse {
+			key = key.Reversed()
+		}
+		_, raw := e.transportISNs[key.MapKey()]
+		_, inline := e.tcpISNs[key.MapKey()]
+		e.flowMu.Unlock()
+		dir, known = state.Key.Dir, raw || inline
+	}
+	if !known {
+		return dpi.DirUnknown
+	}
+	if dir == flow.DirReverse {
+		return dpi.ServerToClient
+	}
+	return dpi.ClientToServer
 }
 
 func nonAdmitDecision(pkt capture.Packet) capture.Decision {

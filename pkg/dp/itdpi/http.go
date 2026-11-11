@@ -52,7 +52,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	// Packet-local callers have no TCP offsets. Stream-aware callers go through
 	// the manager, which owns reassembly and the decoder lifetime.
 	local := NewHTTPDecoder()
-	res, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload})
+	res, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload, Role: pkt.Role, HasPacketStart: true})
 	var events []dpi.Event
 	for _, f := range res.Frames {
 		events = append(events, f.Events...)
@@ -129,7 +129,7 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 	if firstEnd < 0 {
 		return "", nil
 	}
-	first := strings.TrimSpace(string(payload[:firstEnd]))
+	first := strings.TrimSuffix(string(payload[:firstEnd]), "\r")
 	if !looksLikeHTTPLine(first) {
 		return "", nil
 	}
@@ -140,7 +140,7 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 		if end < 0 {
 			break
 		}
-		l := strings.TrimSpace(string(rest[:end]))
+		l := strings.Trim(strings.TrimSuffix(string(rest[:end]), "\r"), " \t")
 		rest = rest[end+1:]
 		if l == "" {
 			break
@@ -149,22 +149,20 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 		if len(kv) != 2 {
 			continue
 		}
-		k := strings.ToLower(strings.TrimSpace(kv[0]))
-		v := strings.TrimSpace(kv[1])
+		k := strings.ToLower(strings.Trim(kv[0], " \t"))
+		v := strings.Trim(kv[1], " \t")
+		switch k {
+		case "upgrade", "connection", "transfer-encoding":
+			if previous, ok := headers[k]; ok {
+				v = previous + "," + v
+			}
+		}
 		headers[k] = v
 	}
 	return first, headers
 }
 
 func looksLikeHTTPLine(l string) bool {
-	if strings.HasPrefix(l, "HTTP/") {
-		return true
-	}
-	methods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "CONNECT ", "PATCH "}
-	for _, m := range methods {
-		if strings.HasPrefix(l, m) {
-			return true
-		}
-	}
-	return false
+	_, valid := httpStart([]byte(l + "\n"))
+	return valid
 }

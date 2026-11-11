@@ -8,29 +8,47 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 )
 
+func (c *httpConnection) role(key httpStreamKey) dpi.StreamDir {
+	if c.transportRole == dpi.DirUnknown || key == c.transportKey {
+		return c.transportRole
+	}
+	if c.transportRole == dpi.ClientToServer {
+		return dpi.ServerToClient
+	}
+	return dpi.ClientToServer
+}
+
 const maxHTTPRequestMethods = 64
 
 type httpRequest struct {
 	method, upgrade string
+	body            *httpBody
+}
+
+type httpBody struct {
+	incomplete, rejected bool
 }
 
 type httpConnection struct {
-	refs        int
+	streams     map[httpStreamKey]*httpStream
 	client      httpStreamKey
 	clientKnown bool
 	methods     []httpRequest
-	// Extra requests need only a scalar count, not retained metadata. Until
-	// all outstanding replies arrive, inspect headers without body framing or
-	// tunnel transitions. Saturation keeps this conservative mode permanent.
-	dropped uint64
-	opaque  bool
+	// Extra requests retain only a count. The retained prefix still owns its
+	// real response boundaries; speculative re-anchors never restore trust.
+	dropped       uint64
+	uncertain     bool
+	server        httpStreamKey
+	serverKnown   bool
+	transportKey  httpStreamKey
+	transportRole dpi.StreamDir
 }
 
 func (c *httpConnection) acceptsStart(key httpStreamKey, response bool) bool {
-	if key.dir != dpi.DirUnknown {
-		return response == (key.dir == dpi.ServerToClient)
+	if c.clientKnown {
+		return response != (key == c.client)
 	}
-	return !c.clientKnown || response != (key == c.client)
+	return !c.serverKnown || response == (key == c.server)
 }
 
 func (c *httpConnection) request(key httpStreamKey, method string, headers map[string]string) {
@@ -52,7 +70,7 @@ func (c *httpConnection) request(key httpStreamKey, method string, headers map[s
 }
 
 func (c *httpConnection) pending() httpRequest {
-	if c.dropped == 0 && len(c.methods) > 0 {
+	if len(c.methods) > 0 {
 		return c.methods[0]
 	}
 	return httpRequest{}
@@ -60,6 +78,9 @@ func (c *httpConnection) pending() httpRequest {
 
 func (c *httpConnection) response() {
 	if len(c.methods) > 0 {
+		if b := c.methods[0].body; b != nil && b.incomplete && !c.uncertain {
+			b.rejected = true
+		}
 		c.methods[0] = httpRequest{}
 		c.methods = c.methods[1:]
 		if len(c.methods) == 0 {
@@ -71,12 +92,15 @@ func (c *httpConnection) response() {
 }
 
 func httpHeaderToken(value, token string) bool {
+	found := false
 	for part := range strings.SplitSeq(value, ",") {
-		if strings.EqualFold(strings.TrimSpace(part), token) {
-			return true
+		part = strings.Trim(part, " \t")
+		if part != "" && !httpProtocolToken(part) {
+			return false
 		}
+		found = found || strings.EqualFold(part, token)
 	}
-	return false
+	return found
 }
 
 func (r httpRequest) acceptsUpgrade(headers map[string]string) bool {
@@ -103,7 +127,7 @@ func (r httpRequest) acceptsUpgrade(headers map[string]string) bool {
 }
 
 func httpUpgradeProtocol(value string) string {
-	name, version, versioned := strings.Cut(strings.TrimSpace(value), "/")
+	name, version, versioned := strings.Cut(strings.Trim(value, " \t"), "/")
 	if !httpProtocolToken(name) || versioned && !httpProtocolToken(version) {
 		return ""
 	}

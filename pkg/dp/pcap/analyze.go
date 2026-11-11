@@ -66,6 +66,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 	}
 
 	flows := make(map[string]*flow.State)
+	roles := make(map[string]dpi.StreamDir)
 	flowEvents := make(map[string]int)
 
 	result := &AnalysisResult{
@@ -113,6 +114,15 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 			continue
 		}
 		hash, state, reoriented := analysisFlowState(flows, pkt, ts)
+		if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 {
+			role, peerRole := dpi.ClientToServer, dpi.ServerToClient
+			if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
+				role, peerRole = peerRole, role
+			}
+			peer := state.Key.Reversed()
+			peer.Dir = flow.DirForward
+			roles[hash], roles[peer.Hash()] = role, peerRole
+		}
 		if opts.MaxFlows > 0 && len(flows) > opts.MaxFlows {
 			return nil, fmt.Errorf("analysis flow budget exceeded")
 		}
@@ -133,7 +143,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 		}
 		var events []dpi.Event
 		if pkt.Invalid == "" && !truncated {
-			events = analyzePacket(mgr, sessions, state, pkt, ts)
+			events = analyzePacket(mgr, sessions, state, pkt, ts, roles[hash])
 		}
 		recordAnalysisEvents(result, flowEvents, hash, events)
 	}
@@ -208,7 +218,7 @@ func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time
 // analyzePacket runs one packet through DPI with its TCP sequence number,
 // as the live engine does. Events come before the error: a stream error's
 // malformed event is among them and the analysis continues.
-func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
+func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.State, pkt capture.Packet, ts time.Time, role dpi.StreamDir) []dpi.Event {
 	parsed := &dpi.ParsedPacket{
 		Timestamp:   ts,
 		Payload:     pkt.Payload,
@@ -218,6 +228,7 @@ func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.Stat
 		TCPSeq:      pkt.TCP.Seq,
 		TCPSeqValid: pkt.TCP.Valid,
 		TCPSyn:      pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+		Role:        role,
 	}
 	if parsed.TCPSyn {
 		parsed.TCPSeq++
