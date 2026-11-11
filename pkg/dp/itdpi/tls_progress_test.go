@@ -133,6 +133,41 @@ func TestTLSRecordProgressAndLargeCertificate(t *testing.T) {
 	}
 }
 
+func TestTLSHelloBufferGrowsWithReceivedBytes(t *testing.T) {
+	d := NewTLSDecoder()
+	st := tlsFlowState(12345, 443)
+	headerOnly := []byte{22, 3, 3, 0, 4, 1, 1, 0, 0}
+	r, err := d.ParseStream(st, dpi.StreamView{Session: "header-only", Bytes: headerOnly})
+	if err != nil || r.Consumed != len(headerOnly) {
+		t.Fatalf("header-only record: %+v %v", r, err)
+	}
+	stream := d.streams[tlsStreamKey{session: "header-only"}]
+	if stream == nil {
+		t.Fatal("TLS stream not retained")
+	}
+	if cap(stream.hello) > len(headerOnly)+16 {
+		t.Fatalf("hello capacity %d exceeds bytes received %d plus small overhead", cap(stream.hello), len(headerOnly))
+	}
+
+	// Accumulating a handshake a byte at a time across many TLS records still
+	// produces the same ClientHello event.
+	hello := buildClientHello("example.com", nil)
+	handshake := hello[5:]
+	var records []byte
+	for _, b := range handshake {
+		records = append(records, tlsRecord([]byte{b})...)
+	}
+	d = NewTLSDecoder()
+	r, err = d.ParseStream(tlsFlowState(12345, 443), dpi.StreamView{Session: "many-records", Bytes: records})
+	if err != nil || r.Consumed != len(records) || len(r.Frames) != len(handshake) {
+		t.Fatalf("many-record ClientHello: frames=%d consumed=%d/%d err=%v", len(r.Frames), r.Consumed, len(records), err)
+	}
+	last := r.Frames[len(r.Frames)-1]
+	if len(last.Events) != 1 || last.Events[0].Kind != "client_hello" || last.Events[0].Attributes["sni"] != "example.com" {
+		t.Fatalf("many-record ClientHello event: %+v", last.Events)
+	}
+}
+
 func BenchmarkTLSRecordProgress(b *testing.B) {
 	for _, size := range []int{0, 60000} {
 		b.Run(stringName(size), func(b *testing.B) {
