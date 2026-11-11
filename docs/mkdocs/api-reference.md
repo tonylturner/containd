@@ -562,6 +562,10 @@ Filters (`id`, `ruleId`, `mode`, `session`, `flow`, `apdu`, `kind`, `protocol`,
 Filters apply **before** the limit, with matches sorted newest-first by timestamp
 and ID, without evidence priority. Filters combine with AND; comma-separated
 `kind` prefixes combine with OR. `since` is inclusive RFC3339.
+The `firewall` category selects `firewall.rule.hit` events by kind, including
+kernel NFLOG and userspace rule decisions. `dpi` excludes firewall rule hits and
+service events. `iec104` continues to select events by the `iec104` protocol;
+`service`, `proxy` and `all` retain their service-kind and unfiltered behavior.
 
 Send `nextCursor` as `cursor` with the same filters to fetch older matches.
 Pagination searches retained memory, not durable history, and is not a snapshot:

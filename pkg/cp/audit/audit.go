@@ -10,7 +10,7 @@ type Record struct {
 	ID        int64     `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
 	Actor     string    `json:"actor"`  // user or system identifier
-	Source    string    `json:"source"` // ui/api/ssh/cli
+	Source    string    `json:"source"` // Server-assigned origin, such as api, ssh, management, signal, or dhcp.
 	Action    string    `json:"action"` // e.g., commit, import, set zone
 	Target    string    `json:"target"` // resource identifier
 	Result    string    `json:"result"` // success/failure
