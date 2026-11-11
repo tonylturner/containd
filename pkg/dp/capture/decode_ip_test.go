@@ -186,6 +186,25 @@ func TestDecodeIPPacketIgnoresPaddingBeyondIPLength(t *testing.T) {
 	}
 }
 
+func TestDecodeIPPacketRetainsIPv6ExtensionPayload(t *testing.T) {
+	raw := make([]byte, 40+8+4+6)
+	raw[0] = 0x60
+	binary.BigEndian.PutUint16(raw[4:6], 12)
+	raw[6] = 0 // Hop-by-Hop
+	copy(raw[40:], []byte{6, 0, 1, 2, 3, 4, 5, 6, 0x12, 0x34, 0x01, 0xbb})
+	raw = append(raw, 9, 9, 9, 9) // Link-layer padding is outside the IP length.
+
+	got := DecodeIPPacket(raw)
+	want := []byte{6, 0, 1, 2, 3, 4, 5, 6, 0x12, 0x34, 0x01, 0xbb}
+	if !bytes.Equal(got.IPv6Payload, want) {
+		t.Fatalf("IPv6Payload = %x, want %x", got.IPv6Payload, want)
+	}
+	raw[40] = 17
+	if got.IPv6Payload[0] != 6 {
+		t.Fatal("IPv6Payload aliases the decoder input")
+	}
+}
+
 // A truncated copy keeps its best-effort payload so observational sources
 // still see it, but it is never reported as decoded.
 func TestDecodeIPPacketTruncatedKeepsBestEffortPayload(t *testing.T) {
