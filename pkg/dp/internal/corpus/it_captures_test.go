@@ -70,11 +70,17 @@ var itDecoderCases = []itDecoderCase{
 		port:     443,
 		decoder:  func() dpi.Decoder { return itdpi.NewTLSDecoder() },
 		wants: []itExpectation{
+			// Independently verified by salesforce/ja3 python/ja3.py at commit
+			// 502cc6395811c54743b0561419d61900a6df3ff7 (dpkt 1.9.8).
+			{label: "TLS 1.2 reference JA3", proto: "tls", kind: "client_hello", key: "ja3_hash", value: "22558766122974704364c9c75c5cce0a", count: 1},
+			{label: "TLS 1.3 reference JA3", proto: "tls", kind: "client_hello", key: "ja3_hash", value: "9dffdb8b608a430b774a2ff7d36c1a0c", count: 1},
 			{label: "TLS 1.2 ClientHello SNI", proto: "tls", kind: "client_hello", key: "sni", value: "tls12.example.test", count: 1},
 			{label: "TLS 1.2 ClientHello ALPN", proto: "tls", kind: "client_hello", key: "alpn", value: "h2", count: 1},
 			{label: "TLS 1.3 ClientHello SNI", proto: "tls", kind: "client_hello", key: "sni", value: "tls13.example.test", count: 1},
 			{label: "TLS 1.3 ClientHello ALPN", proto: "tls", kind: "client_hello", key: "alpn", value: "http/1.1", count: 1},
-			{label: "TLS 1.3 protocol version", proto: "tls", kind: "client_hello", key: "tls_version", value: "TLS1.3", count: 1, gap: true},
+			{label: "TLS 1.2 selected version", proto: "tls", kind: "server_hello", key: "tls_selected_version", value: "TLS1.2", count: 1},
+			{label: "TLS 1.3 selected version", proto: "tls", kind: "server_hello", key: "tls_selected_version", value: "TLS1.3", count: 1},
+			{label: "TLS 1.3 offered versions", proto: "tls", kind: "client_hello", key: "tls_offered_versions", value: "[TLS1.3]", count: 1},
 		},
 	},
 	{
@@ -86,7 +92,8 @@ var itDecoderCases = []itDecoderCase{
 			{label: "HTTP POST request", proto: "http", kind: "request", key: "method", value: "POST", count: 1},
 			{label: "HTTP Host", proto: "http", kind: "request", key: "host", value: "www.example.test", count: 2},
 			{label: "HTTP User-Agent", proto: "http", kind: "request", key: "user_agent", value: "containd-it-capture/1.0", count: 2},
-			{label: "HTTP POST Content-Type", proto: "http", kind: "request", key: "content_type", value: "application/json", count: 1, gap: true},
+			{label: "HTTP response Content-Type", proto: "http", kind: "response", key: "content_type", value: "text/html", count: 1},
+			{label: "HTTP POST Content-Type", proto: "http", kind: "request", key: "content_type", value: "application/json", count: 1},
 		},
 	},
 	{
@@ -217,7 +224,11 @@ func TestITRecordedCaptureDecoders(t *testing.T) {
 					frame = step.Packet.Source[0].Frame
 				}
 				if step.Result.Err != nil {
-					t.Logf("FINDING %s frame %d: replay result error: %v", entry.PCAP, frame, step.Result.Err)
+					if decoderCase.protocol == "http" || decoderCase.protocol == "tls" {
+						t.Errorf("%s frame %d: replay result error: %v", entry.PCAP, frame, step.Result.Err)
+					} else {
+						t.Logf("FINDING %s frame %d: replay result error: %v", entry.PCAP, frame, step.Result.Err)
+					}
 				}
 				if step.Kind != "inspect" {
 					continue
@@ -283,8 +294,8 @@ func TestITRecordedCaptureDecoders(t *testing.T) {
 func stableITAttributes(event dpi.Event) string {
 	keysByProtocol := map[string][]string{
 		"dns":  {"qname", "qtype", "rcode"},
-		"tls":  {"sni", "alpn", "tls_version"},
-		"http": {"method", "path", "host", "user_agent", "status"},
+		"tls":  {"sni", "alpn", "tls_legacy_version", "tls_offered_versions", "tls_selected_version", "ja3", "ja3_hash"},
+		"http": {"method", "path", "host", "user_agent", "status", "content_type"},
 		"ssh":  {"version", "software", "kex_algorithm", "encryption"},
 		"ntp":  {"mode_name", "stratum"},
 		"snmp": {"version", "pdu_type", "first_oid"},

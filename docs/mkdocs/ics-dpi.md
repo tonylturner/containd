@@ -747,6 +747,55 @@ Known versions are `TLS1.0`, `TLS1.1`, `TLS1.2`, `TLS1.3`; other values use
 `0xNNNN`. TLS-encrypted HTTP/2 remains visible only through TLS metadata such
 as the ALPN offer `h2`; headers, streams and content are not decrypted.
 
+### Plaintext HTTP metadata
+
+The HTTP decoder emits `http/request` with `method`, `path`, `host`, `target`,
+`scheme`, `user_agent` and `content_type`, and `http/response` with `status`
+and `content_type`. Both include `src_port`, `dst_port` and `transport`.
+`content_type` is the trimmed Content-Type header value, including parameters
+such as `charset=utf-8`, not a MIME type inferred from the body. It is empty
+when HTTP/1 has no such header. Only complete headers are emitted; bodies,
+cookies, authorization headers and raw header blocks are not exported.
+HTTP/1 headers and trailers are limited to 32 KiB. Content-Length and chunked
+bodies are skipped without retaining their contents. Ambiguous body framing
+is rejected. Close-delimited response bodies are consumed until connection
+end; request/reply correlation (including HEAD response body semantics) is
+not available.
+
+Cleartext HTTP/2 prior knowledge (`h2c`) is recognized by the complete
+connection preface. It emits `http2/preface`, then decodes SETTINGS, HEADERS
+and CONTINUATION frames with a direction-local HPACK context shared across
+streams. `http2/request` carries `stream_id`, `method`, `path`, `authority`,
+`scheme` and `content_type` when present; CONNECT requests can omit path and
+scheme. `http2/response` carries `stream_id`, `status` and `content_type`
+when present. Both include ports and transport. Stream IDs correlate requests
+and responses within a connection, not across connections. Trailers and push
+promises update compression state without emitting additional requests.
+DATA bodies are never exported.
+
+HTTP/2 limits are fixed inspection ceilings, not truncated metadata:
+16 KiB per frame, 64 KiB per compressed header block, 32 KiB per decoded
+header list (including the RFC 7540 32-byte overhead per field), and a
+4 KiB dynamic table per direction. Larger negotiated frame/table sizes are
+not supported. Malformed frames, invalid HPACK, interrupted CONTINUATION
+sequences and exceeded limits produce a malformed event and stop that stream
+inspection. TCP splits and coalesced frames do not change emitted metadata.
+
+An HTTP/1 `Upgrade: h2c` request remains an `http/request` event; its body is
+skipped before recognizing the client's connection preface. A `101` response
+with `Upgrade: h2c` switches the reply direction to HTTP/2, where the reply
+to the upgrade request has stream ID 1. Upgrade settings are not correlated
+across directions. This is passive metadata inspection, not an HTTP/2 endpoint
+or an antivirus body scanner; encrypted HTTP/2 is not decrypted.
+
+Native IDS conditions use the same `content_type` attribute for HTTP/1 and
+cleartext HTTP/2, on requests and responses. Choose `proto: http` or
+`proto: http2` in the rule, or omit the protocol to match both. For example:
+
+```json
+{"field": "attr.content_type", "op": "contains", "value": "application/json"}
+```
+
 ## ICS Firewall Rule Predicates
 
 Firewall rules contain an `ics` object. Generic predicates for protocols other
