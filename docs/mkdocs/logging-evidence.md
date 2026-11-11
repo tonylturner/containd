@@ -92,9 +92,13 @@ remain in their disclosures; they are not per-dataset completeness guarantees.
 ## Account and credential audit records
 
 Account and credential changes attempt to persist an audit record with their actor
-and source (`api` or `ssh`). Audit persistence failure does not block the operation;
-check the persistence status below for missing evidence. Refused logins, own
-password changes with a wrong current password and refused MFA changes are recorded with result `denied`.
+and a server-assigned source: HTTP API requests, including web-console requests,
+use `api`, while SSH sessions use `ssh`. Clients cannot set this value. System
+records use their producing entry point, including `management`, `signal` and
+`dhcp`. Audit persistence failure does not block the operation; check the
+persistence status below for missing evidence. Refused logins, own password
+changes with a wrong current password and refused MFA changes are recorded with
+result `denied`.
 Records never hold the password or code that was tried.
 
 | Action | Change |
