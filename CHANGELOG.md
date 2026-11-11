@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
+  `tls_offered_versions` (from `supported_versions`, GREASE removed) and, when
+  the server reply is seen, `tls_selected_version`. IDS rules and Sigma rules
+  that used `tls_version` must move to the new fields.
+- SNMP events drop `community_auth`, `community_length` and `first_oid`. They
+  now carry the cleartext v1/v2c `community`, the bounded varbind list in `oids`
+  (with `oids_truncated`) and trap metadata. Event storage and syslog forwarding
+  therefore contain SNMP community strings.
+
 ### Added
+
+- Cleartext HTTP/2 inspection (prior-knowledge preface and `Upgrade: h2c`):
+  bounded frame parsing and HPACK decoding report per-stream method, path,
+  `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains
+  ALPN metadata only.
+- HTTP requests and responses report `content_type`, usable in native IDS rule
+  conditions and Sigma rules.
+- SMB events report the offered dialects (`dialects_offered`) and the
+  negotiated `dialect` from NEGOTIATE exchanges, including SMB 3.x. `version`
+  remains a packet-family hint.
+- SNMP v3 events report the visible message flags, security model, USM user
+  name and, when not encrypted, scoped-PDU OIDs.
+- Alert details show the TLS legacy, offered and selected versions and the HTTP
+  content type.
 
 - CSAF advisory `containd-2026-003` for seven bundled ClamAV parser CVEs,
   with SBOM-evidenced management/engine release scope, Cisco CNA CVSS 3.1
@@ -42,9 +67,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JA3 fingerprints follow the reference algorithm: GREASE values are removed,
+  cipher, extension, curve and point-format lists are complete, and the result
+  does not depend on how the ClientHello is split across TCP segments.
+- The Events page "Firewall decisions" filter showed no rule hits; they appeared
+  under "DPI / ICS" as "Telemetry event". `category=firewall` now selects
+  `firewall.rule.hit` events, `category=dpi` excludes them, and the page labels
+  them "Firewall decision".
+- Topology no longer requests rule counters while enforcement is off, so the
+  browser console shows no 502; unavailable counters still show as unknown.
+- Admin-only controls are rendered after the browser role is read, so server
+  and client renders always match during hydration.
+- The learner reads cut IPv6 records through a bounded extension-header walk.
+  A cut record whose chain reaches ICMPv6 no longer excludes the whole dataset,
+  and one that reaches TCP/UDP is scoped to that host pair. Unwalkable, ESP,
+  non-first-fragment and over-budget chains stay excluded.
 - Update gorilla/websocket, golang.org/x/net and golang.org/x/crypto to
   versions outside GHSA-w67g-5rqw-f597, CVE-2026-78661, CVE-2026-97045 and
   GO-2026-5932. None of these were reachable in 0.1.42.
+
+### Security
+
+- Audit records get their `source` from the server; the client-supplied
+  `X-Source` header is ignored when records are stored and forwarded to syslog.
 
 ## [0.1.42] - 2026-11-04
 
