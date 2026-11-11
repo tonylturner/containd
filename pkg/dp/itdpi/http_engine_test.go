@@ -107,7 +107,7 @@ func TestHTTPLegacyEnginePickupsAndTunnels(t *testing.T) {
 		{"mid_body", "", "", map[string]int{}},
 		{"CONNECT", "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\n", "HTTP/1.1 200 Connection Established\r\nContent-Length: 4096\r\n\r\n", map[string]int{"request": 1, "response": 1}},
 		{"websocket", "GET /ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", map[string]int{"request": 1, "response": 1}},
-		{"other_101", "GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 101 Switching Protocols\r\nUpgrade: custom\r\n\r\n", map[string]int{"request": 1, "response": 1}},
+		{"other_101", "GET / HTTP/1.1\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket, custom\r\n\r\n", "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: custom, websocket\r\n\r\n", map[string]int{"request": 1, "response": 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newMetadataEngine(t, 80)

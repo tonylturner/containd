@@ -26,24 +26,37 @@ func TestHTTPMethodCorrelationBoundAndCleanup(t *testing.T) {
 	d := NewHTTPDecoder()
 	st := httpFlowState(12345, 80)
 	req := []byte("GET / HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
-	for i := 0; i <= maxHTTPRequestMethods; i++ {
+	const requests = 10000
+	for i := 0; i < requests; i++ {
 		r, err := d.ParseStream(st, dpi.StreamView{Session: "bounded", Dir: dpi.ClientToServer, Base: int64(i * len(req)), Bytes: req})
 		if err != nil || len(r.Frames) != 1 || len(r.Frames[0].Events) != 1 {
 			t.Fatalf("request %d: %+v %v", i, r, err)
 		}
-		kind := "request"
-		if i == maxHTTPRequestMethods {
-			kind = "malformed"
-		}
-		if r.Frames[0].Events[0].Kind != kind {
+		if r.Frames[0].Events[0].Kind != "request" {
 			t.Fatal(r)
 		}
 	}
 	s := d.streams[httpStreamKey{"bounded", dpi.ClientToServer}]
-	if len(s.peer.methods) != maxHTTPRequestMethods || !s.stopped {
-		t.Fatal("unbounded queue")
+	if len(s.peer.methods) != maxHTTPRequestMethods || cap(s.peer.methods) > 128 ||
+		s.peer.dropped != requests-maxHTTPRequestMethods || s.stopped || s.peer.opaque {
+		t.Fatalf("queue overflow lost coverage or its bound: %+v", s.peer)
+	}
+	if s.peer.pending().method != "" {
+		t.Fatal("uncertain request method used for correlation")
+	}
+	reply := []byte("HTTP/1.1 200 OK\r\nContent-Length: 4096\r\n\r\n")
+	server := httpFlowState(80, 12345)
+	for i := 0; i < requests; i++ {
+		r, err := d.ParseStream(server, dpi.StreamView{Session: "bounded", Dir: dpi.ServerToClient, Base: int64(i * len(reply)), Bytes: reply})
+		if err != nil || len(r.Frames) != 1 || len(r.Frames[0].Events) != 1 || r.Frames[0].Events[0].Kind != "response" {
+			t.Fatalf("reply %d: %+v %v", i, r, err)
+		}
+	}
+	if len(s.peer.methods) != 0 || s.peer.dropped != 0 {
+		t.Fatal("correlation failed to recover after draining replies")
 	}
 	d.StreamEnded("bounded", dpi.ClientToServer)
+	d.StreamEnded("bounded", dpi.ServerToClient)
 	if len(d.streams) != 0 || len(d.connections) != 0 {
 		t.Fatal("connection state leaked")
 	}
