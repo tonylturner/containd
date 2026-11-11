@@ -130,7 +130,11 @@ func walkIPv6ExtensionChain(nextHeader uint8, payload []byte) (uint8, []byte, bo
 			if payload[offset+2] != 0 || payload[offset+3] != 0 {
 				return 0, nil, false
 			}
-			length = (int(payload[offset+1]) + 2) * 4
+			payloadLength := int(payload[offset+1])
+			length = (payloadLength + 2) * 4
+			if payloadLength < 1 || length%8 != 0 {
+				return 0, nil, false
+			}
 		default:
 			if opaqueIPv6Header(nextHeader) {
 				return 0, nil, false
@@ -143,9 +147,14 @@ func walkIPv6ExtensionChain(nextHeader uint8, payload []byte) (uint8, []byte, bo
 			length > len(payload)-offset {
 			return 0, nil, false
 		}
-		if (nextHeader == 0 || nextHeader == 60) &&
-			!validIPv6OptionsHeader(payload[offset:offset+length]) {
+		if nextHeader == 43 && payload[offset+3] != 0 {
 			return 0, nil, false
+		}
+		if nextHeader == 0 || nextHeader == 60 {
+			valid, hasHomeAddress := parseIPv6OptionsHeader(payload[offset : offset+length])
+			if !valid || hasHomeAddress {
+				return 0, nil, false
+			}
 		}
 		nextHeader = payload[offset]
 		offset += length
@@ -153,22 +162,25 @@ func walkIPv6ExtensionChain(nextHeader uint8, payload []byte) (uint8, []byte, bo
 	}
 }
 
-func validIPv6OptionsHeader(header []byte) bool {
+func parseIPv6OptionsHeader(header []byte) (valid, hasHomeAddress bool) {
 	for offset := 2; offset < len(header); {
 		if header[offset] == 0 { // Pad1
 			offset++
 			continue
 		}
 		if len(header)-offset < 2 {
-			return false
+			return false, false
 		}
 		length := int(header[offset+1])
 		if length > len(header)-offset-2 {
-			return false
+			return false, false
+		}
+		if header[offset] == 0xc9 { // Home Address changes the effective source.
+			hasHomeAddress = true
 		}
 		offset += 2 + length
 	}
-	return true
+	return true, hasHomeAddress
 }
 
 func opaqueIPv6Header(proto uint8) bool {

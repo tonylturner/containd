@@ -1387,17 +1387,20 @@ historical loss and missing coordinates exclude the dataset. A short IP/TCP
 header therefore cannot leave an earlier parent eligible for certification.
 A cut non-IP record with readable EtherType (including VLAN tags), or a known
 non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. IPv6
-Hop-by-Hop, Routing, Destination Options, first-fragment and AH chains are
-walked using captured bytes, with a limit of eight extension headers and 256
-bytes. A proven TCP/UDP terminal uses captured ports when present, otherwise
-host-pair/transport scope; a proven non-TCP/UDP terminal is unrelated. Truncated
-or malformed chains, chains exceeding either limit, ESP, unknown, unsupported
-or experimental headers, and non-first fragments remain dataset-wide because
-they can hide a transport. An opaque chain (including MLD-style traffic without
-a walkable non-TCP/UDP terminal) is not proof of unrelated traffic. The IP
-family comes from the decoded header, never IPv4-mapped address spelling.
-Ordinary unrelated ARP/LLDP/ICMP truncation does not erase workshop suggestions.
-A header-less final record remains dataset-wide.
+Hop-by-Hop, Destination Options, first fragments, AH, and Routing headers with
+zero Segments Left are walked from captured bytes, with a limit of eight
+extension headers and 256 bytes. A proven TCP/UDP terminal uses captured ports
+when present, otherwise host-pair/transport scope; a proven non-TCP/UDP terminal
+is unrelated. Routing headers with segments remaining and option headers
+containing a Home Address option are not scoped because they change the
+effective destination or source. Truncated or malformed chains, chains
+exceeding either limit, ESP, unknown, unsupported or experimental headers, and
+non-first fragments remain dataset-wide because they can hide a transport. An
+opaque chain (including MLD-style traffic without a walkable non-TCP/UDP
+terminal) is not proof of unrelated traffic. The IP family comes from the
+decoded header, never IPv4-mapped address spelling. Ordinary unrelated
+ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less
+final record remains dataset-wide.
 
 Live `capture_loss` is retained at transport admission, before worker processing,
 and delivered through AF_PACKET and NFQUEUE even with incomplete TCP headers.
