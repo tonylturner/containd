@@ -17,8 +17,9 @@ import (
 // never attaches raw payload bytes: headers and bodies carry credentials,
 // cookies and content that must not reach the event store or its exports.
 type HTTPDecoder struct {
-	mu      sync.Mutex
-	streams map[httpStreamKey]*httpStream
+	mu          sync.Mutex
+	streams     map[httpStreamKey]*httpStream
+	connections map[string]*httpConnection
 }
 
 func NewHTTPDecoder() *HTTPDecoder { return &HTTPDecoder{} }

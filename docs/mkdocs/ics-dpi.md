@@ -747,8 +747,13 @@ The TLS decoder emits `tls/client_hello` with `sni`, `alpn`,
 `ja3`, `ja3_hash`, `src_port`, `dst_port` and `transport`. TCP reassembly
 makes the fingerprint independent of packet boundaries; handshakes spanning
 TLS records are also supported. Incomplete hellos do not emit partial metadata.
-A handshake is limited to 64 KiB; individual cipher/extension lists are not
-truncated.
+A ClientHello or ServerHello is limited to 64 KiB; individual cipher/extension
+lists are not truncated. Complete TLS records are consumed incrementally;
+only pending hello bodies are retained. Other handshake messages (including
+large Certificate messages) are skipped by their wire length. TLS 1.3
+compatibility ChangeCipherSpec records do not hide retry ClientHellos;
+a pre-TLS-1.3 ChangeCipherSpec ends plaintext inspection. A captured server
+selection takes precedence over a client offer for that decision.
 
 `ja3` is the reference [JA3](https://github.com/salesforce/ja3) string:
 `SSLVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats`,
@@ -788,8 +793,12 @@ cookies, authorization headers and raw header blocks are not exported.
 HTTP/1 headers and trailers are limited to 32 KiB. Content-Length and chunked
 bodies are skipped without retaining their contents. Ambiguous body framing
 is rejected. Close-delimited response bodies are consumed until connection
-end; request/reply correlation (including HEAD response body semantics) is
-not available.
+end. A bounded queue of 64 outstanding request methods per connection
+correlates responses when both directions are observed. HEAD replies and
+1xx/204/304 responses never consume body bytes, regardless of Content-Length;
+interim responses do not dequeue the request. Exceeding the correlation bound
+ends inspection rather than guessing response boundaries. A successful CONNECT
+(2xx) or a non-h2c 101 switches both directions to an opaque tunnel.
 
 Cleartext HTTP/2 prior knowledge (`h2c`) is recognized by the complete
 connection preface. It emits `http2/preface`, then decodes SETTINGS, HEADERS
@@ -806,9 +815,14 @@ HTTP/2 limits are fixed inspection ceilings, not truncated metadata:
 16 KiB per frame, 64 KiB per compressed header block, 32 KiB per decoded
 header list (including the RFC 7540 32-byte overhead per field), and a
 4 KiB dynamic table per direction. Larger negotiated frame/table sizes are
-not supported. Malformed frames, invalid HPACK, interrupted CONTINUATION
-sequences and exceeded limits produce a malformed event and stop that stream
-inspection. TCP splits and coalesced frames do not change emitted metadata.
+not supported. Both TLS and HTTP metadata inspection are best-effort:
+a stream picked up without a valid TLS record or HTTP start line is silently
+ignored. After anchoring, malformed frames, invalid HPACK, interrupted
+CONTINUATION sequences and exceeded limits emit at most one malformed event
+per direction, then consume subsequent bytes silently until stream end.
+This terminal state also applies to sequence-number streams used by live
+capture; it does not rely on session offsets or manager error recovery. TCP
+splits and coalesced frames do not change emitted metadata.
 
 An HTTP/1 `Upgrade: h2c` request remains an `http/request` event; its body is
 skipped before recognizing the client's connection preface. A `101` response
