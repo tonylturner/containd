@@ -36,7 +36,7 @@ function eventHeadline(ev: TelemetryEvent): string {
   if (ev.kind.startsWith("service.nginx.")) return "Reverse-proxy event";
   if (ev.kind.startsWith("service.dhcp.")) return "DHCP service event";
   if (ev.kind.startsWith("service.")) return "System service event";
-  if (ev.proto === "firewall") return "Firewall decision";
+  if (ev.kind === "firewall.rule.hit") return "Firewall decision";
   if (ev.proto) return `${ev.proto.toUpperCase()} telemetry`;
   return "Telemetry event";
 }

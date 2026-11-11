@@ -39,6 +39,38 @@ func TestQueryFiltersBeforeLimit(t *testing.T) {
 		t.Fatal("since boundary")
 	}
 }
+
+func TestQueryCategoriesIncludeRuleHitsAndPreserveIEC104(t *testing.T) {
+	events := []Event{
+		{ID: 1, Kind: "firewall.rule.hit", Attributes: map[string]any{"via": "nflog", "action": "DENY"}},
+		{ID: 2, Kind: "firewall.rule.hit", Transport: "tcp", Attributes: map[string]any{"proto": "modbus", "action": "DENY"}},
+		{ID: 3, Proto: "modbus", Kind: "request"},
+		{ID: 4, Proto: "firewall", Kind: "other"},
+		{ID: 5, Proto: "av", Kind: "service.av.detected"},
+		{ID: 6, Proto: "iec104", Kind: "ics.decision"},
+	}
+	for _, tc := range []struct {
+		category string
+		wantIDs  []uint64
+	}{
+		{category: "firewall", wantIDs: []uint64{2, 1}},
+		{category: "dpi", wantIDs: []uint64{6, 3}},
+		{category: "iec104", wantIDs: []uint64{6}},
+	} {
+		t.Run(tc.category, func(t *testing.T) {
+			page := QueryPage(events, parseTestQuery(t, "category="+tc.category), false, false)
+			if len(page.Events) != len(tc.wantIDs) {
+				t.Fatalf("category %s events = %+v, want IDs %v", tc.category, page.Events, tc.wantIDs)
+			}
+			for i, wantID := range tc.wantIDs {
+				if page.Events[i].ID != wantID {
+					t.Errorf("category %s event[%d].ID = %d, want %d", tc.category, i, page.Events[i].ID, wantID)
+				}
+			}
+		})
+	}
+}
+
 func TestQueryCursorTiesAndDeduplication(t *testing.T) {
 	s := NewStore(20)
 	for i := 0; i < 10; i++ {

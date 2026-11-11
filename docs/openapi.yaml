@@ -5187,7 +5187,7 @@ paths:
         schema: {type: string}
       - name: category
         in: query
-        description: Server-side Events page category; dpi excludes firewall and service kinds.
+        description: Server-side Events page category; firewall selects firewall.rule.hit events, dpi excludes firewall rule hits and service kinds, and iec104 retains protocol matching.
         schema: {type: string, enum: [all, service, proxy, dpi, firewall, iec104]}
       - name: detections
         in: query
