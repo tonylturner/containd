@@ -118,6 +118,9 @@ func FuzzSNMPDecoderOnPacket(f *testing.F) {
 	f.Add(buildSNMPv2cPacket(1, "public", pduGetRequest, 1234, 0, 0, "1.3.6.1.2.1.1.1.0"))
 	f.Add(buildSNMPv2cPacket(1, "private", pduSetRequest, 5678, 0, 0, "1.3.6.1.2.1.1.5.0"))
 	f.Add(buildSNMPv1TrapPacket("public"))
+	f.Add(buildSNMPv2TrapPacket("public", "1.3.6.1.6.3.1.1.5.3"))
+	f.Add(buildSNMPv3Packet(0x01, "fuzz-user", false, "1.3.6.1.2.1.1.1.0"))
+	f.Add(buildSNMPv3Packet(0x03, "fuzz-user", true, "1.3.6.1.2.1.1.1.0"))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -171,9 +174,11 @@ func FuzzSMBDecoderOnPacket(f *testing.F) {
 	dec := NewSMBDecoder()
 	state := smbFlowState(49152, 445)
 
-	f.Add(buildSMBv2Packet(0x0000))
+	f.Add(buildSMB2NegotiateRequest(0x0202, 0x0210, 0x0300, 0x0302, 0x0311))
+	f.Add(buildSMB2NegotiateResponse(0x0311))
 	f.Add(buildSMBv2Packet(0x0009))
-	f.Add(buildSMBv1Packet(0x72))
+	f.Add(buildSMB1NegotiateRequest("NT LM 0.12", "SMB 2.???"))
+	f.Add(buildSMB1NegotiateResponse(0))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {

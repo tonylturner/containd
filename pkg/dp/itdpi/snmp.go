@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	maxCommunityLen = 512
-	maxOIDLen       = 1024
+	maxCommunityLen    = 512
+	maxOIDLen          = 1024
+	maxSNMPOIDs        = 32
+	maxSNMPSecurityLen = 4096
 )
 
 // SNMP PDU type tags (context-specific, constructed).
@@ -28,6 +30,8 @@ const (
 	pduSNMPv2Trap     = 0xA7
 	pduReport         = 0xA8
 )
+
+const snmpTrapOID = "1.3.6.1.6.3.1.1.4.1.0"
 
 var pduTypeNames = map[byte]string{
 	pduGetRequest:     "get_request",
@@ -85,52 +89,29 @@ func (d *SNMPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	}
 	attrs := snmpBaseAttrs(pkt, version)
 	if version == 3 {
-		d.parseV3Header(msg, off, attrs)
+		d.parseV3Message(msg, off, attrs)
 		return []dpi.Event{newSNMPEvent(state, "v3_message", attrs)}, nil
 	}
+	if version != 0 && version != 1 {
+		return nil, nil
+	}
 
-	pduName, pduTag, pduBody, ok := parseSNMPPDU(msg, off, attrs)
+	communityOff, ok := parseSNMPCommunity(msg, off, attrs)
+	if !ok {
+		return nil, nil
+	}
+	pduName, pduTag, pduBody, ok := parseSNMPPDU(msg, communityOff, attrs)
 	if !ok {
 		return nil, nil
 	}
 	if pduTag == pduSetRequest {
 		attrs["write_operation"] = true
 	}
-	if pduTag != pduTrapV1 {
-		d.parsePDUFields(pduBody, attrs)
-	}
+	d.parsePDUFields(pduBody, pduTag, attrs)
 	return []dpi.Event{newSNMPEvent(state, pduName, attrs)}, nil
 }
 
 func (d *SNMPDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
-
-// parsePDUFields extracts request-id, error-status, error-index, and the
-// first OID from the variable bindings in a non-Trap PDU body.
-func (d *SNMPDecoder) parsePDUFields(body []byte, attrs map[string]any) {
-	off := 0
-	reqID, next, ok := parseSNMPIntegerField(body, off)
-	if !ok {
-		return
-	}
-	attrs["request_id"] = reqID
-	errStatus, next, ok := parseSNMPIntegerField(body, next)
-	if !ok {
-		return
-	}
-	attrs["error_status"] = snmpErrorStatus(errStatus)
-	_, next, ok = parseSNMPIntegerField(body, next)
-	if !ok {
-		return
-	}
-	binding, ok := firstSNMPBinding(body, next)
-	if !ok {
-		return
-	}
-	oid, _, ok := readBEROID(binding, 0)
-	if ok && len(oid) <= maxOIDLen {
-		attrs["first_oid"] = oid
-	}
-}
 
 func parseSNMPMessage(p []byte) ([]byte, int64, int, bool) {
 	if len(p) < 2 || p[0] != 0x30 {
@@ -173,35 +154,34 @@ func snmpVersionString(version int64) string {
 	}
 }
 
+func parseSNMPCommunity(msg []byte, off int, attrs map[string]any) (int, bool) {
+	value, next, ok := readBERValue(msg, off, 0x04, maxCommunityLen)
+	if !ok {
+		return 0, false
+	}
+	attrs["community"] = string(value)
+	return next, true
+}
+
 func parseSNMPPDU(msg []byte, off int, attrs map[string]any) (string, byte, []byte, bool) {
-	next, ok := parseSNMPCommunity(msg, off, attrs)
-	if !ok || next >= len(msg) {
+	return parseSNMPPDUAt(msg, off, attrs)
+}
+
+func parseSNMPPDUAt(buf []byte, off int, attrs map[string]any) (string, byte, []byte, bool) {
+	if off >= len(buf) {
 		return "", 0, nil, false
 	}
-	pduTag := msg[next]
+	pduTag := buf[off]
 	pduName, known := pduTypeNames[pduTag]
 	if !known {
 		return "", 0, nil, false
 	}
-	attrs["pdu_type"] = pduName
-	pduLen, pduOff, ok := readBERLength(msg, next+1)
-	if !ok || pduOff+pduLen > len(msg) {
+	body, _, ok := readBERValue(buf, off, pduTag, len(buf))
+	if !ok {
 		return "", 0, nil, false
 	}
-	return pduName, pduTag, msg[pduOff : pduOff+pduLen], true
-}
-
-func parseSNMPCommunity(msg []byte, off int, attrs map[string]any) (int, bool) {
-	if off >= len(msg) || msg[off] != 0x04 {
-		return 0, false
-	}
-	commLen, commOff, ok := readBERLength(msg, off+1)
-	if !ok || commLen > maxCommunityLen || commOff+commLen > len(msg) {
-		return 0, false
-	}
-	attrs["community_length"] = commLen
-	attrs["community_auth"] = true
-	return commOff + commLen, true
+	attrs["pdu_type"] = pduName
+	return pduName, pduTag, body, true
 }
 
 func newSNMPEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
@@ -211,6 +191,55 @@ func newSNMPEvent(state *flow.State, kind string, attrs map[string]any) dpi.Even
 		Kind:       kind,
 		Attributes: attrs,
 	}
+}
+
+func (d *SNMPDecoder) parsePDUFields(body []byte, pduTag byte, attrs map[string]any) {
+	if pduTag == pduTrapV1 {
+		d.parseV1TrapFields(body, attrs)
+		return
+	}
+	reqID, next, ok := parseSNMPIntegerField(body, 0)
+	if !ok {
+		return
+	}
+	attrs["request_id"] = reqID
+	errStatus, next, ok := parseSNMPIntegerField(body, next)
+	if !ok {
+		return
+	}
+	attrs["error_status"] = snmpErrorStatus(errStatus)
+	_, next, ok = parseSNMPIntegerField(body, next)
+	if !ok {
+		return
+	}
+	d.parseVarbindList(body, next, pduTag == pduSNMPv2Trap, attrs)
+}
+
+func (d *SNMPDecoder) parseV1TrapFields(body []byte, attrs map[string]any) {
+	enterprise, next, ok := readBEROID(body, 0)
+	if !ok {
+		return
+	}
+	attrs["enterprise_oid"] = enterprise
+	agent, next, ok := readBERValue(body, next, 0x40, 4)
+	if !ok || len(agent) != 4 {
+		return
+	}
+	generic, next, ok := parseSNMPIntegerField(body, next)
+	if !ok {
+		return
+	}
+	specific, next, ok := parseSNMPIntegerField(body, next)
+	if !ok {
+		return
+	}
+	attrs["generic_trap"] = generic
+	attrs["specific_trap"] = specific
+	_, next, ok = readBERValue(body, next, 0x43, 8)
+	if !ok {
+		return
+	}
+	d.parseVarbindList(body, next, false, attrs)
 }
 
 func parseSNMPIntegerField(body []byte, off int) (int64, int, bool) {
@@ -227,64 +256,139 @@ func snmpErrorStatus(code int64) string {
 	return fmt.Sprintf("%d", code)
 }
 
-func firstSNMPBinding(body []byte, off int) ([]byte, bool) {
-	if off >= len(body) || body[off] != 0x30 {
-		return nil, false
+func (d *SNMPDecoder) parseVarbindList(body []byte, off int, v2Trap bool, attrs map[string]any) {
+	list, _, ok := readBERValue(body, off, 0x30, len(body))
+	if !ok {
+		return
 	}
-	vbLen, vbOff, ok := readBERLength(body, off+1)
-	if !ok || vbOff+vbLen > len(body) {
-		return nil, false
+	var oids []string
+	pos := 0
+	for pos < len(list) && len(oids) < maxSNMPOIDs {
+		binding, next, ok := readBERValue(list, pos, 0x30, len(list))
+		if !ok {
+			break
+		}
+		oid, valueOff, ok := readBEROID(binding, 0)
+		if !ok {
+			break
+		}
+		oids = append(oids, oid)
+		if v2Trap && oid == snmpTrapOID && valueOff < len(binding) && binding[valueOff] == 0x06 {
+			trapOID, _, valid := readBEROID(binding, valueOff)
+			if valid {
+				attrs["trap_oid"] = trapOID
+			}
+		}
+		pos = next
 	}
-	vb := body[vbOff : vbOff+vbLen]
-	if len(vb) < 2 || vb[0] != 0x30 {
-		return nil, false
+	attrs["oids"] = oids
+	if pos < len(list) && len(oids) == maxSNMPOIDs {
+		attrs["oids_truncated"] = true
 	}
-	bindLen, bindOff, ok := readBERLength(vb, 1)
-	if !ok || bindOff+bindLen > len(vb) {
-		return nil, false
-	}
-	binding := vb[bindOff : bindOff+bindLen]
-	if len(binding) < 2 || binding[0] != 0x06 {
-		return nil, false
-	}
-	return binding, true
 }
 
-// parseV3Header extracts msgSecurityModel from the SNMPv3 msgGlobalData.
-func (d *SNMPDecoder) parseV3Header(msg []byte, off int, attrs map[string]any) {
-	if off >= len(msg) || msg[off] != 0x30 {
+func (d *SNMPDecoder) parseV3Message(msg []byte, off int, attrs map[string]any) {
+	header, next, ok := readBERValue(msg, off, 0x30, len(msg))
+	if !ok {
 		return
 	}
-	hdrLen, hdrOff, ok := readBERLength(msg, off+1)
-	if !ok || hdrOff+hdrLen > len(msg) {
+	flags, securityModel, ok := parseSNMPv3Header(header)
+	if !ok {
 		return
 	}
-	hdr := msg[hdrOff : hdrOff+hdrLen]
+	attrs["msg_flags_auth"] = flags&0x01 != 0
+	attrs["msg_flags_priv"] = flags&0x02 != 0
+	attrs["msg_security_model"] = securityModel
 
-	// msgGlobalData SEQUENCE contains:
-	//   msgID (INTEGER), msgMaxSize (INTEGER), msgFlags (OCTET STRING),
-	//   msgSecurityModel (INTEGER)
-	pos := 0
-	for i := 0; i < 4; i++ {
-		if pos >= len(hdr) {
-			return
-		}
-		tag := hdr[pos]
-		if tag == 0x02 && i == 3 {
-			// msgSecurityModel
-			val, _, ok := readBERInteger(hdr, pos)
-			if ok {
-				attrs["msg_security_model"] = val
-			}
-			return
-		}
-		// Skip this TLV.
-		vLen, vOff, ok := readBERLength(hdr, pos+1)
-		if !ok || vOff+vLen > len(hdr) {
-			return
-		}
-		pos = vOff + vLen
+	securityParameters, next, ok := readBERValue(msg, next, 0x04, maxSNMPSecurityLen)
+	if !ok {
+		return
 	}
+	if securityModel == 3 {
+		if userName, found := parseUSMUserName(securityParameters); found {
+			attrs["user_name"] = userName
+		}
+	}
+
+	if flags&0x02 != 0 || next >= len(msg) || msg[next] != 0x30 {
+		return
+	}
+	scopedPDU, _, ok := readBERValue(msg, next, 0x30, len(msg))
+	if !ok {
+		return
+	}
+	_, pos, ok := readBERValue(scopedPDU, 0, 0x04, len(scopedPDU))
+	if !ok {
+		return
+	}
+	_, pos, ok = readBERValue(scopedPDU, pos, 0x04, len(scopedPDU))
+	if !ok {
+		return
+	}
+	_, pduTag, body, ok := parseSNMPPDUAt(scopedPDU, pos, attrs)
+	if !ok {
+		return
+	}
+	if pduTag == pduSetRequest {
+		attrs["write_operation"] = true
+	}
+	d.parsePDUFields(body, pduTag, attrs)
+}
+
+func parseSNMPv3Header(header []byte) (byte, int64, bool) {
+	pos := 0
+	if _, next, ok := readBERValue(header, pos, 0x02, 8); ok {
+		pos = next
+	} else {
+		return 0, 0, false
+	}
+	if _, next, ok := readBERValue(header, pos, 0x02, 8); ok {
+		pos = next
+	} else {
+		return 0, 0, false
+	}
+	flags, next, ok := readBERValue(header, pos, 0x04, 1)
+	if !ok || len(flags) != 1 {
+		return 0, 0, false
+	}
+	pos = next
+	securityModel, _, ok := parseSNMPIntegerField(header, pos)
+	if !ok {
+		return 0, 0, false
+	}
+	return flags[0], securityModel, true
+}
+
+func parseUSMUserName(parameters []byte) (string, bool) {
+	sequence, _, ok := readBERValue(parameters, 0, 0x30, maxSNMPSecurityLen)
+	if !ok {
+		return "", false
+	}
+	pos := 0
+	tags := [...]byte{0x04, 0x02, 0x02, 0x04}
+	maxLens := [...]int{32, 8, 8, 256}
+	for field, tag := range tags {
+		value, next, ok := readBERValue(sequence, pos, tag, maxLens[field])
+		if !ok {
+			return "", false
+		}
+		if field == 3 {
+			return string(value), true
+		}
+		pos = next
+	}
+	return "", false
+}
+
+func readBERValue(buf []byte, off int, tag byte, maxLen int) ([]byte, int, bool) {
+	if off >= len(buf) || buf[off] != tag {
+		return nil, off, false
+	}
+	length, valueOff, ok := readBERLength(buf, off+1)
+	if !ok || length > maxLen || valueOff+length > len(buf) {
+		return nil, off, false
+	}
+	return buf[valueOff : valueOff+length], valueOff + length, true
 }
 
 // --- BER/ASN.1 parsing helpers ---
@@ -297,7 +401,6 @@ func readBERLength(buf []byte, off int) (int, int, bool) {
 	}
 	b := buf[off]
 	if b&0x80 == 0 {
-		// Short form: single byte length.
 		return int(b), off + 1, true
 	}
 	numBytes := int(b & 0x7F)
@@ -307,9 +410,6 @@ func readBERLength(buf []byte, off int) (int, int, bool) {
 	length := 0
 	for i := 0; i < numBytes; i++ {
 		length = (length << 8) | int(buf[off+1+i])
-	}
-	if length < 0 {
-		return 0, off, false
 	}
 	return length, off + 1 + numBytes, true
 }
@@ -324,7 +424,6 @@ func readBERInteger(buf []byte, off int) (int64, int, bool) {
 	if !ok || vLen == 0 || vLen > 8 || vOff+vLen > len(buf) {
 		return 0, off, false
 	}
-	// Sign-extend the first byte.
 	val := int64(int8(buf[vOff]))
 	for i := 1; i < vLen; i++ {
 		val = (val << 8) | int64(buf[vOff+i])
@@ -335,42 +434,40 @@ func readBERInteger(buf []byte, off int) (int64, int, bool) {
 // readBEROID reads a BER OBJECT IDENTIFIER (tag 0x06) starting at buf[off]
 // and returns the dotted-notation string, offset past the element, and success.
 func readBEROID(buf []byte, off int) (string, int, bool) {
-	if off >= len(buf) || buf[off] != 0x06 {
+	oidBytes, next, ok := readBERValue(buf, off, 0x06, maxOIDLen)
+	if !ok || len(oidBytes) == 0 {
 		return "", off, false
 	}
-	vLen, vOff, ok := readBERLength(buf, off+1)
-	if !ok || vLen == 0 || vOff+vLen > len(buf) {
-		return "", off, false
-	}
-	oidBytes := buf[vOff : vOff+vLen]
-
-	var b strings.Builder
-	b.Grow(64)
-
-	// First byte encodes first two components: X*40 + Y.
-	first := int(oidBytes[0])
-	x := first / 40
-	y := first % 40
-	fmt.Fprintf(&b, "%d.%d", x, y)
-
-	// Remaining bytes: base-128 encoded sub-identifiers.
-	val := uint64(0)
-	for i := 1; i < len(oidBytes); i++ {
-		val = (val << 7) | uint64(oidBytes[i]&0x7F)
-		if val > 0xFFFFFFFF {
-			// Unreasonably large sub-identifier.
+	var subIDs []uint64
+	var value uint64
+	for _, b := range oidBytes {
+		if value > 0xFFFFFFFF>>7 {
 			return "", off, false
 		}
-		if oidBytes[i]&0x80 == 0 {
-			fmt.Fprintf(&b, ".%d", val)
-			val = 0
+		value = value<<7 | uint64(b&0x7F)
+		if b&0x80 == 0 {
+			subIDs = append(subIDs, value)
+			value = 0
 		}
 	}
-
-	result := b.String()
-	if len(result) > maxOIDLen {
+	if value != 0 || len(subIDs) == 0 || oidBytes[len(oidBytes)-1]&0x80 != 0 {
 		return "", off, false
 	}
-
-	return result, vOff + vLen, true
+	first := subIDs[0]
+	x, y := uint64(2), first-80
+	if first < 40 {
+		x, y = 0, first
+	} else if first < 80 {
+		x, y = 1, first-40
+	}
+	var b strings.Builder
+	b.Grow(64)
+	fmt.Fprintf(&b, "%d.%d", x, y)
+	for _, subID := range subIDs[1:] {
+		fmt.Fprintf(&b, ".%d", subID)
+		if b.Len() > maxOIDLen {
+			return "", off, false
+		}
+	}
+	return b.String(), next, true
 }

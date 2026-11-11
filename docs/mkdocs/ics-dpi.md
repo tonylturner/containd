@@ -521,6 +521,35 @@ and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decod
 specific attribute map. Inspect emitted events before authoring attribute-based
 [IDS conditions](ids-rules.md).
 
+### SMB metadata
+
+SMB events retain `version` as an SMB1/SMB2 **family hint** from the packet
+header; it is not negotiated-dialect evidence. SMB2/3 negotiate requests emit
+`dialects_offered` (at most 64 dialects), and negotiate responses emit `dialect`
+for the selected revision, including SMB 3.1.1. SMB1 negotiate requests emit
+their offered dialect strings, including `SMB 2.???` on the multi-protocol
+upgrade path. SMB1 responses expose the selected string when the matching
+request was observed on the same flow. Other SMB events continue to expose the
+command, SMB2 session ID and tree-connect share when present.
+
+### SNMP metadata
+
+SNMP events expose `version`; `pdu_type` is included when the PDU is readable.
+Readable non-v1-Trap PDUs also include `request_id` and `error_status`, and
+SetRequests include `write_operation: true`. SNMPv1/v2c events emit the
+cleartext `community` string (up to 512 bytes) and `oids`, the OIDs from the
+variable-binding list, in wire order. At most 32 OIDs are included;
+`oids_truncated: true` marks a longer list. SNMPv1 traps also expose
+`enterprise_oid`, `generic_trap` and `specific_trap`. SNMPv2 traps expose
+`trap_oid` when the `snmpTrapOID.0` binding contains an OID value.
+
+SNMPv3 exposes `msg_flags_auth`, `msg_flags_priv`, `msg_security_model` and
+`user_name` when a USM user name is present. It exposes scoped-PDU `oids` only
+when the PDU is not encrypted; authentication/privacy flags do not imply that
+the engine has verified credentials or decrypted content. SNMP community
+strings are included in event attributes, so event logs and syslog event
+forwarding carry them too. Protect those records and collectors accordingly.
+
 ### Decoded event fields
 
 `GET /api/v1/events` returns decoded events with IDs encoded as decimal JSON

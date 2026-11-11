@@ -32,13 +32,14 @@ type itCaptureManifest struct {
 }
 
 type itExpectation struct {
-	label string
-	proto string
-	kind  string
-	key   string
-	value string
-	count int
-	gap   bool
+	label    string
+	proto    string
+	kind     string
+	key      string
+	value    string
+	count    int
+	gap      bool
+	contains bool
 }
 
 type itDecoderCase struct {
@@ -119,9 +120,12 @@ var itDecoderCases = []itDecoderCase{
 		port:     161,
 		decoder:  func() dpi.Decoder { return itdpi.NewSNMPDecoder() },
 		wants: []itExpectation{
-			{label: "SNMPv2c Get request", proto: "snmp", kind: "get_request", key: "first_oid", value: "1.3.6.1.2.1.1.1.0", count: 1},
-			{label: "SNMP Get response", proto: "snmp", kind: "get_response", key: "first_oid", value: "1.3.6.1.2.1.1.1.0", count: 1},
-			{label: "SNMPv2c GetNext request", proto: "snmp", kind: "get_next_request", key: "version", value: "v2c", count: 1},
+			{label: "SNMPv2c community", proto: "snmp", kind: "get_request", key: "community", value: "public", count: 1},
+			{label: "SNMPv2c Get request OIDs", proto: "snmp", kind: "get_request", key: "oids", value: "1.3.6.1.2.1.1.1.0", count: 1, contains: true},
+			{label: "SNMP community response", proto: "snmp", kind: "get_response", key: "community", value: "public", count: 1},
+			{label: "SNMP Get response OIDs", proto: "snmp", kind: "get_response", key: "oids", value: "1.3.6.1.2.1.1.1.0", count: 1, contains: true},
+			{label: "SNMPv2c GetNext community", proto: "snmp", kind: "get_next_request", key: "community", value: "public", count: 1},
+			{label: "SNMPv2c GetNext OIDs", proto: "snmp", kind: "get_next_request", key: "oids", value: "1.3.6.1.2.1.1.5.0", count: 1, contains: true},
 		},
 	},
 	{
@@ -134,15 +138,19 @@ var itDecoderCases = []itDecoderCase{
 		},
 	},
 	{
+		// smb.pcap is the Apache-2.0 capture of unmodified Debian Samba and
+		// smbclient 4.17.12 negotiation; its capture harness and notices are
+		// documented in test/it/testdata/README.md.
 		protocol: "smb",
 		port:     445,
 		decoder:  func() dpi.Decoder { return itdpi.NewSMBDecoder() },
 		wants: []itExpectation{
 			{label: "SMB negotiate", proto: "smb", kind: "negotiate", key: "version", value: "SMB2", count: 1},
+			{label: "SMB offered dialects", proto: "smb", kind: "negotiate", key: "dialects_offered", value: "3.1.1", count: 1, contains: true},
+			{label: "SMB selected dialect", proto: "smb", kind: "negotiate", key: "dialect", value: "3.1.1", count: 1},
 			{label: "SMB session setup", proto: "smb", kind: "session_setup", count: 1},
 			{label: "SMB tree connect", proto: "smb", kind: "tree_connect", count: 1},
 			{label: "SMB file read", proto: "smb", kind: "read", count: 1},
-			{label: "SMB3 dialect", proto: "smb", kind: "negotiate", key: "dialect", value: "3.1.1", count: 1, gap: true},
 		},
 	},
 }
@@ -247,7 +255,7 @@ func TestITRecordedCaptureDecoders(t *testing.T) {
 						continue
 					}
 					candidateFrames = append(candidateFrames, got.frame)
-					if want.key == "" || fmt.Sprint(got.event.Attributes[want.key]) == want.value {
+					if want.key == "" || matchesITExpectation(got.event.Attributes[want.key], want) {
 						matched++
 					}
 				}
@@ -298,9 +306,9 @@ func stableITAttributes(event dpi.Event) string {
 		"http": {"method", "path", "host", "user_agent", "status", "content_type"},
 		"ssh":  {"version", "software", "kex_algorithm", "encryption"},
 		"ntp":  {"mode_name", "stratum"},
-		"snmp": {"version", "pdu_type", "first_oid"},
+		"snmp": {"version", "community", "pdu_type", "oids", "trap_oid", "msg_flags_auth", "msg_flags_priv", "msg_security_model", "user_name"},
 		"rdp":  {"stage", "cookie", "requested_protocols", "selected_protocol"},
-		"smb":  {"version", "command", "share"},
+		"smb":  {"version", "command", "dialects_offered", "dialect", "share"},
 	}
 	var fields []string
 	for _, key := range keysByProtocol[event.Proto] {
@@ -309,6 +317,25 @@ func stableITAttributes(event dpi.Event) string {
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+func matchesITExpectation(value any, want itExpectation) bool {
+	if want.contains {
+		switch values := value.(type) {
+		case []string:
+			for _, candidate := range values {
+				if candidate == want.value {
+					return true
+				}
+			}
+			return false
+		case string:
+			return strings.Contains(values, want.value)
+		default:
+			return false
+		}
+	}
+	return fmt.Sprint(value) == want.value
 }
 
 func makeITFixture(protocol string, serverPort uint16, packets []corpus.Packet) (corpus.Fixture, []int) {
