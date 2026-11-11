@@ -81,7 +81,48 @@ func httpHeaderToken(value, token string) bool {
 
 func (r httpRequest) acceptsUpgrade(headers map[string]string) bool {
 	selected := headers["upgrade"]
-	return selected != "" && !strings.Contains(selected, ",") &&
-		httpHeaderToken(headers["connection"], "upgrade") &&
-		httpHeaderToken(r.upgrade, selected)
+	if selected == "" || r.upgrade == "" || !httpHeaderToken(headers["connection"], "upgrade") {
+		return false
+	}
+	// RFC 9110 7.8 permits multiple selected protocol layers. Every layer
+	// must have been offered; names compare case-insensitively, not versions.
+	// A set keeps work linear in the bounded request/response header lengths.
+	offered := make(map[string]struct{})
+	for protocol := range strings.SplitSeq(r.upgrade, ",") {
+		if key := httpUpgradeProtocol(protocol); key != "" {
+			offered[key] = struct{}{}
+		}
+	}
+	for protocol := range strings.SplitSeq(selected, ",") {
+		key := httpUpgradeProtocol(protocol)
+		if _, ok := offered[key]; key == "" || !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func httpUpgradeProtocol(value string) string {
+	name, version, versioned := strings.Cut(strings.TrimSpace(value), "/")
+	if !httpProtocolToken(name) || versioned && !httpProtocolToken(version) {
+		return ""
+	}
+	if versioned {
+		return strings.ToLower(name) + "/" + version
+	}
+	return strings.ToLower(name)
+}
+
+func httpProtocolToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, c := range value {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			strings.ContainsRune("!#$%&'*+-.^_`|~", c) {
+			continue
+		}
+		return false
+	}
+	return true
 }

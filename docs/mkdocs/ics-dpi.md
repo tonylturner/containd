@@ -784,7 +784,8 @@ establishes roles, but cannot establish a tunnel. CONNECT does not suppress late
 plaintext requests while unanswered. Only a server 2xx answering the pending CONNECT
 switches both directions to an opaque tunnel. A server 101 must answer the
 pending request's upgrade offer: both messages must include `Connection: Upgrade`,
-and the response's selected `Upgrade` protocol must match an offered protocol.
+and every protocol selected in the response's `Upgrade` header must have been
+offered. Protocol names compare case-insensitively; versions match exactly.
 A negotiated non-h2c upgrade becomes opaque; an unsolicited or unmatched 101
 does not.
 

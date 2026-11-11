@@ -49,9 +49,16 @@ func TestHTTPDroppedRequestCounterSaturates(t *testing.T) {
 
 func TestHTTPUpgradeCorrelationClearsOnFinalResponse(t *testing.T) {
 	c := httpConnection{}
-	c.request(httpStreamKey{}, "GET", map[string]string{"connection": "Upgrade", "upgrade": "websocket"})
-	if !c.pending().acceptsUpgrade(map[string]string{"connection": "keep-alive, upgrade", "upgrade": "WebSocket"}) {
-		t.Fatal("matching upgrade not accepted")
+	c.request(httpStreamKey{}, "GET", map[string]string{"connection": "Upgrade", "upgrade": "websocket, custom/V1"})
+	for _, selected := range []string{"WebSocket", "custom/V1, WebSocket"} {
+		if !c.pending().acceptsUpgrade(map[string]string{"connection": "keep-alive, upgrade", "upgrade": selected}) {
+			t.Fatalf("matching upgrade not accepted: %s", selected)
+		}
+	}
+	for _, selected := range []string{"custom/v1", "WebSocket, unoffered", "WebSocket,", "web socket", "/V1", "custom/"} {
+		if c.pending().acceptsUpgrade(map[string]string{"connection": "Upgrade", "upgrade": selected}) {
+			t.Fatalf("invalid or unoffered upgrade accepted: %s", selected)
+		}
 	}
 	c.response()
 	c.request(httpStreamKey{}, "GET", nil)
