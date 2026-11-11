@@ -75,7 +75,7 @@ func TestTLSJA3Reference(t *testing.T) {
 			records := tlsRecord(hs[:split])
 			records = append(records, tlsRecord(hs[split:])...)
 			r, err := NewTLSDecoder().ParseStream(tlsFlowState(12345, 443), dpi.StreamView{Bytes: records})
-			if err != nil || r.Consumed != len(records) || len(r.Frames) != 1 || len(r.Frames[0].Events) != 1 || r.Frames[0].Events[0].Attributes["ja3_hash"] != f.MD5 {
+			if err != nil || r.Consumed != len(records) || len(r.Frames) != 2 || len(r.Frames[0].Events) != 0 || len(r.Frames[1].Events) != 1 || r.Frames[1].Events[0].Attributes["ja3_hash"] != f.MD5 {
 				t.Fatalf("cross-record: %+v %v", r, err)
 			}
 		})
@@ -129,14 +129,21 @@ func TestTLSBounds(t *testing.T) {
 			t.Fatalf("truncated %d: %+v %v", n, r, err)
 		}
 	}
-	for _, raw := range [][]byte{
-		{22, 3, 3, 0xff, 0xff},
-		tlsRecord([]byte{1, 1, 0, 1}), // announced hello over 64 KiB
+	// Unknown oversized records are silent pickups. Once a valid record has
+	// anchored TLS, oversized hellos produce one event, not a manager restart.
+	for _, tc := range []struct {
+		raw       []byte
+		malformed int
+	}{
+		{[]byte{22, 3, 3, 0xff, 0xff}, 0},
+		{tlsRecord([]byte{1, 1, 0, 1}), 1},
 	} {
-		if _, err := NewTLSDecoder().ParseStream(tlsFlowState(1, 443), dpi.StreamView{Bytes: raw}); err == nil {
-			t.Fatal("accepted oversized TLS")
+		r, err := NewTLSDecoder().ParseStream(tlsFlowState(1, 443), dpi.StreamView{Bytes: tc.raw})
+		if err != nil || r.Consumed != len(tc.raw) || len(r.Frames) != 1 || len(r.Frames[0].Events) != tc.malformed {
+			t.Fatalf("bounds: %+v %v", r, err)
 		}
 	}
+
 	// Old TLS clients without extensions still have a reference JA3 string.
 	b := buildClientHello("", nil)[9:]
 	b = b[:len(b)-2]

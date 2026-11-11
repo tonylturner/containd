@@ -17,8 +17,9 @@ import (
 
 // TLSDecoder emits ClientHello metadata (SNI, ALPN when possible).
 type TLSDecoder struct {
-	mu        sync.Mutex
-	encrypted map[tlsStreamKey]bool
+	mu          sync.Mutex
+	streams     map[tlsStreamKey]*tlsStream
+	connections map[string]*tlsConnection
 }
 
 func NewTLSDecoder() *TLSDecoder { return &TLSDecoder{} }
@@ -152,6 +153,7 @@ func parseClientHello(ch []byte) clientHelloMeta {
 				if len(body) < 1 || int(body[0]) != len(body)-1 {
 					return clientHelloMeta{}
 				}
+				points = nil
 				for _, p := range body[1:] {
 					points = append(points, uint16(p))
 				}

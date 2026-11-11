@@ -19,75 +19,165 @@ type tlsStreamKey struct {
 	dir     dpi.StreamDir
 }
 
+type tlsConnection struct {
+	refs     int
+	selected string
+}
+
+type tlsStream struct {
+	connection                             string
+	peer                                   *tlsConnection
+	anchored, stopped, encrypted, offers13 bool
+	header                                 [4]byte
+	headerN                                int
+	typ                                    byte
+	remaining                              int
+	hello                                  []byte
+}
+
 func (d *TLSDecoder) StreamEnded(session string, dir dpi.StreamDir) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	delete(d.encrypted, tlsStreamKey{session, dir})
+	key := tlsStreamKey{session, dir}
+	if s := d.streams[key]; s != nil {
+		s.peer.refs--
+		if s.peer.refs == 0 {
+			delete(d.connections, s.connection)
+		}
+		delete(d.streams, key)
+	}
 }
 
 func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.encrypted == nil {
-		d.encrypted = make(map[tlsStreamKey]bool)
+	if d.streams == nil {
+		d.streams = make(map[tlsStreamKey]*tlsStream)
+		d.connections = make(map[string]*tlsConnection)
 	}
 	key := tlsStreamKey{v.Session, v.Dir}
-	encrypted := d.encrypted[key]
-
+	s := d.streams[key]
+	if s == nil {
+		connection := metadataConnectionKey(state, v)
+		peer := d.connections[connection]
+		if peer == nil {
+			peer = &tlsConnection{}
+			d.connections[connection] = peer
+		}
+		peer.refs++
+		s = &tlsStream{connection: connection, peer: peer}
+		d.streams[key] = s
+	}
 	var res dpi.StreamResult
-	var handshake []byte
-	var events []dpi.Event
-	start := 0
-	for off := 0; off < len(v.Bytes); {
-		p := v.Bytes[off:]
+	for res.Consumed < len(v.Bytes) {
+		if s.stopped || s.encrypted {
+			metadataFrame(&res, v, len(v.Bytes)-res.Consumed, nil)
+			break
+		}
+		p := v.Bytes[res.Consumed:]
 		if len(p) < 5 {
 			break
 		}
 		n := int(binary.BigEndian.Uint16(p[3:5]))
+		reason := ""
+		var prior []dpi.Event
 		if p[0] < 20 || p[0] > 24 || p[1] != 3 || n > 18432 {
-			return res, &dpi.FrameError{Offset: v.Base + int64(start), Reason: "invalid TLS record"}
-		}
-		if len(p) < 5+n {
+			reason = "invalid TLS record"
+		} else if len(p) < 5+n {
 			break
-		}
-		off += 5 + n
-		if p[0] == 20 && len(handshake) == 0 {
-			encrypted = true
-			d.encrypted[key] = true
-		}
-		if p[0] == 22 && !encrypted {
-			if len(handshake)+n > maxTLSHello+4 {
-				return res, &dpi.FrameError{Offset: v.Base + int64(start), Reason: "TLS handshake size limit"}
-			}
-			handshake = append(handshake, p[5:5+n]...)
-			for len(handshake) >= 4 {
-				size := int(handshake[1])<<16 | int(handshake[2])<<8 | int(handshake[3])
-				if size > maxTLSHello {
-					return res, &dpi.FrameError{Offset: v.Base + int64(start), Reason: "TLS handshake size limit"}
+		} else {
+			s.anchored = true
+			switch p[0] {
+			case 22:
+				events, err := s.handshake(state, p[5:5+n])
+				if err != "" {
+					reason = err
+					prior = events
+				} else {
+					metadataFrame(&res, v, 5+n, events)
 				}
-				if len(handshake) < size+4 {
-					break
+			case 20:
+				if n != 1 || p[5] != 1 {
+					reason = "invalid TLS ChangeCipherSpec"
+				} else {
+					// A TLS 1.3 dummy CCS does not encrypt subsequent retry hellos.
+					// A captured server selection takes precedence over a client offer.
+					tls13 := s.peer.selected == "TLS1.3" || s.peer.selected == "" && s.offers13
+					if !tls13 {
+						s.encrypted = true
+						s.hello = nil
+					}
+					metadataFrame(&res, v, 5+n, nil)
 				}
-				if ev, ok := tlsHelloEvent(state, handshake[0], handshake[4:4+size]); ok {
-					events = append(events, ev)
+			default:
+				if s.headerN != 0 || s.remaining != 0 {
+					reason = "interrupted TLS handshake"
+				} else {
+					metadataFrame(&res, v, 5+n, nil)
 				}
-				handshake = handshake[4+size:]
-			}
-		} else if len(handshake) != 0 {
-			// Only ChangeCipherSpec may intervene in a fragmented handshake.
-			if p[0] != 20 {
-				return res, &dpi.FrameError{Offset: v.Base + int64(start), Reason: "interrupted TLS handshake"}
 			}
 		}
-		if len(handshake) == 0 {
-			res.Frames = append(res.Frames, dpi.DecodedFrame{Start: v.Base + int64(start), End: v.Base + int64(off), Events: events})
-			res.Consumed = off
-			start = off
-			events = nil
+		if reason != "" {
+			s.stopped = true
+			s.hello = nil
+			metadataStop(state, v, &res, s.anchored, "tls", reason, prior)
 		}
 	}
 	res.NeedMore = res.Consumed < len(v.Bytes)
 	return res, nil
+}
+
+// Consume each record once. Only hello bodies are retained; Certificate and
+// other potentially large messages are skipped by their 24-bit wire length.
+func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
+	var events []dpi.Event
+	for len(p) > 0 {
+		if s.headerN < 4 {
+			n := copy(s.header[s.headerN:], p)
+			s.headerN += n
+			p = p[n:]
+			if s.headerN < 4 {
+				break
+			}
+			s.typ = s.header[0]
+			s.remaining = int(s.header[1])<<16 | int(s.header[2])<<8 | int(s.header[3])
+			if s.typ == 1 || s.typ == 2 {
+				if s.remaining > maxTLSHello {
+					return events, "TLS hello size limit"
+				}
+				s.hello = make([]byte, 0, s.remaining)
+			}
+		}
+		n := min(len(p), s.remaining)
+		if s.typ == 1 || s.typ == 2 {
+			s.hello = append(s.hello, p[:n]...)
+		}
+		s.remaining -= n
+		p = p[n:]
+		if s.remaining != 0 {
+			break
+		}
+		if s.typ == 1 || s.typ == 2 {
+			ev, ok := tlsHelloEvent(st, s.typ, s.hello)
+			if !ok {
+				return events, "invalid TLS hello"
+			}
+			events = append(events, ev)
+			if s.typ == 1 {
+				s.offers13 = false
+				for _, version := range ev.Attributes["tls_offered_versions"].([]string) {
+					if version == "TLS1.3" {
+						s.offers13 = true
+					}
+				}
+			} else {
+				s.peer.selected = ev.Attributes["tls_selected_version"].(string)
+			}
+			s.hello = nil
+		}
+		s.headerN = 0
+	}
+	return events, ""
 }
 
 func tlsHelloEvent(state *flow.State, typ byte, body []byte) (dpi.Event, bool) {
