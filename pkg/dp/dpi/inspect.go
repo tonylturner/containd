@@ -93,9 +93,18 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 			fed.err.Proto = res.Proto
 			res.Err = fed.err // nothing was inspected: not malformed
 		case fed.err != nil:
-			errEvent = streamError(state, pkt, &res, fed.err)
+			if recovery, ok := framer.(StreamResynchronizer); ok && !pkt.FailClosed {
+				fed.err.Proto = res.Proto
+				res.Events = append(res.Events, recovery.ResyncStream(state,
+					StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Role: pkt.Role}, fed.err)...)
+				m.reassembler.resync(key, pos, len(pkt.Payload))
+				res.Gap = false
+			} else {
+				errEvent = streamError(state, pkt, &res, fed.err)
+			}
 		case len(fed.buf) > 0:
-			view := StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Bytes: fed.buf}
+			view := StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Bytes: fed.buf,
+				PacketStart: fed.packetStart, HasPacketStart: fed.hasPacketStart, Role: pkt.Role}
 			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
 		}
 	}

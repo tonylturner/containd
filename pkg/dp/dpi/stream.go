@@ -28,6 +28,13 @@ type StreamView struct {
 	Dir     StreamDir
 	Base    int64 // absolute offset of Bytes[0]
 	Bytes   []byte
+	// PacketStart locates the current payload in Bytes, only when the entire
+	// segment extends the contiguous stream in order (not a replay or a hole).
+	PacketStart    int
+	HasPacketStart bool
+	// Role is transport authority, independent of Dir and stream identity.
+	// DirUnknown means that the connection initiator is not known.
+	Role StreamDir
 }
 
 // DecodedFrame is one complete frame at absolute range [Start,End).
@@ -71,6 +78,15 @@ type StreamDecoder interface {
 // decoder drops its state for that stream and must not call the manager.
 type StreamEnder interface {
 	StreamEnded(session string, dir StreamDir)
+}
+
+// StreamResynchronizer is a passive decoder's recovery policy for reassembly
+// loss. Outside fail-closed inspection the manager drops held bytes but retains
+// decoder lifetime and transport position. The decoder enters resynchronization
+// and owns any bounded diagnostic events; the loss is not a fatal Inspect error.
+// Decoders without this extension retain the strict stream failure contract.
+type StreamResynchronizer interface {
+	ResyncStream(state *flow.State, v StreamView, cause *StreamError) []Event
 }
 
 // StreamErrKind classifies manager-side stream failures.

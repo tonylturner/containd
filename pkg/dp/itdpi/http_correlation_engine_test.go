@@ -35,7 +35,7 @@ func TestHTTPLegacyEngineOverflowHeaderOnlyResponses(t *testing.T) {
 	}
 	h.send(t, false, []byte("GET /after HTTP/1.1\r\n\r\n"))
 	h.send(t, true, []byte("HTTP/1.1 204 No Content\r\n\r\n"))
-	h.want(t, "http", map[string]int{"request": 66, "response": 66})
+	h.want(t, "http", map[string]int{"request": 66, "response": 66, "malformed": 1})
 }
 
 func TestHTTPLegacyEngineWrongDirectionResponse(t *testing.T) {
@@ -128,5 +128,5 @@ func TestHTTPLegacyEngineCONNECTResponseMustMatch(t *testing.T) {
 	h.send(t, false, []byte("GET /before-tunnel HTTP/1.1\r\n\r\n"))
 	h.send(t, true, []byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	h.send(t, false, []byte("GET /inside-tunnel HTTP/1.1\r\n\r\n"))
-	h.want(t, "http", map[string]int{"request": 3, "response": 2})
+	h.want(t, "http", map[string]int{"request": 4, "response": 2})
 }

@@ -117,13 +117,13 @@ func TestHTTPLegacyEnginePickupsAndTunnels(t *testing.T) {
 			if tc.response != "" {
 				h.send(t, true, []byte(tc.response))
 			}
-			if tc.request != "" {
-				h.send(t, false, []byte("GET /inside-tunnel HTTP/1.1\r\n\r\n"))
-			}
 			payload := append(bytes.Repeat([]byte{0xee}, 1396), '\r', '\n', '\r', '\n')
 			for i := 0; i < 6000; i++ {
 				h.send(t, i%2 == 0, payload)
 			}
+			h.want(t, "http", tc.want)
+			h.send(t, false, []byte("GET /inside-tunnel HTTP/1.1\r\n\r\n"))
+			tc.want["request"]++
 			h.want(t, "http", tc.want)
 		})
 	}

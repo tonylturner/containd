@@ -34,9 +34,10 @@ func metadataFrame(res *dpi.StreamResult, v dpi.StreamView, n int, events []dpi.
 	res.Frames = append(res.Frames, dpi.DecodedFrame{Start: start, End: v.Base + int64(res.Consumed), Events: events})
 }
 
-// Passive metadata decoders retain a terminal state instead of returning a
-// framing error: a legacy manager otherwise discards their state and retries
-// the next packet as a new stream. Unknown pickups are not protocol errors.
+// Passive metadata decoders consume failed bytes instead of returning a framing
+// error: a legacy manager would discard their error-suppression state. The
+// caller owns subsequent resynchronization or terminal suppression. Unknown
+// pickups are not protocol errors.
 func metadataStop(st *flow.State, v dpi.StreamView, res *dpi.StreamResult, anchored bool, proto, reason string, events []dpi.Event) {
 	if anchored {
 		events = append(events, dpi.Event{FlowID: st.ID(), Proto: proto, Kind: "malformed", Attributes: map[string]any{"error": reason}})

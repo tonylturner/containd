@@ -5,6 +5,7 @@ package itdpi
 import (
 	"bytes"
 	"fmt"
+	"mime"
 	"strconv"
 	"strings"
 
@@ -24,9 +25,11 @@ type httpStream struct {
 	key               httpStreamKey
 	connection        string
 	peer              *httpConnection
-	anchored, stopped bool
+	anchored, resync  bool
+	suppressMalformed bool
 	scan, lineStart   int
-	headerOnly        bool
+	role              dpi.StreamDir
+	body              *httpBody
 
 	h2         *h2Stream
 	remaining  uint64
@@ -42,8 +45,8 @@ func (d *HTTPDecoder) StreamEnded(session string, dir dpi.StreamDir) {
 	defer d.mu.Unlock()
 	key := httpStreamKey{session, dir}
 	if s := d.streams[key]; s != nil {
-		s.peer.refs--
-		if s.peer.refs == 0 {
+		delete(s.peer.streams, key)
+		if len(s.peer.streams) == 0 {
 			delete(d.connections, s.connection)
 		}
 		delete(d.streams, key)
@@ -63,29 +66,37 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 		connection := metadataConnectionKey(st, v)
 		peer := d.connections[connection]
 		if peer == nil {
-			peer = &httpConnection{}
+			peer = &httpConnection{streams: make(map[httpStreamKey]*httpStream)}
 			d.connections[connection] = peer
 		}
-		peer.refs++
 		s = &httpStream{key: key, connection: connection, peer: peer}
 		d.streams[key] = s
+		peer.streams[key] = s
 	}
+	if v.Role != dpi.DirUnknown {
+		if !s.peer.acceptsStart(s.key, v.Role == dpi.ServerToClient) {
+			s.peer.methods, s.peer.dropped = nil, 0
+			s.peer.clientKnown, s.peer.serverKnown = false, false
+			s.peer.uncertain = true
+		}
+		s.peer.transportKey, s.peer.transportRole = s.key, v.Role
+	}
+	s.role = s.peer.role(s.key)
 	var res dpi.StreamResult
+	d.httpReanchor(st, s, v, &res)
 	for res.Consumed < len(v.Bytes) {
 		off := res.Consumed
 		p := v.Bytes[off:]
 		n, events, err := d.httpFrame(st, s, p)
 		if err != nil {
-			if s.headerOnly {
-				// Correlation loss leaves body boundaries unknown. A non-HTTP
-				// byte here is not a framing fault: keep searching for headers.
-				s.scan, s.lineStart = 0, 0
-				metadataFrame(&res, v, 1, nil)
-				continue
-			}
-			s.stopped = true
+			anchored := s.anchored
+			s.clearFraming()
+			s.resync = true
 			s.h2 = nil
-			metadataStop(st, v, &res, s.anchored, "http", err.Error(), nil)
+			s.anchored = false
+			s.suppressMalformed = true
+			s.peer.uncertain = true
+			metadataStop(st, v, &res, anchored, "http", err.Error(), nil)
 			break
 		}
 		if n == 0 {
@@ -98,7 +109,7 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 }
 
 func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, []dpi.Event, error) {
-	if s.stopped || s.peer.opaque {
+	if s.resync {
 		return len(p), nil, nil
 	}
 	if s.h2 != nil {
@@ -110,6 +121,9 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	if s.remaining > 0 {
 		n := min(uint64(len(p)), s.remaining)
 		s.remaining -= n
+		if s.remaining == 0 && !s.chunked && s.body != nil {
+			s.body.incomplete = false
+		}
 		return int(n), nil, nil
 	}
 	if s.chunkCRLF {
@@ -132,6 +146,9 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 			return 0, nil, err
 		}
 		s.trailers = false
+		if s.body != nil {
+			s.body.incomplete = false
+		}
 		return n, nil, nil
 	}
 
@@ -147,7 +164,13 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 			return 0, nil, fmt.Errorf("HTTP chunk line limit")
 		}
 		line := bytes.TrimSuffix(p[:n], []byte("\r"))
-		size, err := strconv.ParseUint(strings.SplitN(string(line), ";", 2)[0], 16, 64)
+		digits := strings.SplitN(string(line), ";", 2)[0]
+		if digits == "" || strings.IndexFunc(digits, func(c rune) bool {
+			return !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F')
+		}) >= 0 {
+			return 0, nil, fmt.Errorf("invalid HTTP chunk size")
+		}
+		size, err := strconv.ParseUint(digits, 16, 64)
 		if err != nil {
 			return 0, nil, fmt.Errorf("invalid HTTP chunk size")
 		}
@@ -159,14 +182,6 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 			s.chunkCRLF = true
 		}
 		return n + 1, nil, nil
-	}
-	if s.headerOnly {
-		if n := httpResponseSkip(p); n != 0 {
-			if n < 0 {
-				return 0, nil, nil
-			}
-			return n, nil, nil
-		}
 	}
 	if p[0] == 'P' && bytes.HasPrefix([]byte(h2Preface), p[:min(len(p), len(h2Preface))]) {
 		if len(p) < len(h2Preface) {
@@ -211,7 +226,8 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		return 0, nil, fmt.Errorf("invalid HTTP start line")
 	}
 	response := strings.HasPrefix(line, "HTTP/")
-	if !s.peer.acceptsStart(s.key, response) {
+	if s.role != dpi.DirUnknown && response != (s.role == dpi.ServerToClient) ||
+		s.role == dpi.DirUnknown && !s.peer.acceptsStart(s.key, response) {
 		// Wrong-role text is not a message from this HTTP endpoint. It
 		// cannot dequeue requests, switch protocols or frame a peer's body.
 		return end, nil, nil
@@ -233,27 +249,31 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		method = parts[0]
 	}
 	events := http1Events(st, &dpi.ParsedPacket{Payload: p[:end], Proto: "tcp", SrcPort: st.Key.SrcPort, DstPort: st.Key.DstPort})
-	headerOnly := response && s.peer.dropped != 0
+	uncertainBody := response && (s.peer.uncertain || s.peer.dropped != 0 && len(s.peer.methods) == 0)
 	switch {
-	case response && status == 101 && pending.acceptsUpgrade(headers):
+	case response && status == 101 && !s.peer.uncertain && s.peer.dropped == 0 && pending.acceptsUpgrade(headers):
 		if strings.EqualFold(headers["upgrade"], "h2c") {
 			s.h2 = newH2Stream()
 		} else {
-			s.peer.opaque = true
+			d.httpTunnel(s.peer)
 		}
-	case response && method == "CONNECT" && status >= 200 && status < 300:
-		s.peer.opaque = true
-	case headerOnly:
-		// Lost methods make even Content-Length ambiguous (notably HEAD).
-		// Keep observing headers instead of allowing a guessed body length
-		// or an unattributed upgrade to silence either endpoint.
-	case response && (method == "HEAD" || status < 200 || status == 204 || status == 304):
+	case response && method == "CONNECT" && status >= 200 && status < 300 && !s.peer.uncertain && s.peer.dropped == 0:
+		d.httpTunnel(s.peer)
+	case response && (status < 200 || status == 204 || status == 304):
 		// Content-Length here describes a representation, never wire body bytes.
+	case uncertainBody && headers["content-length"] != "0":
+		// The lost method might be HEAD. Do not treat a speculative next
+		// packet boundary as evidence that outstanding replies have drained.
+		s.untilClose = true
+		s.peer.uncertain = true
+	case response && method == "HEAD":
+		// Only a followed correlation boundary establishes a HEAD reply.
 	case headers["transfer-encoding"] != "":
-		if !strings.EqualFold(headers["transfer-encoding"], "chunked") {
-			return 0, nil, fmt.Errorf("unsupported HTTP transfer encoding")
+		if httpChunked(headers["transfer-encoding"]) {
+			s.chunked = true
+		} else {
+			s.untilClose = true // response with non-final-chunked coding
 		}
-		s.chunked = true
 	case headers["content-length"] != "":
 		n, err := strconv.ParseUint(headers["content-length"], 10, 64)
 		if err != nil {
@@ -264,34 +284,24 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		s.untilClose = true
 	}
 	if response {
+		if status != 101 && !s.peer.clientKnown && !s.peer.serverKnown {
+			s.peer.server, s.peer.serverKnown = s.key, true
+		}
 		if status >= 200 || status == 101 {
 			s.peer.response()
 		}
-		s.headerOnly = headerOnly
 	} else {
 		s.peer.request(s.key, method, headers)
-	}
-
-	return end, events, nil
-}
-
-// In header-only mode body boundaries are unknown. Keep at most the incomplete
-// "HTTP/" prefix across segments; do not retain or reject arbitrary body bytes.
-// A positive result skips bytes, zero begins a candidate, and -1 needs more.
-func httpResponseSkip(p []byte) int {
-	prefix := []byte("HTTP/")
-	if i := bytes.Index(p, prefix); i >= 0 {
-		return i
-	}
-	for n := min(len(p), len(prefix)-1); n > 0; n-- {
-		if bytes.HasPrefix(prefix, p[len(p)-n:]) {
-			if n == len(p) {
-				return -1
+		if s.remaining > 0 || s.chunked {
+			s.body = &httpBody{incomplete: true}
+			if n := len(s.peer.methods); s.peer.dropped == 0 && n > 0 {
+				s.peer.methods[n-1].body = s.body
 			}
-			return len(p) - n
 		}
 	}
-	return len(p)
+	s.anchored = !s.resync
+	s.suppressMalformed = s.resync
+	return end, events, nil
 }
 
 func httpTransport(st *flow.State) map[string]any {
@@ -301,6 +311,35 @@ func httpTransport(st *flow.State) map[string]any {
 func validateHTTPFraming(raw []byte, headers map[string]string) error {
 	if headers["transfer-encoding"] != "" && headers["content-length"] != "" {
 		return fmt.Errorf("ambiguous HTTP body framing")
+	}
+	if length, ok := headers["content-length"]; ok {
+		if length == "" || strings.IndexFunc(length, func(c rune) bool { return c < '0' || c > '9' }) >= 0 {
+			return fmt.Errorf("invalid HTTP content length")
+		}
+		if _, err := strconv.ParseUint(length, 10, 64); err != nil {
+			return fmt.Errorf("invalid HTTP content length")
+		}
+	}
+	if coding, ok := headers["transfer-encoding"]; ok {
+		parts, err := httpTransferCodings(coding)
+		if err != nil {
+			return err
+		}
+		seenChunked := false
+		for i, name := range parts {
+			if seenChunked {
+				return fmt.Errorf("invalid HTTP transfer encoding")
+			}
+			if strings.EqualFold(name, "chunked") {
+				seenChunked = true
+				if i != len(parts)-1 {
+					return fmt.Errorf("non-final chunked transfer encoding")
+				}
+			}
+		}
+		if !strings.HasPrefix(string(raw), "HTTP/") && !seenChunked {
+			return fmt.Errorf("request transfer encoding is not chunked")
+		}
 	}
 	var lengthSeen bool
 	lines := bytes.Split(raw, []byte("\n"))
@@ -316,10 +355,11 @@ func validateHTTPFraming(raw []byte, headers map[string]string) error {
 		if i <= 0 {
 			return fmt.Errorf("invalid HTTP header")
 		}
-		name := strings.ToLower(string(line[:i]))
-		if strings.TrimSpace(name) != name {
+		name := string(line[:i])
+		if !httpProtocolToken(name) {
 			return fmt.Errorf("invalid HTTP header name")
 		}
+		name = strings.ToLower(name)
 		if name == "content-length" {
 			if lengthSeen {
 				return fmt.Errorf("duplicate HTTP content length")
@@ -328,6 +368,44 @@ func validateHTTPFraming(raw []byte, headers map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// Quoted transfer parameters can contain commas; field combination must happen
+// before splitting the coding list. Chunked itself has no parameters.
+func httpTransferCodings(value string) ([]string, error) {
+	var names []string
+	start, quoted, escaped := 0, false, false
+	for i := 0; i <= len(value); i++ {
+		if i < len(value) {
+			c := value[i]
+			if escaped {
+				escaped = false
+				continue
+			}
+			if quoted && c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				quoted = !quoted
+			}
+			if c != ',' || quoted {
+				continue
+			}
+		}
+		part := strings.Trim(value[start:i], " \t")
+		token, _, _ := strings.Cut(part, ";")
+		if !httpProtocolToken(strings.Trim(token, " \t")) {
+			return nil, fmt.Errorf("invalid HTTP transfer encoding")
+		}
+		name, params, err := mime.ParseMediaType(part)
+		if err != nil || !httpProtocolToken(name) || name == "chunked" && len(params) != 0 {
+			return nil, fmt.Errorf("invalid HTTP transfer encoding")
+		}
+		names = append(names, name)
+		start = i + 1
+	}
+	return names, nil
 }
 
 // Scan newly arrived bytes only. Retain offsets, never the manager's buffer.
@@ -350,10 +428,12 @@ func (s *httpStream) headerEnd(p []byte, startLine bool) (int, error) {
 			return i + 1, nil
 		}
 		if startLine && s.lineStart == 0 {
-			if !looksLikeHTTPLine(strings.TrimSpace(string(line))) {
+			if !looksLikeHTTPLine(string(line)) {
 				return 0, fmt.Errorf("invalid HTTP start line")
 			}
-			s.anchored = true
+			if !s.suppressMalformed {
+				s.anchored = true
+			}
 		}
 		s.scan = i + 1
 		s.lineStart = i + 1
