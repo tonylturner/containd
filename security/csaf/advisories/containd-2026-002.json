@@ -3,7 +3,7 @@
     "category": "csaf_security_advisory",
     "csaf_version": "2.0",
     "lang": "en-US",
-    "title": "Untrusted X-User header can forge management audit and lab review actors",
+    "title": "Untrusted X-User and X-Source headers can forge management audit attribution",
     "publisher": {
       "category": "vendor",
       "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
@@ -18,21 +18,26 @@
     "tracking": {
       "id": "containd-2026-002",
       "status": "final",
-      "version": "1",
+      "version": "2",
       "initial_release_date": "2026-11-05T00:00:00Z",
-      "current_release_date": "2026-11-05T00:00:00Z",
+      "current_release_date": "2026-11-11T00:00:00Z",
       "revision_history": [
         {
           "number": "1",
           "date": "2026-11-05T00:00:00Z",
           "summary": "Initial publication of affected management versions and the 0.1.42 fix."
+        },
+        {
+          "number": "2",
+          "date": "2026-11-11T00:00:00Z",
+          "summary": "Add the X-Source audit-provenance vulnerability, affected through 0.1.42 and fixed in 0.1.43."
         }
       ]
     },
     "notes": [
       {
         "category": "summary",
-        "text": "Management API requests in lab mode or authenticated with static API tokens could use a caller-controlled X-User header as the audit actor. In lab mode that actor was also forwarded for learn-suggestion review. Normal authenticated user sessions overwrote this value and were unaffected."
+        "text": "Management API requests could use an untrusted X-User header as the audit actor in lab mode or static-token sessions, and an untrusted X-Source header to forge the audit source label. The X-User issue also affected lab-mode learn-suggestion review; normal authenticated user sessions were unaffected. The X-Source issue affected audit records persisted and forwarded to syslog, but the source label was not used for authorization decisions."
       }
     ],
     "references": [
@@ -58,11 +63,27 @@
             }
           },
           {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.37|<0.1.42",
+            "product": {
+              "product_id": "containd-management-0.1.37-through-0.1.41",
+              "name": "containd management releases 0.1.37 through 0.1.41"
+            }
+          },
+          {
             "category": "product_version",
             "name": "0.1.42",
             "product": {
               "product_id": "containd-0.1.42",
               "name": "containd management 0.1.42"
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "0.1.43",
+            "product": {
+              "product_id": "containd-0.1.43",
+              "name": "containd management 0.1.43"
             }
           }
         ]
@@ -156,6 +177,75 @@
           "category": "external",
           "summary": "Fix merged for 0.1.42",
           "url": "https://github.com/tonylturner/containd/commit/9a0614a58b380cc36603268a8b74db8e06173d55"
+        }
+      ]
+    },
+    {
+      "title": "Management audit source attribution trusts X-Source",
+      "ids": [
+        {
+          "system_name": "containd advisory",
+          "text": "containd-2026-002"
+        }
+      ],
+      "cwe": {
+        "id": "CWE-348",
+        "name": "Use of Less Trusted Source"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "text": "The management API copied the caller-controlled X-Source request header into the source field of persisted audit records. Audit records are also exported to syslog, so a client able to reach the management API could forge their source label in stored and forwarded audit metadata. The source value is not used in authorization decisions; the demonstrated impact is limited to integrity of audit provenance."
+        },
+        {
+          "category": "general",
+          "title": "Version evidence",
+          "text": "Commit 695d3deb introduced the X-Source reads; v0.1.37 is the first release tag containing that commit. Inspection of every release tag from v0.1.37 through v0.1.42 found the header copied into audit context and/or used as the auditLog fallback. Commit ba9535f3 removes both client-header paths and sets the source server-side; this fix is included in 0.1.43."
+        },
+        {
+          "category": "general",
+          "title": "CVSS scoring",
+          "text": "No CVSS 3.1 score is assigned. The demonstrated impact is integrity of audit metadata only, but the privilege level required to reach a management API operation varies by configuration and the available evidence does not justify a single vector."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.37-through-0.1.41",
+          "containd-0.1.42"
+        ],
+        "fixed": [
+          "containd-0.1.43"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade the management product to containd 0.1.43 or later.",
+          "product_ids": [
+            "containd-management-0.1.37-through-0.1.41",
+            "containd-0.1.42"
+          ],
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.43"
+        },
+        {
+          "category": "workaround",
+          "details": "Strip the incoming X-Source header at a trusted reverse proxy and prevent clients from bypassing that proxy to reach the management API directly.",
+          "product_ids": [
+            "containd-management-0.1.37-through-0.1.41",
+            "containd-0.1.42"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Introduction of X-Source audit provenance",
+          "url": "https://github.com/tonylturner/containd/commit/695d3deb58dd3aaa53a1a19690e430499156a17e"
+        },
+        {
+          "category": "external",
+          "summary": "Server-derived audit provenance fix",
+          "url": "https://github.com/tonylturner/containd/commit/ba9535f35fed0931a7b92f00469abb66797d5e44"
         }
       ]
     }
