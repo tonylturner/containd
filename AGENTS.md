@@ -49,7 +49,7 @@ protocols, including IEC 104. The executable in `cmd/containd/main.go` supports
 Run commands from the repository root unless a command changes directory.
 The checks below cover CI validation and additional UI checks. CI details are in
 `.github/workflows/ci.yml`; Go lint settings are in `.golangci.yml` (golangci-lint
-v2 configuration). CI uses golangci-lint action v7 with version v2.11.
+v2 configuration). CI uses golangci-lint action v9 with version v2.11.
 
 ```bash
 go mod tidy && git diff --exit-code go.mod go.sum
