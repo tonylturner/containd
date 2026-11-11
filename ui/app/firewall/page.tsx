@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import type { ConfigBase } from "../../lib/config-boundary";
@@ -17,7 +18,6 @@ import Link from "next/link";
 
 import {
   api,
-  isAdmin,
   fetchDataPlane,
   setDataPlane,
   getRulesetPreview,
@@ -65,6 +65,7 @@ function insertCreatedRule(rows: FirewallRule[], saved: FirewallRule & { index: 
 }
 
 export default function FirewallPage() {
+  const isAdmin = useIsAdmin();
   const configView = useConfigView({ rules: [] as FirewallRule[], zones: [] as Zone[],
     defaultAction: "unknown" as DefaultAction,
     nat: { enabled: false } as NATConfig, routing: null as RoutingConfig | null,
@@ -155,7 +156,7 @@ export default function FirewallPage() {
   useConfigRefresh(refresh);
 
   async function loadRulesetPreview() {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     setRulesetPreview(null);
     setRulesetState("loading");
     const preview = await getRulesetPreview();
@@ -255,7 +256,7 @@ export default function FirewallPage() {
   })();
 
   async function quickStartLanWanOutbound() {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     setError(null);
     setNotice(null);
     confirm.open({
@@ -338,7 +339,7 @@ export default function FirewallPage() {
       title="Firewall Rules"
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin() && (
+          {isAdmin && (
             <button
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting || !canSave}
@@ -358,7 +359,7 @@ export default function FirewallPage() {
       }
     >
       {revisionNotice(() => refresh({ keepEdits: false }))}
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
@@ -378,7 +379,7 @@ export default function FirewallPage() {
             <FirewallEnforcementControl config={dpiConfig} defaultAction={defaultAction}
               health={health?.enforcement} available={canSave} revision={viewRevision}
               onStage={(next, expectedRevision) => {
-                if (!isAdmin() || !canSaveNow()) return Promise.resolve({ ok: false, error: "Configuration unavailable. Refresh successfully before saving." });
+                if (!isAdmin || !canSaveNow()) return Promise.resolve({ ok: false, error: "Configuration unavailable. Refresh successfully before saving." });
                 return write((base, view) => base === expectedRevision
                   ? setDataPlane(base, { ...view.dpiConfig, enforcement: next })
                   : Promise.resolve({ ok: false as const, error: "Configuration changed since you loaded it. Refresh and review before saving." }),
@@ -460,7 +461,7 @@ export default function FirewallPage() {
           }}
         />
 
-        {isAdmin() && (
+        {isAdmin && (
           <div className="mt-4">
             <button type="button" disabled={!canSave} aria-expanded={showCreate} aria-controls="create-rule-panel" onClick={() => setShowCreate(!showCreate)}
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text)">Create rule</button>
@@ -481,7 +482,7 @@ export default function FirewallPage() {
           </div>
         )}
 
-        {editing && isAdmin() && (
+        {editing && isAdmin && (
           <EditRuleModal
             available={canSave}
             revision={viewRevision}
@@ -509,7 +510,7 @@ export default function FirewallPage() {
               Preview the low-level configuration for your saved changes without activating it.
             </p>
           </div>
-          {isAdmin() && (
+          {isAdmin && (
             <button
               onClick={loadRulesetPreview}
               disabled={rulesetState === "loading"}
@@ -519,7 +520,7 @@ export default function FirewallPage() {
             </button>
           )}
         </div>
-        {!isAdmin() && (
+        {!isAdmin && (
           <div className="mt-3 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
             View-only mode: ruleset preview requires admin access.
           </div>

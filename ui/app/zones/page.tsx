@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import entityStyles from "../interfaces/entity-table.module.css";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
@@ -15,7 +16,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type Zone, type Conduit } from "../../lib/api";
+import { api, type Zone, type Conduit } from "../../lib/api";
 import { mapZone, scoreZone, slColor } from "../../lib/security-scoring";
 import { validateZoneName } from "../../lib/validate";
 import { useToast } from "../../components/ToastProvider";
@@ -29,6 +30,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 
 export default function ZonesPage() {
+  const isAdmin = useIsAdmin();
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const rowsDraft = useConfigEditor<Zone[]>([], false);
@@ -163,7 +165,7 @@ export default function ZonesPage() {
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <fieldset disabled={!canSave} className="min-w-0">
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
@@ -179,7 +181,7 @@ export default function ZonesPage() {
               value={name}
               onChange={(e) => { setName(e.target.value); setNameError(validateZoneName(e.target.value)); }}
               placeholder="name (e.g. ot)"
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               className={"w-full input-industrial " + (nameError ? "border-red-500/30" : "")}
             />
             {nameError && <p role="alert" aria-label="Zone name error" className="mt-1 text-xs text-red-400">{nameError}</p>}
@@ -191,7 +193,7 @@ export default function ZonesPage() {
               value={alias}
               onChange={(e) => setAlias(e.target.value)}
               placeholder="alias (optional)"
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               className="w-full input-industrial"
             />
           </div>
@@ -202,12 +204,12 @@ export default function ZonesPage() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="description"
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               className="w-full input-industrial"
             />
           </div>
           <label className="text-sm">Consequence
-            <input value={consequence} onChange={e => setConsequence(e.target.value)} disabled={!isAdmin()} className="mt-1 w-full input-industrial" />
+            <input value={consequence} onChange={e => setConsequence(e.target.value)} disabled={!isAdmin} className="mt-1 w-full input-industrial" />
           </label>
           <div>
             <label htmlFor="zone-slt" className="sr-only">Security Level Target</label>
@@ -215,7 +217,7 @@ export default function ZonesPage() {
               id="zone-slt"
               value={slTarget}
               onChange={(e) => setSlTarget(Number(e.target.value))}
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               className="w-full input-industrial"
             >
               <option value={0}>SL-T: 0 (None)</option>
@@ -228,7 +230,7 @@ export default function ZonesPage() {
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p role="alert" aria-label="Zone save error" className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
-          {isAdmin() && (
+          {isAdmin && (
             <button
               onClick={onCreate}
               disabled={saving || !canSave}
@@ -281,7 +283,7 @@ export default function ZonesPage() {
                     conduits={conduits}
                     onDelete={onDelete}
                     onUpdate={onUpdate}
-                    canEdit={isAdmin()}
+                    canEdit={isAdmin}
                   />
                 ))}
               </tbody>

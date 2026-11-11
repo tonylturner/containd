@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { upsertRow } from "../../lib/config-editor";
@@ -12,7 +13,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
+import { api, type Interface, type InterfaceState, type Zone } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { docsHrefForPath } from "../../components/shell-nav";
 import { staticAssetURL } from "../../lib/api-core";
@@ -30,6 +31,7 @@ import { runtimeFor } from "../../lib/interface-addresses";
 import { zoneLabel, zoneName } from "../../lib/zones";
 
 export default function InterfacesPage() {
+  const isAdmin = useIsAdmin();
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const rowsDraft = useConfigEditor<Interface[]>([], false);
@@ -216,7 +218,7 @@ export default function InterfacesPage() {
       title="Interfaces"
       actions={
         <div className="flex items-center gap-2">
-          {isAdmin() && (
+          {isAdmin && (
             <>
               <button
                 onClick={onReconcileReplace}
@@ -288,7 +290,7 @@ export default function InterfacesPage() {
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
@@ -342,7 +344,7 @@ export default function InterfacesPage() {
                 osState={state}
                 onDelete={onDelete}
                 onUpdate={onUpdate}
-                canEdit={isAdmin() && canSave}
+                canEdit={isAdmin && canSave}
               />
             ))}
           </tbody>
@@ -357,14 +359,14 @@ export default function InterfacesPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name (e.g. tunnel1)"
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             className="input-industrial"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             className="input-industrial"
           />
           <select
@@ -374,7 +376,7 @@ export default function InterfacesPage() {
                 (e.target.value as "physical" | "bridge" | "vlan") || "physical",
               )
             }
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             className="input-industrial"
             title="Interface type"
           >
@@ -385,7 +387,7 @@ export default function InterfacesPage() {
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             className="input-industrial"
           >
             <option value="">(no zone)</option>
@@ -409,7 +411,7 @@ export default function InterfacesPage() {
               value={members}
               onChange={(e) => setMembers(e.target.value)}
               placeholder="members (comma-separated)"
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               className="input-industrial md:col-span-2"
             />
           ) : ifaceType === "vlan" ? (
@@ -418,14 +420,14 @@ export default function InterfacesPage() {
                 value={parent}
                 onChange={(e) => setParent(e.target.value)}
                 placeholder="parent (e.g. wan or eth0)"
-                disabled={!isAdmin()}
+                disabled={!isAdmin}
                 className="input-industrial"
               />
               <input
                 value={vlanId}
                 onChange={(e) => setVlanId(e.target.value)}
                 placeholder="vlan id (1-4094)"
-                disabled={!isAdmin()}
+                disabled={!isAdmin}
                 className="input-industrial"
               />
             </>
@@ -434,7 +436,7 @@ export default function InterfacesPage() {
             value={addresses}
             onChange={(e) => setAddresses(e.target.value)}
             placeholder="addresses (CIDR, comma-separated)"
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             className="input-industrial md:col-span-2"
           />
         </div>
@@ -454,7 +456,7 @@ export default function InterfacesPage() {
         </div>
         <div className="mt-3 flex items-center justify-between">
           {error && <p className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
-          {isAdmin() && (
+          {isAdmin && (
             <button
               onClick={onCreate}
               disabled={saving || !canSave}

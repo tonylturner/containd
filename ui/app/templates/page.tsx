@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { revisionError } from "../../lib/config-revision";
 
 import { useConfigView, matchingRevisions } from "../../lib/use-config-revision";
@@ -10,7 +11,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, fetchDataPlane, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
+import { api, fetchDataPlane, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { summarizeGenericICS, formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
@@ -37,11 +38,12 @@ function protoBadgeClass(proto: string): string {
 /* ── Page ─────────────────────────────────────────────────────── */
 
 export default function TemplatesPage() {
+  const isAdmin = useIsAdmin();
   const view = useConfigView({ zones: [] as Zone[], globalMode: "" as ICSModeSelection });
   const { readConfig } = view;
   const { zones, globalMode } = view.data;
   const viewRevision = view.state.baseRevision ?? "";
-  const canEdit = isAdmin();
+  const canEdit = isAdmin;
   const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
   // Until the first answer the list is unknown, not empty.
   const [configAvailable, setConfigAvailable] = useState(false);

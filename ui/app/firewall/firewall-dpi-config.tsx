@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useEffect, useState } from "react";
 
 import type { ConfigBase, ConfigWriteResult } from "../../lib/config-boundary";
@@ -14,7 +15,6 @@ import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
-  isAdmin,
   type DataPlaneConfig,
   type DPIExclusion,
   type HealthResponse,
@@ -44,6 +44,7 @@ export function DPIConfigSection({
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
 }) {
+  const isAdmin = useIsAdmin();
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
@@ -53,7 +54,7 @@ export function DPIConfigSection({
   const [showExclModal, setShowExclModal] = useState(false);
   const [showICSConfigModal, setShowICSConfigModal] = useState(false);
   const [needsInline, setNeedsInline] = useState(false);
-  const canEdit = isAdmin();
+  const canEdit = isAdmin;
   const dpiOn = cfg.dpiEnabled ?? false;
   const dpiMode = cfg.dpiMode ?? "";
   const protos = cfg.dpiProtocols ?? {};

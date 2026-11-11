@@ -1,5 +1,9 @@
+"use client";
+
+import { useIsAdmin } from "../hooks/useIsAdmin";
+
 import { useProtection } from "../hooks/useProtection";
-import { isAdmin, type EnforcementHealth } from "../lib/api";
+import { type EnforcementHealth } from "../lib/api";
 import { hasTrafficProtectionNotice } from "../lib/protection-view";
 import { effectiveEnforcementState, enforcementDetail } from "./enforcement-detail";
 import { ProtectionRetry } from "./ProtectionNotice";
@@ -16,6 +20,7 @@ const VIEWS: Record<EnforcementHealth["state"], { status: "healthy" | "degraded"
 
 /** Packet enforcement health alone is not a clean-readiness certificate. */
 export function EnforcementHealthIndicator({ health }: { health: EnforcementHealth | undefined }) {
+  const isAdmin = useIsAdmin();
   const { status } = useProtection();
   if (!health) return <StatusIndicator status="unknown" label="Firewall enforcement" sublabel="status unavailable" />;
   const state = effectiveEnforcementState(health, status);
@@ -28,6 +33,6 @@ export function EnforcementHealthIndicator({ health }: { health: EnforcementHeal
       sublabel={trafficNotice ? undefined : status?.ready ? "Protection needs attention" : protection.title} />
     {!trafficNotice && protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
     {health.reason && <p className="break-words text-xs text-amber">{health.reason}</p>}
-    <ProtectionRetry isAdmin={isAdmin()} />
+    <ProtectionRetry isAdmin={isAdmin} />
   </div>;
 }

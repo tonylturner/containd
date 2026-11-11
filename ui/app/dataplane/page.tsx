@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { ConfigEditNotice, useConfigEditor, revisionError } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -9,7 +10,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   api,
-  isAdmin,
   deletePcap,
   getPcapConfig,
   getPcapStatus,
@@ -44,7 +44,8 @@ type SaveState = "idle" | "starting" | "stopping";
 type PcapForwardRow = PcapForwardTarget & { interface: string };
 
 export default function PcapPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);

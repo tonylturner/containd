@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -13,7 +14,6 @@ import { useCallback, useState } from "react";
 
 import {
   api,
-  isAdmin,
   type Gateway,
   type OSRoute,
   type OSRoutingSnapshot,
@@ -34,7 +34,8 @@ import {
 import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 
 export default function RoutingPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [osRouting, setOSRouting] = useState<OSRoutingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -274,7 +275,7 @@ export default function RoutingPage() {
   }
 
   function adoptOSDefaultRoute() {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     setError(null);
     setNotice(null);
     confirm.open({

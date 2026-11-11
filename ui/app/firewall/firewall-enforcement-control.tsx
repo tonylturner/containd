@@ -1,9 +1,10 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useState } from "react";
 import Link from "next/link";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { isAdmin, type DataPlaneConfig, type EnforcementHealth } from "../../lib/api";
+import { type DataPlaneConfig, type EnforcementHealth } from "../../lib/api";
 import type { ConfigWriteResult } from "../../lib/config-boundary";
 import { revisionError } from "../../lib/config-revision";
 import type { DefaultAction } from "./firewall-default-row";
@@ -16,11 +17,12 @@ export function FirewallEnforcementControl({ config, defaultAction, health, avai
   revision: string;
   onStage: (next: boolean, revision: string) => Promise<ConfigWriteResult<DataPlaneConfig>>;
 }) {
+  const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<{ revision: string; warning?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (!isAdmin()) return null;
+  if (!isAdmin) return null;
   // The API omits false booleans. A failed read is not an omitted field.
   const known = available && (config.enforcement === undefined || typeof config.enforcement === "boolean");
   const enabled = config.enforcement === true;

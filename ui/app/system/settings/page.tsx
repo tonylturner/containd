@@ -1,11 +1,12 @@
 "use client";
 
+import { useIsAdmin } from "../../../hooks/useIsAdmin";
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
-import { api, isAdmin, type DeploymentProfile, type TLSInfo } from "../../../lib/api";
+import { api, type DeploymentProfile, type TLSInfo } from "../../../lib/api";
 import {
   clearDismissedTips,
   getPersistCLIHistory,
@@ -19,7 +20,8 @@ import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
 import { certUploadNotice, tlsPolicyRows, tlsView } from "./tls-view";
 
 export default function SystemSettingsPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const confirm = useConfirm();
   const [tlsInfo, setTLSInfo] = useState<TLSInfo | null>(null);
   const [deploymentProfile, setDeploymentProfile] = useState<DeploymentProfile>();

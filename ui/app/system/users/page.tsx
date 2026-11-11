@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../../hooks/useIsAdmin";
 import { useCallback, useState } from "react";
 
 import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
@@ -8,7 +9,7 @@ import { Shell } from "../../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
 import { SaveStateLine } from "../../../components/SaveStateLine";
 import { useSaveAction } from "../../../hooks/useSaveAction";
-import { api, isAdmin, type ApiResult, type User, type UserRole } from "../../../lib/api";
+import { api, type ApiResult, type User, type UserRole } from "../../../lib/api";
 import {
   CreateUserPanel,
   ManageUsersPanel,
@@ -19,11 +20,12 @@ import {
 type UsersTab = "manage" | "create";
 
 export default function UsersPage() {
+  const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const save = useSaveAction<Exclude<PendingAction, null>>();
   const pending = save.pending;
   const [loadedUsers, setUsers] = useState<User[]>([]);
-  const users = isAdmin() ? loadedUsers : [];
+  const users = isAdmin ? loadedUsers : [];
   const [error, setError] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
@@ -56,11 +58,11 @@ export default function UsersPage() {
   const [resetPwValue, setResetPwValue] = useState("");
 
   const { loading: usersLoading, refresh } = useAsyncRefresh(useCallback(async () => {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     const list = await api.listUsers();
     setUsers(list ?? []);
-  }, []));
-  const loading = isAdmin() && usersLoading;
+  }, [isAdmin]));
+  const loading = isAdmin && usersLoading;
 
   /**
    * Runs one user action at a time through the shared save hook: the acting
@@ -146,7 +148,7 @@ export default function UsersPage() {
   }
 
   function onDeleteUser(user: User) {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     confirm.open({
       title: "Delete User",
       message: `Delete user ${user.username}? This cannot be undone.`,
@@ -163,7 +165,7 @@ export default function UsersPage() {
   }
 
   function onDisableUserMFA(user: User) {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     confirm.open({
       title: "Disable MFA",
       message: `Disable MFA for ${user.username}? They will be able to sign in with only their password until they re-enable MFA.`,
@@ -180,7 +182,7 @@ export default function UsersPage() {
   }
 
   function onRequireUserMFA(user: User) {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     confirm.open({
       title: "Require MFA",
       message: user.mfaEnabled
@@ -199,7 +201,7 @@ export default function UsersPage() {
   }
 
   function onClearUserMFARequirement(user: User) {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     confirm.open({
       title: "Clear MFA Requirement",
       message: `Clear the MFA requirement for ${user.username}?`,
@@ -216,7 +218,7 @@ export default function UsersPage() {
   }
 
   function onExtendUserMFAGrace(user: User) {
-    if (!isAdmin()) return;
+    if (!isAdmin) return;
     confirm.open({
       title: "Extend MFA Grace",
       message: `Give ${user.username} another 7 days to set up MFA?`,
@@ -248,7 +250,7 @@ export default function UsersPage() {
         pending={!!resetPwUserId && pending === `password:${resetPwUserId}`}
       />
 
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border p-4 text-sm">
           Admin access required.
         </div>
@@ -282,7 +284,7 @@ export default function UsersPage() {
           users={users}
           query={query}
           onQueryChange={setQuery}
-          canEdit={isAdmin()}
+          canEdit={isAdmin}
           editingUserId={editingUserId}
           editDraft={editDraft}
           setEditDraft={setEditDraft}
@@ -301,7 +303,7 @@ export default function UsersPage() {
 
       {activeTab === "create" && (
         <CreateUserPanel
-          canEdit={isAdmin()}
+          canEdit={isAdmin}
           newUser={newUser}
           setNewUser={setNewUser}
           onCreate={onCreate}

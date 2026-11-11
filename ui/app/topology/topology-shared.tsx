@@ -400,7 +400,13 @@ export function withHealth(data: TopoNodeData, health: HealthResponse | undefine
   };
 }
 
-export async function buildTopology(): Promise<TopoResult | null> {
+export async function buildTopology(
+  enforcementState: NonNullable<HealthResponse["enforcement"]>["state"] | undefined,
+): Promise<TopoResult | null> {
+  const countersRequest: Promise<ApiResult<RuleCounters>> =
+    enforcementState === "enforcing" || enforcementState === "degraded"
+      ? api.getRuleCounters().catch(() => ({ ok: false, error: "rule counters unavailable" }))
+      : Promise.resolve({ ok: false, error: "no applied ruleset" });
   const [running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
     api.getRunningConfig().then(snapshot => snapshot?.data ?? null),
     api.listInterfaceState(),
@@ -408,7 +414,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     api.listFlows(),
     api.listEvents(),
     api.getSystemStats().catch(() => null),
-    api.getRuleCounters(),
+    countersRequest,
   ]);
   if (!running || ifaceState === null || flows === null) return null;
   const zones = running.zones;

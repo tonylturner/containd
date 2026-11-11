@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { upsertRow } from "../../lib/config-editor";
@@ -19,7 +20,7 @@ import { Shell } from "../../components/Shell";
 import { Pagination, SearchBar, SortableHeader } from "../../components/TableControls";
 import { useToast } from "../../components/ToastProvider";
 import { useTableControls } from "../../hooks/useTableControls";
-import { api, isAdmin, type FirewallRule, type IdentityBinding } from "../../lib/api";
+import { api, type FirewallRule, type IdentityBinding } from "../../lib/api";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import {
   MAX_BINDING_IDENTITIES,
@@ -49,10 +50,11 @@ function unboundRuleLabels(rules: FirewallRule[], bindings: IdentityBinding[]): 
 }
 
 export default function IdentitiesPage() {
+  const isAdmin = useIsAdmin();
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
-  const canEdit = isAdmin();
+  const canEdit = isAdmin;
   const rowsDraft = useConfigEditor<IdentityBinding[]>([], false);
   const { cfg: bindings, readConfig: adoptRows } = rowsDraft;
   const [rules, setRules] = useState<FirewallRule[]>([]);
