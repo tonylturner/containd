@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Audit records get their `source` from the server; the client-supplied
   `X-Source` header is ignored when records are stored and forwarded to syslog.
+- Advisory `containd-2026-003` revision 2: both images still ship Wolfi
+  ClamAV 1.5.2-r7, so 0.1.43 remains affected when ClamAV-mode HTTP scanning
+  is enabled. The workarounds are unchanged.
 
 ## [0.1.42] - 2026-11-04
 

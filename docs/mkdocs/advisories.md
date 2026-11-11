@@ -38,7 +38,7 @@ supported engine-only service does not register the management API, although
 its executable also supports management modes.
 
 Advisory 003 covers the SBOM-evidenced management releases 0.1.17–0.1.23 and
-0.1.25–0.1.42, and engine releases 0.1.35–0.1.42, for all seven CVEs.
+0.1.25–0.1.43, and engine releases 0.1.35–0.1.43, for all seven CVEs.
 Management 0.1.16 is affected by five; its ClamAV 1.4.3 lacks the vulnerable
 1.5-only ZIP code for CVE-2026-20337/20338. No claim is made for releases without
 SBOM evidence, unpublished releases or inventories without ClamAV.
@@ -46,7 +46,7 @@ In **System > Services > Antivirus**, clear **Scan HTTP uploads** and
 **Scan HTTP downloads**, or disable **Enable AV/ICAP scanning**; save the
 candidate and commit it. Alternatively use **Remote scanner (ICAP)** with an
 independently maintained backend. Disabling inspection removes that protection.
-No fixed containd release is available as of 2026-11-05; upstream fixes are
+No fixed containd release is available as of 2026-11-11; upstream fixes are
 ClamAV 1.5.4/1.4.6, and a fixed image follows once Wolfi publishes the updated
 1.5 package. See [AV settings](services.md#av) and the advisory for exact scope.
 
@@ -77,9 +77,12 @@ Package assessments are scan-conditional: they appear only for the image and
 platform where the scanner reports that identifier. Unconditional vendor
 statements can also cover a release range without a scanner hit.
 
-### v0.1.42 package assessments
+### v0.1.42–v0.1.43 package assessments
 
-The vendor triage covers both images at 0.1.42, not future releases:
+The vendor triage covers both images at the releases named below, not future
+releases. The ClamAV assessment covers 0.1.42 and 0.1.43. The Go assessments
+cover 0.1.42; 0.1.43 updates those dependencies, and its scan does not report
+them:
 
 - Seven ClamAV parser CVEs (CVE-2026-20337, -20338, -20339, -20345, -20346,
   -20347 and -20348) are `known_affected` when ClamAV-mode HTTP upload/download
@@ -87,7 +90,7 @@ The vendor triage covers both images at 0.1.42, not future releases:
   clamd and the HTTP scanning gate, just as the engine in the combined appliance
   does. Disable ClamAV-mode HTTP scanning or use an independently maintained
   ICAP backend until a fixed image is available. Disabling scanning removes
-  that inspection protection. On 2026-11-05 the Wolfi security database lists
+  that inspection protection. On 2026-11-11 the Wolfi security database lists
   1.5.4-r2 as fixed, but neither architecture's package index publishes it.
 - GHSA-w67g-5rqw-f597 is `known_not_affected`: the shared binary uses WebSockets
   only as a server, and v1.5.1 uses cryptographic randomness for client masks.
