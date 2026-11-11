@@ -764,12 +764,29 @@ cookies, authorization headers and raw header blocks are not exported.
 HTTP/1 headers and trailers are limited to 32 KiB. Content-Length and chunked
 bodies are skipped without retaining their contents. Ambiguous body framing
 is rejected. Close-delimited response bodies are consumed until connection
-end. A bounded queue of 64 outstanding request methods per connection
-correlates responses when both directions are observed. HEAD replies and
-1xx/204/304 responses never consume body bytes, regardless of Content-Length;
+end. A bounded queue of 64 outstanding request methods and upgrade offers per
+connection correlates responses when both directions are observed. HEAD replies
+and 1xx/204/304 responses never consume body bytes, regardless of Content-Length;
 interim responses do not dequeue the request. Exceeding the correlation bound
-ends inspection rather than guessing response boundaries. A successful CONNECT
-(2xx) or a non-h2c 101 switches both directions to an opaque tunnel.
+does not stop either direction or emit a malformed event. Instead, replies use
+header-only inspection: body lengths, chunk boundaries and tunnel transitions
+are not inferred from uncertain request methods. Non-header bytes are skipped
+while searching for subsequent response headers; body text resembling a response
+header can therefore be reported as metadata in this mode. Only an outstanding
+count is retained for requests beyond the bound. Correlation resumes after all
+outstanding final replies have drained.
+
+The first observed request establishes the client direction unless the caller
+already supplied explicit stream roles. Subsequent wrong-direction start lines
+are ignored without changing peer state or consuming request correlation.
+Reply-only capture can still produce response metadata before a request
+establishes roles, but cannot establish a tunnel. CONNECT does not suppress later
+plaintext requests while unanswered. Only a server 2xx answering the pending CONNECT
+switches both directions to an opaque tunnel. A server 101 must answer the
+pending request's upgrade offer: both messages must include `Connection: Upgrade`,
+and the response's selected `Upgrade` protocol must match an offered protocol.
+A negotiated non-h2c upgrade becomes opaque; an unsolicited or unmatched 101
+does not.
 
 Cleartext HTTP/2 prior knowledge (`h2c`) is recognized by the complete
 connection preface. It emits `http2/preface`, then decodes SETTINGS, HEADERS
@@ -789,17 +806,18 @@ header list (including the RFC 7540 32-byte overhead per field), and a
 not supported. Both TLS and HTTP metadata inspection are best-effort:
 a stream picked up without a valid TLS record or HTTP start line is silently
 ignored. After anchoring, malformed frames, invalid HPACK, interrupted
-CONTINUATION sequences and exceeded limits emit at most one malformed event
-per direction, then consume subsequent bytes silently until stream end.
+CONTINUATION sequences and exceeded framing/HPACK limits emit at most one
+malformed event per direction, then consume subsequent bytes silently until
+stream end.
 This terminal state also applies to sequence-number streams used by live
 capture; it does not rely on session offsets or manager error recovery. TCP
 splits and coalesced frames do not change emitted metadata.
 
 An HTTP/1 `Upgrade: h2c` request remains an `http/request` event; its body is
-skipped before recognizing the client's connection preface. A `101` response
-with `Upgrade: h2c` switches the reply direction to HTTP/2, where the reply
-to the upgrade request has stream ID 1. Upgrade settings are not correlated
-across directions. This is passive metadata inspection, not an HTTP/2 endpoint
+skipped before recognizing the client's connection preface. A server `101` response
+negotiating the pending request's `Upgrade: h2c` switches the reply direction to
+HTTP/2, where the reply to the upgrade request has stream ID 1. Upgrade settings
+are not correlated across directions. This is passive metadata inspection, not an HTTP/2 endpoint
 or an antivirus body scanner; encrypted HTTP/2 is not decrypted.
 
 Native IDS conditions use the same `content_type` attribute for HTTP/1 and

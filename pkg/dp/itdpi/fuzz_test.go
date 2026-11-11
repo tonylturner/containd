@@ -62,6 +62,8 @@ func FuzzHTTPDecoderOnPacket(f *testing.F) {
 	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nok"))
 	f.Add([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
 	f.Add([]byte("POST / HTTP/1.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n"))
+	f.Add([]byte("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"))
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nbodyHTTP/1.1 204 No Content\r\n\r\n"))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {

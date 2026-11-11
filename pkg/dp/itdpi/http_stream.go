@@ -20,19 +20,13 @@ type httpStreamKey struct {
 	dir     dpi.StreamDir
 }
 
-const maxHTTPRequestMethods = 64
-
-type httpConnection struct {
-	refs                   int
-	methods                []string
-	opaque, connectPending bool
-}
-
 type httpStream struct {
-	connection                     string
-	peer                           *httpConnection
-	anchored, stopped, requestSide bool
-	scan, lineStart                int
+	key               httpStreamKey
+	connection        string
+	peer              *httpConnection
+	anchored, stopped bool
+	scan, lineStart   int
+	headerOnly        bool
 
 	h2         *h2Stream
 	remaining  uint64
@@ -73,7 +67,7 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 			d.connections[connection] = peer
 		}
 		peer.refs++
-		s = &httpStream{connection: connection, peer: peer}
+		s = &httpStream{key: key, connection: connection, peer: peer}
 		d.streams[key] = s
 	}
 	var res dpi.StreamResult
@@ -82,6 +76,13 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 		p := v.Bytes[off:]
 		n, events, err := d.httpFrame(st, s, p)
 		if err != nil {
+			if s.headerOnly {
+				// Correlation loss leaves body boundaries unknown. A non-HTTP
+				// byte here is not a framing fault: keep searching for headers.
+				s.scan, s.lineStart = 0, 0
+				metadataFrame(&res, v, 1, nil)
+				continue
+			}
 			s.stopped = true
 			s.h2 = nil
 			metadataStop(st, v, &res, s.anchored, "http", err.Error(), nil)
@@ -159,6 +160,14 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		}
 		return n + 1, nil, nil
 	}
+	if s.headerOnly {
+		if n := httpResponseSkip(p); n != 0 {
+			if n < 0 {
+				return 0, nil, nil
+			}
+			return n, nil, nil
+		}
+	}
 	if p[0] == 'P' && bytes.HasPrefix([]byte(h2Preface), p[:min(len(p), len(h2Preface))]) {
 		if len(p) < len(h2Preface) {
 			return 0, nil, nil
@@ -192,11 +201,6 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	if bytes.HasPrefix(p, []byte("\r\n")) {
 		return 2, nil, nil
 	}
-	// CONNECT clients must wait for the server's final response. Their early
-	// tunnel bytes are not another HTTP request, including before a 2xx arrives.
-	if s.peer.connectPending && s.requestSide {
-		return len(p), nil, nil
-	}
 	end, err := s.headerEnd(p, true)
 	if err != nil || end == 0 {
 		return 0, nil, err
@@ -206,28 +210,32 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	if len(parts) < 2 {
 		return 0, nil, fmt.Errorf("invalid HTTP start line")
 	}
+	response := strings.HasPrefix(line, "HTTP/")
+	if !s.peer.acceptsStart(s.key, response) {
+		// Wrong-role text is not a message from this HTTP endpoint. It
+		// cannot dequeue requests, switch protocols or frame a peer's body.
+		return end, nil, nil
+	}
 	if err := validateHTTPFraming(p[:end], headers); err != nil {
 		return 0, nil, err
 	}
-	response := strings.HasPrefix(line, "HTTP/")
 	status := 0
 	method := ""
+	pending := s.peer.pending()
 	if response {
 		var err error
 		status, err = strconv.Atoi(parts[1])
 		if err != nil || status < 100 || status > 599 {
 			return 0, nil, fmt.Errorf("invalid HTTP response status")
 		}
-		if len(s.peer.methods) > 0 {
-			method = s.peer.methods[0]
-		}
+		method = pending.method
 	} else {
 		method = parts[0]
-		s.requestSide = true
 	}
 	events := http1Events(st, &dpi.ParsedPacket{Payload: p[:end], Proto: "tcp", SrcPort: st.Key.SrcPort, DstPort: st.Key.DstPort})
+	headerOnly := response && s.peer.dropped != 0
 	switch {
-	case response && status == 101:
+	case response && status == 101 && pending.acceptsUpgrade(headers):
 		if strings.EqualFold(headers["upgrade"], "h2c") {
 			s.h2 = newH2Stream()
 		} else {
@@ -235,6 +243,10 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		}
 	case response && method == "CONNECT" && status >= 200 && status < 300:
 		s.peer.opaque = true
+	case headerOnly:
+		// Lost methods make even Content-Length ambiguous (notably HEAD).
+		// Keep observing headers instead of allowing a guessed body length
+		// or an unattributed upgrade to silence either endpoint.
 	case response && (method == "HEAD" || status < 200 || status == 204 || status == 304):
 		// Content-Length here describes a representation, never wire body bytes.
 	case headers["transfer-encoding"] != "":
@@ -253,27 +265,33 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	}
 	if response {
 		if status >= 200 || status == 101 {
-			if len(s.peer.methods) > 0 {
-				s.peer.methods[0] = ""
-				s.peer.methods = s.peer.methods[1:]
-			}
-			if method == "CONNECT" {
-				s.peer.connectPending = false
-			}
+			s.peer.response()
 		}
+		s.headerOnly = headerOnly
 	} else {
-		if len(s.peer.methods) >= maxHTTPRequestMethods {
-			s.peer.opaque = true
-			return 0, nil, fmt.Errorf("HTTP request correlation limit")
-		}
-		// Retain only the method token, not its backing request line and path.
-		s.peer.methods = append(s.peer.methods, strings.Clone(method))
-		if method == "CONNECT" {
-			s.peer.connectPending = true
-		}
+		s.peer.request(s.key, method, headers)
 	}
 
 	return end, events, nil
+}
+
+// In header-only mode body boundaries are unknown. Keep at most the incomplete
+// "HTTP/" prefix across segments; do not retain or reject arbitrary body bytes.
+// A positive result skips bytes, zero begins a candidate, and -1 needs more.
+func httpResponseSkip(p []byte) int {
+	prefix := []byte("HTTP/")
+	if i := bytes.Index(p, prefix); i >= 0 {
+		return i
+	}
+	for n := min(len(p), len(prefix)-1); n > 0; n-- {
+		if bytes.HasPrefix(prefix, p[len(p)-n:]) {
+			if n == len(p) {
+				return -1
+			}
+			return len(p) - n
+		}
+	}
+	return len(p)
 }
 
 func httpTransport(st *flow.State) map[string]any {
