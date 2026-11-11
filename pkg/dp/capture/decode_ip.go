@@ -116,6 +116,9 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 	}
 	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
 	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
+	if ipv6ExtensionHeader(pkt.Proto) {
+		pkt.IPv6Payload = append([]byte(nil), data[40:]...)
+	}
 	switch pkt.Proto {
 	case 44:
 		pkt.Invalid = InvalidFragment
@@ -129,6 +132,15 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 	}
 	pkt.Invalid = lengthErr
 	return pkt, true
+}
+
+func ipv6ExtensionHeader(proto uint8) bool {
+	switch proto {
+	case 0, 43, 44, 51, 60, 135, 139, 140, 253, 254:
+		return true
+	default:
+		return false
+	}
 }
 
 // decodeL4 fills the transport fields of pkt and reports success; on
