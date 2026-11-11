@@ -89,7 +89,7 @@ func TestIPv6WalkableExtensionLossScope(t *testing.T) {
 			name: "AH with TCP",
 			next: 51,
 			payload: append(
-				[]byte{6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+				[]byte{6, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 				tcp...,
 			),
 		},
@@ -133,18 +133,58 @@ func TestIPv6WalkableMLDIsUnrelated(t *testing.T) {
 	}
 }
 
-func TestIPv6RoutingUDPUsesPorts(t *testing.T) {
+func TestIPv6RoutingScopeRequiresZeroSegmentsLeft(t *testing.T) {
 	udp := []byte{0x9c, 0x40, 0x00, 0x35, 0, 8, 0, 0}
-	payload := append([]byte{17, 0, 0, 0, 0, 0, 0, 0}, udp...)
-	loss := CaptureLoss(ipv6LossPacket(43, payload, 0), "capture_truncated")
-	want := evidence.LossScope{
-		Source:      evidence.Endpoint{IP: "2001:db8::1", Port: 40000},
-		Destination: evidence.Endpoint{IP: "2001:db8::2", Port: 53},
-		Transport:   "udp",
-		Ports:       true,
+	for _, tc := range []struct {
+		name         string
+		segmentsLeft byte
+		wantScope    bool
+	}{
+		{name: "no segments left", segmentsLeft: 0, wantScope: true},
+		{name: "segments remain", segmentsLeft: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			routing := []byte{17, 0, 0, tc.segmentsLeft, 0, 0, 0, 0}
+			payload := append(routing, udp...)
+			loss := CaptureLoss(ipv6LossPacket(43, payload, 0), "capture_truncated")
+			if tc.wantScope {
+				want := evidence.LossScope{
+					Source:      evidence.Endpoint{IP: "2001:db8::1", Port: 40000},
+					Destination: evidence.Endpoint{IP: "2001:db8::2", Port: 53},
+					Transport:   "udp",
+					Ports:       true,
+				}
+				if loss.Code != "capture_truncated" || loss.Scope != want {
+					t.Fatalf("loss = %+v, want capture_truncated with scope %+v", loss, want)
+				}
+				return
+			}
+			if loss.Code != "capture_truncated" || loss.Scope != (evidence.LossScope{}) {
+				t.Fatalf("loss = %+v, want unscoped loss while segments remain", loss)
+			}
+			ds := evidence.Dataset{}
+			ds.RecordLoss(loss)
+			if !ds.LossTouches(evidence.Observation{}) {
+				t.Fatal("routing header with segments left did not exclude dataset")
+			}
+		})
 	}
-	if loss.Code != "capture_truncated" || loss.Scope != want {
-		t.Fatalf("loss = %+v, want capture_truncated with scope %+v", loss, want)
+}
+
+func TestIPv6HomeAddressOptionKeepsLossUnscoped(t *testing.T) {
+	destinationOptions := make([]byte, 24)
+	destinationOptions[0], destinationOptions[1] = 17, 2
+	destinationOptions[2], destinationOptions[3] = 0xc9, 16
+	copy(destinationOptions[4:20], net.ParseIP("2001:db8::3").To16())
+	payload := append(destinationOptions, []byte{0x9c, 0x40, 0x00, 0x35, 0, 8, 0, 0}...)
+	loss := CaptureLoss(ipv6LossPacket(60, payload, 0), "capture_loss")
+	if loss.Code != "capture_loss" || loss.Scope != (evidence.LossScope{}) {
+		t.Fatalf("loss = %+v, want unscoped capture_loss", loss)
+	}
+	ds := evidence.Dataset{}
+	ds.RecordLoss(loss)
+	if !ds.LossTouches(evidence.Observation{}) {
+		t.Fatal("Home Address option did not exclude dataset")
 	}
 }
 
@@ -172,6 +212,16 @@ func TestIPv6UnwalkableExtensionLossExcludesDataset(t *testing.T) {
 			name:    "malformed destination options",
 			next:    60,
 			payload: []byte{58, 0, 5, 10, 0, 0, 0, 0},
+		},
+		{
+			name:    "AH payload length zero",
+			next:    51,
+			payload: []byte{58, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			name:    "AH misaligned payload length",
+			next:    51,
+			payload: []byte{58, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		},
 		{
 			name:    "ESP after hop-by-hop",
@@ -221,8 +271,13 @@ func TestIPv6UnwalkableExtensionLossExcludesDataset(t *testing.T) {
 
 func FuzzWalkIPv6ExtensionChain(f *testing.F) {
 	f.Add(uint8(0), []byte{58, 0, 0, 0, 0, 0, 0, 0})
-	f.Add(uint8(51), []byte{6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	f.Add(uint8(51), []byte{58, 0, 0, 0, 0, 0, 0, 0})
+	f.Add(uint8(51), []byte{58, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	f.Add(uint8(51), []byte{6, 4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	f.Add(uint8(44), []byte{6, 0, 0, 8, 0, 0, 0, 0})
+	f.Add(uint8(43), []byte{58, 0, 0, 1, 0, 0, 0, 0})
+	f.Add(uint8(43), []byte{58, 0, 0, 0, 0, 0, 0, 0})
+	f.Add(uint8(60), []byte{17, 2, 0xc9, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	f.Add(uint8(253), []byte{6, 0, 0, 0, 0, 0, 0, 0})
 	f.Fuzz(func(t *testing.T, nextHeader uint8, payload []byte) {
 		terminal, transport, ok := walkIPv6ExtensionChain(nextHeader, payload)
