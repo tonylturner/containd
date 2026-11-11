@@ -76,7 +76,7 @@ function TopologyInner() {
   // ── Fetch & build ──
   const { refresh: fetchData } = useAsyncRefresh(useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await buildTopology();
+      const result = await buildTopology(health?.enforcement?.state);
       if (signal?.aborted) return;
       if (!result) {
         setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
@@ -102,7 +102,7 @@ function TopologyInner() {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
-  }, []), { initialArgs: (signal): [AbortSignal] => [signal] });
+  }, [health?.enforcement?.state]), { initialArgs: (signal): [AbortSignal] => [signal] });
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
