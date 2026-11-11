@@ -3,9 +3,11 @@ package ids
 
 import "testing"
 
-func TestSNMPSigmaFieldsMatchEmittedMetadata(t *testing.T) {
-	if got := normalizeField("community"); got != "attr.community" {
-		t.Fatalf("community=%q, want attr.community", got)
+func TestSMBandSNMPSigmaFieldsMatchEmittedMetadata(t *testing.T) {
+	for _, key := range []string{"dialect", "community"} {
+		if got := normalizeField(key); got != "attr."+key {
+			t.Fatalf("%s=%q, want attr.%s", key, got, key)
+		}
 	}
 	if got := normalizeField("community_auth"); got != "" {
 		t.Fatalf("obsolete community_auth=%q, want unsupported", got)
@@ -13,8 +15,27 @@ func TestSNMPSigmaFieldsMatchEmittedMetadata(t *testing.T) {
 	if got := normalizeField("first_oid"); got != "" {
 		t.Fatalf("obsolete first_oid=%q, want unsupported", got)
 	}
-	if got := normalizeField("oids"); got != "" {
-		t.Fatalf("array-valued OIDs=%q, want unsupported scalar field", got)
+	for _, key := range []string{"oids", "dialects_offered"} {
+		if got := normalizeField(key); got != "" {
+			t.Fatalf("array-valued %s=%q, want unsupported scalar field", key, got)
+		}
+	}
+}
+
+func TestTLSAndHTTPScalarSigmaFields(t *testing.T) {
+	for _, key := range []string{
+		"tls_legacy_version", "tls_selected_version", "content_type",
+		"authority", "stream_id",
+	} {
+		if got := normalizeField(key); got != "attr."+key {
+			t.Fatalf("%s=%q, want attr.%s", key, got, key)
+		}
+	}
+	if got := normalizeField("tls_version"); got != "" {
+		t.Fatalf("removed tls_version=%q, want unsupported", got)
+	}
+	if got := normalizeField("tls_offered_versions"); got != "" {
+		t.Fatalf("array-valued tls_offered_versions=%q, want unsupported scalar field", got)
 	}
 }
 
