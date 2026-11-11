@@ -145,7 +145,7 @@ func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
 				if s.remaining > maxTLSHello {
 					return events, "TLS hello size limit"
 				}
-				s.hello = make([]byte, 0, s.remaining)
+				s.hello = s.hello[:0]
 			}
 		}
 		n := min(len(p), s.remaining)
