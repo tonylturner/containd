@@ -14,7 +14,7 @@
       ],
       "version_range": {
         "introduced": "0.1.42",
-        "before": "0.1.44-0"
+        "before": "0.1.43-0"
       },
       "when": "scan",
       "status": "known_not_affected",
@@ -30,7 +30,7 @@
       ],
       "version_range": {
         "introduced": "0.1.42",
-        "before": "0.1.44-0"
+        "before": "0.1.43-0"
       },
       "when": "scan",
       "status": "known_not_affected",
@@ -46,7 +46,7 @@
       ],
       "version_range": {
         "introduced": "0.1.42",
-        "before": "0.1.44-0"
+        "before": "0.1.43-0"
       },
       "when": "scan",
       "status": "known_not_affected",
@@ -67,7 +67,7 @@
       ],
       "version_range": {
         "introduced": "0.1.42",
-        "before": "0.1.44-0"
+        "before": "0.1.43-0"
       },
       "when": "scan",
       "status": "known_not_affected",
