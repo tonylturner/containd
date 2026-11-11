@@ -67,6 +67,7 @@ func FuzzHTTPDecoderOnPacket(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = parseHTTP(data)
 		fuzzITStream(data, NewHTTPDecoder(), state)
+		fuzzHTTPReply(data)
 		_, _ = NewHTTPDecoder().OnPacket(state, &dpi.ParsedPacket{
 			Payload: data,
 			Proto:   "tcp",
@@ -83,6 +84,10 @@ func FuzzTLSDecoderOnPacket(f *testing.F) {
 	f.Add(buildClientHello("secure.example.com", []string{"h2", "http/1.1"}))
 	f.Add([]byte{0x16, 0x03, 0x01})
 	f.Add([]byte{})
+	f.Add(append(tlsRecord([]byte{11, 1, 0, 0}), tlsRecord([]byte{0})...))
+	hello13 := helloWithExtensions([]byte{0, 43, 0, 5, 4, 3, 4, 3, 3})
+	retry := append(append([]byte(nil), hello13...), 20, 3, 3, 0, 1, 1)
+	f.Add(append(retry, hello13...))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = NewTLSDecoder().OnPacket(state, &dpi.ParsedPacket{
@@ -240,12 +245,23 @@ func FuzzNTPDecoderOnPacket(f *testing.F) {
 func fuzzITStream(data []byte, decoder dpi.Decoder, state *flow.State) {
 	mgr := dpi.NewManager(decoder)
 	split := len(data) / 2
-	for i, p := range [][]byte{data[:split], data[split:]} {
-		off := int64(0)
-		if i == 1 {
-			off = int64(split)
+	for _, legacy := range []bool{false, true} {
+		for i, p := range [][]byte{data[:split], data[split:]} {
+			off := int64(0)
+			if i == 1 {
+				off = int64(split)
+			}
+			pkt := &dpi.ParsedPacket{Payload: p, Proto: "tcp", HasOffset: !legacy, Session: "fuzz", Dir: dpi.ClientToServer, Offset: off, TCPSeqValid: legacy, TCPSeq: uint32(100 + off)}
+			if legacy {
+				pkt.Dir = dpi.DirUnknown
+				pkt.Session = ""
+			}
+			mgr.Inspect(state, pkt)
 		}
-		mgr.Inspect(state, &dpi.ParsedPacket{Payload: p, Proto: "tcp", HasOffset: true, Session: "fuzz", Dir: dpi.ClientToServer, Offset: off})
+		if legacy {
+			_, _ = mgr.OnFlowEnd(state)
+		} else {
+			mgr.EndStream("fuzz")
+		}
 	}
-	mgr.EndStream("fuzz")
 }

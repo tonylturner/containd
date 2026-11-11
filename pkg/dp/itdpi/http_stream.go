@@ -19,7 +19,21 @@ type httpStreamKey struct {
 	session string
 	dir     dpi.StreamDir
 }
+
+const maxHTTPRequestMethods = 64
+
+type httpConnection struct {
+	refs                   int
+	methods                []string
+	opaque, connectPending bool
+}
+
 type httpStream struct {
+	connection                     string
+	peer                           *httpConnection
+	anchored, stopped, requestSide bool
+	scan, lineStart                int
+
 	h2         *h2Stream
 	remaining  uint64
 	chunked    bool
@@ -32,7 +46,14 @@ func (*HTTPDecoder) Protocol() string { return "http" }
 func (d *HTTPDecoder) StreamEnded(session string, dir dpi.StreamDir) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	delete(d.streams, httpStreamKey{session, dir})
+	key := httpStreamKey{session, dir}
+	if s := d.streams[key]; s != nil {
+		s.peer.refs--
+		if s.peer.refs == 0 {
+			delete(d.connections, s.connection)
+		}
+		delete(d.streams, key)
+	}
 }
 
 func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
@@ -40,11 +61,19 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 	defer d.mu.Unlock()
 	if d.streams == nil {
 		d.streams = make(map[httpStreamKey]*httpStream)
+		d.connections = make(map[string]*httpConnection)
 	}
 	key := httpStreamKey{v.Session, v.Dir}
 	s := d.streams[key]
 	if s == nil {
-		s = &httpStream{}
+		connection := metadataConnectionKey(st, v)
+		peer := d.connections[connection]
+		if peer == nil {
+			peer = &httpConnection{}
+			d.connections[connection] = peer
+		}
+		peer.refs++
+		s = &httpStream{connection: connection, peer: peer}
 		d.streams[key] = s
 	}
 	var res dpi.StreamResult
@@ -53,19 +82,24 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 		p := v.Bytes[off:]
 		n, events, err := d.httpFrame(st, s, p)
 		if err != nil {
-			return res, &dpi.FrameError{Offset: v.Base + int64(off), Reason: err.Error()}
+			s.stopped = true
+			s.h2 = nil
+			metadataStop(st, v, &res, s.anchored, "http", err.Error(), nil)
+			break
 		}
 		if n == 0 {
 			break
 		}
-		res.Consumed += n
-		res.Frames = append(res.Frames, dpi.DecodedFrame{Start: v.Base + int64(off), End: v.Base + int64(res.Consumed), Events: events})
+		metadataFrame(&res, v, n, events)
 	}
 	res.NeedMore = res.Consumed < len(v.Bytes)
 	return res, nil
 }
 
 func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, []dpi.Event, error) {
+	if s.stopped || s.peer.opaque {
+		return len(p), nil, nil
+	}
 	if s.h2 != nil {
 		return s.h2.frame(st, p)
 	}
@@ -78,6 +112,10 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		return int(n), nil, nil
 	}
 	if s.chunkCRLF {
+		if p[0] == '\n' {
+			s.chunkCRLF = false
+			return 1, nil, nil
+		}
 		if len(p) < 2 {
 			return 0, nil, nil
 		}
@@ -88,25 +126,16 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		return 2, nil, nil
 	}
 	if s.trailers {
-		if bytes.HasPrefix(p, []byte("\r\n")) {
-			s.trailers = false
-			return 2, nil, nil
-		}
-		n := bytes.Index(p, []byte("\r\n\r\n"))
-		if n < 0 {
-			if len(p) > maxHTTPHeaders {
-				return 0, nil, fmt.Errorf("HTTP trailer limit")
-			}
-			return 0, nil, nil
-		}
-		if n+4 > maxHTTPHeaders {
-			return 0, nil, fmt.Errorf("HTTP trailer limit")
+		n, err := s.headerEnd(p, false)
+		if err != nil || n == 0 {
+			return 0, nil, err
 		}
 		s.trailers = false
-		return n + 4, nil, nil
+		return n, nil, nil
 	}
+
 	if s.chunked {
-		n := bytes.Index(p, []byte("\r\n"))
+		n := bytes.IndexByte(p, '\n')
 		if n < 0 {
 			if len(p) > 1024 {
 				return 0, nil, fmt.Errorf("HTTP chunk line limit")
@@ -116,7 +145,8 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		if n > 1024 {
 			return 0, nil, fmt.Errorf("HTTP chunk line limit")
 		}
-		size, err := strconv.ParseUint(strings.SplitN(string(p[:n]), ";", 2)[0], 16, 64)
+		line := bytes.TrimSuffix(p[:n], []byte("\r"))
+		size, err := strconv.ParseUint(strings.SplitN(string(line), ";", 2)[0], 16, 64)
 		if err != nil {
 			return 0, nil, fmt.Errorf("invalid HTTP chunk size")
 		}
@@ -127,13 +157,14 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 			s.remaining = size
 			s.chunkCRLF = true
 		}
-		return n + 2, nil, nil
+		return n + 1, nil, nil
 	}
 	if p[0] == 'P' && bytes.HasPrefix([]byte(h2Preface), p[:min(len(p), len(h2Preface))]) {
 		if len(p) < len(h2Preface) {
 			return 0, nil, nil
 		}
 		s.h2 = newH2Stream()
+		s.anchored = true
 		return len(h2Preface), []dpi.Event{{FlowID: st.ID(), Proto: "http2", Kind: "preface", Attributes: httpTransport(st)}}, nil
 	}
 	// The server connection preface begins with SETTINGS, not the magic string.
@@ -144,54 +175,104 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		}
 		if p[3] == 4 {
 			s.h2 = newH2Stream()
-			return s.h2.frame(st, p)
+			n, events, err := s.h2.frame(st, p)
+			if err == nil && n > 0 {
+				s.anchored = true
+			}
+			return n, events, err
 		}
 	}
-	end := bytes.Index(p, []byte("\r\n\r\n"))
-	if end < 0 {
-		if len(p) > maxHTTPHeaders {
-			return 0, nil, fmt.Errorf("HTTP header limit")
-		}
+	// Leading empty lines before a request are ignored (RFC 9112 2.2).
+	if p[0] == '\n' {
+		return 1, nil, nil
+	}
+	if p[0] == '\r' && len(p) == 1 {
 		return 0, nil, nil
 	}
-	end += 4
-	if end > maxHTTPHeaders {
-		return 0, nil, fmt.Errorf("HTTP header limit")
+	if bytes.HasPrefix(p, []byte("\r\n")) {
+		return 2, nil, nil
+	}
+	// CONNECT clients must wait for the server's final response. Their early
+	// tunnel bytes are not another HTTP request, including before a 2xx arrives.
+	if s.peer.connectPending && s.requestSide {
+		return len(p), nil, nil
+	}
+	end, err := s.headerEnd(p, true)
+	if err != nil || end == 0 {
+		return 0, nil, err
 	}
 	line, headers := parseHTTP(p[:end])
-	if line == "" {
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
 		return 0, nil, fmt.Errorf("invalid HTTP start line")
 	}
-	// Ambiguous framing is not a source of reliable metadata. Never treat
-	// bytes inside an ambiguously delimited body as another request.
 	if err := validateHTTPFraming(p[:end], headers); err != nil {
 		return 0, nil, err
 	}
+	response := strings.HasPrefix(line, "HTTP/")
+	status := 0
+	method := ""
+	if response {
+		var err error
+		status, err = strconv.Atoi(parts[1])
+		if err != nil || status < 100 || status > 599 {
+			return 0, nil, fmt.Errorf("invalid HTTP response status")
+		}
+		if len(s.peer.methods) > 0 {
+			method = s.peer.methods[0]
+		}
+	} else {
+		method = parts[0]
+		s.requestSide = true
+	}
 	events := http1Events(st, &dpi.ParsedPacket{Payload: p[:end], Proto: "tcp", SrcPort: st.Key.SrcPort, DstPort: st.Key.DstPort})
-	// A 101 switches this direction to binary frames; the client direction
-	// independently recognizes its mandatory connection preface after the body.
-	if strings.HasPrefix(line, "HTTP/") && strings.Contains(line, " 101 ") && strings.EqualFold(headers["upgrade"], "h2c") {
-		s.h2 = newH2Stream()
-	} else if parts := strings.Fields(line); strings.HasPrefix(line, "HTTP/") && len(parts) > 1 && (parts[1] == "204" || parts[1] == "304" || strings.HasPrefix(parts[1], "1")) {
-		// These responses have no body even when Content-Length describes the
-		// selected representation rather than bytes on this connection.
-	} else if te := headers["transfer-encoding"]; te != "" {
-		if !strings.EqualFold(te, "chunked") {
+	switch {
+	case response && status == 101:
+		if strings.EqualFold(headers["upgrade"], "h2c") {
+			s.h2 = newH2Stream()
+		} else {
+			s.peer.opaque = true
+		}
+	case response && method == "CONNECT" && status >= 200 && status < 300:
+		s.peer.opaque = true
+	case response && (method == "HEAD" || status < 200 || status == 204 || status == 304):
+		// Content-Length here describes a representation, never wire body bytes.
+	case headers["transfer-encoding"] != "":
+		if !strings.EqualFold(headers["transfer-encoding"], "chunked") {
 			return 0, nil, fmt.Errorf("unsupported HTTP transfer encoding")
 		}
 		s.chunked = true
-	} else if cl, ok := headers["content-length"]; ok {
-		n, err := strconv.ParseUint(cl, 10, 64)
+	case headers["content-length"] != "":
+		n, err := strconv.ParseUint(headers["content-length"], 10, 64)
 		if err != nil {
 			return 0, nil, fmt.Errorf("invalid HTTP content length")
 		}
 		s.remaining = n
-	} else if strings.HasPrefix(line, "HTTP/") {
-		parts := strings.Fields(line)
-		if len(parts) > 1 && parts[1] != "204" && parts[1] != "304" && !strings.HasPrefix(parts[1], "1") {
-			s.untilClose = true
+	case response:
+		s.untilClose = true
+	}
+	if response {
+		if status >= 200 || status == 101 {
+			if len(s.peer.methods) > 0 {
+				s.peer.methods[0] = ""
+				s.peer.methods = s.peer.methods[1:]
+			}
+			if method == "CONNECT" {
+				s.peer.connectPending = false
+			}
+		}
+	} else {
+		if len(s.peer.methods) >= maxHTTPRequestMethods {
+			s.peer.opaque = true
+			return 0, nil, fmt.Errorf("HTTP request correlation limit")
+		}
+		// Retain only the method token, not its backing request line and path.
+		s.peer.methods = append(s.peer.methods, strings.Clone(method))
+		if method == "CONNECT" {
+			s.peer.connectPending = true
 		}
 	}
+
 	return end, events, nil
 }
 
@@ -204,8 +285,9 @@ func validateHTTPFraming(raw []byte, headers map[string]string) error {
 		return fmt.Errorf("ambiguous HTTP body framing")
 	}
 	var lengthSeen bool
-	lines := bytes.Split(raw, []byte("\r\n"))
+	lines := bytes.Split(raw, []byte("\n"))
 	for _, line := range lines[1:] {
+		line = bytes.TrimSuffix(line, []byte("\r"))
 		if len(line) == 0 {
 			break
 		}
@@ -228,4 +310,38 @@ func validateHTTPFraming(raw []byte, headers map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// Scan newly arrived bytes only. Retain offsets, never the manager's buffer.
+// Both CRLF and bare LF terminate header lines, as supported by parseHTTP.
+func (s *httpStream) headerEnd(p []byte, startLine bool) (int, error) {
+	for s.scan < len(p) {
+		i := bytes.IndexByte(p[s.scan:], '\n')
+		if i < 0 {
+			s.scan = len(p)
+			break
+		}
+		i += s.scan
+		if i+1 > maxHTTPHeaders {
+			return 0, fmt.Errorf("HTTP header limit")
+		}
+		line := bytes.TrimSuffix(p[s.lineStart:i], []byte("\r"))
+		if len(line) == 0 {
+			s.scan = 0
+			s.lineStart = 0
+			return i + 1, nil
+		}
+		if startLine && s.lineStart == 0 {
+			if !looksLikeHTTPLine(strings.TrimSpace(string(line))) {
+				return 0, fmt.Errorf("invalid HTTP start line")
+			}
+			s.anchored = true
+		}
+		s.scan = i + 1
+		s.lineStart = i + 1
+	}
+	if len(p) > maxHTTPHeaders {
+		return 0, fmt.Errorf("HTTP header limit")
+	}
+	return 0, nil
 }

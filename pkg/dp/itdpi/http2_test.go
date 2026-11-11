@@ -177,9 +177,13 @@ func TestHTTP2BoundsAndMalformed(t *testing.T) {
 			raw := append([]byte(h2Preface), h2Settings()...)
 			raw = append(raw, frames...)
 			d := NewHTTPDecoder()
-			_, err := d.ParseStream(httpFlowState(1, 80), dpi.StreamView{Session: "bad", Bytes: raw})
-			if err == nil {
-				t.Fatal("accepted malformed stream")
+			r, err := d.ParseStream(httpFlowState(1, 80), dpi.StreamView{Session: "bad", Bytes: raw})
+			if err != nil || r.Consumed != len(raw) || len(r.Frames) == 0 || len(r.Frames[len(r.Frames)-1].Events) != 1 || r.Frames[len(r.Frames)-1].Events[0].Kind != "malformed" {
+				t.Fatalf("missing terminal malformed event: %+v %v", r, err)
+			}
+			again, err := d.ParseStream(httpFlowState(1, 80), dpi.StreamView{Session: "bad", Base: int64(len(raw)), Bytes: raw})
+			if err != nil || len(again.Frames) != 1 || len(again.Frames[0].Events) != 0 {
+				t.Fatalf("restarted malformed stream: %+v %v", again, err)
 			}
 			d.StreamEnded("bad", dpi.DirUnknown)
 			if len(d.streams) != 0 {
@@ -261,8 +265,9 @@ func TestHTTPBodyFramingBounds(t *testing.T) {
 		"POST / HTTP/1.1\r\n Transfer-Encoding: chunked\r\n\r\n",
 		"GET / HTTP/1.1\r\nX-Long: " + strings.Repeat("a", maxHTTPHeaders) + "\r\n\r\n",
 	} {
-		if _, err := NewHTTPDecoder().OnPacket(httpFlowState(1, 80), &dpi.ParsedPacket{Payload: []byte(raw), Proto: "tcp"}); err == nil {
-			t.Fatal("accepted ambiguous/oversized HTTP headers")
+		events, err := NewHTTPDecoder().OnPacket(httpFlowState(1, 80), &dpi.ParsedPacket{Payload: []byte(raw), Proto: "tcp"})
+		if err != nil || len(events) != 1 || events[0].Kind != "malformed" {
+			t.Fatalf("missing malformed event: %v %v", events, err)
 		}
 	}
 	raw := []byte("HTTP/1.1 304 Not Modified\r\nContent-Length: 123\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n")
