@@ -78,6 +78,12 @@ Example IDS configuration body (replace the rule list only intentionally):
   actual events rather than assuming every decoder supplies every field.
 - A bare non-core name falls back to an attribute lookup.
 
+The decoder-backed scalar vocabulary includes TLS `tls_legacy_version` and
+`tls_selected_version`; HTTP `content_type`, `authority`, and `stream_id`;
+and SMB/SNMP `dialect` and `community`. `tls_version` is not supported.
+List-valued decoder attributes are not evaluated: this includes
+`tls_offered_versions`, `dialects_offered`, and `oids`.
+
 Source/destination IP and port are **not core IDS fields**. They are added to the
 telemetry envelope after decoding; the evaluator receives the original decoder
 event, not that enriched envelope. Use firewall network predicates for network

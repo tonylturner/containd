@@ -42,13 +42,16 @@ func normalizeField(field string) string {
 // decoderAttribute is the supported scalar Sigma attribute vocabulary. Keep
 // additions tied to an emitting decoder; a log field or arbitrary attr.* name
 // is not evidence of an executable network predicate. Array-valued attributes
-// such as cipher_suites/extensions/requested_protocols need evaluator support.
+// need evaluator support; examples include cipher_suites, extensions,
+// requested_protocols, tls_offered_versions, dialects_offered, and oids.
 func decoderAttribute(field string) bool {
 	switch field {
 	// pkg/dp/itdpi/{http,dns,tls}.go
 	case "method", "path", "host", "target", "scheme", "user_agent", "status",
+		"content_type", "authority", "stream_id",
 		"id", "qr", "opcode", "rcode", "questions", "answers",
-		"qname", "qtype", "qclass", "sni", "alpn", "tls_version", "ja3", "ja3_hash":
+		"qname", "qtype", "qclass", "sni", "alpn", "tls_legacy_version",
+		"tls_selected_version", "ja3", "ja3_hash":
 		return true
 	// Common IT metadata and itdpi/{detect,ics_marker,ntp,rdp,smb,snmp,ssh}.go.
 	case "src_port", "dst_port", "transport", "detected", "ics",
