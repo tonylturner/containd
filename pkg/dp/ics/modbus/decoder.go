@@ -62,11 +62,18 @@ func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamRe
 			break
 		}
 		adu := v.Bytes[pos : pos+n]
-		res.Frames = append(res.Frames, dpi.DecodedFrame{
+		parsed := decodeADU(adu)
+		decoded := dpi.DecodedFrame{
 			Start:  v.Base + int64(pos),
 			End:    v.Base + int64(pos+n),
-			Events: []dpi.Event{aduEvent(state, decodeADU(adu), adu)},
-		})
+			Events: []dpi.Event{aduEvent(state, parsed, adu)},
+			Unit:   decodeUnit(parsed, state, v.Dir),
+		}
+		if err := dpi.ValidateDecodedFrame(decoded); err != nil {
+			res.Consumed = pos
+			return res, &dpi.FrameError{Offset: decoded.Start, Reason: err.Error(), Event: malformedEvent(state, v.Bytes[pos:pos+n], err)}
+		}
+		res.Frames = append(res.Frames, decoded)
 		pos += n
 	}
 	res.Consumed = pos

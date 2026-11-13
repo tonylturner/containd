@@ -38,7 +38,8 @@ func (d *Decoder) peer(k stationKey) *stationContext {
 // Each transport-completed application fragment is independently inspected.
 // The conversation retains only bounded sequence/confirmation metadata, never
 // concatenates object bytes across application headers or delays policy events.
-func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attrs map[string]any, now time.Time) {
+func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attrs map[string]any, now time.Time) error {
+	var shapeErr error
 	h, fc := data[0], data[1]
 	fir, fin, con, uns := h&0x80 != 0, h&0x40 != 0, h&0x20 != 0, h&0x10 != 0
 	seq := h & 15
@@ -65,8 +66,9 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 		// it carries evidence, not a fabricated protocol violation.
 		if !fir || !fin || con {
 			mergeCodes(attrs, eventfields.KeyConformance, []string{"dnp3.application_control"})
+			return ErrInvalidShape
 		}
-		return
+		return nil
 	}
 	if !IsResponse(fc) {
 		c.requestSeq = seq
@@ -74,8 +76,9 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 		c.requestValid = fir && fin
 		if !fir || !fin || uns {
 			mergeCodes(attrs, eventfields.KeyConformance, []string{"dnp3.application_control"})
+			return ErrInvalidShape
 		}
-		return
+		return nil
 	}
 	if fir && !uns {
 		if peer := d.peer(k); peer != nil && peer.requestValid {
@@ -87,6 +90,7 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 	}
 	if (fc == FuncUnsolicitedResponse) != uns {
 		mergeCodes(attrs, eventfields.KeyConformance, []string{"dnp3.application_control"})
+		shapeErr = ErrInvalidShape
 	}
 	a := &c.application[channel]
 	hash := sha256.Sum256(data)
@@ -95,12 +99,13 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 		attrs["application_fragment"] = a.fragments
 		attrs["application_complete"] = !a.active
 		a.touched = now
-		return
+		return ErrUnsupportedShape
 	}
 	if fir {
 		if a.active {
 			mergeCodes(attrs, eventfields.KeyConformance, []string{"dnp3.application_restart"})
 			mergeCodes(attrs, eventfields.KeyUndecoded, []string{"dnp3.application_incomplete"})
+			shapeErr = ErrInvalidShape
 		}
 		*a = applicationAssembly{active: true, started: now}
 	} else if !a.active || seq != (a.seq+1)&15 || fc != a.fc {
@@ -108,13 +113,13 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 		mergeCodes(attrs, eventfields.KeyUndecoded, []string{"dnp3.application_incomplete"})
 		*a = applicationAssembly{}
 		attrs["application_complete"] = false
-		return
+		return ErrInvalidShape
 	}
 	if a.fragments >= maxAssemblySegments {
 		*a = applicationAssembly{}
 		mergeCodes(attrs, eventfields.KeyUndecoded, []string{"dnp3.assembly_limit"})
 		attrs["application_complete"] = false
-		return
+		return ErrInvalidShape
 	}
 	a.fragments++
 	a.seq = seq
@@ -125,4 +130,5 @@ func (d *Decoder) application(k stationKey, c *stationContext, data []byte, attr
 	a.active = !fin
 	attrs["application_fragment"] = a.fragments
 	attrs["application_complete"] = fin
+	return shapeErr
 }

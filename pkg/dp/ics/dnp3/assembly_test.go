@@ -15,7 +15,19 @@ import (
 
 func parseAssembly(t *testing.T, d *Decoder, session string, dir dpi.StreamDir, wire []byte) []dpi.Event {
 	t.Helper()
-	res, err := d.ParseStream(dnp3State(), dpi.StreamView{Session: session, Dir: dir, Bytes: wire})
+	// Each call continues beyond already-consumed physical frames. Assembly
+	// coverage can precede this view, but may never overlap a new link.
+	var base int64
+	d.mu.Lock()
+	for k, c := range d.stations {
+		if k.session == session && k.dir == dir && c.transport != nil {
+			for _, r := range c.transport.ranges {
+				base = max(base, r.End)
+			}
+		}
+	}
+	d.mu.Unlock()
+	res, err := d.ParseStream(dnp3State(), dpi.StreamView{Session: session, Dir: dir, Base: base, Bytes: wire})
 	total := 0
 	for k, c := range d.stations {
 		total += contextBytes(k, c)
