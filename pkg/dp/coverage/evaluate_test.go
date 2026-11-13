@@ -3,6 +3,7 @@
 package coverage
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -118,6 +119,64 @@ func TestEvaluateSkipsRulesWithoutProtocolAndSortsByID(t *testing.T) {
 	}
 	if Evaluate(nil, inline()) != nil || Evaluate(&rules.Snapshot{}, inline()) != nil {
 		t.Fatal("no semantic rule must give no coverage")
+	}
+}
+
+func TestLowerPreservesReason(t *testing.T) {
+	for _, mode := range []string{"enforce", "monitor"} {
+		for _, code := range []Code{NoInlinePath, EnforcementDisabled, DPIDisabled, DecoderDisabled, QueueUnavailable, ExclusionOverlap, DomainExclusion} {
+			t.Run(mode+"/"+string(code), func(t *testing.T) {
+				reason := Reason{Code: code, Message: "final operator-facing message", Value: "10.1.0.4", Matches: 7, Runtime: true}
+				r := Rule{Mode: mode, State: Enforcing}
+				wantState := NotEnforcing
+				if code == ExclusionOverlap || code == DomainExclusion {
+					wantState = Partial
+				}
+				if mode == "monitor" {
+					r.State, wantState = Monitoring, Monitoring
+				}
+				r.Lower(reason)
+				if r.State != wantState || !reflect.DeepEqual(r.Reasons, []Reason{reason}) {
+					t.Fatalf("got %+v, want state %s and unchanged reason %+v", r, wantState, reason)
+				}
+			})
+		}
+	}
+}
+
+func TestEvaluateFailClosedMessages(t *testing.T) {
+	for _, protocol := range []string{"modbus", "dnp3", "iec104"} {
+		for _, tc := range []struct {
+			name    string
+			code    Code
+			mutate  func(*Settings)
+			message string
+		}{
+			{"master off", DPIDisabled, func(s *Settings) { s.DPIEnabled = false },
+				"DPI is off; the kernel drops this rule's whole transport scope until DPI is enabled"},
+			{"decoder off", DecoderDisabled, func(s *Settings) { s.ICSProtocols = map[string]bool{protocol: false} },
+				fmt.Sprintf("the %s decoder is switched off (dataplane.dpiIcsProtocols.%s); the kernel drops this rule's whole transport scope until the decoder is enabled", protocol, protocol)},
+			{"IP exclusion", ExclusionOverlap, func(s *Settings) { s.Exclusions = []Exclusion{{Type: "ip", Value: "10.1.0.4"}} },
+				"DPI exclusion 10.1.0.4 prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion"},
+			{"CIDR exclusion", ExclusionOverlap, func(s *Settings) { s.Exclusions = []Exclusion{{Type: "cidr", Value: "10.1.0.0/24"}} },
+				"DPI exclusion 10.1.0.0/24 prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion"},
+		} {
+			t.Run(protocol+"/"+tc.name, func(t *testing.T) {
+				entry := modbusRule("r", "enforce")
+				entry.ICS.Protocol = protocol
+				s := inline()
+				tc.mutate(&s)
+				r := Evaluate(&rules.Snapshot{Firewall: []rules.Entry{entry}}, s)[0]
+				if len(r.Reasons) != 1 || r.Reasons[0].Code != tc.code || r.Reasons[0].Message != tc.message {
+					t.Fatalf("reasons = %+v, want %s: %s", r.Reasons, tc.code, tc.message)
+				}
+				replayed := Rule{RuleID: r.RuleID, Protocol: r.Protocol, Mode: r.Mode, State: Enforcing}
+				replayed.Lower(r.Reasons[0])
+				if !reflect.DeepEqual(replayed, r) {
+					t.Fatalf("replayed coverage %+v differs from evaluated coverage %+v", replayed, r)
+				}
+			})
+		}
 	}
 }
 

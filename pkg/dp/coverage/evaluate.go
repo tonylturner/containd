@@ -48,10 +48,18 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 	}
 	// Monitoring IEC sessions retain their independent inspection path.
 	if !s.DPIEnabled && (!iec || mode == modeEnforce) {
-		r.Lower(Reason{Code: DPIDisabled, Message: "DPI is switched off (dataplane.dpiEnabled), so no command of this rule is decoded"})
+		message := "DPI is switched off (dataplane.dpiEnabled), so no command of this rule is decoded"
+		if mode == modeEnforce {
+			message = "DPI is off; the kernel drops this rule's whole transport scope until DPI is enabled"
+		}
+		r.Lower(Reason{Code: DPIDisabled, Message: message})
 	}
 	if on, set := s.ICSProtocols[protocol]; set && !on {
-		r.Lower(Reason{Code: DecoderDisabled, Message: fmt.Sprintf("the %s decoder is switched off (dataplane.dpiIcsProtocols.%s)", protocol, protocol)})
+		message := fmt.Sprintf("the %s decoder is switched off (dataplane.dpiIcsProtocols.%s)", protocol, protocol)
+		if mode == modeEnforce {
+			message += "; the kernel drops this rule's whole transport scope until the decoder is enabled"
+		}
+		r.Lower(Reason{Code: DecoderDisabled, Message: message})
 	}
 	// Monitoring IEC sessions ignore exclusions; enforcing sessions drop IP/CIDR-excluded traffic.
 	if !iec || mode == modeEnforce {
@@ -71,26 +79,19 @@ func addExclusionReason(r *Rule, e rules.Entry, x Exclusion) {
 		r.Lower(Reason{Code: DomainExclusion, Value: x.Value,
 			Message: fmt.Sprintf("flows to addresses that DNS or TLS associate with %s skip inspection", x.Value)})
 	case ExclusionOverlaps(x, e.Sources, e.Destinations):
-		r.Lower(Reason{Code: ExclusionOverlap, Value: x.Value,
-			Message: fmt.Sprintf("DPI exclusion %s meets this rule's addresses; its flows skip inspection", x.Value)})
+		message := fmt.Sprintf("DPI exclusion %s meets this rule's addresses; its flows skip inspection", x.Value)
+		if r.Mode == modeEnforce {
+			message = fmt.Sprintf("DPI exclusion %s prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion", x.Value)
+		}
+		r.Lower(Reason{Code: ExclusionOverlap, Value: x.Value, Message: message})
 	}
 }
 
-// Lower records reason and lowers the rule's state to what the reason
+// Lower records reason unchanged and lowers the rule's state to what the reason
 // allows: an exclusion leaves an enforcing rule partial, every other cause
 // leaves it not enforcing. A monitoring rule keeps its state; the reason
 // explains what it cannot observe.
 func (r *Rule) Lower(reason Reason) {
-	if r.Mode == modeEnforce {
-		switch reason.Code {
-		case DPIDisabled:
-			reason.Message = "DPI is off; the kernel drops this rule's whole transport scope until DPI is enabled"
-		case DecoderDisabled:
-			reason.Message += "; the kernel drops this rule's whole transport scope until the decoder is enabled"
-		case ExclusionOverlap:
-			reason.Message = fmt.Sprintf("DPI exclusion %s prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion", reason.Value)
-		}
-	}
 	r.Reasons = append(r.Reasons, reason)
 	if r.State == Monitoring || r.State == NotEnforcing {
 		return
