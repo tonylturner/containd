@@ -13,16 +13,20 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // TLSDecoder emits ClientHello metadata (SNI, ALPN when possible).
 type TLSDecoder struct {
 	mu          sync.Mutex
+	resources   limits.Resources
 	streams     map[tlsStreamKey]*tlsStream
 	connections map[string]*tlsConnection
 }
 
-func NewTLSDecoder() *TLSDecoder { return &TLSDecoder{} }
+func NewTLSDecoder() *TLSDecoder {
+	return &TLSDecoder{resources: limits.NewResources(nil, nil)}
+}
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *TLSDecoder) Ports() (tcpPorts, udpPorts []uint16) {
@@ -53,6 +57,10 @@ func (d *TLSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		return nil, nil
 	}
 	local := NewTLSDecoder()
+	d.mu.Lock()
+	local.SetResources(d.resources)
+	d.mu.Unlock()
+	defer local.StreamEnded("", dpi.DirUnknown)
 	result, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload})
 	var events []dpi.Event
 	for _, frame := range result.Frames {

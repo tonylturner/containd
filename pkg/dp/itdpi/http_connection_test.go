@@ -56,7 +56,9 @@ func TestHTTPUncertainBodyReanchorsOnlyAtPacketStart(t *testing.T) {
 
 func TestHTTPDroppedRequestCounterSaturates(t *testing.T) {
 	c := httpConnection{dropped: ^uint64(0)}
-	c.request(httpStreamKey{}, "HEAD", nil)
+	if err := c.request(&httpStream{id: 1}, "HEAD", nil); err != nil {
+		t.Fatal(err)
+	}
 	c.response()
 	if c.dropped != ^uint64(0) || c.pending().method != "" {
 		t.Fatalf("counter wrapped or ended inspection: %+v", c)
@@ -65,7 +67,10 @@ func TestHTTPDroppedRequestCounterSaturates(t *testing.T) {
 
 func TestHTTPUpgradeCorrelationClearsOnFinalResponse(t *testing.T) {
 	c := httpConnection{}
-	c.request(httpStreamKey{}, "GET", map[string]string{"connection": "Upgrade", "upgrade": "websocket, custom/V1"})
+	defer c.clearRequests()
+	if err := c.request(&httpStream{id: 1}, "GET", map[string]string{"connection": "Upgrade", "upgrade": "websocket, custom/V1"}); err != nil {
+		t.Fatal(err)
+	}
 	for _, selected := range []string{"WebSocket", "custom/V1, WebSocket"} {
 		if !c.pending().acceptsUpgrade(map[string]string{"connection": "keep-alive, upgrade", "upgrade": selected}) {
 			t.Fatalf("matching upgrade not accepted: %s", selected)
@@ -77,7 +82,9 @@ func TestHTTPUpgradeCorrelationClearsOnFinalResponse(t *testing.T) {
 		}
 	}
 	c.response()
-	c.request(httpStreamKey{}, "GET", nil)
+	if err := c.request(&httpStream{id: 1}, "GET", nil); err != nil {
+		t.Fatal(err)
+	}
 	if c.pending().acceptsUpgrade(map[string]string{"connection": "Upgrade", "upgrade": "websocket"}) {
 		t.Fatal("upgrade leaked to the following request")
 	}
