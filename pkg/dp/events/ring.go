@@ -28,6 +28,11 @@ func (r eventRing) at(i int) Event {
 }
 
 func (s *Store) appendGeneral(ev Event) {
+	slot := len(s.general.events)
+	if slot == s.general.capacity {
+		slot = s.general.head
+	}
+	s.incidentContext.replace(slot, ev)
 	s.retainBinding(ev)
 	if old, evicted := s.general.push(ev); evicted {
 		s.releaseBinding(old)

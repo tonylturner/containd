@@ -88,6 +88,7 @@ type Store struct {
 	demoAborted      abortedSet
 	denies           eventRing
 	incidents        incidentBank
+	incidentContext  incidentContextIndex
 	historyTruncated bool
 	bindings         map[string]*bindingRecord
 	aborted          abortedSet // aborted IEC104 incarnations hidden from Flows
