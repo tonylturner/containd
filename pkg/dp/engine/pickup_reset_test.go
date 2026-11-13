@@ -15,6 +15,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -24,6 +25,28 @@ type resetFlow struct {
 	*fcFlow
 	inj     *session.Fake
 	deletes chan conntrack.DeleteRequest
+}
+
+func TestPickupResetRefusalIsCountedWithoutEviction(t *testing.T) {
+	p := newPickupResets()
+	p.maxEntries = 3
+	ledger := limits.NewLedger(nil)
+	p.ledger = ledger
+	now := time.Now()
+	resets := connReset{targets: [2]resetTarget{{valid: true, sent: now}, {valid: true, sent: now}}}
+	for i := 0; i < 40; i++ {
+		client := netip.AddrPortFrom(netip.MustParseAddr("192.0.2.1"), uint16(40000+i))
+		server := netip.MustParseAddrPort("192.0.2.2:2404")
+		p.record(iecKey{client: client, server: server}, resets, &deniedTCP{}, nil, now)
+	}
+	occupancy := p.LimitOccupancy()
+	if occupancy.Limit != 3 || occupancy.Entries != 3 || occupancy.HighWater != 3 {
+		t.Fatalf("pickup occupancy %+v", occupancy)
+	}
+	hits := ledger.Status(limits.TablePickupReset, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonRefused || hits[0].Mode != limits.ModeObserve || hits[0].Total != 37 {
+		t.Fatalf("pickup refusal ledger hits %+v", hits)
+	}
 }
 
 func newResetFlow(t *testing.T, port uint16) *resetFlow {

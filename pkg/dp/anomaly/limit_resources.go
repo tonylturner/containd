@@ -10,4 +10,6 @@ import "github.com/tonylturner/containd/pkg/dp/limits"
 func (d *Detector) SetLimits(l limits.Limits, budget *limits.Budget, ledger *limits.Ledger) {
 	d.stateLimits = l
 	d.resources = limits.NewResources(budget, ledger)
+	d.writeRate.ledger = d.resources.Ledger
+	d.totalRate.ledger = d.resources.Ledger
 }

@@ -4,9 +4,11 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
@@ -76,16 +78,24 @@ func TestVerdictCacheFlush(t *testing.T) {
 }
 
 func TestVerdictCacheEvictsAtCapacity(t *testing.T) {
-	vc := NewVerdictCache(5*time.Second, 4)
+	vc := NewVerdictCache(5*time.Second, 3)
+	ledger := limits.NewLedger(nil)
+	vc.ledger = ledger
 
-	for i := 0; i < 10; i++ {
-		vc.Put("flow"+string(rune('a'+i)), verdict.Verdict{Action: verdict.AllowContinue})
+	for i := 0; i < 40; i++ {
+		vc.Put(fmt.Sprintf("flow-%02d", i), verdict.Verdict{Action: verdict.AllowContinue})
 	}
 
-	// After inserting 10 items into a cache with max 4, we should have
-	// at most 4 entries.
-	if vc.Len() > 4 {
-		t.Fatalf("expected at most 4 entries, got %d", vc.Len())
+	// Repeated high-cardinality insertion stays within the configured cap.
+	if vc.Len() > 3 {
+		t.Fatalf("expected at most 3 entries, got %d", vc.Len())
+	}
+	if o := vc.LimitOccupancy(); o.Limit != 3 || o.Entries != 3 || o.HighWater != 3 {
+		t.Fatalf("cache occupancy %+v", o)
+	}
+	hits := ledger.Status(limits.TableVerdictCache, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonEvicted || hits[0].Mode != limits.ModeObserve || hits[0].Total != 37 {
+		t.Fatalf("cache eviction ledger hits %+v", hits)
 	}
 }
 

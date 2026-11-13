@@ -12,15 +12,12 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 const (
-	// maxThresholdKeys bounds the per-flow counters of threshold signatures.
-	maxThresholdKeys = 4096
-	// maxThresholdDedupValues bounds distinct identity values retained in one
-	// threshold window. At the cap, unseen values are still counted but not
-	// retained; repeated unseen values can therefore count more than once.
-	maxThresholdDedupValues = 256
+	maxThresholdKeys        = limits.MaxSignatureWindows
+	maxThresholdDedupValues = limits.MaxSignatureValues
 
 	thresholdScopeFlow       = "flow"
 	thresholdScopeConnection = "connection"
@@ -61,11 +58,12 @@ func (t Threshold) validate() error {
 type thresholdKey struct{ sigID, flowID string }
 
 type thresholdState struct {
-	start  time.Time
-	window time.Duration
-	count  int
-	fired  bool
-	seen   map[string]struct{}
+	start      time.Time
+	window     time.Duration
+	count      int
+	fired      bool
+	seen       map[string]struct{}
+	valueBytes int
 }
 
 // passThreshold counts a matching event and reports whether the signature
@@ -94,12 +92,19 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 	}
 	key := thresholdKey{sigID: sig.ID, flowID: flowID}
 	st := e.thresholds[key]
-	if st == nil || now.Sub(st.start) > window {
-		if st == nil && len(e.thresholds) >= maxThresholdKeys {
+	if st != nil && now.Sub(st.start) > st.window {
+		delete(e.thresholds, key)
+		st = nil
+	}
+	if st == nil {
+		if len(e.thresholds) >= e.windowLimit() {
 			e.evictThresholds(now)
 		}
 		st = &thresholdState{start: now, window: window}
 		e.thresholds[key] = st
+		if int64(len(e.thresholds)) > e.thresholdHighWater {
+			e.thresholdHighWater = int64(len(e.thresholds))
+		}
 	}
 	if st.fired {
 		return false
@@ -109,11 +114,18 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 			if _, seen := st.seen[dedupKey]; seen {
 				return false
 			}
-			if len(st.seen) < maxThresholdDedupValues {
+			if len(dedupKey) > e.valueByteLimit() ||
+				len(st.seen) >= e.valueLimit() ||
+				st.valueBytes+len(dedupKey) > e.valueByteLimit() {
+				// Preserve the existing threshold count semantics; only the
+				// dedup-history identity is truncated.
+				e.resources.Ledger.Record(limits.TableSignatureWindows, limits.ReasonTruncated, limits.ModeObserve)
+			} else {
 				if st.seen == nil {
 					st.seen = make(map[string]struct{})
 				}
 				st.seen[dedupKey] = struct{}{}
+				st.valueBytes += len(dedupKey)
 			}
 		}
 	}
@@ -123,6 +135,7 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 	}
 	st.fired = true
 	st.seen = nil
+	st.valueBytes = 0
 	return true
 }
 
@@ -157,15 +170,47 @@ func isEmptyDedupValue(value any) bool {
 	}
 }
 
-// evictThresholds drops expired windows, and every window if none expired,
-// to keep the counters bounded.
+// evictThresholds drops expired windows, then only the oldest live window.
 func (e *Engine) evictThresholds(now time.Time) {
 	for k, st := range e.thresholds {
 		if now.Sub(st.start) > st.window {
 			delete(e.thresholds, k)
 		}
 	}
-	if len(e.thresholds) >= maxThresholdKeys {
-		e.thresholds = make(map[thresholdKey]*thresholdState)
+	if len(e.thresholds) >= e.windowLimit() {
+		var oldestKey thresholdKey
+		var oldest *thresholdState
+		for key, st := range e.thresholds {
+			if oldest == nil || st.start.Before(oldest.start) ||
+				(st.start.Equal(oldest.start) && (key.sigID < oldestKey.sigID ||
+					(key.sigID == oldestKey.sigID && key.flowID < oldestKey.flowID))) {
+				oldestKey, oldest = key, st
+			}
+		}
+		if oldest != nil {
+			delete(e.thresholds, oldestKey)
+			e.resources.Ledger.Record(limits.TableSignatureWindows, limits.ReasonEvicted, limits.ModeObserve)
+		}
 	}
+}
+
+func (e *Engine) windowLimit() int {
+	if e.maxWindows <= 0 {
+		return maxThresholdKeys
+	}
+	return min(e.maxWindows, maxThresholdKeys)
+}
+
+func (e *Engine) valueLimit() int {
+	if e.maxValues <= 0 {
+		return maxThresholdDedupValues
+	}
+	return min(e.maxValues, maxThresholdDedupValues)
+}
+
+func (e *Engine) valueByteLimit() int {
+	if e.maxValueBytes <= 0 {
+		return limits.MaxSignatureValueBytes
+	}
+	return min(e.maxValueBytes, limits.MaxSignatureValueBytes)
 }

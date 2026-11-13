@@ -2,13 +2,19 @@
 
 package anomaly
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/limits"
+)
 
 func TestRateLimitOccupancy(t *testing.T) {
 	d := New()
-	d.writeRate.buckets["write"] = map[int64]int{1: 1}
-	d.totalRate.buckets["total"] = map[int64]int{1: 1}
-	if o := d.LimitOccupancy(); o.Limit != 0 || o.Entries != 2 || o.ChargedBytes != 0 {
+	d.writeRate.recordAt("write", time.Now())
+	d.totalRate.recordAt("total", time.Now())
+	d.updateRateHighWater()
+	if o := d.LimitOccupancy(); o.Limit != 2*limits.MaxRateTrackers || o.Entries != 2 || o.HighWater != 2 || o.ChargedBytes != 0 {
 		t.Fatalf("occupancy %+v", o)
 	}
 }
