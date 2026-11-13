@@ -15,6 +15,12 @@ class Failure(RuntimeError):
     pass
 
 
+def elapsed():
+    # Darwin's continuous raw clock includes sleep; time.monotonic() uses
+    # mach_absolute_time(), which pauses during sleep and cannot cap wall time.
+    return time.clock_gettime(time.CLOCK_MONOTONIC_RAW)
+
+
 def write_json(path, value):
     path = Path(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -26,14 +32,14 @@ class Runtime:
     def __init__(self, root, project, out, env, budget=5400):
         self.root, self.project, self.out = root, project, out
         self.env = dict(os.environ, **env, COMPOSE_PROJECT_NAME=project)
-        self.deadline = time.monotonic() + budget
+        self.deadline = elapsed() + budget
         self.owned = False
         self.processes = []
         self.base = None
         self.revision = None
 
     def remaining(self):
-        left = self.deadline - time.monotonic()
+        left = self.deadline - elapsed()
         if left <= 0:
             raise Failure("harness wall-time budget exceeded")
         return left
@@ -100,8 +106,8 @@ class Runtime:
             raise Failure(f"management {path}: HTTP {err.code}: {err.read().decode()}") from err
 
     def wait(self, predicate, description, seconds=90):
-        end = time.monotonic() + min(seconds, self.remaining())
-        while time.monotonic() < end:
+        end = elapsed() + min(seconds, self.remaining())
+        while elapsed() < end:
             if predicate():
                 return
             time.sleep(.25)
@@ -123,7 +129,7 @@ class Runtime:
         # Teardown remains permitted after expiry; it must not share the load's
         # expired timeout. Only this explicitly claimed project can be removed.
         original_deadline = self.deadline
-        self.deadline = max(self.deadline, time.monotonic() + 120)
+        self.deadline = max(self.deadline, elapsed() + 120)
         errors = []
         try:
             containers = self.check_oom()
@@ -180,7 +186,7 @@ class Sampler:
         self.thread = threading.Thread(target=self.loop)
 
     def sample(self):
-        sample = {"at": time.monotonic(), "containers": {}}
+        sample = {"at": elapsed(), "containers": {}}
         for service in ("appliance", "client", "peer"):
             raw = self.runtime.execute(service, "sh", "-c", SAMPLE, timeout=10).stdout
             sample["containers"][service] = cgroup_sample(raw)

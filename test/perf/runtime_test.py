@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
+import http.client
 import json
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from runtime import Failure, Runtime
 
@@ -61,16 +63,61 @@ class Ownership(unittest.TestCase):
             with self.assertRaisesRegex(Failure, "wall-time"):
                 rt.remaining()
 
+    def test_wall_budget_uses_continuous_clock_when_uptime_pauses(self):
+        with tempfile.TemporaryDirectory() as out:
+            with patch("runtime.time.monotonic", return_value=10), \
+                    patch("runtime.time.clock_gettime", side_effect=[10, 5411]) as clock:
+                rt = self.runtime(out)
+                with self.assertRaisesRegex(Failure, "wall-time"):
+                    rt.remaining()
+                clock.assert_called_with(time.CLOCK_MONOTONIC_RAW)
+
 
 class FailureCleanup(unittest.TestCase):
+    def test_failed_load_capture_cleanup_does_not_mask_primary_failure(self):
+        from harness import capture_stop
+        process = Mock()
+        process.poll.return_value = 0
+        process.wait.return_value = 0
+        with tempfile.TemporaryDirectory() as out:
+            directory = Path(out)
+            (directory / "path.pcap").write_bytes(b"")
+            capture_stop(Mock(), process, directory, validate=False)
+            with self.assertRaisesRegex(ValueError, "empty/header-only"):
+                capture_stop(Mock(), process, directory)
+
+    def test_waits_through_initial_management_disconnect(self):
+        from harness import wait_http
+        rt = Mock()
+        rt.api.side_effect = [http.client.RemoteDisconnected("not listening yet"), {}]
+        def wait(predicate, _description):
+            self.assertFalse(predicate())
+            self.assertTrue(predicate())
+        rt.wait.side_effect = wait
+        wait_http(rt)
+
+    def test_memory_guard_counts_reclaimable_cache(self):
+        from harness import check_memory
+        check_memory("MemFree: 2097152 kB\nMemAvailable: 4194304 kB\n")
+        with self.assertRaisesRegex(Failure, "below 4 GiB .*MemAvailable"):
+            check_memory("MemFree: 2097152 kB\nMemAvailable: 4194303 kB\n")
+
+    def test_memory_guard_requires_available_not_free(self):
+        from harness import check_memory
+        for memory in ("MemFree: 8388608 kB\n", "MemAvailable: invalid kB\n",
+                       "MemAvailable: 8388608 MB\n"):
+            with self.subTest(memory=memory):
+                with self.assertRaisesRegex(Failure, "MemAvailable missing or invalid"):
+                    check_memory(memory)
+
     def test_preflight_failure_always_tears_down(self):
         from harness import trial
         with tempfile.TemporaryDirectory() as out:
             rt = Runtime(Path.cwd(), "containd-perf-test", Path(out), {})
             cleaned = []
             rt.teardown = lambda directory: cleaned.append(directory)
-            with patch("harness.setup", side_effect=Failure("VM free memory below 4 GiB")):
-                with self.assertRaisesRegex(Failure, "VM free memory"):
+            with patch("harness.setup", side_effect=Failure("VM available memory below 4 GiB")):
+                with self.assertRaisesRegex(Failure, "VM available memory"):
                     trial(rt, 0, "modbus", "monitor", False, 1, 100, True, "confirm")
             self.assertEqual(len(cleaned), 1)
 

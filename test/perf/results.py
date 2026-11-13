@@ -132,6 +132,15 @@ def summarize(row):
                 forward_skb_pps=row["peer_network_delta"]["IpInReceives"] / seconds)
 
 
+def verify_smoke(row):
+    load = row["load"]
+    if (load["seconds"] < 3 or load["completed_sessions"] != load["sessions"] or
+            any(load[k]["errors"] or load[k]["success"] <= 0 for k in ("main", "probe")) or
+            row["cap_hits"] or row["queue_delta"]["kernel_drops"] or row["queue_delta"]["user_drops"] or
+            (row["dpi"] and row["protocol_delta"]["eventCount"] <= 0)):
+        raise ValueError("smoke workload failed its hold, transactions, decode or loss assertions; see row.json")
+
+
 def tables(rows, smoke):
     title = "PLUMBING ONLY — NOT PUBLISHABLE" if smoke else "Docker Desktop lab measurements"
     lines = [f"# {title}", "", "NFQUEUE traversal / monitor inspection; inline enforcement uses a",

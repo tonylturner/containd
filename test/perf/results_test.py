@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import copy
 import ipaddress
 import struct
 import unittest
@@ -6,7 +7,7 @@ import unittest
 from harness import config_for, redact
 from results import (choose_subnets, delta, network_stats, pcap_summary, percentile,
                      project_name, protocol_stats, queue_delta, queue_stats,
-                     summarize, tables)
+                     summarize, tables, verify_smoke)
 from runtime import Failure, cgroup_sample
 
 
@@ -35,6 +36,9 @@ class Measurements(unittest.TestCase):
             self.assertFalse(on["firewall"]["nat"]["enabled"])
             enforce = config_for(base, protocol, "enforce", True, "10.1.0.3", "10.2.0.3")
             self.assertEqual(len(enforce["firewall"]["rules"]), 1)
+            if protocol == "iec104":
+                self.assertEqual(enforce["firewall"]["rules"][0]["ics"],
+                                 dict(protocol="iec104", mode="enforce", readOnly=True))
             with self.assertRaises(Failure):
                 config_for(base, protocol, "enforce", False, "10.1.0.3", "10.2.0.3")
 
@@ -98,6 +102,28 @@ class Measurements(unittest.TestCase):
         load["schema"] = 2
         with self.assertRaises(ValueError):
             summarize(row)
+
+    def test_smoke_requires_real_success_not_vacuous_decode_proof(self):
+        row = dict(dpi=True, load=dict(seconds=3, sessions=1, completed_sessions=1,
+                   main=dict(success=300, errors=0), probe=dict(success=30, errors=0)),
+                   cap_hits=0, queue_delta=dict(kernel_drops=0, user_drops=0),
+                   protocol_delta=dict(eventCount=660))
+        verify_smoke(row)
+        for path, value in ((("load", "seconds"), .001), (("load", "completed_sessions"), 0),
+                            (("load", "main", "success"), 0), (("load", "probe", "errors"), 1),
+                            (("protocol_delta", "eventCount"), 0), (("cap_hits",), 1),
+                            (("queue_delta", "kernel_drops"), 1)):
+            bad = copy.deepcopy(row)
+            target = bad
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "smoke workload failed"):
+                    verify_smoke(bad)
+        row["dpi"] = False
+        row["protocol_delta"]["eventCount"] = 0
+        verify_smoke(row)
 
 
 if __name__ == "__main__":

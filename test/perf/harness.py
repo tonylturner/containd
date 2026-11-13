@@ -14,8 +14,8 @@ import urllib.error
 
 from results import (choose_subnets, delta, hits, network_stats, pcap_summary,
                      project_name, protocol_stats, queue_delta, queue_stats,
-                     summarize, tables)
-from runtime import Failure, Runtime, Sampler, write_json
+                     summarize, tables, verify_smoke)
+from runtime import Failure, Runtime, Sampler, elapsed, write_json
 
 PORTS = {"modbus": 502, "dnp3": 20000, "iec104": 2404}
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +43,9 @@ def config_for(base, protocol, mode, dpi, lan, wan):
         elif protocol == "dnp3":
             rule["ics"].update(functionCode=[1, 129], readOnly=True)
         else:
-            rule["ics"].update(typeIds=[102, 1], ca=[1], readOnly=True)
+            # Safe-read includes STARTDT and S acknowledgements: these have
+            # neither an ASDU type nor a common address to match.
+            rule["ics"].update(readOnly=True)
     rules = [rule]
     if mode == "monitor":
         rules.append({k: v for k, v in dict(rule, id="perf-l4").items() if k != "ics"})
@@ -102,9 +104,19 @@ def wait_http(rt):
         try:
             rt.api("/health")
             return True
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
             return False
     rt.wait(available, "management API")
+
+
+def check_memory(memory):
+    fields = dict(line.split(":", 1) for line in memory.splitlines() if ":" in line)
+    value = fields.get("MemAvailable", "").split()
+    if len(value) != 2 or value[1] != "kB" or not value[0].isdigit():
+        raise Failure("VM MemAvailable missing or invalid in /proc/meminfo")
+    available = int(value[0]) * 1024
+    if available < 4 * 2**30:
+        raise Failure(f"VM available memory below 4 GiB ({available} bytes MemAvailable)")
 
 
 def setup(rt, directory, protocol, mode, dpi):
@@ -113,9 +125,7 @@ def setup(rt, directory, protocol, mode, dpi):
     rt.compose(["up", "-d", "client"])
     memory = rt.execute("client", "cat", "/proc/meminfo").stdout
     (directory / "guest-meminfo-preflight.txt").write_text(memory)
-    free = int(next(line.split()[1] for line in memory.splitlines() if line.startswith("MemFree:"))) * 1024
-    if free < 4 * 2**30:
-        raise Failure(f"VM free memory below 4 GiB ({free} bytes MemFree)")
+    check_memory(memory)
     rt.compose(["up", "-d"])
     address = rt.compose(["port", "appliance", "18080"]).stdout.strip()
     host, port = address.rsplit(":", 1)
@@ -153,6 +163,8 @@ def setup(rt, directory, protocol, mode, dpi):
     positive = connect(rt, "peer", "127.0.0.1", 25000)
     denied = connect(rt, "client", rt.env["PERF_WAN_PEER"], 25000, expected=False)
     write_json(directory / "denied-control.json", dict(listener=positive, denied=denied))
+    write_json(directory / "allowed-control.json",
+               connect(rt, "client", rt.env["PERF_WAN_PEER"], PORTS[protocol]))
     # Appliance down is an outage preflight, not a dataplane performance row.
     rt.compose(["stop", "-t", "10", "appliance"])
     down_probe = connect(rt, "client", rt.env["PERF_WAN_PEER"], PORTS[protocol], expected=False)
@@ -195,7 +207,7 @@ def capture_start(rt, directory):
         "pid=$!; echo $pid > /results/capture.pid; wait $pid"], directory / "capture.log")
 
 
-def capture_stop(rt, process, directory):
+def capture_stop(rt, process, directory, validate=True):
     if process.poll() is None:
         pid = (directory / "capture.pid").read_text().strip()
         if not pid.isdigit():
@@ -205,6 +217,8 @@ def capture_stop(rt, process, directory):
     code = process.wait(timeout=10)
     if code:
         raise Failure(f"path capture failed ({code})")
+    if not validate:
+        return  # A failed load has no path sample to validate; retain its evidence.
     result = pcap_summary((directory / "path.pcap").read_bytes())
     # tcpdump's stderr includes capture/kernel drops; require the terminal report.
     log = (directory / "capture.log").read_text()
@@ -292,15 +306,17 @@ def trial(rt, index, protocol, mode, dpi, sessions, rate, smoke, stage):
             row["summary"]["sustainable"] = False
         row["endpoint_limited"] = (resources["peer"]["cpu_cores_peak"] >= 1.8 or
                                     resources["client"]["cpu_cores_peak"] >= 1.8)
-        print(f"  queue +{qd['received']}; eventCount +{pd['eventCount']}; successes {successful}; denied control verified", flush=True)
         write_json(directory / "row.json", row)
+        if smoke:
+            verify_smoke(row)
+        print(f"  queue +{qd['received']}; eventCount +{pd['eventCount']}; successes {successful}; denied control verified", flush=True)
         return row
     finally:
         try:
             if sampler is not None:
                 sampler.finish()
             if capture is not None:
-                capture_stop(rt, capture, directory)
+                capture_stop(rt, capture, directory, validate=False)
         finally:
             rt.teardown(directory)
 
@@ -330,7 +346,8 @@ def manifest(rt, smoke):
                  compose_version=rt.run(["docker", "compose", "version"]).stdout,
                  build_flags="CGO_ENABLED=0 GOOS=linux GOARCH=arm64 -trimpath; product Dockerfile defaults",
                  limits=dict(appliance=dict(cpus=4, memory=2 * 2**30), endpoints=dict(cpus=2, memory=512 * 2**20)),
-                 ceiling_seconds=5400, min_free_bytes=4 * 2**30,
+                 ceiling_seconds=5400, budget_clock="Darwin CLOCK_MONOTONIC_RAW",
+                 min_available_bytes=4 * 2**30,
                  workload=dict(ip="IPv4", mtu=1500, nat=False, tcp_nodelay=True, outstanding_per_session=1,
                                probe_tps=10, histogram="1% logarithmic upper bounds, microseconds, 1802 bins",
                                omission="paced closed loop; late slots counted, never caught up",
@@ -423,7 +440,7 @@ def main():
     finally:
         # Image tags, unlike shared build-cache layers, belong to this run too.
         # Keep teardown possible after the workload deadline; never prune.
-        rt.deadline = max(rt.deadline, time.monotonic() + 90)
+        rt.deadline = max(rt.deadline, elapsed() + 90)
         cleanup_errors = []
         for tag in built_images:
             result = rt.run(["docker", "image", "rm", tag], check=False, timeout=30)

@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reproducible routed Modbus, DNP3 and IEC 104 measurement harness with matched
   NFQUEUE monitor DPI off/on and separate inline-enforcement series, bounded
-  Docker Desktop resources, protocol-aware endpoints, raw JSON evidence and
+  Docker Desktop resources with a 4 GiB VM available-memory guard,
+  protocol-aware endpoints, raw JSON evidence and
   explicit application goodput, RTT and tested-session definitions.
 
 - Engine userspace traffic-state limits: `dataplane.limits.maxFlows`

@@ -122,7 +122,9 @@ COMPOSE_PROJECT_NAME="containd-perf-smoke-$(date +%s)" \
 ```
 
 Smoke uses one-second warmup and three-second measurement windows, one repetition
-per workload/mode. Its artifacts are explicitly **not publishable figures**.
+per workload/mode. Every main/probe hold must succeed without application errors,
+queue drops or cap hits; DPI-on decode proof must be positive, not vacuously zero.
+Its artifacts are explicitly **not publishable figures**.
 
 For a full run, record the settings currently displayed in Docker Desktop
 without changing them. Supply its version, backend, network mode, allocated
@@ -149,7 +151,8 @@ results; a summary table alone is not reproducible evidence.
   false and exclusions are empty. Both directions traverse the production queue.
 - **Inline enforcement:** read-only ICS ALLOW rules, DPI on. Its matched
   monitor/L4 DPI-off reference is **not the identical policy**. Enforce with
-  DPI off is never run.
+  DPI off is never run. IEC 104 uses safe-read admission, including STARTDT
+  and S acknowledgements; these frames have no ASDU type or common address.
 
 The fixed protocol-aware workload is Modbus FC3 reading registers 0–1, DNP3
 class-0 reads with validated link/data CRCs, transport and application sequence
@@ -204,9 +207,10 @@ mixed into replicated headline medians/ranges. Session results say **highest
 confirmed N / first failing N**, or **at least N tested, budget-limited**, never
 maximum capacity. Client or peer CPU saturation marks endpoint-limited results.
 
-The wall-time ceiling is ninety minutes, including builds and setup. The
+The wall-time ceiling is ninety minutes, including builds, setup and host sleep;
+the budget uses macOS's continuous monotonic clock, not active uptime. The
 appliance is limited to four CPUs and 2 GiB; each endpoint to two CPUs and
-512 MiB. A preflight VM `MemFree` below 4 GiB, any owned-container OOM kill or
+512 MiB. A preflight VM `MemAvailable` below 4 GiB, any owned-container OOM kill or
 budget expiry aborts the run and still tears down. Partial runs retain evidence
 but omit incompletely replicated headline rows. Resource samples every five
 seconds retain cgroup CPU/current/peak memory and engine RSS/Go heap. Other

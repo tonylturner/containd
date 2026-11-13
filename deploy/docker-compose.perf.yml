@@ -61,14 +61,18 @@ services:
         ipv4_address: ${PERF_WAN_PEER:?}
 networks:
   lan:
-    internal: true
-    driver_opts: {com.docker.network.driver.mtu: '1500'}
+    # Internal bridges reject off-subnet IP traffic before a routed appliance
+    # can receive it. Use ordinary isolated bridges without masquerading.
+    driver_opts:
+      com.docker.network.driver.mtu: '1500'
+      com.docker.network.bridge.enable_ip_masquerade: 'false'
     ipam:
       config:
         - subnet: ${PERF_LAN_SUBNET:?}
   wan:
-    internal: true
-    driver_opts: {com.docker.network.driver.mtu: '1500'}
+    driver_opts:
+      com.docker.network.driver.mtu: '1500'
+      com.docker.network.bridge.enable_ip_masquerade: 'false'
     ipam:
       config:
         - subnet: ${PERF_WAN_SUBNET:?}
