@@ -152,7 +152,7 @@ func protocolCovers(a, d rules.Protocol) bool {
 
 // icsEmpty reports an ICS predicate with no field set.
 func icsEmpty(p rules.ICSPredicate) bool {
-	return p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil && len(p.Addresses) == 0 &&
+	return p.MessageClass == "" && p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil && len(p.Addresses) == 0 &&
 		len(p.ObjectClasses) == 0 && !p.ReadOnly && !p.WriteOnly && p.Direction == "" && p.Mode == "" &&
 		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
 		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil && p.SelectExecute == "" &&
