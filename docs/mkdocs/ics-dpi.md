@@ -1411,7 +1411,11 @@ Validation does not check `op`; a condition with another `op` never matches.
 An optional `threshold` of `count` (at least 2) and `windowSeconds` (at least 1)
 alerts once per flow ID when that many events match in one window. The window
 starts at the first matching event. The signature does not alert again for that
-flow ID until the window has passed.
+flow ID until the window has passed. The engine keeps at most 4,096 windows:
+when full it drops expired windows first, then the oldest live window, and
+counts the eviction as `signature_windows` `evicted`. An evicted identity that
+matches again starts a fresh window and can alert before the original window
+would have passed.
 
 Two optional threshold fields change what counts:
 
@@ -1420,8 +1424,9 @@ Two optional threshold fields change what counts:
   Events whose flow ID is not a connection tuple keep their own counter.
 - `dedupAttr`: an event attribute. Matching events with the same nonempty value
   count once in a window. The built-in write storm uses `apdu_id`. A window
-  retains at most 256 values; past that, new values still count but are not
-  remembered.
+  retains at most 256 values and 16 KiB of value text; past that, new values
+  still count but are not remembered, and each is counted as
+  `signature_windows` `truncated`.
 
 ```json
 {
@@ -1600,7 +1605,9 @@ Engine unavailability displays an explicit unavailable state, not an empty
 inventory or zero counters; **Refresh** retries.
 
 Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
-points per CA. The least recently observed entry is evicted at each cap; idle
+points per CA, and to 65,536 points in total. The least recently observed entry
+is evicted at each cap, and a total-cap eviction removes the least recently
+observed point anywhere and counts in the points overflow; idle
 entries expire after 24 hours on the next observation or read. Reads do not
 extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 assets,
 128 peers and 256 station addresses per asset, with the same asset LRU/expiry.

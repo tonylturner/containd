@@ -2983,7 +2983,7 @@ components:
       required: [semantics, limit, retained, evicted, since, complete, rows]
       properties:
         semantics: {type: string, enum: [recent]}
-        limit: {type: integer, description: Retention cap; zero while retention is unbounded.}
+        limit: {type: integer, description: 'Maximum retained directional host-pair rows; least-recently-active rows are evicted when full.'}
         retained: {type: integer}
         evicted: {type: integer, format: uint64}
         since: {type: string, format: date-time, description: Tracker creation time.}
