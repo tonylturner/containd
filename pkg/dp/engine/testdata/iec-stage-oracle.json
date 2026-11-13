@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "sequences": [
+    {
+      "id": "execute-double-command",
+      "peer": "schema-fixture-not-peer-evidence",
+      "frames": [
+        {"direction": "request", "apdu": "680e000000002e010600010001000001"},
+        {"direction": "response", "apdu": "680e000000002e010700010001000001"},
+        {"direction": "response", "apdu": "680e000000002e010a00010001000001"}
+      ]
+    }
+  ]
+}

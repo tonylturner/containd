@@ -23,7 +23,8 @@ func (t *sessionTable) allocateSessionLocked(client, server netip.AddrPort, ctx 
 	// The fixed credit includes held-list slots and abort bookkeeping, so
 	// a terminal failure never needs another allocation reservation.
 	return &trackedSession{memory: memory, id: t.newID(), flow: retainedSessionState(state),
-		client: client, server: server, iecSession: iecSession{ctx: ctx, mode: mode}, lastSeen: now,
+		pairing: newPairing(sessionProtocol(state), t.resources, mode == "monitor", &t.pairingTotal),
+		client:  client, server: server, iecSession: iecSession{ctx: ctx, mode: mode}, lastSeen: now,
 		held: make([]*heldPacket, 0, sessionMaxHeldPerSession)}
 }
 
@@ -69,6 +70,9 @@ func (t *sessionTable) inspectionLimitLocked(s *trackedSession, cur *heldPacket,
 }
 
 func (s *trackedSession) clearInspectionBytes() {
+	if s.pairing != nil {
+		s.pairing.close()
+	}
 	for _, d := range s.dirs {
 		if d != nil {
 			d.bytes.Release()

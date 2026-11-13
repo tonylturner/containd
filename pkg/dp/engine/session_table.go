@@ -55,6 +55,7 @@ const (
 // trackedSession owns one TCP session incarnation, from its SYN.
 type trackedSession struct {
 	iecSession     // protocol state; transport identity, ranges and credits live here
+	pairing        sessionPairing
 	memory         *flow.InspectionMemory
 	inspectionLost bool
 	id             string
@@ -127,13 +128,14 @@ type sessionTable struct {
 	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
 	pressureOffline bool
 
-	snap       *rules.Snapshot
-	sessions   map[sessionKey]*trackedSession
-	tombstones int
-	heldTotal  int
-	held       map[capture.Token]*trackedSession
-	aborts     map[capture.Token]*abortTxn
-	reconnect  map[string]time.Time // client IP + server → aborted at
+	snap         *rules.Snapshot
+	sessions     map[sessionKey]*trackedSession
+	tombstones   int
+	heldTotal    int
+	pairingTotal int
+	held         map[capture.Token]*trackedSession
+	aborts       map[capture.Token]*abortTxn
+	reconnect    map[string]time.Time // client IP + server → aborted at
 }
 
 func addrPort(ip net.IP, port uint16) (netip.AddrPort, bool) {
@@ -288,6 +290,9 @@ func (t *sessionTable) expire() {
 				acts.merge(t.deleteLocked(key, s))
 			}
 		default:
+			if s.pairing != nil {
+				s.pairing.expire(now)
+			}
 			t.iecAdapter.expireLocked(t, s, &acts, now)
 			if len(s.held) > 0 && now.Sub(s.held[0].since) > sessionPendingTimeout {
 				acts.merge(t.abortLocked(s, abortTimeout, "", nil, now))

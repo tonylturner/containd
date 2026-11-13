@@ -757,6 +757,7 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
 		t.iecAdapter.frameLocked(t, s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
+		t.observePairingLocked(s, dir, f, now)
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
 	}
