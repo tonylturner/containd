@@ -1,0 +1,202 @@
+{
+  "document": {
+    "category": "csaf_security_advisory",
+    "csaf_version": "2.0",
+    "lang": "en-US",
+    "title": "Uninspected Modbus and DNP3 traffic bypasses enforce-mode predicates",
+    "publisher": {
+      "category": "vendor",
+      "contact_details": "Email tony@defendics.com and follow the disclosure process in https://github.com/tonylturner/containd/blob/main/SECURITY.md",
+      "issuing_authority": "The containd project publishes a CSAF VEX document for each release and CSAF security advisories for confirmed vulnerabilities that affect the containd codebase, official container images, and directly maintained release artifacts.",
+      "name": "containd project",
+      "namespace": "https://github.com/tonylturner/containd"
+    },
+    "aggregate_severity": {
+      "namespace": "https://www.first.org/cvss/v3.1",
+      "text": "HIGH"
+    },
+    "tracking": {
+      "id": "containd-2026-004",
+      "status": "final",
+      "version": "1",
+      "initial_release_date": "2026-11-13T00:00:00Z",
+      "current_release_date": "2026-11-13T00:00:00Z",
+      "revision_history": [
+        {
+          "number": "1",
+          "date": "2026-11-13T00:00:00Z",
+          "summary": "Initial publication of the evidenced affected range, inspection workarounds and the scheduled 0.1.44 fix."
+        }
+      ]
+    },
+    "notes": [
+      {
+        "category": "summary",
+        "title": "Summary",
+        "text": "Enforce-mode Modbus and DNP3 rules could admit traffic on transport scope alone when DPI or the relevant protocol decoder was disabled, or an IP/CIDR DPI exclusion covered the flow. A read-only ALLOW could admit writes, and a DENY targeting a DNP3 operate could admit that operate. The combined management appliance and standalone engine are affected. The fix is scheduled for containd 0.1.44."
+      }
+    ],
+    "references": [
+      {
+        "category": "self",
+        "summary": "This advisory",
+        "url": "https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-004.json"
+      }
+    ]
+  },
+  "product_tree": {
+    "branches": [
+      {
+        "category": "product_name",
+        "name": "containd",
+        "branches": [
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.37|<=0.1.43",
+            "product": {
+              "product_id": "containd-management-0.1.37-through-0.1.43",
+              "name": "containd management releases 0.1.37 through 0.1.43"
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "0.1.44",
+            "product": {
+              "product_id": "containd-0.1.44",
+              "name": "containd management 0.1.44"
+            }
+          }
+        ]
+      },
+      {
+        "category": "product_name",
+        "name": "containd-engine",
+        "branches": [
+          {
+            "category": "product_version_range",
+            "name": "vers:semver/>=0.1.37|<=0.1.43",
+            "product": {
+              "product_id": "containd-engine-0.1.37-through-0.1.43",
+              "name": "containd-engine releases 0.1.37 through 0.1.43"
+            }
+          },
+          {
+            "category": "product_version",
+            "name": "0.1.44",
+            "product": {
+              "product_id": "containd-engine-0.1.44",
+              "name": "containd-engine 0.1.44"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "title": "Uninspected Modbus and DNP3 traffic bypasses enforce-mode predicates",
+      "ids": [
+        {
+          "system_name": "containd advisory",
+          "text": "containd-2026-004"
+        }
+      ],
+      "cwe": {
+        "id": "CWE-636",
+        "name": "Not Failing Securely ('Failing Open')"
+      },
+      "notes": [
+        {
+          "category": "description",
+          "title": "Description",
+          "text": "With NFQUEUE enforcement configured, Modbus and DNP3 ICS rules steered their transport scope to the engine for protocol-level decisions. Queued terminals admitted transport irrespective of the configured ALLOW or DENY action. If the DPI master switch was off, or an IP/CIDR exclusion suppressed inspection, the engine accepted the uninspected flow and continued to kernel admission without a non-admitting verdict. Disabling the relevant decoder likewise prevented the protocol events needed to evaluate its predicates. The resulting transport-only admission bypassed function-code and read-only restrictions."
+        },
+        {
+          "category": "general",
+          "title": "Version evidence and limits",
+          "text": "Commit 8e89b0df397f8455039efeae68ab6830e8e81ee6 introduced the ordered admission implementation in pkg/dp/enforce/ordered.go: queued ICS terminals admit transport regardless of their message action and transport matching clears the ICS predicate. Its first containing release tag is v0.1.37. The explicit !shouldInspect accept path in pkg/dp/engine/us_packet.go is already present in commit ef0d3e332afd21e668f54fa4c8cb283107dac98d (v0.1.33); uninspected-flow ALLOW caching existed even earlier. Both ordered admission and the uninspected accept remain in every release tag from v0.1.37 through v0.1.42. Release 0.1.43 also remains affected; the first fixed version is 0.1.44. Engine-level reproduction confirmed v0.1.39 and v0.1.42. Accordingly, 0.1.37 is the earliest release established as affected by this source analysis, not a proven original introduction of every variant. The reproduction did not compile on v0.1.35; releases before 0.1.37 remain untested and are not asserted to be unaffected. Earlier queue implementations may also be affected."
+        },
+        {
+          "category": "general",
+          "title": "Product and operating-mode scope",
+          "text": "The combined containd management appliance runs this dataplane engine, as does the standalone containd-engine product. This is a transit-policy enforcement flaw, not a management API authentication bypass. Exposure requires a matching effective-enforce Modbus or DNP3 rule and unavailable inspection caused by disabled DPI, a disabled relevant decoder, or an overlapping IP/CIDR DPI exclusion. Monitor-effective rules do not promise prevention and are not the vulnerability described here. IEC 104 configurations with these inspection conflicts were rejected by validation rather than exhibiting this demonstrated bypass. CIP was not separately reproduced; this advisory does not assert a tested CIP bypass."
+        },
+        {
+          "category": "general",
+          "title": "CVSS scoring",
+          "text": "The containd project assigns CVSS 3.1 7.5 HIGH: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N. An unauthenticated network peer able to send traffic through the affected transport scope can send ordinary prohibited protocol commands without a race, special payload or user interaction. The inspection-off or exclusion configuration is an exposure prerequisite, not attacker-held privileges. Integrity is high because protocol-level write/operate restrictions can be completely bypassed within that scope. Scope is unchanged because the scored impact is failure of the firewall policy under its own security authority. Confidentiality and availability are not scored: neither disclosure nor a device outage was demonstrated. Downstream process consequences depend on the protected devices and are not assumed in this base score."
+        },
+        {
+          "category": "general",
+          "title": "Scope and availability of the fix",
+          "text": "The first fixed version is 0.1.44, the next scheduled release; 0.1.43 remains affected. Commit cb995a84a79fdea33a7b685fb51e56204eec7420 and follow-up commits through 0baeb316 add fail-closed handling for Modbus, DNP3, IEC 104 and CIP enforce rules when inspection is unavailable. Disabled DPI or a disabled decoder causes a kernel drop over the rule transport scope; IP/CIDR-excluded flows in queued enforce scopes are dropped by the engine. This applies to ALLOW and DENY alike. Configurations remain valid with warnings explaining the cause and repair, and the former IEC 104-only inspection-activation validation is removed. The NFQUEUE requirement remains. Until 0.1.44 is available, apply a workaround."
+        }
+      ],
+      "product_status": {
+        "known_affected": [
+          "containd-management-0.1.37-through-0.1.43",
+          "containd-engine-0.1.37-through-0.1.43"
+        ],
+        "fixed": [
+          "containd-0.1.44",
+          "containd-engine-0.1.44"
+        ]
+      },
+      "scores": [
+        {
+          "cvss_v3": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          },
+          "products": [
+            "containd-management-0.1.37-through-0.1.43",
+            "containd-engine-0.1.37-through-0.1.43"
+          ]
+        }
+      ],
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Upgrade the combined management appliance and any standalone engines to containd 0.1.44, the first fixed version. This is the next scheduled release, not a claim that it is already published; use a workaround until it is available.",
+          "product_ids": [
+            "containd-management-0.1.37-through-0.1.43",
+            "containd-engine-0.1.37-through-0.1.43"
+          ],
+          "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.44"
+        },
+        {
+          "category": "workaround",
+          "details": "Keep dataplane.dpiEnabled enabled and the relevant decoder enabled in dataplane.dpiIcsProtocols, and remove IP/CIDR dataplane.dpiExclusions entries that overlap enforce rules. Save and commit the corrected configuration. Alternatively replace each affected rule with an explicit transport-level DENY over the required scope, removing its ICS predicate so it is not queued for protocol inspection; ensure no earlier ALLOW shadows that DENY. A transport DENY blocks all matching traffic, including otherwise permitted reads, not only the prohibited protocol function.",
+          "product_ids": [
+            "containd-management-0.1.37-through-0.1.43",
+            "containd-engine-0.1.37-through-0.1.43"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "category": "external",
+          "summary": "Ordered admission implementation, first released in 0.1.37",
+          "url": "https://github.com/tonylturner/containd/commit/8e89b0df397f8455039efeae68ab6830e8e81ee6"
+        },
+        {
+          "category": "external",
+          "summary": "Explicit uninspected-flow accept path present in 0.1.33",
+          "url": "https://github.com/tonylturner/containd/blob/v0.1.33/pkg/dp/engine/us_packet.go#L71-L75"
+        },
+        {
+          "category": "external",
+          "summary": "Fail-closed inspection availability fix",
+          "url": "https://github.com/tonylturner/containd/commit/cb995a84a79fdea33a7b685fb51e56204eec7420"
+        },
+        {
+          "category": "external",
+          "summary": "Release downloads",
+          "url": "https://github.com/tonylturner/containd/releases"
+        }
+      ]
+    }
+  ]
+}
