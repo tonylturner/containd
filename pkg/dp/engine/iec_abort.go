@@ -100,7 +100,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 	if t.markAbort != nil {
 		t.markAbort(s.id)
 	}
-	t.reconnect[pairKey(s.client, s.server)] = now
+	t.rememberReconnectLocked(s.client, s.server, now)
 	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason.name}, now))
 	if txn.pending == 0 {
 		acts.merge(t.finishLocked(txn, now))

@@ -350,14 +350,19 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	prevIEC := e.iec
 	e.retireCaptureLocked()
 	e.stopNFLogLocked()
+
+	// Join capture before taking its publication fence: delivery and verdict
+	// settlement may still need the read lock while Stop waits for them.
+	// Direct packet callers use the same fence, so retire their owners only
+	// after in-flight calls finish, and keep admission excluded until the swap.
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	if prevIEC != nil {
 		prevIEC.flushHeldCredits()
 		prevIEC.stopInspection()
 	}
 	e.clearFlowOwners()
 
-	e.policyMu.Lock()
-	defer e.policyMu.Unlock()
 	e.flowMu.Lock()
 	observationRecords := e.observationPending
 	e.observationPending = nil

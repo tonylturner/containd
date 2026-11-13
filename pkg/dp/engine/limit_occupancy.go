@@ -15,7 +15,7 @@ func (t *iecTable) LimitOccupancy() limits.Occupancy {
 func (t *iecTable) reconnectLimitOccupancy() limits.Occupancy {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return limits.Occupancy{Entries: int64(len(t.reconnect))}
+	return limits.Occupancy{Limit: iecMaxReconnectHistory, Entries: int64(len(t.reconnect))}
 }
 
 func (e *Engine) httpCorrelationOccupancy() limits.Occupancy {

@@ -40,6 +40,7 @@ const (
 	iecIdleTTL              = 10 * time.Minute
 	iecResetRetries         = 3
 	iecResetWindow          = time.Second
+	iecMaxReconnectHistory  = 4096
 	iecReconnectWindow      = 10 * time.Minute
 	iecExpireInterval       = 100 * time.Millisecond
 	iecProtocol             = "iec104"
@@ -211,6 +212,24 @@ func addrPort(ip net.IP, port uint16) (netip.AddrPort, bool) {
 
 func pairKey(client, server netip.AddrPort) string {
 	return client.Addr().String() + ">" + server.String()
+}
+
+// rememberReconnectLocked retains observational abort history. Refreshing a
+// pair does not consume another slot; new pairs displace the oldest abort.
+func (t *iecTable) rememberReconnectLocked(client, server netip.AddrPort, now time.Time) {
+	key := pairKey(client, server)
+	if _, exists := t.reconnect[key]; !exists && len(t.reconnect) >= iecMaxReconnectHistory {
+		var oldest string
+		var at time.Time
+		for k, aborted := range t.reconnect {
+			if oldest == "" || aborted.Before(at) || aborted.Equal(at) && k < oldest {
+				oldest, at = k, aborted
+			}
+		}
+		delete(t.reconnect, oldest)
+		t.ledger.Record(limits.TableIECReconnect, limits.ReasonEvicted, limits.ModeObserve)
+	}
+	t.reconnect[key] = now
 }
 
 // sessionCtx is the opener-oriented evaluation context of a session.
