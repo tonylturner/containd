@@ -9,8 +9,8 @@
 
 ## Direct-upgrade validation
 
-The proven continuous direct-upgrade floor is **0.1.35**, for the candidate
-identified below: training 0.1.35–0.1.42 and strict→strict 0.1.39–0.1.42 all
+The proven continuous direct-upgrade floor is **0.1.35**, for the release
+candidate: training 0.1.35–0.1.42 and strict→strict 0.1.39–0.1.42 all
 pass. Training 0.1.33 also passes individually, but does not lower the floor
 because 0.1.34 has a reproduced source defect. These are combined-mode,
 same-profile upgrades with a full stopped-data backup and, for sources before
@@ -29,50 +29,34 @@ static-address configuration:
 
 These failures occur in the published source writer, before candidate boot.
 The 0.1.33 release notes document preservation of static, DHCP and WireGuard
-host addresses during CIDR conversion. Do not remove static addresses from the
-test fixture or modify old databases to turn these rows into passing claims.
+host addresses during CIDR conversion. Schema compatibility does not fix a
+source release that cannot commit the representative configuration.
 The 0.1.35 release notes document the explicit-binding fix. The 0.1.34 failure
 depends on attachment order: a successful attempt does not erase a reproduced
 source defect or extend the continuous supported floor.
 
-### Measured matrix
+### Supported upgrade paths
 
-Validated on 2026-11-12 with Docker Desktop, Linux/arm64, against the local
-candidate image `containd/containd:upgrade-578f7729-continue`,
-built with embedded commit `ce93be97a5d12d935add68fc2952fce46510422d` and image ID
-`sha256:84b91d0faa9dbc427ddf3b97e0366c69c53943c595c844e1b4b1bd612953991b`.
-Its informational VERSION is `0.1.42` (before the release bump); target
-config schema is `0.1.11`. This is evidence for this candidate, not a
-promise for an untested future tag. Re-run the matrix before releasing it.
+Validated on 2026-11-12 with Docker Desktop, Linux/arm64, against the release
+candidate (config schema `0.1.11`). These passing paths apply to that candidate,
+not an untested future release. The release owner retains private image identity
+and run evidence; revalidate against the exact candidate before each release.
 
-| Source | Profile | Result | Wall seconds |
-| --- | --- | --- | ---: |
-| 0.1.30 | training | UNSUPPORTED | 19.53 |
-| 0.1.31 | training | UNSUPPORTED | 19.43 |
-| 0.1.32 | training | UNSUPPORTED | 18.41 |
-| 0.1.33 | training | PASS | 23.74 |
-| 0.1.34 | training | UNSUPPORTED (attempt passed) | 17.17 |
-| 0.1.35 | training | PASS | 20.11 |
-| 0.1.36 | training | PASS | 16.90 |
-| 0.1.37 | training | PASS | 17.08 |
-| 0.1.38 | training | PASS | 16.94 |
-| 0.1.39 | training | PASS | 17.09 |
-| 0.1.40 | training | PASS | 18.55 |
-| 0.1.41 | training | PASS | 18.16 |
-| 0.1.42 | training | PASS | 17.40 |
-| 0.1.39 | strict | PASS | 17.91 |
-| 0.1.40 | strict | PASS | 18.72 |
-| 0.1.41 | strict | PASS | 19.51 |
-| 0.1.42 | strict | PASS | 18.59 |
-
-Wall times include each source pull, seed, upgrade, checks and teardown, with
-cached images; they are not throughput or upgrade-downtime benchmarks. The
-rows total 315.24 seconds, excluding the shared endpoint image build.
-Every passing row completes 14 named assertion groups. The 0.1.34 attempt also
-completed all checks, but remains unsupported because its explicit-binding
-failure was reproduced on another attachment order. No candidate boot occurred
-for the address-conversion failures. All owned containers, networks and volumes
-were absent after teardown; pulled and built images were retained.
+| From | To | Profile |
+| --- | --- | --- |
+| 0.1.33 | Release candidate | training |
+| 0.1.35 | Release candidate | training |
+| 0.1.36 | Release candidate | training |
+| 0.1.37 | Release candidate | training |
+| 0.1.38 | Release candidate | training |
+| 0.1.39 | Release candidate | training |
+| 0.1.40 | Release candidate | training |
+| 0.1.41 | Release candidate | training |
+| 0.1.42 | Release candidate | training |
+| 0.1.39 | Release candidate | strict→strict |
+| 0.1.40 | Release candidate | strict→strict |
+| 0.1.41 | Release candidate | strict→strict |
+| 0.1.42 | Release candidate | strict→strict |
 
 For a release candidate, run the complete
 [upgrade matrix smoke](testing.md#upgrade-matrix-smoke) before tagging:
@@ -95,8 +79,7 @@ first fixed release, without altering the representative fixture. The smoke
 continues past those rows but stops on an unexpected or candidate-side failure,
 without repairing stored data or relaxing protection assertions. The floor is
 the oldest source from which every later training row and every available later
-strict row passes. The candidate is identified by image tag and embedded source
-commit; VERSION can still name the previous release before the release bump.
+strict row passes.
 It covers combined mode and a representative routed policy, not every service
 or split deployment. Full stopped-data rollback
 backups and the interface-name changes below remain mandatory.
