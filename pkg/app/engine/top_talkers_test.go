@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
@@ -36,7 +37,7 @@ func TestTopTalkersClampAndShape(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if w.Code != 200 || len(got.Rows) != tc.want || got.Semantics != "recent" || got.Limit != 0 || got.Evicted != 0 || got.Retained != 1002 || !got.Complete || got.Since.IsZero() {
+			if w.Code != 200 || len(got.Rows) != tc.want || got.Semantics != "recent" || got.Limit != limits.DefaultMaxTopTalkers || got.Evicted != 0 || got.Retained != 1002 || !got.Complete || got.Since.IsZero() {
 				t.Fatalf("shape/clamp %+v status %d", got, w.Code)
 			}
 		})
