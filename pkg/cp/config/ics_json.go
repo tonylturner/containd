@@ -14,6 +14,7 @@ import (
 )
 
 type icsPredicateJSON struct {
+	MessageClass      string     `json:"messageClass,omitempty"`
 	Protocol          string     `json:"protocol,omitempty"`
 	FunctionCode      []int      `json:"functionCode,omitempty"`
 	UnitID            *uint8     `json:"unitId,omitempty"`
@@ -46,6 +47,7 @@ type icsPredicateJSON struct {
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 	out := icsPredicateJSON{
 		Protocol:          p.Protocol,
+		MessageClass:      p.MessageClass,
 		UnitID:            p.UnitID,
 		Addresses:         p.Addresses,
 		ObjectClasses:     p.ObjectClasses,
@@ -106,6 +108,9 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
+	if err := checkMessageClassKeys(out, fields); err != nil {
+		return err
+	}
 	if err := checkICSKeysForProtocol(out.Protocol, fields); err != nil {
 		return err
 	}
@@ -117,7 +122,7 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 // Matching is exact: encoding/json's case-insensitive field matching does
 // not apply to predicates.
 var icsPredicateKeys = []string{
-	"protocol", "functionCode", "unitId", "addresses", "objectClasses",
+	"protocol", "messageClass", "functionCode", "unitId", "addresses", "objectClasses",
 	"readOnly", "writeOnly", "direction", "mode",
 	"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute", "commandStates", "commandQualifiers",
 	"masters", "outstations", "groups", "variations", "instances", "attributes", "tags",
@@ -136,6 +141,15 @@ var cipOnlyKeys = []string{"instances", "attributes", "tags"}
 func (p *ICSPredicate) decodeField(key string, raw json.RawMessage) error {
 	var err error
 	switch key {
+	case "messageClass":
+		if isJSONNull(raw) {
+			err = errors.New("must not be null; omit the field to match ordinary messages")
+		} else {
+			err = json.Unmarshal(raw, &p.MessageClass)
+			if err == nil && p.MessageClass != "autonomous" && p.MessageClass != "session" {
+				err = errors.New("must be autonomous or session")
+			}
+		}
 	case "protocol":
 		err = json.Unmarshal(raw, &p.Protocol)
 	case "functionCode":

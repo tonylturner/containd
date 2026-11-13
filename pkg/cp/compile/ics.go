@@ -13,6 +13,7 @@ import (
 func ICSPredicate(p config.ICSPredicate) dprules.ICSPredicate {
 	out := dprules.ICSPredicate{
 		Protocol:          p.Protocol,
+		MessageClass:      p.MessageClass,
 		FunctionCode:      append([]uint8(nil), p.FunctionCode...),
 		Addresses:         append([]string(nil), p.Addresses...),
 		ObjectClasses:     append([]uint16(nil), p.ObjectClasses...),

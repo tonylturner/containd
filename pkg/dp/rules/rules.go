@@ -146,6 +146,7 @@ type Protocol struct {
 
 // ICSPredicate captures ICS-specific fields for all supported protocols.
 type ICSPredicate struct {
+	MessageClass  string   `json:"messageClass,omitempty"` // autonomous | session; omitted = ordinary
 	Protocol      string   // modbus, dnp3, cip, iec104
 	FunctionCode  []uint8  // function/service codes (all protocols)
 	UnitID        *uint8   // optional Modbus unit id

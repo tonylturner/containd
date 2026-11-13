@@ -15,6 +15,7 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 	unitID := uint8(7)
 	in := config.ICSPredicate{
 		Protocol:          "iec104",
+		MessageClass:      "autonomous",
 		FunctionCode:      []uint8{3},
 		UnitID:            &unitID,
 		Addresses:         []string{"0-10"},
@@ -45,6 +46,7 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 	wantUnitID := uint8(7)
 	want := rules.ICSPredicate{
 		Protocol:          "iec104",
+		MessageClass:      "autonomous",
 		FunctionCode:      []uint8{3},
 		UnitID:            &wantUnitID,
 		Addresses:         []string{"0-10"},
@@ -75,7 +77,7 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 	// Keep the complete explicit fixture above in lockstep with both types.
 	// No zero fields: even pointer-false and list-zero values must survive.
 	for _, typ := range []reflect.Type{reflect.TypeOf(in), reflect.TypeOf(want)} {
-		if typ.NumField() != 27 {
+		if typ.NumField() != 28 {
 			t.Fatalf("%s has %d fields; enumerate every predicate field in the copy fixture", typ, typ.NumField())
 		}
 	}
