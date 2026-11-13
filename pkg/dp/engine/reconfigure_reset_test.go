@@ -45,7 +45,7 @@ func (*resetOnQueueStopCapture) Settler() capture.Settler { return nil }
 
 func TestReconfigureRunsQueueShutdownResetsBeforeStoppingWorker(t *testing.T) {
 	injector := &session.Fake{}
-	e, err := New(Config{NFQueueGroup: 101, ResetInjector: injector})
+	e, err := New(Config{DPIEnabled: true, NFQueueGroup: 101, ResetInjector: injector})
 	if err != nil {
 		t.Fatal(err)
 	}

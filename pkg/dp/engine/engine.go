@@ -595,10 +595,14 @@ func (e *Engine) ShouldInspect(state *flow.State, pkt *dpi.ParsedPacket) bool {
 	return false
 }
 
+func (e *Engine) dpiMasterEnabled() bool {
+	return e != nil && (e.dpiEnabled || e.inspectAll)
+}
+
 func (e *Engine) dpiInspectionEnabled(state *flow.State) bool {
 	// Master DPI toggle — when explicitly disabled, skip DPI entirely.
 	// Note: inspectAll (DPIMock/lab mode) overrides this for testing.
-	if !e.dpiEnabled && !e.inspectAll {
+	if !e.dpiMasterEnabled() {
 		return false
 	}
 	if len(e.dpiExclusions) > 0 && state != nil && e.isExcluded(state) {
@@ -674,8 +678,10 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if e.observation != nil && (!stopped || pkt.Token.Inline()) {
 		e.observePacket(pkt, state)
 	}
-	if d, ok := e.handleIECPacket(pkt, state); ok {
-		return d
+	if e.dpiMasterEnabled() {
+		if d, ok := e.handleIECPacket(pkt, state); ok {
+			return d
+		}
 	}
 	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped, observeOnly)
 }

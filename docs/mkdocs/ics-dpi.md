@@ -46,6 +46,11 @@ Setup alone does not turn on DPI, protocol decoders or firewall enforcement,
 and does not change Monitor into blocking. Review those settings, the candidate
 diff and per-rule coverage; use **Commit-confirmed** to apply safely.
 
+The DPI master switch applies to every ICS decoder, including IEC 104. When
+`dataplane.dpiEnabled` is off, no ICS command is decoded or evaluated against
+ICS rules; ordinary firewall policy still determines packet delivery.
+Validation also requires DPI to be enabled for IEC 104 enforce rules.
+
 Monitor-only traffic needs DPI, its decoder and capture:
 
 - With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
