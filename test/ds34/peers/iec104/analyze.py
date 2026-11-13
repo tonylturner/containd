@@ -3,6 +3,7 @@
 
 import csv
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -89,7 +90,80 @@ FIELDS = [
 ]
 
 
-def analyze(stack, directory):
+def replay_sequences(stack, peer, cases, rows):
+    """Export a fixed byte-stable profile, without rewriting any APDU field."""
+    sequences = []
+    observed = {row["case"] for row in rows if row["status"] == "observed"}
+    all_units = [unit for case in cases for unit in case["units"]]
+
+    def frame(direction, data):
+        return {
+            "direction": "request" if direction == "TX" else "response",
+            "apdu": data.hex(),
+        }
+
+    for case in cases:
+        if case["type"] == "0" or case["id"] not in observed:
+            continue
+        # The C sample's later I frames carry periodic-dependent APCI counters.
+        # Its clock and Java's clock also replace timestamps with wall time.
+        # Keep their complete observations in the stage table and wire evidence;
+        # never canonicalize those bytes to manufacture a repeatable fixture.
+        if stack == "lib60870" and not (
+            case["type"] == "45"
+            and case["procedure"] == "execute"
+            and case["variant"] == "without-select"
+        ):
+            continue
+        if stack == "j60870" and case["procedure"] == "clock":
+            continue
+        frames = [
+            frame(direction, data)
+            for direction, data, unit in case["units"]
+            if unit["kind"] == "I" and unit["cot"] not in (1, 2, 3, 4)
+        ]
+        if len(frames) < 2:
+            raise ValueError(f"{stack}: incomplete replay episode {case['id']}")
+        sequences.append(
+            {"id": f"{stack}-case-{case['id']}", "peer": peer, "frames": frames}
+        )
+
+    # U exchanges contain no sequence counters. Select one actual act/con pair,
+    # not every inactivity-triggered repetition whose count depends on timing.
+    for control in ("STARTDT", "STOPDT", "TESTFR"):
+        frames = []
+        for direction, data, unit in all_units:
+            wanted = (("TX", f"{control}-act"), ("RX", f"{control}-con"))[len(frames)]
+            if (direction, unit["kind"]) == wanted:
+                frames.append(frame(direction, data))
+                if len(frames) == 2:
+                    break
+        if len(frames) != 2:
+            raise ValueError(f"{stack}: incomplete replay exchange {control}")
+        sequences.append(
+            {"id": f"{stack}-{control.lower()}", "peer": peer, "frames": frames}
+        )
+
+    if stack == "c104":
+        startup = cases[0]["units"]
+        causes = {
+            unit["cot"]
+            for direction, _, unit in startup
+            if direction == "RX" and unit["kind"] == "I"
+        }
+        if causes != {1, 2, 3, 4}:
+            raise ValueError("c104: incomplete autonomous startup capture")
+        sequences.append(
+            {
+                "id": "c104-startup-autonomous",
+                "peer": peer,
+                "frames": [frame(direction, data) for direction, data, _ in startup],
+            }
+        )
+    return sequences
+
+
+def analyze(stack, peer, directory):
     cases = []
     raw = {"TX": [], "RX": []}
     current = None
@@ -261,21 +335,38 @@ def analyze(stack, directory):
         writer = csv.writer(out, delimiter="\t", lineterminator="\n")
         writer.writerow(["case", "completion_frame", "direction", "apdu_hex"])
         writer.writerows(wire)
-    return rows
+    return rows, replay_sequences(stack, peer, cases, rows)
 
 
 def main():
     directory = Path(sys.argv[1])
-    rows = [
-        row
-        for stack in ("lib60870", "j60870", "c104")
-        for row in analyze(stack, directory)
-    ]
+    with Path(__file__).with_name("sources.tsv").open() as source:
+        peers = {
+            row["name"]: f"{row['name']} {row['version']}@{row['commit']}"
+            for row in csv.DictReader(source, delimiter="\t")
+        }
+    rows = []
+    sequences = []
+    for stack in ("lib60870", "j60870", "c104"):
+        stack_rows, stack_sequences = analyze(stack, peers[stack], directory)
+        rows.extend(stack_rows)
+        sequences.extend(stack_sequences)
     with (directory / "stages.tsv").open("w") as out:
         writer = csv.DictWriter(out, FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
-    print(f"validated {len(rows)} observations against captured TCP")
+    with (directory / "oracle.json").open("w") as out:
+        json.dump(
+            {"version": 1, "sequences": sequences},
+            out,
+            indent=2,
+            allow_nan=False,
+        )
+        out.write("\n")
+    print(
+        f"validated {len(rows)} observations and {len(sequences)} replay sequences "
+        "against captured TCP"
+    )
 
 
 if __name__ == "__main__":

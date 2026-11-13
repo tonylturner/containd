@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 import csv
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +69,83 @@ class CaptureTests(unittest.TestCase):
             self.assertRegex(record["commit"], r"^[0-9a-f]{40}$")
             self.assertRegex(record["archive_sha256"], r"^[0-9a-f]{64}$")
             self.assertIn(record["archive_sha256"], dockerfile)
+
+    def test_replay_schema_and_exact_wire_subsequences(self):
+        root = Path(__file__).parent
+        oracle = json.loads((root / "oracle.json").read_text())
+        self.assertEqual(set(oracle), {"version", "sequences"})
+        self.assertIs(type(oracle["version"]), int)
+        self.assertEqual(oracle["version"], 1)
+        self.assertTrue(oracle["sequences"])
+        with (root / "sources.tsv").open() as source:
+            peers = {
+                row["name"]: f"{row['name']} {row['version']}@{row['commit']}"
+                for row in csv.DictReader(source, delimiter="\t")
+            }
+        with (root / "stages.tsv").open() as source:
+            rows = {
+                (row["stack"], row["case"]): row
+                for row in csv.DictReader(source, delimiter="\t")
+            }
+        wires = {}
+        for stack in ("lib60870", "j60870", "c104"):
+            with (root / f"{stack}.wire.tsv").open() as source:
+                wires[stack] = list(csv.DictReader(source, delimiter="\t"))
+        seen = set()
+        command_types = set()
+        for sequence in oracle["sequences"]:
+            self.assertEqual(set(sequence), {"id", "peer", "frames"})
+            self.assertNotIn(sequence["id"], seen)
+            seen.add(sequence["id"])
+            stack = sequence["id"].split("-")[0]
+            self.assertEqual(sequence["peer"], peers[stack])
+            self.assertGreaterEqual(len(sequence["frames"]), 2)
+            wire = wires[stack]
+            if "-case-" in sequence["id"]:
+                ident = sequence["id"].split("-case-")[1]
+                row = rows[(stack, ident)]
+                self.assertEqual(row["status"], "observed")
+                self.assertTrue(row["request_cot"])
+                wire = [frame for frame in wire if frame["case"] == ident]
+                if row["procedure"] in ("select", "execute"):
+                    command_types.add(int(row["type"]))
+            actual = iter(
+                {
+                    "direction": "request"
+                    if frame["direction"] == "TX"
+                    else "response",
+                    "apdu": frame["apdu_hex"],
+                }
+                for frame in wire
+            )
+            for frame in sequence["frames"]:
+                self.assertEqual(set(frame), {"direction", "apdu"})
+                self.assertIn(frame["direction"], ("request", "response"))
+                self.assertRegex(frame["apdu"], r"^(?:[0-9a-f]{2})+$")
+                data = bytes.fromhex(frame["apdu"])
+                self.assertGreaterEqual(len(data), 6)
+                self.assertEqual(data[0], 0x68)
+                self.assertEqual(len(data), data[1] + 2)
+                self.assertTrue(any(value == frame for value in actual))
+        self.assertEqual(command_types, {*range(45, 52), *range(58, 65)})
+
+    def test_committed_oracles_regenerate_byte_exactly(self):
+        root = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory(prefix="ds34peer-oracle-") as temp:
+            target = Path(temp)
+            for stack in ("lib60870", "j60870", "c104"):
+                for suffix in ("master.log", "tcp.tsv"):
+                    name = f"{stack}.{suffix}"
+                    shutil.copyfile(root / name, target / name)
+            subprocess.run(
+                [sys.executable, str(root / "analyze.py"), str(target)],
+                check=True,
+                capture_output=True,
+            )
+            for name in ("oracle.json", "stages.tsv"):
+                self.assertEqual(
+                    (root / name).read_bytes(), (target / name).read_bytes()
+                )
 
 
 if __name__ == "__main__":

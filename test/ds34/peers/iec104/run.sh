@@ -116,4 +116,4 @@ else:
     [[ "$(wc -c < "$OUT/$stack.pcap")" -gt 24 ]]
 done
 python3 "$HERE/analyze.py" "$OUT"
-echo "Oracle and captures: $OUT"
+echo "Stage table, oracle.json and captures: $OUT"

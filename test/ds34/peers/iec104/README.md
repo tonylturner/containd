@@ -40,6 +40,7 @@ Run from the repository root, choosing two **empty absolute** output directories
 bash test/ds34/peers/iec104/run.sh /tmp/iec104-peer-first
 bash test/ds34/peers/iec104/run.sh /tmp/iec104-peer-second
 cmp /tmp/iec104-peer-first/stages.tsv /tmp/iec104-peer-second/stages.tsv
+cmp /tmp/iec104-peer-first/oracle.json /tmp/iec104-peer-second/oracle.json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s test/ds34/peers/iec104 -p 'test_*.py'
 shellcheck -x test/ds34/peers/iec104/run.sh
@@ -65,9 +66,43 @@ of another procedure fail rather than silently producing an oracle.
 To refresh committed data, review both runs and copy only the evidence files
 listed below from one successful run. Runtime TCP sequence numbers, packet
 numbers, timestamps and periodic sample counts need not be byte-identical;
-`stages.tsv` must be. Run logs and output directories are not build context.
+`stages.tsv` and `oracle.json` must be. Run logs and output directories are not
+build context.
 
 ## Oracle and evidence format
+
+`oracle.json` is the strict version-1 replay interface:
+
+```json
+{"version":1,"sequences":[{"id":"unique-id","peer":"stack version@commit","frames":[{"direction":"request","apdu":"680407000000"},{"direction":"response","apdu":"68040b000000"}]}]}
+```
+
+There are no extra fields. Each sequence contains at least two frames, each
+holding exactly one complete APDU. Directions are master-to-station `request`
+and station-to-master `response`, including autonomous and control frames.
+Every byte, including APCI counters, P/N/T, S/E, addresses, qualifiers, values
+and timestamps, is retained from the verified capture. No timestamp or counter
+normalization is performed. Rejected and unsupported episodes remain only in
+the stage table and full capture evidence, not this replay interface.
+
+The replay export is a **fixed deterministic subset**, not every positive
+observation: all c104 positive I-frame episodes; Java positive I-frame episodes
+except its wall-clock clock-sync replies; the C sample's initial Type45
+execute-without-selection episode; one actual STARTDT/STOPDT/TESTFR pair from
+each peer; and c104's complete autonomous startup, including S acknowledgements.
+Later C I-frame episodes have periodic-dependent APCI counters, and C/Java
+clock replies contain current time. Those observations stay intact in the
+stage table and wire evidence rather than being rewritten for repeatability.
+The JSON includes all fourteen command types, GI, counter, Read, clock and test
+positive witnesses, plus monitoring/initialization and S/U frames. It does not
+invent positive Reset105 or negative peer witnesses.
+
+Sequence IDs `STACK-case-NNN` resolve to `STACK.wire.tsv:case=NNN`; control
+exchange IDs and `c104-startup-autonomous` resolve to the peer's wire table
+(`case=001` for startup). Application episodes omit unrelated S/U and
+autonomous frames while preserving the order and bytes of the I frames.
+The previously documented peer disagreements are preserved, not filtered for
+compatibility with a particular decoder or pairing implementation.
 
 `stages.tsv` is generated exclusively from observed replies:
 
