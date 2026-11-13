@@ -112,7 +112,13 @@ The baseline uses non-race Go tests and is not the complete CI gate.
 
 [CI](.github/workflows/ci.yml) also checks module tidiness, runs the full Go race
 suite, scans with curated Semgrep rules, and builds docs with `--strict`.
-It tests release promotion decisions offline, audits npm dependencies, builds
+The independent `kernel-tests` job runs the eight default privileged kernel
+test roots via `bash scripts/gate-kernel-tests.sh` on `ubuntu-latest`; failures
+upload verbose output as `kernel-tests-log`. It is not the entire opt-in kernel
+suite. Run the same script locally with Docker; Linux hosts need bridge
+netfilter and TUN available before the container starts. See
+[kernel test prerequisites](docs/mkdocs/testing.md#kernel-tests).
+CI also tests release promotion decisions offline, audits npm dependencies, builds
 the UI and runs all Playwright specs with Chromium, uploading reports on failure.
 The Docker job builds the appliance image, runs the AV scanning gate
 (`bash scripts/smoke-av-gate.sh`) and public Compose quickstart

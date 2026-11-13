@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An independent `kernel-tests` CI job runs the eight default privileged kernel
+  test roots on every pull request and push to `main`, with verbose failure
+  logs. Its disposable test container allows the namespace and private procfs
+  mounts needed on AppArmor-enabled Linux hosts.
 - Cleartext HTTP/2 inspection (prior-knowledge preface and `Upgrade: h2c`):
   bounded frame parsing and HPACK decoding report per-stream method, path,
   `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains

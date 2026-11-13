@@ -78,6 +78,7 @@ shellcheck_targets=(
     scripts/containd-connect
     scripts/coverage-report.sh
     scripts/dev-verify.sh
+    scripts/gate-kernel-tests.sh
     scripts/csaf/validate.sh
     scripts/perf-baseline.sh
     scripts/preflight-iec104-helpers.sh

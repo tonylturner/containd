@@ -14,8 +14,11 @@ docs-builder tests, the production build and all Playwright specs with Chromium.
 The Docker job builds the management/all-mode image, runs the AV gate and public
 Compose quickstart against that image, then scans it with Trivy.
 
-These checks do not run the opt-in privileged kernel test suite or every live
-smoke below. Mocked browser tests do not replace live backend or lab-path checks.
+The independent `kernel-tests` job runs the eight default roots selected by
+`bash scripts/gate-kernel-tests.sh` on `ubuntu-latest`, with a 30-minute job
+timeout. Failures upload verbose output as `kernel-tests-log`. This is a
+bounded kernel gate, not every privileged test or live smoke below. Mocked
+browser tests do not replace live backend or lab-path checks.
 
 ## Coverage Workflow
 
@@ -354,6 +357,19 @@ container command. The `pkg/dp/netcfg` management kernel test also needs a
 TUN device, OpenVPN and reverse-path filtering;
 `bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
 
+Run the same kernel gate as CI from the repository root:
+
+```bash
+bash scripts/gate-kernel-tests.sh
+```
+
+It requires Docker with a Linux kernel supporting nftables, NFQUEUE, NFLOG,
+TPROXY, network namespaces, bridge netfilter and TUN. On a Linux host, load
+`br_netfilter` and `tun` before starting the container (`sudo modprobe
+br_netfilter && sudo modprobe tun`); CI does this on its disposable runner.
+Docker Desktop supplies the Linux kernel on macOS. Cold runs need internet
+access for the Go image, Debian packages and Go modules.
+
 `bash scripts/gate-kernel-tests.sh` runs protection-bind
 (`TestProtectionBindKernel` in `pkg/dp/engine`), scanning-gate and
 management-routing kernel tests. The default filter includes
@@ -361,11 +377,19 @@ management-routing kernel tests. The default filter includes
 takeover; the other tests cover nft steering (`TestGateKernel`) and every
 golden nft ruleset (`TestKernelNFTLoadsGoldens`) in `pkg/dp/enforce`, gate
 policy routing (`TestGateRoutingKernel`) in `pkg/dp/netcfg`, and the gate
-manager (`TestGateManagerKernel`) in `pkg/app/engine`. The script builds a
-`golang` image with nftables, iproute2, Python and OpenVPN, passes
+manager (`TestGateManagerKernel`) in `pkg/app/engine`. Cross-zone accounting
+(`TestAccountingKernel` in `pkg/dp/enforce`) and its engine lifecycle
+(`TestTelemetryAccountingKernelLifecycle` in `pkg/dp/engine`) complete the
+eight default roots. All eight must pass; missing prerequisites fail the gate.
+WireGuard and the other opt-in kernel tests are outside this default filter.
+The script builds a `golang` image with nftables, iproute2, Python and OpenVPN, passes
 `/dev/net/tun` into the container, and runs it with `NET_ADMIN`, `NET_RAW` and
-`SYS_ADMIN` (network namespaces need the last one). It keeps the build and
-module caches in named Docker volumes and passes extra arguments to `go test`;
+`SYS_ADMIN` (network namespaces need the last one). Only this disposable
+container runs with `apparmor=unconfined`, allowing netns bind mounts and the
+bridge accounting test's private procfs mount without changing host policy.
+It publishes no host ports and uses neither host networking nor `--privileged`.
+It keeps the build and module caches in named Docker volumes and passes extra
+arguments to `go test`;
 `KERNEL_TEST_RUN` overrides its default test filter. It runs the packages one
 at a time (`go test -p 1`) because the netcfg and engine tests install the
 gate's policy routing in the namespace-global table 104010 and would remove
