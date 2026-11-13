@@ -18,6 +18,7 @@ import (
 // partly covered by a zone with interfaces.
 func emptyZoneSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled:       true,
 		Default:          rules.ActionDeny,
 		ZoneIfaces:       map[string][]string{"ot": {"eth2"}, "spare": nil},
 		IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}},
@@ -61,6 +62,7 @@ func zoneNamesSnapshot() *rules.Snapshot {
 // line, and one rule whose sources and destinations share no family.
 func familySnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled: true,
 		Default:    rules.ActionDeny,
 		ZoneIfaces: map[string][]string{"it": {"eth1"}, "ot": {"eth2"}},
 		IdentityBindings: []rules.IdentityBinding{

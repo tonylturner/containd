@@ -21,6 +21,7 @@ var maintenanceWindow = rules.SchedulePredicate{DaysOfWeek: []string{"Saturday",
 // TAG rules with identities.
 func goldenSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled: true,
 		Default:    rules.ActionDeny,
 		ZoneIfaces: map[string][]string{"l3": {"eth3"}, "l1": {"eth1"}},
 		IdentityBindings: []rules.IdentityBinding{
@@ -232,7 +233,7 @@ func TestIdentityLowering(t *testing.T) {
 // retains identity and schedule, including an inspecting DENY terminal.
 func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	entry := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Schedule: maintenanceWindow, Action: rules.ActionDeny}
-	snap := &rules.Snapshot{Firewall: []rules.Entry{entry}, IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}}}
+	snap := &rules.Snapshot{DPIEnabled: true, Firewall: []rules.Entry{entry}, IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}}}
 	for _, q := range []int{0, 100} {
 		c := goldenCompiler()
 		c.QueueID = q

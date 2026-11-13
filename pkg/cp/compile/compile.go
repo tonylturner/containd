@@ -37,6 +37,7 @@ func CompileSnapshotWithInputs(cfg *config.Config, inputs SnapshotInputs) (dprul
 		LocalIPv4ByDevice: copyLocalIPv4(inputs.LocalIPv4ByDevice),
 		Version:           cfg.Version,
 		DPIMode:           cfg.DataPlane.DPIMode,
+		DPIEnabled:        cfg.DataPlane.DPIEnabled || cfg.DataPlane.DPIMock,
 		Firewall:          make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		LocalInput:        make([]dprules.LocalServiceRule, 0, 8),
 		Default:           dprules.Action(cfg.Firewall.EffectiveDefaultAction()),
@@ -50,6 +51,13 @@ func CompileSnapshotWithInputs(cfg *config.Config, inputs SnapshotInputs) (dprul
 			Enabled: cfg.IDS.Enabled,
 			Rules:   make([]dprules.IDSRule, 0, len(cfg.IDS.Rules)),
 		},
+	}
+	snap.DPIICSProtocols = make(map[string]bool, len(cfg.DataPlane.DPIICSProtocols))
+	for protocol, enabled := range cfg.DataPlane.DPIICSProtocols {
+		snap.DPIICSProtocols[protocol] = enabled
+	}
+	for _, x := range cfg.DataPlane.DPIExclusions {
+		snap.DPIExclusions = append(snap.DPIExclusions, dprules.DPIExclusion{Value: x.Value, Type: x.Type})
 	}
 	if snap.NAT.Enabled {
 		if strings.TrimSpace(snap.NAT.EgressZone) == "" {

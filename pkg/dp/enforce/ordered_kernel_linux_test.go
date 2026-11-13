@@ -58,7 +58,7 @@ func TestOrderedKernelInspectionOrder(t *testing.T) {
 	for _, plainAction := range []rules.Action{rules.ActionAllow, rules.ActionDeny, rules.ActionReset} {
 		for _, inspectFirst := range []bool{false, true} {
 			t.Run(fmt.Sprint(plainAction, inspectFirst), func(t *testing.T) {
-				snap := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
+				snap := &rules.Snapshot{DPIEnabled: true, Default: rules.ActionDeny, Firewall: []rules.Entry{
 					{ID: "plain", Action: plainAction, Protocols: []rules.Protocol{{Name: "tcp", Port: "18001"}}},
 					{ID: "inspected", Action: rules.ActionDeny, Protocols: []rules.Protocol{{Name: "tcp", Port: "18001"}},
 						ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "enforce", FunctionCode: []uint8{6}}},

@@ -46,16 +46,19 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 			r.Lower(Reason{Code: NoInlinePath, Message: "dataplane.nfqueueGroup is 0: the engine only observes copies and cannot hold or drop a command"})
 		}
 	}
-	// The IEC 104 envelope is inspected whatever the DPI master switch says.
-	if !s.DPIEnabled && !iec {
+	// Monitoring IEC sessions retain their independent inspection path.
+	if !s.DPIEnabled && (!iec || mode == modeEnforce) {
 		r.Lower(Reason{Code: DPIDisabled, Message: "DPI is switched off (dataplane.dpiEnabled), so no command of this rule is decoded"})
 	}
 	if on, set := s.ICSProtocols[protocol]; set && !on {
 		r.Lower(Reason{Code: DecoderDisabled, Message: fmt.Sprintf("the %s decoder is switched off (dataplane.dpiIcsProtocols.%s)", protocol, protocol)})
 	}
-	// IEC 104 inspection ignores every DPI exclusion.
-	if !iec {
+	// Monitoring IEC sessions ignore exclusions; enforcing sessions drop IP/CIDR-excluded traffic.
+	if !iec || mode == modeEnforce {
 		for _, x := range s.Exclusions {
+			if iec && x.Type == "domain" {
+				continue
+			}
 			addExclusionReason(&r, e, x)
 		}
 	}
@@ -78,6 +81,16 @@ func addExclusionReason(r *Rule, e rules.Entry, x Exclusion) {
 // leaves it not enforcing. A monitoring rule keeps its state; the reason
 // explains what it cannot observe.
 func (r *Rule) Lower(reason Reason) {
+	if r.Mode == modeEnforce {
+		switch reason.Code {
+		case DPIDisabled:
+			reason.Message = "DPI is off; the kernel drops this rule's whole transport scope until DPI is enabled"
+		case DecoderDisabled:
+			reason.Message += "; the kernel drops this rule's whole transport scope until the decoder is enabled"
+		case ExclusionOverlap:
+			reason.Message = fmt.Sprintf("DPI exclusion %s prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion", reason.Value)
+		}
+	}
 	r.Reasons = append(r.Reasons, reason)
 	if r.State == Monitoring || r.State == NotEnforcing {
 		return

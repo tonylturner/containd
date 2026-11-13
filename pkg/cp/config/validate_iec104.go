@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -121,12 +120,8 @@ func validateIEC104IOA(ranges []IOARange, ruleID string) error {
 	return nil
 }
 
-// validateIEC104Policy checks what needs the whole config: which types an
-// ALLOW rule may name, and the static causes that keep an IEC104 enforce
-// envelope from activating. Commit, candidate and import all
-// validate, so these reject the config before it is saved.
+// validateIEC104Policy checks which types an enforce ALLOW rule may name.
 func validateIEC104Policy(c *Config) error {
-	var enforce []Rule
 	for _, r := range c.Firewall.Rules {
 		if r.ICS.Protocol != ICSProtocolIEC104 {
 			continue
@@ -137,14 +132,8 @@ func validateIEC104Policy(c *Config) error {
 				return err
 			}
 		}
-		if mode == "enforce" {
-			enforce = append(enforce, r)
-		}
 	}
-	if len(enforce) == 0 {
-		return nil
-	}
-	return validateIEC104Activation(c.DataPlane, enforce)
+	return nil
 }
 
 func validateIEC104AllowTypes(r Rule) error {
@@ -155,32 +144,6 @@ func validateIEC104AllowTypes(r Rule) error {
 	}
 	if slices.Contains(r.ICS.Classes, "unknown") {
 		return fmt.Errorf("rule %s ics classes \"unknown\" cannot be allowed in enforce mode", r.ID)
-	}
-	return nil
-}
-
-func validateIEC104Activation(dp DataPlaneConfig, enforce []Rule) error {
-	first := enforce[0].ID
-	if !dp.DPIEnabled {
-		return fmt.Errorf("rule %s: iec104 enforce needs dataplane.dpiEnabled", first)
-	}
-	if on, set := dp.DPIICSProtocols[ICSProtocolIEC104]; set && !on {
-		return fmt.Errorf("rule %s: iec104 enforce needs the iec104 decoder; dataplane.dpiIcsProtocols.iec104 is false", first)
-	}
-	// A zero nfqueueGroup means the engine captures with AF_PACKET, which
-	// observes but cannot hold or drop a packet.
-	if dp.NFQueueGroup == 0 {
-		return fmt.Errorf("rule %s: iec104 enforce needs NFQUEUE capture; set dataplane.nfqueueGroup to a non-zero queue", first)
-	}
-	// Domain exclusions never exempt the envelope, so only IP and CIDR
-	// exclusions can overlap it.
-	for _, r := range enforce {
-		for _, excl := range dp.DPIExclusions {
-			x := coverage.Exclusion{Value: excl.Value, Type: excl.Type}
-			if coverage.ExclusionOverlaps(x, r.Sources, r.Destinations) {
-				return fmt.Errorf("rule %s: dpi exclusion %q overlaps the iec104 enforce envelope", r.ID, excl.Value)
-			}
-		}
 	}
 	return nil
 }

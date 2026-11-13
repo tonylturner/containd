@@ -25,6 +25,7 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 		GatePlainPort: enforce.DefaultGatePlainPort, GateMasqPort: enforce.DefaultGateMasqPort}
 	snap := iecSnapshot("enforce")
 	snap.DPIMode = "enforce"
+	snap.DPIEnabled = true
 	snap.Firewall = append(snap.Firewall,
 		rules.Entry{ID: "logged", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Log: true, Action: rules.ActionAllow},
 		rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus"}, Action: rules.ActionAllow},
@@ -43,7 +44,7 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			applier := &recordingApplier{}
-			e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, TableName: settings.TableName,
+			e, err := New(Config{DPIEnabled: true, Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, TableName: settings.TableName,
 				ManagementReservation: reservation, EngineAPI: engineAPI, Applier: applier,
 				GatePlainPort: settings.GatePlainPort, GateMasqPort: settings.GateMasqPort},
 				NFLogGroup: settings.NFLogGroup, NFQueueGroup: settings.NFQueueGroup, ResetInjector: &session.Fake{}})

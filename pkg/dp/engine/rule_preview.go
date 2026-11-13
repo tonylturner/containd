@@ -66,8 +66,19 @@ func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) P
 	evs := e.Events().ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}, ForwardMatches: request.ForwardMatches}
+	e.flowMu.Lock()
+	settings := e.coverage
+	e.flowMu.Unlock()
+	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}, ForwardMatches: request.ForwardMatches,
+		DPIMode: settings.DPIMode, DPIEnabled: settings.DPIEnabled, DPIICSProtocols: settings.ICSProtocols}
+	for _, x := range settings.Exclusions {
+		candidate.DPIExclusions = append(candidate.DPIExclusions, rules.DPIExclusion{Value: x.Value, Type: x.Type})
+	}
 	if snap != nil {
+		candidate.DPIMode = snap.DPIMode
+		candidate.DPIEnabled = snap.DPIEnabled
+		candidate.DPIICSProtocols = snap.DPIICSProtocols
+		candidate.DPIExclusions = snap.DPIExclusions
 		candidate.IdentityBindings = snap.IdentityBindings
 		candidate.ZoneIfaces = snap.ZoneIfaces
 		candidate.LocalIPv4ByDevice = snap.LocalIPv4ByDevice

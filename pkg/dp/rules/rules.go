@@ -12,7 +12,10 @@ type Snapshot struct {
 	AdmissionParity   uint32
 	ForwardMatches    map[string]ForwardMatch
 	LocalIPv4ByDevice map[string][]netip.Addr
-	DPIMode           string  // inherited ICS mode for this snapshot
+	DPIMode           string // inherited ICS mode for this snapshot
+	DPIEnabled        bool
+	DPIICSProtocols   map[string]bool
+	DPIExclusions     []DPIExclusion
 	Version           string  // compiled rule version
 	Firewall          []Entry // firewall rules
 	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
@@ -29,6 +32,12 @@ type Snapshot struct {
 	IdentityBindings []IdentityBinding
 	// Gate is the scan selection the engine steers through the scanning gate.
 	Gate GateSelection
+}
+
+// DPIExclusion selects traffic that cannot be inspected.
+type DPIExclusion struct {
+	Value string
+	Type  string
 }
 
 // IdentityBinding tags one address with identity labels.

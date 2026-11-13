@@ -158,21 +158,25 @@ func TestValidateIEC104EnforceStaticCauses(t *testing.T) {
 		mutate func(*DataPlaneConfig)
 		want   string
 	}{
-		{"dpi off", func(dp *DataPlaneConfig) { dp.DPIEnabled = false }, "needs dataplane.dpiEnabled"},
-		{"decoder off", func(dp *DataPlaneConfig) { dp.DPIICSProtocols["iec104"] = false }, "dpiIcsProtocols.iec104 is false"},
-		{"queue 0 means AF_PACKET capture", func(dp *DataPlaneConfig) { dp.NFQueueGroup = 0 }, "needs NFQUEUE capture"},
+		{"dpi off", func(dp *DataPlaneConfig) { dp.DPIEnabled = false }, ""},
+		{"decoder off", func(dp *DataPlaneConfig) { dp.DPIICSProtocols["iec104"] = false }, ""},
+		{"queue 0 means AF_PACKET capture", func(dp *DataPlaneConfig) { dp.NFQueueGroup = 0 }, "needs an inline path"},
 		{"ip exclusion on the server", func(dp *DataPlaneConfig) {
 			dp.DPIExclusions = []DPIExclusion{{Value: "10.30.30.30", Type: "ip"}}
-		}, `dpi exclusion "10.30.30.30" overlaps`},
+		}, ""},
 		{"cidr exclusion around the client", func(dp *DataPlaneConfig) {
 			dp.DPIExclusions = []DPIExclusion{{Value: "10.60.0.0/16", Type: "cidr"}}
-		}, `dpi exclusion "10.60.0.0/16" overlaps`},
+		}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := iec104Config(rule)
 			tc.mutate(&cfg.DataPlane)
-			wantValidateError(t, cfg, tc.want)
+			if tc.want != "" {
+				wantValidateError(t, cfg, tc.want)
+			} else if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 
@@ -181,7 +185,9 @@ func TestValidateIEC104EnforceStaticCauses(t *testing.T) {
 		open.Sources = nil
 		cfg := iec104Config(open)
 		cfg.DataPlane.DPIExclusions = []DPIExclusion{{Value: "192.0.2.1", Type: "ip"}}
-		wantValidateError(t, cfg, "overlaps the iec104 enforce envelope")
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	t.Run("activatable", func(t *testing.T) {
@@ -210,13 +216,13 @@ func TestValidateIEC104EnforceStaticCauses(t *testing.T) {
 		inherit := iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true})
 		cfg := iec104Config(inherit)
 		cfg.DataPlane.NFQueueGroup = 0
-		wantValidateError(t, cfg, "needs NFQUEUE capture")
+		wantValidateError(t, cfg, "needs an inline path")
 	})
 }
 
 // Commit, candidate and import all save through the store, which
 // validates before it writes anything.
-func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
+func TestStoreSavesUninspectableIEC104Enforce(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cfg.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -226,14 +232,14 @@ func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 
 	cfg := iec104Config(iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "enforce"}))
 	cfg.DataPlane.DPIICSProtocols["iec104"] = false
-	if err := testSaveCandidate(store, ctx, cfg); err == nil || !strings.Contains(err.Error(), "iec104") {
-		t.Fatalf("SaveCandidate err = %v, want iec104 rejection", err)
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
+		t.Fatal(err)
 	}
-	if err := store.Save(ctx, cfg); err == nil || !strings.Contains(err.Error(), "iec104") {
-		t.Fatalf("Save err = %v, want iec104 rejection", err)
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := store.Load(ctx); err != ErrNotFound {
-		t.Fatalf("Load after rejected save err = %v, want ErrNotFound", err)
+	if _, err := store.Load(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -125,8 +125,9 @@ func (e *Engine) resetExclusionHits() {
 }
 
 // countAddressExclusionLocked counts a new connection that an IP or CIDR
-// exclusion exempts from inspection. IEC 104 sessions are inspected
-// regardless, and nothing is exempted while DPI is off. Requires flowMu.
+// exclusion exempts from inspection. Inline IEC enforce drops are counted
+// by uninspectableDecision; monitoring IEC sessions still ignore exclusions.
+// Nothing is exempted while DPI is off. Requires flowMu.
 func (e *Engine) countAddressExclusionLocked(state *flow.State) {
 	if e.exclusionHits == nil || (!e.dpiEnabled && !e.inspectAll) || isIECFlow(state) {
 		return
