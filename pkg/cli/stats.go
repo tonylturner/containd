@@ -60,6 +60,9 @@ func showStatsTopTalkers(api *API) Command {
 			return nil
 		}
 		fmt.Fprintf(out, "Top recently active host pairs: retained=%d limit=%d evicted=%d complete=%t since=%s\n", result.Retained, result.Limit, result.Evicted, result.Complete, fmtTime(result.Since))
+		if !result.Complete {
+			fmt.Fprintln(out, "History is incomplete: older recently active host pairs were evicted.")
+		}
 		if len(result.Rows) == 0 {
 			fmt.Fprintln(out, "No flow statistics.")
 			return nil
