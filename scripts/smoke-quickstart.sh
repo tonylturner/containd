@@ -103,7 +103,7 @@ curl -fsS -b "$cookie" \
 curl -fsS -b "$cookie" \
   "$api/stats/protocols" | jq -e 'type == "array"' >/dev/null
 curl -fsS -b "$cookie" \
-  "$api/stats/top-talkers?n=5" | jq -e 'type == "array"' >/dev/null
+  "$api/stats/top-talkers?n=5" | jq -e '(.rows | type == "array") and .limit > 0 and (.complete | type == "boolean")' >/dev/null
 curl -fsS -b "$cookie" \
   "$api/conntrack?limit=5" | jq -e 'type == "array"' >/dev/null
 curl -fsS -b "$cookie" \
