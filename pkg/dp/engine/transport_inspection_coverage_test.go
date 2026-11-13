@@ -69,6 +69,14 @@ func TestTransportInspectionBypassExtendsRecovery(t *testing.T) {
 	syn := transportWire(evidence.Original, at, nil)
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 1000}
 	e.handleTransportPacket(syn, r.resolve(ctx, syn, false), nil)
+	// Keep the tested incarnation established while inspection is bypassed.
+	// Half-open connections expire after 30 seconds.
+	synAck := transportWire(evidence.Reply, at, nil)
+	synAck.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN | capture.TCPFlagACK, Seq: 1999, Ack: 1001}
+	e.handleTransportPacket(synAck, r.resolve(ctx, synAck, false), nil)
+	ack := transportWire(evidence.Original, at, nil)
+	ack.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 1001, Ack: 2000}
+	e.handleTransportPacket(ack, r.resolve(ctx, ack, false), nil)
 	e.flowMu.Lock()
 	state := e.tupleStateLocked(evidence.Original)
 	e.flowMu.Unlock()

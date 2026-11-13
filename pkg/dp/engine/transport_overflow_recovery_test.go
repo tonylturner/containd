@@ -65,8 +65,14 @@ func round3LegitConnection(t *testing.T, e *Engine, r *transportResolver) {
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 	r.admit(e, syn)
 	processTransportAdmission(t, e, r)
+	// This fixture exercises a quiet established connection across the
+	// correlation recovery interval, not a half-open connection's idle TTL.
+	synAck := transportWire(ev.Reply, at.Add(time.Microsecond), nil)
+	synAck.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN | capture.TCPFlagACK, Seq: 1999, Ack: 101}
+	r.admit(e, synAck)
+	processTransportAdmission(t, e, r)
 	req := transportWire(ev.Original, at.Add(time.Millisecond), modbusADU(1, 3, 10, 2))
-	req.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 101}
+	req.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 101, Ack: 2000}
 	r.admit(e, req)
 	processTransportAdmission(t, e, r)
 	rep := transportWire(ev.Reply, at.Add(2*time.Millisecond), modbusReadReply(1))

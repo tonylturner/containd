@@ -46,12 +46,11 @@ func (e *Engine) Ledger() *limits.Ledger {
 	return e.ledger
 }
 
-// LimitOccupancy reports actual directional states, not future reserved slots.
-// Flow admission is currently uncapped.
+// LimitOccupancy reports reserved directional slots, including unseen peers.
 func (e *Engine) LimitOccupancy() limits.Occupancy {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
-	return limits.Occupancy{Entries: int64(len(e.flows))}
+	return limits.Occupancy{Limit: int64(e.stateLimits.MaxFlows), Entries: int64(e.flowSlots), HighWater: int64(e.flowHighWater)}
 }
 func (e *Engine) syncFlowsActiveLocked() {
 	if !e.detached {

@@ -137,6 +137,8 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 // it already needs. A real retirement still ends streams before creating the
 // replacement state, preserving peer lookup and close ordering.
 func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
+	enforcing := e.flowEnforcing(pkt)
+	e.sweepBeforeAdmission(now, enforcing)
 	iecOwned := !pkt.Token.Inline() && e.iecOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
@@ -147,9 +149,9 @@ func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming 
 		}
 		e.flowMu.Lock()
 	}
-	state, forgotten, needsSweep := e.trackFlowLocked(pkt, now)
+	state, forgotten := e.trackFlowLocked(pkt, now, enforcing, incoming)
 	e.flowMu.Unlock()
-	e.finishFlowTracking(forgotten, needsSweep, now)
+	e.finishFlowTracking(forgotten)
 	return state
 }
 
@@ -294,6 +296,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 				previous := peer.Connection.Load()
 				e.adoptTransportPending(incoming, previous)
 				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
+					e.mergeFlowSlotsLocked(state, peer)
 					peer.Connection.Store(incoming)
 					peer.Tags = e.flowTags(peer)
 				}

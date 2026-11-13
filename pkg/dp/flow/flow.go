@@ -87,7 +87,10 @@ func appendIP(b []byte, ip net.IP) []byte {
 
 // State holds runtime flow state and timestamps.
 type State struct {
-	Key          Key
+	Key Key
+	// Admission is the connection's paired slot reservation. Only the engine's
+	// flow lock may inspect or mutate it; snapshots merely share the pointer.
+	Admission    *Admission `json:"-"`
 	idKey        MapKey
 	id           string
 	Connection   ConnectionSlot   `json:"-"`
