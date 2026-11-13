@@ -131,6 +131,14 @@ func TestDS34DecodedFrames(t *testing.T) {
 			t.Fatal("event mutated unit")
 		}
 	})
+	t.Run("apci-reserved-observational", func(t *testing.T) {
+		wire := iFrame(0, 0, asdu(100, 1, 6, 0, 1, 0, 0, 0, 20))
+		wire[4] |= 0x01 // reserved bit of receive control octet 3
+		f := checkTypedSplits(t, dpi.ClientToServer, wire)[0]
+		if s, err := PairingShape(f.Unit.(*Unit)); err != nil || s.TypeID != 100 {
+			t.Fatalf("reserved APCI bit changed pairing shape: %+v %v", s, err)
+		}
+	})
 	t.Run("unsupported-errors", func(t *testing.T) {
 		for _, wire := range [][]byte{
 			iFrame(0, 0, asdu(200, 1, 3, 0, 1, 0, 0, 0)),

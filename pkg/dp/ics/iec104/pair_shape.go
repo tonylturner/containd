@@ -127,8 +127,12 @@ func PairingShape(u *Unit) (PairShape, error) {
 func decodeUnit(apdu []byte, direction string) *Unit {
 	a := decodeAPCI(apdu)
 	u := &Unit{PairShape: PairShape{Format: a.format, UFunction: a.uFunction, SendSequence: a.sendSeq, ReceiveSequence: a.recvSeq}}
-	if len(a.findings) > 0 {
-		u.shapeErr = fmt.Errorf("%w: APCI", ErrInvalidShape)
+	// Reserved control bits are observational conformance findings; strict
+	// policy vetoes them from the events. Other APCI findings are structural.
+	for _, f := range a.findings {
+		if f != FindingReservedBits {
+			u.shapeErr = fmt.Errorf("%w: APCI", ErrInvalidShape)
+		}
 	}
 	if a.format != "I" {
 		if a.length != 4 {
