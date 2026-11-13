@@ -38,7 +38,6 @@ export function ProfileModal({
   const [mfaDisableCode, setMfaDisableCode] = React.useState("");
   const [state, setState] = React.useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = React.useState<string | null>(null);
-  const passwordRef = React.useRef<HTMLInputElement | null>(null);
   const mustStayOpen = !!forcePassword || !!forceMFA;
   const mfaRequired = !!me.mfaRequired;
   const mfaGraceDisplay = formatOptionalDate(me.mfaGraceUntil);
@@ -47,12 +46,6 @@ export function ProfileModal({
     : me.profile === "training"
       ? "You must change the default password before continuing."
       : "You must change your password before continuing.";
-
-  React.useEffect(() => {
-    if (initialTab === "password") {
-      setTimeout(() => passwordRef.current?.focus(), 50);
-    }
-  }, [initialTab]);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -349,6 +342,7 @@ export function ProfileModal({
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder="Current password"
                 autoComplete="current-password"
+                autoFocus
                 className={inputClass}
               />
             </div>
@@ -366,7 +360,6 @@ export function ProfileModal({
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password (min 8 chars)"
                 autoComplete="new-password"
-                ref={passwordRef}
                 className={inputClass}
               />
             </div>
