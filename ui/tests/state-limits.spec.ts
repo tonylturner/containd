@@ -1,6 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { stateLimits as snapshot } from "./fixtures/state-limits";
+import { formatBytes } from "../lib/utils";
+
+test("IEC byte formatting shares sizing without changing existing short labels", () => {
+  for (const [bytes, expected] of [[0, "0 B"], [512, "512 B"], [1024, "1 KiB"], [1536, "1.5 KiB"], [1048576, "1 MiB"], [2097152, "2 MiB"], [67108864, "64 MiB"], [1073741824, "1 GiB"]] as const) {
+    expect(formatBytes(bytes, { iec: true })).toBe(expected);
+  }
+  expect(formatBytes(Number.NaN, { iec: true })).toBe("-");
+  expect(formatBytes(1048576)).toBe("1.0 MB");
+});
 
 async function setup(page: Page) {
   const state = { fault: "", reject: false, counter: 1, writes: [] as { base?: string; body: Record<string, any> }[], config: { dpiEnabled: true, nfqueueGroup: 101, limits: { maxFlows: 32768 } } as Record<string, any> };
@@ -55,6 +64,11 @@ for (const fault of ["", "offline", "malformed", "bad-category"]) {
       await expect(flows).toContainText("2,048");
       await expect(flows).toContainText("17 refused / enforce");
       await expect(flows).toContainText("Recent hit");
+      await expect(flows.getByRole("cell").nth(3)).toHaveText("4,096");
+      const inspection = table.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "inspection_bytes", exact: true }) });
+      await expect(inspection.getByRole("cell")).toHaveText(["64 MiB", "0", "1 MiB", "2 MiB", "", ""]);
+      await expect(table.getByRole("status")).toHaveCount(1);
+      await expect(page.getByText("Inspection charges by category:", { exact: false })).toContainText("stream 512 KiB · decoder 512 KiB · held 0 B · pairing 0 B");
       await expect(table).toContainText("No aggregate cap");
       if (process.env.STATE_LIMITS_SCREENSHOT) await table.locator("../..").screenshot({ path: process.env.STATE_LIMITS_SCREENSHOT });
       await page.setViewportSize({ width: 390, height: 844 });

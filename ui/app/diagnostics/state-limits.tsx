@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card } from "../../components/Card";
 import { StatusBadge } from "../../components/StatusBadge";
 import { fetchStateLimits, type StateLimits } from "../../lib/api-state-limits";
+import { formatBytes } from "../../lib/utils";
 
 export function StateLimitsPanel() {
   const [data, setData] = useState<StateLimits | null>(null);
@@ -40,14 +41,19 @@ export function StateLimitsPanel() {
             </tr></thead>
             <tbody className="tabular-nums">{data.tables.map(row => <tr key={row.table} className="border-t">
               <th className="py-2 pr-2 font-mono text-xs font-normal">{row.table}</th>
-              {[row.limit === 0 ? "No aggregate cap" : row.limit.toLocaleString(), row.entries.toLocaleString(), row.chargedBytes.toLocaleString(), row.highWater.toLocaleString()].map((value, i) =>
+              {[
+                row.limit === 0 ? "No aggregate cap" : row.table === "inspection_bytes" ? formatBytes(row.limit, { iec: true }) : row.limit.toLocaleString(),
+                row.entries.toLocaleString(),
+                formatBytes(row.chargedBytes, { iec: true }),
+                row.table === "inspection_bytes" ? formatBytes(row.highWater, { iec: true }) : row.highWater.toLocaleString(),
+              ].map((value, i) =>
                 <td key={i} className="whitespace-nowrap px-2 py-2">{value}</td>)}
-              <td className="px-2 py-2"><StatusBadge variant={row.pressure ? "warning" : "neutral"}>{row.pressure ? "Recent hit" : "No recent hit"}</StatusBadge></td>
-              <td className="px-2 py-2 text-xs">{row.hits.length ? row.hits.map(hit => <div key={`${hit.reason}/${hit.mode}`} className="whitespace-nowrap">{hit.total.toLocaleString()} {hit.reason} / {hit.mode}</div>) : "0"}</td>
+              <td className="px-2 py-2">{row.pressure && <StatusBadge variant="warning">Recent hit</StatusBadge>}</td>
+              <td className="px-2 py-2 text-xs">{row.hits.map(hit => <div key={`${hit.reason}/${hit.mode}`} className="whitespace-nowrap">{hit.total.toLocaleString()} {hit.reason} / {hit.mode}</div>)}</td>
             </tr>)}</tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-(--text-muted)">Inspection charges by category: {Object.entries(data.budget.byCategory).map(([category, bytes]) => `${category} ${bytes.toLocaleString()} B`).join(" · ")}</p>
+        <p className="mt-3 text-xs text-(--text-muted)">Inspection charges by category: {Object.entries(data.budget.byCategory).map(([category, bytes]) => `${category} ${formatBytes(bytes, { iec: true })}`).join(" · ")}</p>
       </>}
   </Card>;
 }

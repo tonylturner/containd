@@ -57,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most `min(16 MiB, maxInspectionBytes/4)` per decoder within the shared budget.
 - Authenticated `GET /api/v1/diagnostics/state-limits` and a compact Diagnostics
   table expose occupancy, charged bytes, high water, recent pressure and hits;
-  engine unavailability returns 503. Enum-only Prometheus state-limit counters
+  byte values use binary units, and empty pressure/hit cells avoid idle noise.
+  Engine unavailability returns 503. Enum-only Prometheus state-limit counters
   and gauges expose the same live process state. Pressure-entry events coalesce
   per table; hit totals survive configuration rebuilds.
 

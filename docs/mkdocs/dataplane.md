@@ -139,7 +139,9 @@ nftables sets, eBPF and kernel conntrack are outside these engine traffic-state
 limits. This is not a bound on all appliance allocations.
 
 The **Diagnostics** page shows limits, occupancy, charged bytes, high water,
-recent pressure and hit totals. Authenticated readers can also use
+recent pressure and hit totals. Byte quantities use binary units (KiB, MiB, GiB);
+counts remain plain numbers. Empty pressure and hit cells mean no recent
+pressure and no recorded hits respectively. Authenticated readers can also use
 `GET /api/v1/diagnostics/state-limits`; an unreachable engine returns 503,
 never a zero-pressure snapshot. Pressure means a hit in the last 60 seconds.
 `dataplane.state_limit` events coalesce pressure entry per table, with `table`,
