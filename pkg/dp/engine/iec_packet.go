@@ -576,7 +576,7 @@ func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
 }
 
 // dropHeldLocked drops the held packets of one direction (dir -1: both).
-// They leave the ledger at once; their completions are ignored.
+// Their settlement credits survive until completion, rejection or source flush.
 func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 	var out []capture.Resolution
 	kept := s.held[:0]
@@ -736,6 +736,27 @@ func (t *iecTable) stopParseLocked(s *iecSession) {
 // frame of a live session is allowed: a deny aborts at once.
 func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur *heldPacket, res iecResult, now time.Time) iecResult {
 	d := s.dirs[dir]
+	// Admit a possible hold before removing any old held token or publishing
+	// any successful result. A refusal must drop even a prefix this packet
+	// would otherwise have released.
+	if cur.end > d.framedEnd && pkt.Token.Inline() {
+		remaining, bytes := len(s.held), s.heldBytes
+		for _, h := range s.held {
+			if h.dir == dir && h.end <= d.framedEnd {
+				remaining--
+				bytes -= int(h.end - h.off)
+			}
+		}
+		if remaining >= iecMaxHeldPerSession || bytes+len(pkt.Payload) > iecMaxHeldBytes || t.heldTotal-len(s.held)+remaining >= iecMaxHeldGlobal {
+			return droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
+		}
+		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true) {
+			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeEnforce)
+			r := droppedWith("state_limit", t.abortLocked(s, abortBound, "", cur, now))
+			r.stateLimit = true
+			return r
+		}
+	}
 	kept := s.held[:0]
 	finReleased := false
 	for _, h := range s.held {
@@ -762,14 +783,6 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 		return res
 	}
 	n := int(cur.end - cur.off)
-	if len(s.held) >= iecMaxHeldPerSession || s.heldBytes+n > iecMaxHeldBytes || t.heldTotal >= iecMaxHeldGlobal {
-		r := droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
-		r.decision.Resolved = append(res.decision.Resolved, r.decision.Resolved...)
-		r.inspect, r.findings = res.inspect, res.findings
-		res.acts.merge(r.acts)
-		r.acts = res.acts
-		return r
-	}
 	s.held = append(s.held, cur)
 	s.heldBytes += n
 	t.held[cur.tok] = s

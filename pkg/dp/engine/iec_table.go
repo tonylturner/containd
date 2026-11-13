@@ -135,6 +135,8 @@ func newIECDir(isn uint32) *iecDir {
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
 	ledger        *limits.Ledger
+	resources     limits.Resources
+	settlements   map[capture.Token]*limits.Lease
 	detached      bool
 	mu            sync.Mutex
 	zones         *zoneCache // the engine's
@@ -184,19 +186,21 @@ type iecTable struct {
 // newIECTable returns a table that resolves zones through zones.
 func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 	return &iecTable{
-		ledger:     limits.NewLedger(nil),
-		zones:      zones,
-		now:        time.Now,
-		newPolicy:  newRulesPolicy,
-		safeRead:   iec104.SafeRead,
-		newID:      nextLiveSessionID,
-		ctDelete:   conntrack.Delete,
-		globalMode: globalMode,
-		sessions:   make(map[iecKey]*iecSession),
-		held:       make(map[capture.Token]*iecSession),
-		aborts:     make(map[capture.Token]*abortTxn),
-		reconnect:  make(map[string]time.Time),
-		pickups:    newPickupResets(),
+		ledger:      limits.NewLedger(nil),
+		resources:   limits.NewResources(nil, nil),
+		settlements: make(map[capture.Token]*limits.Lease),
+		zones:       zones,
+		now:         time.Now,
+		newPolicy:   newRulesPolicy,
+		safeRead:    iec104.SafeRead,
+		newID:       nextLiveSessionID,
+		ctDelete:    conntrack.Delete,
+		globalMode:  globalMode,
+		sessions:    make(map[iecKey]*iecSession),
+		held:        make(map[capture.Token]*iecSession),
+		aborts:      make(map[capture.Token]*abortTxn),
+		reconnect:   make(map[string]time.Time),
+		pickups:     newPickupResets(),
 
 		inventoryTokens: make(map[capture.Token]*iecSession),
 	}
