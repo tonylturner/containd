@@ -279,11 +279,20 @@ All default DB paths are under `/data`:
 - `CONTAIND_CONFIG_DB` (default `/data/config.db`)
 - `CONTAIND_AUDIT_DB` (default `/data/audit.db`)
 - `CONTAIND_USERS_DB` (default `/data/users.db`)
+- `CONTAIND_TELEMETRY_DB` (default `/data/telemetry.db`, bounded monitoring history)
 - `CONTAIND_EVIDENCE_DB` (engine-owned evidence, default `/data/evidence.db`)
 
-The starter and dev Compose files pass through the first three variables.
+The starter and dev Compose files pass through the first four variables.
 To override the evidence path, add `CONTAIND_EVIDENCE_DB` to the service's
 `environment` as well; setting it only in `.env` does not pass it into the container.
+
+For upgrade rollback, stop all writers and preserve the **whole** data directory,
+including SQLite WAL/SHM sidecars, TLS identity (`tls/server.pem`, or the legacy
+`server.crt`/`server.key` pair), SSH host keys, service material, config backups
+and `demo.json` preferences. A config export alone does not preserve accounts,
+identity or history. Back up external certificate/key mounts, the JWT secret,
+Compose configuration and image references separately; keep these backups private.
+See the [update checklist](update-policy.md#operator-update-checklist).
 
 The bind-mount source depends on the Compose file location:
 

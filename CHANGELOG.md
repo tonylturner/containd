@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An isolated published-image upgrade smoke with per-row wall times, private
+  stopped-data backups, account/config retention assertions and routed
+  allow/deny checks. The rule-mode migration entry point shares this driver;
+  direct-upgrade support remains conditional on a complete passing matrix.
 - Cleartext HTTP/2 inspection (prior-knowledge preface and `Upgrade: h2c`):
   bounded frame parsing and HPACK decoding report per-stream method, path,
   `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains

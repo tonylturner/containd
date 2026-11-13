@@ -82,6 +82,53 @@ No workflow is dispatched and no registry is contacted. See
 [Update Policy](update-policy.md#when-latest-moves) for promotion and retry
 behavior.
 
+## Upgrade Matrix Smoke
+
+The release validation command exercises genuine published source images against
+the exact locally built candidate:
+
+```sh
+docker build -f build/Dockerfile.mgmt -t containd/containd:upgrade-local .
+UPGRADE_IMAGE=containd/containd:upgrade-local \
+  COMPOSE_PROJECT_NAME=upgrade-local-$(date +%s) \
+  bash scripts/smoke-upgrade.sh
+```
+
+It declares training rows for every release 0.1.30–0.1.42 and strict→strict rows
+for 0.1.39–0.1.42. A failure stops the run; an unexecuted row is not supported
+merely because another row has the same schema. See
+[Update Policy](update-policy.md) for supported paths and required deployment
+changes. This is an opt-in local release gate, not part of ordinary CI.
+
+Requires Docker Engine 28.1+, Compose 2.36.0+, Python 3 and registry access.
+The driver refuses existing project resources, selects unused private subnets,
+publishes only ephemeral loopback management ports and creates fresh private
+data for each row. It tears down its own containers, networks and volumes even
+on failure; pulled images remain. Do not supply an existing appliance data tree.
+
+`UPGRADE_RESULTS` selects a new evidence directory (default `build/<project>`).
+It contains secrets, stopped-data backups, logs, source digests, candidate image
+identity, named assertions, row wall times in `matrix.json` and teardown evidence
+in `remaining-resources.json`. Keep it private. Successful checks cover distinct
+running/candidate configurations and IDS banks, previous snapshot retention,
+accounts/credentials, TLS/SSH identity, CAS epochs, migration audit idempotence,
+ready/protecting revision agreement and receiver-verified allowed/denied traffic
+after upgrade, restart and an explicit new commit. No split-mode or arbitrary
+service-configuration coverage is implied.
+
+For a focused reproduction, add `--from-version 0.1.35 --profile training`;
+omit both filters for release validation. The old
+`scripts/smoke-rule-modes-migration.sh` entry point delegates to that row with
+`RULE_MODES_IMAGE` and optional `RULE_MODES_RESULTS`, rather than maintaining
+another boot/teardown implementation. Target schema assertions use the current
+Go schema authority, not a release-number guess. Offline checks:
+
+```sh
+python3 -m unittest discover -s test/upgrade -p '*_test.py'
+bash -n scripts/smoke-upgrade.sh scripts/smoke-rule-modes-migration.sh
+shellcheck scripts/smoke-upgrade.sh scripts/smoke-rule-modes-migration.sh
+```
+
 ## UI Route Smoke
 
 `npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only

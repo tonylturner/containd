@@ -7,6 +7,33 @@
 - Do not assume security backports for older releases unless release notes or
   an advisory explicitly state otherwise.
 
+## Direct-upgrade validation
+
+There is not yet a proven direct-upgrade support floor. Schema-reader acceptance
+alone is not a supported from→to matrix. The published-image smoke declares
+training 0.1.30–0.1.42 and strict→strict 0.1.39–0.1.42 as validation targets;
+these targets must not be read as passing support claims.
+
+For a release candidate, run the complete
+[upgrade matrix smoke](testing.md#upgrade-matrix-smoke) before tagging:
+
+1. Build the management/all-mode image from the exact release source with a
+   unique local tag and record its image ID and source commit.
+2. Run `scripts/smoke-upgrade.sh` with `UPGRADE_IMAGE` pointing to that image,
+   a unique `COMPOSE_PROJECT_NAME=upgrade-<id>` and a new private
+   `UPGRADE_RESULTS` directory. Do not filter rows for release validation.
+3. Require every declared row to pass. Preserve `matrix.json`, source image
+   digests, row wall times and the empty `remaining-resources.json` teardown
+   evidence privately. A failed or unexecuted row is not a pass.
+4. Publish only the demonstrated from→to rows and their profile/topology
+   prerequisites. Recheck them against each new candidate; do not infer
+   compatibility from matching schema versions or an image-only boot.
+
+The smoke stops on its first failure without repairing stored data or relaxing
+protection assertions. It covers combined mode and a representative routed
+policy, not every service or split deployment. Full stopped-data rollback
+backups and the interface-name changes below remain mandatory.
+
 ## Release artifacts and security information
 
 Releases include signed images, SBOMs, image digests, and packaged CSAF provider
