@@ -29,10 +29,10 @@ func TestApplyAbortsPartialIECEvenOnNoop(t *testing.T) {
 	if err := h.e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatal(err)
 	}
-	h.e.iec.mu.Lock()
-	s, _ := h.e.iec.lookupLocked(goldenClient, goldenServer)
-	aborted := s != nil && s.state == iecAborted && len(s.held) == 0
-	h.e.iec.mu.Unlock()
+	h.e.sessions.mu.Lock()
+	s, _ := h.e.sessions.lookupLocked(goldenClient, goldenServer)
+	aborted := s != nil && s.state == sessionAborted && len(s.held) == 0
+	h.e.sessions.mu.Unlock()
 	if !aborted || h.e.CurrentRules().AdmissionParity != 0 {
 		t.Fatal("no-op commit retained a partial frame or flipped parity")
 	}

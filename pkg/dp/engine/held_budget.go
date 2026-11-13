@@ -7,12 +7,12 @@ import (
 )
 
 // Settlement owns credits beyond the held list: returning a resolution does
-// not mean its verdict has been submitted. All access is under the IEC lock.
-func (t *iecTable) holdCreditLocked(tok capture.Token, payload int, enforcing bool) bool {
+// not mean its verdict has been submitted. All access is under the session lock.
+func (t *sessionTable) holdCreditLocked(tok capture.Token, payload int, enforcing bool) bool {
 	if t.settlements[tok] != nil {
 		return true
 	}
-	if payload < 0 || len(t.settlements) >= iecMaxHeldGlobal {
+	if payload < 0 || len(t.settlements) >= sessionMaxHeldGlobal {
 		return false
 	}
 	class := limits.ClassObserve
@@ -28,14 +28,14 @@ func (t *iecTable) holdCreditLocked(tok capture.Token, payload int, enforcing bo
 	return true
 }
 
-func (t *iecTable) releaseHeldCreditLocked(tok capture.Token) {
+func (t *sessionTable) releaseHeldCreditLocked(tok capture.Token) {
 	if lease := t.settlements[tok]; lease != nil {
 		delete(t.settlements, tok)
 		lease.Release()
 	}
 }
 
-func (t *iecTable) flushHeldCreditsLocked(generation uint64) {
+func (t *sessionTable) flushHeldCreditsLocked(generation uint64) {
 	for tok := range t.settlements {
 		if generation == 0 || tok.Generation() == generation {
 			t.releaseHeldCreditLocked(tok)
@@ -43,7 +43,7 @@ func (t *iecTable) flushHeldCreditsLocked(generation uint64) {
 	}
 }
 
-func (t *iecTable) flushHeldCredits() {
+func (t *sessionTable) flushHeldCredits() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.flushHeldCreditsLocked(0)

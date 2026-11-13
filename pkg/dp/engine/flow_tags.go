@@ -105,7 +105,7 @@ type tagPolicy interface {
 // withSessionTags adds to IEC104 session events the TAG labels of their
 // session tuple, which is oriented client to server, under the table's
 // current policy. It runs outside the table lock.
-func (t *iecTable) withSessionTags(evs []iecTelemetry) []events.Event {
+func (t *sessionTable) withSessionTags(evs []iecTelemetry) []events.Event {
 	out := make([]events.Event, len(evs))
 	for i := range evs {
 		out[i] = evs[i].Event

@@ -5,7 +5,6 @@ package engine
 
 import (
 	"errors"
-	"sort"
 	"strings"
 	"time"
 
@@ -21,9 +20,9 @@ var (
 	errNotInline           = errors.New("capture is not inline")
 )
 
-// iecActions is the work an IEC104 state change produces. It is collected
+// sessionActions is the work a session state change produces. It is collected
 // under the session lock and carried out after the lock is released.
-type iecActions struct {
+type sessionActions struct {
 	drops            []capture.Resolution // held tokens to drop
 	events           []iecTelemetry
 	jobs             []func()
@@ -35,7 +34,7 @@ type iecActions struct {
 	retired bool
 }
 
-func (a *iecActions) merge(b iecActions) {
+func (a *sessionActions) merge(b sessionActions) {
 	a.drops = append(a.drops, b.drops...)
 	a.events = append(a.events, b.events...)
 	a.jobs = append(a.jobs, b.jobs...)
@@ -47,7 +46,7 @@ func (a *iecActions) merge(b iecActions) {
 // abortTxn waits for the verdict completions of an aborted session's
 // dropped packets before it reports ics.verdict and starts the resets.
 type abortTxn struct {
-	s       *iecSession
+	s       *trackedSession
 	pending int
 	errs    []string
 	apdus   []string
@@ -61,19 +60,19 @@ var targetNames = [2]string{"client", "server"}
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
 // verdict completion. A monitor envelope never aborts; callers ensure that.
-func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
-	var acts iecActions
-	if t.detached || s.state == iecAborted {
+func (t *sessionTable) abortLocked(s *trackedSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) sessionActions {
+	var acts sessionActions
+	if t.detached || s.state == sessionAborted {
 		return acts
 	}
-	acts.merge(t.endInventoryLocked(s))
+	acts.merge(t.iecAdapter.endLocked(t, s))
 	acts.retired = true
 	t.countAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {
 		dropped = append(dropped, cur)
 	}
-	txn := &abortTxn{s: s, apdus: t.droppedAPDUsLocked(s, dropped), trigger: trigger}
+	txn := &abortTxn{s: s, apdus: t.iecAdapter.droppedAPDUsLocked(s, dropped), trigger: trigger}
 	for _, h := range s.held {
 		delete(t.held, h.tok)
 		t.aborts[h.tok] = txn
@@ -90,8 +89,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 			txn.errs = append(txn.errs, errNotInline.Error())
 		}
 	}
-	s.state, s.endedAt = iecAborted, now
-	s.apci = nil
+	s.state, s.endedAt = sessionAborted, now
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
@@ -108,59 +106,21 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 	return acts
 }
 
-// droppedAPDUsLocked lists every identified APDU whose bytes the dropped
-// packets carry: decided frames they overlap, and the known start of the
-// incomplete tail. Unknown boundaries get no ID.
-func (t *iecTable) droppedAPDUsLocked(s *iecSession, dropped []*heldPacket) []string {
-	seen := map[string]bool{}
-	var ids []string
-	add := func(dir int, start int64) {
-		id := eventfields.APDUID(s.id, dirLetter(dir), start)
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	for _, h := range dropped {
-		d := s.dirs[h.dir]
-		if d == nil {
-			continue
-		}
-		for _, f := range d.frames {
-			if f.start < h.end && h.off < f.end {
-				add(h.dir, f.start)
-			}
-		}
-		if d.framedEnd < d.bytes.Next() && h.end > d.framedEnd {
-			add(h.dir, d.framedEnd)
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func dirLetter(dir int) byte {
-	if dir == iecDirClient {
-		return eventfields.DirClient
-	}
-	return eventfields.DirServer
-}
-
 // resetTargets computes one RST per endpoint: for target X, seq is the end
 // of the last byte forwarded to X. Without both ISNs the
 // connection was never established and nothing is reset.
-func resetTargets(s *iecSession) *connReset {
-	c2s, s2c := s.dirs[iecDirClient], s.dirs[iecDirSrv]
+func resetTargets(s *trackedSession) *connReset {
+	c2s, s2c := s.dirs[sessionDirClient], s.dirs[sessionDirSrv]
 	if c2s == nil || s2c == nil {
 		return &connReset{}
 	}
 	return &connReset{targets: [2]resetTarget{
-		iecDirClient: {valid: true, r: session.Reset{Src: s.server, Dst: s.client, Seq: forwardedSeq(s2c)}},
-		iecDirSrv:    {valid: true, r: session.Reset{Src: s.client, Dst: s.server, Seq: forwardedSeq(c2s)}},
+		sessionDirClient: {valid: true, r: session.Reset{Src: s.server, Dst: s.client, Seq: forwardedSeq(s2c)}},
+		sessionDirSrv:    {valid: true, r: session.Reset{Src: s.client, Dst: s.server, Seq: forwardedSeq(c2s)}},
 	}}
 }
 
-func forwardedSeq(d *iecDir) uint32 {
+func forwardedSeq(d *sessionDir) uint32 {
 	end := d.forwarded
 	if d.finFwd {
 		end++
@@ -169,7 +129,7 @@ func forwardedSeq(d *iecDir) uint32 {
 }
 
 // finishLocked reports ics.verdict and starts the resets.
-func (t *iecTable) finishLocked(txn *abortTxn, now time.Time) iecActions {
+func (t *sessionTable) finishLocked(txn *abortTxn, now time.Time) sessionActions {
 	attrs := map[string]any{
 		eventfields.KeyOutcome: outcomeDropped,
 		eventfields.KeyAPDUIDs: append([]string{}, txn.apdus...),
@@ -181,17 +141,17 @@ func (t *iecTable) finishLocked(txn *abortTxn, now time.Time) iecActions {
 		attrs[eventfields.KeyOutcome] = outcomeDropFailed
 		attrs[eventfields.KeyError] = strings.Join(txn.errs, "; ")
 	}
-	return iecActions{
+	return sessionActions{
 		events: []iecTelemetry{txn.s.event(eventfields.KindVerdict, attrs, now)},
 		jobs:   []func(){t.resetJob(txn.s)},
 	}
 }
 
 // completeLocked records one verdict completion of an aborted session.
-func (t *iecTable) completeLocked(tok capture.Token, err error, now time.Time) iecActions {
+func (t *sessionTable) completeLocked(tok capture.Token, err error, now time.Time) sessionActions {
 	txn := t.aborts[tok]
 	if txn == nil {
-		return iecActions{}
+		return sessionActions{}
 	}
 	delete(t.aborts, tok)
 	txn.pending--
@@ -199,20 +159,20 @@ func (t *iecTable) completeLocked(tok capture.Token, err error, now time.Time) i
 		txn.errs = append(txn.errs, err.Error())
 	}
 	if txn.pending > 0 {
-		return iecActions{}
+		return sessionActions{}
 	}
 	return t.finishLocked(txn, now)
 }
 
 // resetJob sends the resets of an aborted session and then deletes its
 // conntrack entry. It runs on the worker, never under the session lock.
-func (t *iecTable) resetJob(s *iecSession) func() {
+func (t *sessionTable) resetJob(s *trackedSession) func() {
 	var connection *flow.Connection
 	if s.flow != nil {
 		connection = s.flow.Connection.Load()
 	}
 	return func() {
-		for _, target := range []int{iecDirSrv, iecDirClient} {
+		for _, target := range []int{sessionDirSrv, sessionDirClient} {
 			t.mu.Lock()
 			tr := s.reset.targets[target]
 			t.mu.Unlock()
@@ -221,7 +181,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 			}
 		}
 		t.mu.Lock()
-		established := s.reset.targets[iecDirSrv].valid
+		established := s.reset.targets[sessionDirSrv].valid
 		t.mu.Unlock()
 		if established {
 			t.deleteConntrack(s.client, s.server, connection, "iec104 abort "+s.id)
@@ -231,7 +191,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 
 // sendReset sends one RST and reports it. A failure keeps the session
 // dropped and makes enforcement unhealthy.
-func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
+func (t *sessionTable) sendReset(s *trackedSession, target int, r session.Reset) {
 	err := t.sendRST(r)
 	t.mu.Lock()
 	now := t.now()
@@ -253,18 +213,18 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 
 // challengeLocked answers a challenge ACK from a reset target of an aborted
 // session (connReset.challenge).
-func (t *iecTable) challengeLocked(s *iecSession, from int, pkt capture.Packet, now time.Time) iecActions {
+func (t *sessionTable) challengeLocked(s *trackedSession, from int, pkt capture.Packet, now time.Time) sessionActions {
 	r, ok := s.reset.challenge(from, pkt.TCP, now)
 	if !ok {
-		return iecActions{}
+		return sessionActions{}
 	}
-	return iecActions{jobs: []func(){func() { t.sendReset(s, from, r) }}}
+	return sessionActions{jobs: []func(){func() { t.sendReset(s, from, r) }}}
 }
 
 // apply carries out actions after the session lock is released: drops are
 // settled (a rejected request gets no completion, so it completes here),
 // then events are emitted and jobs queued.
-func (t *iecTable) apply(acts iecActions) {
+func (t *sessionTable) apply(acts sessionActions) {
 	if len(acts.drops) > 0 {
 		errs := t.settle(acts.drops)
 		t.mu.Lock()
@@ -283,8 +243,8 @@ func (t *iecTable) apply(acts iecActions) {
 }
 
 // finish emits events and queues jobs; drops were resolved by the caller.
-func (t *iecTable) finish(acts iecActions) {
-	t.finishInventory(acts)
+func (t *sessionTable) finish(acts sessionActions) {
+	t.iecAdapter.finishDelivery(acts)
 	if len(acts.events) > 0 {
 		t.emit(acts.events)
 	}
@@ -300,7 +260,7 @@ func (t *iecTable) finish(acts iecActions) {
 	}
 }
 
-func (t *iecTable) settle(res []capture.Resolution) []error {
+func (t *sessionTable) settle(res []capture.Resolution) []error {
 	var settler capture.Settler
 	if t.settler != nil {
 		settler = t.settler()
@@ -317,13 +277,13 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 
 // onVerdict records a verdict completion. A held token completes only when
 // its generation went down: the kernel dropped it, so it leaves the ledger.
-func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
+func (t *sessionTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
 	t.releaseHeldCreditLocked(tok)
 	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
-	t.inventoryVerdictLocked(tok, v, err, &acts)
+	t.iecAdapter.verdictLocked(t, tok, v, err, &acts)
 	if s := t.held[tok]; s != nil {
 		t.unholdLocked(s, tok)
 	}
@@ -331,7 +291,7 @@ func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.finish(acts)
 }
 
-func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
+func (t *sessionTable) unholdLocked(s *trackedSession, tok capture.Token) {
 	delete(t.held, tok)
 	for i, h := range s.held {
 		if h.tok == tok {
@@ -347,8 +307,8 @@ func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
 // down: its held packets are gone and its byte ledger can no longer be
 // trusted. The kernel already dropped the held packets; their
 // completions (ErrQueueClosed) finish the aborts.
-func (t *iecTable) onSourceDown(generation ...uint64) {
-	var acts iecActions
+func (t *sessionTable) onSourceDown(generation ...uint64) {
+	var acts sessionActions
 	t.mu.Lock()
 	gen := uint64(0)
 	if len(generation) != 0 {
@@ -358,7 +318,7 @@ func (t *iecTable) onSourceDown(generation ...uint64) {
 	t.pressureOffline = true
 	now := t.now()
 	for _, s := range t.sessions {
-		if s.mode == "enforce" && (s.state == iecSynSent || s.state == iecEstablished) {
+		if s.mode == "enforce" && (s.state == sessionSynSent || s.state == sessionEstablished) {
 			a := t.abortLocked(s, abortQueue, "", nil, now)
 			a.drops = nil
 			acts.merge(a)

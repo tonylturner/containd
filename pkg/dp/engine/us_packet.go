@@ -46,7 +46,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // retain their respective denial until a new handshake or scope removal.
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correlationAdmitted, decodingStopped, observeOnly bool) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
-	e.iec.answerPickupChallenge(pkt)
+	e.sessions.answerPickupChallenge(pkt)
 	if e.isDeniedTCP(state) {
 		// A retained denial from a removed enforce scope owns no admission.
 		if observeOnly {
@@ -300,7 +300,7 @@ func (e *Engine) reportPacketPanic(err error) {
 	if e.onError != nil {
 		e.onError(err)
 	}
-	e.iec.health.fault(faultWorker, err.Error())
+	e.sessions.health.fault(faultWorker, err.Error())
 }
 
 func isIECPort(pkt capture.Packet) bool {

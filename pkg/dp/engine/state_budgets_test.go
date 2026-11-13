@@ -88,7 +88,7 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 		}
 		c.advance(6 * time.Minute) // Both the 30 s opening TTL and 5 min established TTL.
 		e.sweepFlows(c.now())
-		e.iec.expire()
+		e.sessions.expire()
 		assertStateBudgetCaps(t, e)
 		if e.LimitOccupancy().Entries != 0 {
 			t.Fatal("expired flows retained")
@@ -113,9 +113,9 @@ func testStateBudgetHeadroom(t *testing.T) {
 	// used by both managers. Observe may retain only 3072 of the 4096 bytes.
 	const charge = 1 + limits.HeldPacketHeaderAllowanceBytes + limits.HeldTokenMetadataBytes
 	for i := range 88 {
-		e.iec.mu.Lock()
-		ok := e.iec.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false)
-		e.iec.mu.Unlock()
+		e.sessions.mu.Lock()
+		ok := e.sessions.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false)
+		e.sessions.mu.Unlock()
 		if ok != (i < 3) {
 			t.Fatalf("monitor token %d admitted=%t", i, ok)
 		}
@@ -124,9 +124,9 @@ func testStateBudgetHeadroom(t *testing.T) {
 			t.Fatal("monitor consumed reserved headroom")
 		}
 	}
-	e.iec.mu.Lock()
-	ok := e.iec.holdCreditLocked(capture.NewToken(2, 1), 1, true)
-	e.iec.mu.Unlock()
+	e.sessions.mu.Lock()
+	ok := e.sessions.holdCreditLocked(capture.NewToken(2, 1), 1, true)
+	e.sessions.mu.Unlock()
 	if !ok || e.budget.Status().InUse != 4*charge {
 		t.Fatal("monitor flood starved enforcement")
 	}
@@ -366,7 +366,7 @@ func testStateBudgetReconfigure(t *testing.T) {
 	defer release()
 	e.dpiMgr = dpi.NewManager(gate)
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.iec.dpi = e.dpiMgr
+	e.sessions.dpi = e.dpiMgr
 	p := stateBudgetTrace(0, true, c.now())[0]
 	if d := e.HandlePacket(p); d.Action != capture.Repeat {
 		t.Fatal(d)
@@ -447,7 +447,7 @@ func testStateBudgetRebind(t *testing.T) {
 	}
 	legacy, observer := e.dpiMgr, e.observation
 	for i := range 3 {
-		b, table, epoch := e.budget, e.iec, e.epoch.Load()
+		b, table, epoch := e.budget, e.sessions, e.epoch.Load()
 		tok := capture.NewToken(uint64(i+1), 1)
 		table.mu.Lock()
 		ok := table.holdCreditLocked(tok, 1, true)
@@ -464,7 +464,7 @@ func testStateBudgetRebind(t *testing.T) {
 		if err := e.RetryProtection(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if e.epoch.Load() != epoch+1 || e.budget != b || e.iec != table || old == e.hooks || e.dpiMgr != legacy || e.observation != observer {
+		if e.epoch.Load() != epoch+1 || e.budget != b || e.sessions != table || old == e.hooks || e.dpiMgr != legacy || e.observation != observer {
 			t.Fatal("capture retry rebuilt configuration owners or did not rebind")
 		}
 		// Reusing a kernel packet ID in a new capture generation must not allow

@@ -73,7 +73,7 @@ func (e *Engine) refreshLocalAddresses(ctx context.Context) error {
 		return e.policyFault(faultAddresses, err)
 	}
 	if maps.EqualFunc(old.LocalIPv4ByDevice, addrs, slices.Equal[[]netip.Addr]) {
-		e.iec.health.clear(faultAddresses)
+		e.sessions.health.clear(faultAddresses)
 		return nil
 	}
 	next := *old
@@ -106,15 +106,15 @@ func (e *Engine) refreshLocalAddresses(ctx context.Context) error {
 		}
 	}
 	e.ruleSnap.Update(&next)
-	e.iec.mu.Lock()
-	e.iec.snap, e.iec.policy = &next, e.iec.newPolicy(&next)
-	e.iec.mu.Unlock()
+	e.sessions.mu.Lock()
+	e.sessions.snap, e.sessions.policy = &next, e.sessions.newPolicy(&next)
+	e.sessions.mu.Unlock()
 	e.gate.mu.Lock()
 	e.gate.snap = &next
 	e.gate.mu.Unlock()
 	e.admission.signature = signature
 	e.verdictCache.Flush()
-	e.iec.health.clear(faultAddresses)
+	e.sessions.health.clear(faultAddresses)
 	return nil
 }
 

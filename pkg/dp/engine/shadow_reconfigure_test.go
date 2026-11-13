@@ -24,15 +24,15 @@ func TestIECShadowCountersFollowReconfiguredEngine(t *testing.T) {
 	}
 	observe := func() {
 		t.Helper()
-		tab := e.iec
+		tab := e.sessions
 		client := netip.MustParseAddrPort("10.60.60.10:40000")
 		server := netip.MustParseAddrPort("10.30.30.30:2404")
-		s := &iecSession{id: "reconfigure", client: client, server: server, mode: "monitor", ctx: tab.sessionCtx(client, server)}
+		s := &trackedSession{id: "reconfigure", client: client, server: server, iecSession: iecSession{mode: "monitor", ctx: tab.sessionCtx(client, server)}}
 		ev := dpi.Event{Proto: "iec104", Kind: "request", Attributes: map[string]any{
 			"apci_type": "I", "type_id": uint8(46), "ca": uint16(1), "apdu_id": "message", "direction": "request",
 		}}
 		tab.mu.Lock()
-		j := tab.judgeLocked(s, []dpi.Event{ev, ev}, time.Now())
+		j := tab.iecAdapter.judgeLocked(tab, s, []dpi.Event{ev, ev}, time.Now())
 		tab.mu.Unlock()
 		if j.denied {
 			t.Fatal("monitor denied delivery")

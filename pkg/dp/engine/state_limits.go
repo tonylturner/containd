@@ -80,13 +80,13 @@ func (e *Engine) stateLimitsSnapshot() limits.Snapshot {
 	add(limits.TableInspection, limits.Occupancy{Limit: s.Budget.Limit, ChargedBytes: s.Budget.InUse, HighWater: s.Budget.HighWater})
 	add(limits.TableTopTalkers, e.stats.LimitOccupancy())
 	add(limits.TableRateTrackers, e.anomalyDetector.LimitOccupancy())
-	add(limits.TableIECSessions, e.iec.LimitOccupancy())
-	add(limits.TableIECReconnect, e.iec.reconnectLimitOccupancy())
+	add(limits.TableIECSessions, e.sessions.LimitOccupancy())
+	add(limits.TableIECReconnect, e.sessions.reconnectLimitOccupancy())
 	add(limits.TableInventoryPoints, e.inventory.LimitOccupancy())
 	add(limits.TableSignatureWindows, e.sigEngine.LimitOccupancy())
 	add(limits.TableConformance, e.conformance.LimitOccupancy())
 	add(limits.TableVerdictCache, e.verdictCache.LimitOccupancy())
-	add(limits.TablePickupReset, e.iec.pickups.LimitOccupancy())
+	add(limits.TablePickupReset, e.sessions.pickups.LimitOccupancy())
 	// Only the legacy manager registers HTTP decoders today.
 	add(limits.TableHTTPCorrelation, e.httpCorrelationOccupancy())
 	return s

@@ -387,12 +387,12 @@ func TestTransportCoverageIECTable(t *testing.T) {
 	}
 	// Close through the table's existing in-window RST, then open a new
 	// table incarnation; no new recovery criterion is introduced.
-	e.iec.mu.Lock()
+	e.sessions.mu.Lock()
 	src, _ := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, _ := addrPort(pkt.DstIP, pkt.DstPort)
-	session, _ := e.iec.lookupLocked(src, dst)
-	pkt.TCP.Seq = forwardedSeq(session.dirs[iecDirClient])
-	e.iec.mu.Unlock()
+	session, _ := e.sessions.lookupLocked(src, dst)
+	pkt.TCP.Seq = forwardedSeq(session.dirs[sessionDirClient])
+	e.sessions.mu.Unlock()
 	pkt.Payload, pkt.TCP.Flags = nil, capture.TCPFlagRST
 	e.HandlePacket(pkt)
 	reader.mu.Lock()

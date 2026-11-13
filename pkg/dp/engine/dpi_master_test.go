@@ -48,8 +48,8 @@ func TestDPIProtocolsRespectMasterOff(t *testing.T) {
 				h := newIECHarnessWithDPI(t, mode, false)
 				h.e.dpiMode = mode
 				h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-				h.e.iec.dpi = h.e.dpiMgr
-				h.e.iec.newPolicy = newRulesPolicy
+				h.e.sessions.dpi = h.e.dpiMgr
+				h.e.sessions.newPolicy = newRulesPolicy
 				h.e.LoadRules(rules.Snapshot{DPIMode: mode, Default: rules.ActionAllow, Firewall: []rules.Entry{{
 					ID: "iec104", Action: rules.ActionDeny,
 					ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}, Mode: mode},

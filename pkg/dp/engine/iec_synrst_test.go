@@ -26,7 +26,7 @@ func TestIECSYNACKWithRSTDrops(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 101, nil)); d.Action != h.deniedDisposition() || d.Reason != reasonIECInvalid {
 		t.Fatalf("SYN-ACK with RST = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if st, _ := h.sessionState(); st != iecSynSent {
+	if st, _ := h.sessionState(); st != sessionSynSent {
 		t.Fatalf("session state %d, want awaiting its SYN-ACK", st)
 	}
 	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 101, nil)); d.Action != h.passingDisposition() {
@@ -35,7 +35,7 @@ func TestIECSYNACKWithRSTDrops(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 101, nil)); d.Action != h.deniedDisposition() || d.Reason != reasonIECInvalid {
 		t.Fatalf("retransmitted SYN-ACK with RST = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if st, _ := h.sessionState(); st != iecEstablished {
+	if st, _ := h.sessionState(); st != sessionEstablished {
 		t.Fatalf("session state %d, want established", st)
 	}
 
@@ -49,13 +49,13 @@ func TestIECSYNACKWithRSTDrops(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(false, synAckRST, 9000, 778, nil)); d.Action != h.deniedDisposition() || d.Reason != reasonIECInvalid {
 		t.Fatalf("SYN-ACK with RST on the tombstone = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if st, _ := h.sessionState(); st != iecAborted {
+	if st, _ := h.sessionState(); st != sessionAborted {
 		t.Fatalf("session state %d, want the tombstone", st)
 	}
 	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("SYN-ACK on the tombstone = %+v, want Accept", d)
 	}
-	if st, _ := h.sessionState(); st != iecEstablished {
+	if st, _ := h.sessionState(); st != sessionEstablished {
 		t.Fatalf("session state %d, want established", st)
 	}
 }
@@ -88,7 +88,7 @@ func TestIECSYNWithRSTOpensNothing(t *testing.T) {
 			if d := h.e.handlePacket(h.pkt(true, synRSTFlags, h.clientISN+5000, 0, nil)); d.Action != h.deniedDisposition() || d.Reason != reasonIECInvalid {
 				t.Fatalf("SYN with RST into the session = %+v, want Drop by %s", d, reasonIECInvalid)
 			}
-			if st, _ := h.sessionState(); st != iecEstablished {
+			if st, _ := h.sessionState(); st != sessionEstablished {
 				t.Fatalf("session state %d, want established", st)
 			}
 			if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
@@ -117,13 +117,13 @@ func TestIECSYNWithRSTOnClosedOpensNothing(t *testing.T) {
 			if d := h.e.handlePacket(h.pkt(true, synRSTFlags, 700, 0, nil)); d.Action != h.deniedDisposition() || d.Reason != reasonIECInvalid {
 				t.Fatalf("SYN with RST on the closed session = %+v, want Drop by %s", d, reasonIECInvalid)
 			}
-			if st, _ := h.sessionState(); st != iecClosed {
+			if st, _ := h.sessionState(); st != sessionClosed {
 				t.Fatalf("session state %d, want closed", st)
 			}
 			if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 700, 0, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECAccept {
 				t.Fatalf("next SYN = %+v, want Accept by %s", d, reasonIECAccept)
 			}
-			if st, _ := h.sessionState(); st != iecSynSent {
+			if st, _ := h.sessionState(); st != sessionSynSent {
 				t.Fatalf("session state %d, want awaiting its SYN-ACK", st)
 			}
 		})
@@ -155,7 +155,7 @@ func TestIECSYNWithRSTOnTombstoneOpensNothing(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 		t.Fatalf("SYN-ACK answering the SYN with RST = %+v, want Drop by %s", d, reasonIECTombstone)
 	}
-	if st, _ := h.sessionState(); st != iecAborted {
+	if st, _ := h.sessionState(); st != sessionAborted {
 		t.Fatalf("session state %d, want the tombstone", st)
 	}
 	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
@@ -164,7 +164,7 @@ func TestIECSYNWithRSTOnTombstoneOpensNothing(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("SYN-ACK on the tombstone = %+v, want Accept", d)
 	}
-	if st, _ := h.sessionState(); st != iecEstablished {
+	if st, _ := h.sessionState(); st != sessionEstablished {
 		t.Fatalf("session state %d, want established", st)
 	}
 }

@@ -32,7 +32,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 				pkt.DstPort = 2404
 				pkt.TCP.Flags = capture.TCPFlagSYN
 				owned := scope == "owned"
-				if got := e.iecOwnsPacket(pkt); got != owned {
+				if got := e.sessionOwnsPacket(pkt); got != owned {
 					t.Fatalf("ownership = %v, want %v", got, owned)
 				}
 

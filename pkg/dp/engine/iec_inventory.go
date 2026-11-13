@@ -20,7 +20,7 @@ type iecInventoryInput interface {
 }
 
 // Session-owned delivery evidence. All maps, pending and allowed are protected
-// by iecTable.mu. Only the observation/learner-delivery rendezvous crosses that lock.
+// by sessionTable.mu. Only the observation/learner-delivery rendezvous crosses that lock.
 type iecInventoryLedger struct {
 	commands map[string]*iecInventoryCommand
 	tokens   map[capture.Token]map[*iecInventoryCommand]struct{}
@@ -55,7 +55,7 @@ func (c *iecInventoryCommand) flush() {
 	}
 }
 
-func (t *iecTable) observeInventoryLocked(s *iecSession, dir int, f dpi.DecodedFrame, cur *heldPacket, acts *iecActions, now time.Time) {
+func (t *sessionTable) observeInventoryLocked(s *trackedSession, dir int, f dpi.DecodedFrame, cur *heldPacket, acts *sessionActions, now time.Time) {
 	if t.inventory == nil {
 		return
 	}
@@ -64,7 +64,7 @@ func (t *iecTable) observeInventoryLocked(s *iecSession, dir int, f dpi.DecodedF
 		return
 	}
 	o.SessionID, o.Controlling, o.Controlled = s.id, s.client, s.server
-	o.ControlDirection, o.Time = dir == iecDirClient, now
+	o.ControlDirection, o.Time = dir == sessionDirClient, now
 	c := &iecInventoryCommand{input: t.inventory, learnDelivery: t.learnDelivery, observation: o, start: f.Start, end: f.End, allowed: true}
 	acts.inventoryObserve = append(acts.inventoryObserve, c)
 	if !o.IsCommand() {
@@ -92,8 +92,8 @@ func (t *iecTable) observeInventoryLocked(s *iecSession, dir int, f dpi.DecodedF
 	t.inventoryAttachLocked(s, c, cur, acts)
 }
 
-func (t *iecTable) inventoryAttachLocked(s *iecSession, c *iecInventoryCommand, h *heldPacket, acts *iecActions) {
-	if h.dir != iecDirClient || h.off >= c.end || c.start >= h.end || c.final.Load() != 0 {
+func (t *sessionTable) inventoryAttachLocked(s *trackedSession, c *iecInventoryCommand, h *heldPacket, acts *sessionActions) {
+	if h.dir != sessionDirClient || h.off >= c.end || c.start >= h.end || c.final.Load() != 0 {
 		return
 	}
 	l := s.inventory
@@ -115,7 +115,7 @@ func (t *iecTable) inventoryAttachLocked(s *iecSession, c *iecInventoryCommand, 
 
 // Attach retransmissions received while delivery is still pending. Completed
 // APDUs are not observed again and later retransmissions cannot change history.
-func (t *iecTable) inventoryPacketLocked(s *iecSession, cur *heldPacket, acts *iecActions) {
+func (t *sessionTable) inventoryPacketLocked(s *trackedSession, cur *heldPacket, acts *sessionActions) {
 	if s.inventory != nil {
 		for _, c := range s.inventory.commands {
 			t.inventoryAttachLocked(s, c, cur, acts)
@@ -123,7 +123,7 @@ func (t *iecTable) inventoryPacketLocked(s *iecSession, cur *heldPacket, acts *i
 	}
 }
 
-func (s *iecSession) inventoryDecisionLocked(ev dpi.Event, d iecDecision) {
+func (s *trackedSession) inventoryDecisionLocked(ev dpi.Event, d iecDecision) {
 	if s.inventory == nil || d.decision == decisionAllow {
 		return
 	}
@@ -133,7 +133,7 @@ func (s *iecSession) inventoryDecisionLocked(ev dpi.Event, d iecDecision) {
 	}
 }
 
-func (t *iecTable) inventoryFinalLocked(s *iecSession, c *iecInventoryCommand, accepted bool, acts *iecActions) {
+func (t *sessionTable) inventoryFinalLocked(s *trackedSession, c *iecInventoryCommand, accepted bool, acts *sessionActions) {
 	value := uint32(1)
 	if accepted {
 		value = 2
@@ -153,7 +153,7 @@ func (t *iecTable) inventoryFinalLocked(s *iecSession, c *iecInventoryCommand, a
 	acts.learnerDelivery = append(acts.learnerDelivery, c)
 }
 
-func (t *iecTable) inventoryVerdictLocked(tok capture.Token, v capture.Verdict, err error, acts *iecActions) {
+func (t *sessionTable) inventoryVerdictLocked(tok capture.Token, v capture.Verdict, err error, acts *sessionActions) {
 	s := t.inventoryTokens[tok]
 	if s == nil {
 		return
@@ -171,8 +171,8 @@ func (t *iecTable) inventoryVerdictLocked(tok capture.Token, v capture.Verdict, 
 	}
 }
 
-func (t *iecTable) endInventoryLocked(s *iecSession) iecActions {
-	var acts iecActions
+func (t *sessionTable) endInventoryLocked(s *trackedSession) sessionActions {
+	var acts sessionActions
 	if s.inventory != nil {
 		for _, c := range s.inventory.commands {
 			t.inventoryFinalLocked(s, c, false, &acts)
@@ -185,17 +185,17 @@ func (t *iecTable) endInventoryLocked(s *iecSession) iecActions {
 	return acts
 }
 
-func (t *iecTable) expireInventoryLocked(s *iecSession, acts *iecActions, now time.Time) {
+func (t *sessionTable) expireInventoryLocked(s *trackedSession, acts *sessionActions, now time.Time) {
 	if s.inventory != nil {
 		for _, c := range s.inventory.commands {
-			if now.Sub(c.observation.Time) > iecPendingTimeout {
+			if now.Sub(c.observation.Time) > sessionPendingTimeout {
 				t.inventoryFinalLocked(s, c, false, acts)
 			}
 		}
 	}
 }
 
-func (t *iecTable) finishInventory(acts iecActions) {
+func (a *iecAdapter) finishDelivery(acts sessionActions) {
 	for _, c := range acts.inventoryObserve {
 		c.observe()
 	}
@@ -205,13 +205,13 @@ func (t *iecTable) finishInventory(acts iecActions) {
 
 }
 
-// stopInventory also covers a configuration replaced before Start.
-func (t *iecTable) stopInventory() {
-	var acts iecActions
+// stopDelivery also covers a configuration replaced before Start.
+func (a *iecAdapter) stopDelivery(t *sessionTable) {
+	var acts sessionActions
 	t.mu.Lock()
 	for _, s := range t.sessions {
 		acts.merge(t.endInventoryLocked(s))
 	}
 	t.mu.Unlock()
-	t.finishInventory(acts)
+	a.finishDelivery(acts)
 }

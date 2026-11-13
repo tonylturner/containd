@@ -40,7 +40,7 @@ func (s *oracleSpy) BlockFlowTemp(context.Context, net.IP, net.IP, string, strin
 type oracleState struct {
 	Cache                                                     map[string]verdict.Verdict
 	Generic                                                   map[flow.MapKey]time.Time
-	IEC                                                       map[string]iecState
+	IEC                                                       map[string]sessionState
 	CacheWrites                                               []string
 	Submissions, Followups, Deletes, Updates, TombstoneWrites int
 	Resets                                                    []session.Reset
@@ -49,7 +49,7 @@ type oracleState struct {
 }
 
 func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
-	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[flow.MapKey]time.Time{}, IEC: map[string]iecState{},
+	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[flow.MapKey]time.Time{}, IEC: map[string]sessionState{},
 		CacheWrites: append([]string(nil), s.cache...), Verdicts: s.verdicts, Submissions: s.submissions, Followups: s.followups, Deletes: s.deletes, Updates: s.updates, TombstoneWrites: s.tombstones, Resets: s.injector.Resets(), Pending: len(e.hooks.after.pending) + len(e.hooks.blocks.jobs)}
 	for k, v := range e.verdictCache.entries {
 		out.Cache[k] = v.verdict
@@ -57,7 +57,7 @@ func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
 	for k, v := range e.deniedTCP {
 		out.Generic[k] = v.expires
 	}
-	for k, v := range e.iec.sessions {
+	for k, v := range e.sessions.sessions {
 		out.IEC[fmt.Sprint(k)] = v.state
 	}
 	return out
@@ -135,16 +135,16 @@ func TestObservationVerdictOracle(t *testing.T) {
 					e.observation.now = func() time.Time { return now }
 				}
 				e.deniedTCPNow = func() time.Time { return now }
-				e.iec.now = func() time.Time { return now }
+				e.sessions.now = func() time.Time { return now }
 				e.verdictCache.now = func() time.Time { return now }
 				e.verdictCache.changed = func(op, key string, v verdict.Verdict) {
 					spy.cache = append(spy.cache, fmt.Sprintf("%s/%s/%+v", op, key, v))
 				}
 				e.hooks.blocks.submitted = func() { spy.submissions++ }
 				e.hooks.after.submitted = func() { spy.followups++ }
-				markAbort := e.iec.markAbort
-				e.iec.markAbort = func(id string) { spy.tombstones++; markAbort(id) }
-				e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { spy.deletes++; return nil }
+				markAbort := e.sessions.markAbort
+				e.sessions.markAbort = func(id string) { spy.tombstones++; markAbort(id) }
+				e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { spy.deletes++; return nil }
 				e.updater = spy
 				e.LoadRules(snap)
 				if tc.strict {

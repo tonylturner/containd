@@ -68,7 +68,7 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 }
 
 func (e *Engine) reopenDeniedTCP(pkt capture.Packet) {
-	if pkt.Proto != 6 || e.iecOwnsPacket(pkt) || !pkt.TCP.Valid ||
+	if pkt.Proto != 6 || e.sessionOwnsPacket(pkt) || !pkt.TCP.Valid ||
 		pkt.TCP.Flags&capture.TCPFlagSYN == 0 || pkt.TCP.Flags&(capture.TCPFlagACK|capture.TCPFlagRST) != 0 ||
 		!handshakeMarked(pkt) {
 		return
@@ -91,7 +91,7 @@ var tcpDecisionSeed = maphash.MakeSeed()
 // original packet's inspection and its denial, and pass as consumed bytes.
 // Fixed stripes bound synchronization state independently of tuple retention.
 func (e *Engine) lockGenericTCP(pkt capture.Packet) func() {
-	if pkt.Proto != 6 || e.iecOwnsPacket(pkt) {
+	if pkt.Proto != 6 || e.sessionOwnsPacket(pkt) {
 		return func() {}
 	}
 	key := flow.Key{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort, Proto: 6}

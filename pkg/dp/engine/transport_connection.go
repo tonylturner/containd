@@ -68,7 +68,7 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	if pkt.Token.Inline() {
 		return
 	}
-	iecOwned := e.iecOwnsConnection(pkt, incoming)
+	iecOwned := e.sessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	e.flowMu.Unlock()
@@ -139,7 +139,7 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
 	enforcing := e.flowEnforcing(pkt)
 	e.sweepBeforeAdmission(now, enforcing)
-	iecOwned := !pkt.Token.Inline() && e.iecOwnsConnection(pkt, incoming)
+	iecOwned := !pkt.Token.Inline() && e.sessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	if len(retired) != 0 {
@@ -158,19 +158,19 @@ func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming 
 // A retained IEC session owns its tuple even if its current envelope changes.
 // Otherwise ownership is decided from the same opener-oriented envelope as
 // the table's new-session path. Call before taking flowMu.
-func (e *Engine) iecOwnsPacket(pkt capture.Packet) bool {
+func (e *Engine) sessionOwnsPacket(pkt capture.Packet) bool {
 	var connection *flow.Connection
 	e.flowMu.Lock()
 	if retained := e.tupleStateLocked(packetKey(pkt).Tuple()); retained != nil {
 		connection = retained.Connection.Load()
 	}
 	e.flowMu.Unlock()
-	return e.iecOwnsConnection(pkt, connection)
+	return e.sessionOwnsConnection(pkt, connection)
 }
 
 // Avoid constructing a temporary authority slot when no IEC envelope exists.
-func (e *Engine) iecOwnsConnection(pkt capture.Packet, incoming *flow.Connection) bool {
-	t := e.iec
+func (e *Engine) sessionOwnsConnection(pkt capture.Packet, incoming *flow.Connection) bool {
+	t := e.sessions
 	if t == nil {
 		return false
 	}
@@ -184,8 +184,8 @@ func (e *Engine) iecOwnsConnection(pkt capture.Packet, incoming *flow.Connection
 	return t.ownsStateLocked(pkt, &state)
 }
 
-func (e *Engine) iecOwnsState(pkt capture.Packet, state *flow.State) bool {
-	t := e.iec
+func (e *Engine) sessionOwnsState(pkt capture.Packet, state *flow.State) bool {
+	t := e.sessions
 	if t == nil {
 		return false
 	}
@@ -194,7 +194,7 @@ func (e *Engine) iecOwnsState(pkt capture.Packet, state *flow.State) bool {
 	return t.ownsStateLocked(pkt, state)
 }
 
-func (t *iecTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
+func (t *sessionTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
 	if !t.hasIEC {
 		return false
 	}

@@ -80,8 +80,8 @@ func newIECConformanceHarness(t *testing.T, mode string, parsing ics.Parsing, sn
 	t.Helper()
 	h := newIECHarness(t, mode)
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
-	h.e.iec.newPolicy = newRulesPolicy
+	h.e.sessions.dpi = h.e.dpiMgr
+	h.e.sessions.newPolicy = newRulesPolicy
 	h.e.LoadRules(snap)
 	h.e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
 	h.handshake()

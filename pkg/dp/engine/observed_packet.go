@@ -27,7 +27,7 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 	e.flowMu.Unlock()
 	// IEC incarnations (including tombstones) retain their opener/service
 	// coordinates independently of mutable generic flow orientation.
-	if t := e.iec; t != nil {
+	if t := e.sessions; t != nil {
 		t.mu.Lock()
 		src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
 		dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)

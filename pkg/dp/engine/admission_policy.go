@@ -84,7 +84,7 @@ func (e *Engine) recoverAdmission(ctx context.Context) error {
 			return e.policyFault(faultAdmission, err)
 		}
 		a.dirty = false
-		e.iec.health.clear(faultAdmission)
+		e.sessions.health.clear(faultAdmission)
 	}
 	if !a.initialized {
 		// No allocation from a prior process is trustworthy. Clear only the
@@ -110,7 +110,7 @@ func (e *Engine) recoverAdmission(ctx context.Context) error {
 		}
 	}
 	a.initialized, a.gateDirty = true, false
-	e.iec.health.clear(faultGateZones)
+	e.sessions.health.clear(faultGateZones)
 	return nil
 }
 
@@ -154,6 +154,6 @@ func (e *Engine) sweepAdmission(ctx context.Context, old *rules.Snapshot, oldPar
 
 func (e *Engine) policyFault(cause string, err error) error {
 	err = fmt.Errorf("%s: %w", cause, err)
-	e.iec.health.fault(cause, err.Error())
+	e.sessions.health.fault(cause, err.Error())
 	return err
 }

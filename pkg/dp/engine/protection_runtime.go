@@ -47,7 +47,7 @@ func (e *Engine) bindProtection(newConfiguration bool) {
 	})
 	e.hooks.active = func() bool { return p.current(epoch) }
 	e.hooks.source = func(ev capture.SourceEvent) { p.source(epoch, group, ev) }
-	health := e.iec.health
+	health := e.sessions.health
 	notify := func() {
 		health.mu.Lock()
 		defer health.mu.Unlock()
@@ -172,8 +172,8 @@ func (e *Engine) retireCaptureLocked() {
 	if e.runCapture != nil {
 		e.runCapture.Stop()
 	}
-	if e.iec != nil && e.iec.jobs != nil && e.runDone != nil {
-		e.iec.jobs.flush(e.runDone)
+	if e.sessions != nil && e.sessions.jobs != nil && e.runDone != nil {
+		e.sessions.jobs.flush(e.runDone)
 	}
 	if e.runCancel != nil {
 		e.runCancel()
@@ -236,11 +236,11 @@ func (e *Engine) Close() {
 	e.stopNFLogLocked()
 	e.nflogLifetime = nil
 	e.clearFlowOwners()
-	if e.iec != nil {
-		e.iec.flushHeldCredits()
-		e.iec.stopInspection()
-		if e.iec.injector != nil {
-			_ = e.iec.injector.Close()
+	if e.sessions != nil {
+		e.sessions.flushHeldCredits()
+		e.sessions.stopInspection()
+		if e.sessions.injector != nil {
+			_ = e.sessions.injector.Close()
 		}
 	}
 }

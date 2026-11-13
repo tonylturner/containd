@@ -261,7 +261,7 @@ func TestNATPolicyIdentityTagsExclusionsAndIEC(t *testing.T) {
 		if wire.Dir == flow.DirReverse {
 			wire = wire.Reversed()
 		}
-		s := &iecSession{id: "retired", flow: state, client: wire.Tuple().Source, server: wire.Tuple().Destination}
+		s := &trackedSession{id: "retired", flow: state, client: wire.Tuple().Source, server: wire.Tuple().Destination}
 		// No session remains in the table at emission time.
 		got := table.withSessionTags([]iecTelemetry{s.sessionEvent(outcomeAborted, nil, time.Now())})
 		if !reflect.DeepEqual(got[0].Attributes[events.KeyTags], []string{"backend"}) {

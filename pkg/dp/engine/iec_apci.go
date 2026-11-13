@@ -14,7 +14,7 @@ import (
 
 // observeAPCILocked runs once per decoded frame, never once per ASDU object
 // or packet. The session table has already ordered and deduplicated TCP bytes.
-func (s *iecSession) observeAPCILocked(dir int, f dpi.DecodedFrame, acts *iecActions, now time.Time) {
+func (s *trackedSession) observeAPCILocked(dir int, f dpi.DecodedFrame, acts *sessionActions, now time.Time) {
 	if len(f.Events) == 0 {
 		return
 	}
@@ -51,7 +51,7 @@ func (s *iecSession) observeAPCILocked(dir int, f dpi.DecodedFrame, acts *iecAct
 	s.appendAPCIFindingsLocked(s.apci.Observe(input, now), ev, acts, now)
 }
 
-func (s *iecSession) expireAPCILocked(acts *iecActions, now time.Time) {
+func (s *trackedSession) expireAPCILocked(acts *sessionActions, now time.Time) {
 	if s.apci != nil && !s.stopParse {
 		s.appendAPCIFindingsLocked(s.apci.Expire(now), dpi.Event{}, acts, now)
 	}
@@ -59,10 +59,10 @@ func (s *iecSession) expireAPCILocked(acts *iecActions, now time.Time) {
 
 // appendAPCIFindingsLocked only constructs events; finish emits them after
 // unlock. It shares the anomaly alert builder with other protocol anomalies.
-func (s *iecSession) appendAPCIFindingsLocked(findings []anomaly.IEC104APCIFinding, frame dpi.Event, acts *iecActions, now time.Time) {
+func (s *trackedSession) appendAPCIFindingsLocked(findings []anomaly.IEC104APCIFinding, frame dpi.Event, acts *sessionActions, now time.Time) {
 	for _, f := range findings {
 		src, dst := s.client, s.server
-		if f.Direction == iecDirSrv {
+		if f.Direction == sessionDirSrv {
 			src, dst = dst, src
 		}
 		ev := frame

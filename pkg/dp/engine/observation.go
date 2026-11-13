@@ -179,7 +179,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	parsed := observationPacket(st)
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
-	iecOwned := e.iecOwnsState(pkt, st)
+	iecOwned := e.sessionOwnsState(pkt, st)
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {

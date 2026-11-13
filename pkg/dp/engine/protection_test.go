@@ -98,7 +98,7 @@ func TestProtectionFailedEventPrefersFailedComponentReason(t *testing.T) {
 func TestProtectionRebindDropsRetiredQueueImmediately(t *testing.T) {
 	e := protectionFixture(t, false)
 	e.hooks.onSource(capture.SourceEvent{Ready: true})
-	fresh, err := New(Config{NFQueueGroup: 102, Enforce: EnforceConfig{Enabled: true}, ResetInjector: e.iec.injector})
+	fresh, err := New(Config{NFQueueGroup: 102, Enforce: EnforceConfig{Enabled: true}, ResetInjector: e.sessions.injector})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +158,11 @@ func TestProtectionBoundedRetryAndFaults(t *testing.T) {
 		t.Fatalf("exhausted: %+v", st)
 	}
 	e.hooks.onSource(capture.SourceEvent{Ready: true})
-	e.iec.health.fault(faultWorker, "worker failed")
+	e.sessions.health.fault(faultWorker, "worker failed")
 	if e.Protection().State != "failed" {
 		t.Fatalf("worker loss: %+v", e.Protection())
 	}
-	e.iec.health.clear(faultWorker)
+	e.sessions.health.clear(faultWorker)
 	if e.Protection().State != "protecting" {
 		t.Fatalf("worker recovery: %+v", e.Protection())
 	}
@@ -299,7 +299,7 @@ func TestProtectionReleaseClearsInstalledIdentity(t *testing.T) {
 	e := gateEngine(t, &nftModel{}, 101, &bindCapture{})
 	e.BeginProtection("boot", "enabled")
 	applyIEC(t, e)
-	fresh, err := New(Config{Events: e.Events(), NFQueueGroup: 101, ResetInjector: e.iec.injector})
+	fresh, err := New(Config{Events: e.Events(), NFQueueGroup: 101, ResetInjector: e.sessions.injector})
 	if err != nil {
 		t.Fatal(err)
 	}

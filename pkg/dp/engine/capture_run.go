@@ -34,8 +34,8 @@ func (e *Engine) newRun() error {
 		fenced.SetPublicationFence(&e.policyMu)
 	}
 	e.capture, e.hooks = runner, hooks
-	hooks.iec = e.iec
-	e.iec.settler = runner.Settler
-	e.iec.jobs = hooks.blocks
+	hooks.sessions = e.sessions
+	e.sessions.settler = runner.Settler
+	e.sessions.jobs = hooks.blocks
 	return nil
 }

@@ -42,7 +42,7 @@ func TestCaptureHandlerRecoversPanics(t *testing.T) {
 	if len(logged) != 2 || !strings.Contains(logged[0], "decoder bug") {
 		t.Fatalf("logged = %v", logged)
 	}
-	e.iec.health.clear(faultInjector)
+	e.sessions.health.clear(faultInjector)
 	e.LoadRules(iecSnapshot("enforce"))
 	if st := e.IEC104Enforcement(); st.Healthy || !strings.Contains(st.Reason, "panic") {
 		t.Fatalf("health = %+v", st)
