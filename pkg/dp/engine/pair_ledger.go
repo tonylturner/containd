@@ -48,6 +48,7 @@ type pairGrant[K protocolPairKey, S any] struct {
 	Created, Expires time.Time
 	State            pairProgress
 	lease            *limits.Lease
+	contextLease     *limits.Lease
 	autonomous       bool
 }
 type pairMarker[K protocolPairKey] struct {
@@ -68,6 +69,7 @@ type sessionPairing interface {
 	inspect(dpi.DecodedFrame, dpi.StreamDir, time.Time) (rules.MessageClass, pairReason)
 	apply(dpi.DecodedFrame, dpi.StreamDir, requestPermit, time.Time) pairReason
 	expire(time.Time)
+	reauthorize(*compiledRules, rules.EvalContext, time.Time) pairReason
 	close()
 }
 type pairLedger[K protocolPairKey, S any] struct {
@@ -254,6 +256,9 @@ func (b *pairLedger[K, S]) autonomous(k K, s S, now time.Time) pairReason {
 }
 func (b *pairLedger[K, S]) remove(i int) {
 	b.grants[i].lease.Release()
+	if b.grants[i].contextLease != nil {
+		b.grants[i].contextLease.Release()
+	}
 	copy(b.grants[i:], b.grants[i+1:])
 	b.grants[len(b.grants)-1] = nil
 	b.grants = b.grants[:len(b.grants)-1]

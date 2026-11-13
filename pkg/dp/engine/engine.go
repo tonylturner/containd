@@ -422,6 +422,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// The replacement table's counter callback must use the surviving
 	// engine's installed policy, not the discarded constructor's snapshots.
 	fresh.sessions.shadow = e.countShadow
+	fresh.sessions.ruleOwner = &e.ruleSnap
 	e.sessions = fresh.sessions
 	if e.admission.dirty {
 		e.sessions.health.fault(faultAdmission, "admission sweep requires recovery")

@@ -71,6 +71,7 @@ func newRulesPolicy(snap *rules.Snapshot) iecPolicy {
 // newIECTable binds the session owner to IEC104, the only gated protocol.
 func newIECTable(globalMode string, zones *zoneCache) *sessionTable {
 	return &sessionTable{
+		ruleOwner:   &ruleSnapshots{},
 		ledger:      limits.NewLedger(nil),
 		resources:   limits.NewResources(nil, nil),
 		settlements: make(map[capture.Token]*heldCredit),

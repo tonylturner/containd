@@ -132,6 +132,7 @@ type sessionTable struct {
 	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
 	pressureOffline bool
 
+	ruleOwner    *ruleSnapshots
 	snap         *rules.Snapshot
 	sessions     map[sessionKey]*trackedSession
 	tombstones   int
@@ -235,6 +236,10 @@ func (t *sessionTable) setPolicy(snap *rules.Snapshot) {
 func (t *sessionTable) installPolicy(snap *rules.Snapshot, abortPartial bool) sessionActions {
 	var acts sessionActions
 	t.mu.Lock()
+	if t.ruleOwner.Load() != snap {
+		t.ruleOwner.Store(snap)
+	}
+	compiled := t.ruleOwner.current.Load()
 	t.snap = snap
 	active, hasICS := t.iecAdapter.installLocked(snap)
 	now := t.now()
@@ -249,6 +254,15 @@ func (t *sessionTable) installPolicy(snap *rules.Snapshot, abortPartial bool) se
 			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))
 		case matched && mode == s.mode:
 			s.ctx = ctx
+			if s.pairing != nil {
+				if why := s.pairing.reauthorize(compiled, ctx, now); why == stateLimit {
+					if s.mode == "enforce" {
+						acts.merge(t.abortLocked(s, abortBound, "", nil, now))
+					} else {
+						t.stopParseLocked(s)
+					}
+				}
+			}
 		case s.mode == "enforce" || mode == "enforce":
 			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))
 		default:

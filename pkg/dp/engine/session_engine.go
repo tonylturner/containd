@@ -32,6 +32,7 @@ func (e *Engine) initSessions(cfg Config) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
 	t = newIECTable(cfg.DPIMode, &e.zones)
+	t.ruleOwner = &e.ruleSnap
 	t.ledger = e.ledger
 	t.resources = e.inspectionResources()
 	t.detached = e.detached

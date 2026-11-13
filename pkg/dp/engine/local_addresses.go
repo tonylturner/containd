@@ -98,17 +98,19 @@ func (e *Engine) refreshLocalAddresses(ctx context.Context) error {
 		}
 		script.WriteString(update)
 	}
+	var acts sessionActions
 	e.policyMu.Lock()
-	defer e.policyMu.Unlock()
+	defer func() {
+		e.policyMu.Unlock()
+		e.sessions.apply(acts)
+	}()
 	if script.Len() != 0 {
 		if err := e.applier.Apply(ctx, script.String()); err != nil {
 			return e.policyFault(faultAddresses, err)
 		}
 	}
 	e.ruleSnap.Update(&next)
-	e.sessions.mu.Lock()
-	e.sessions.snap, e.sessions.policy = &next, e.sessions.newPolicy(&next)
-	e.sessions.mu.Unlock()
+	acts = e.sessions.installPolicy(&next, false)
 	e.gate.mu.Lock()
 	e.gate.snap = &next
 	e.gate.mu.Unlock()
