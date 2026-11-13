@@ -12,6 +12,7 @@ import (
 // actionsSnapshot has one rule of every action, in no particular order.
 func actionsSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled: true,
 		Default:    rules.ActionDeny,
 		ZoneIfaces: map[string][]string{"it": {"eth1"}, "ot": {"eth2"}},
 		Firewall: []rules.Entry{

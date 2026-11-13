@@ -670,6 +670,9 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if pkt.Token.Inline() && pkt.Mark&markabi.EnforceScopeMark != 0 && !e.enforcingPacketScope(pkt, state) {
 		return capture.Decision{Action: capture.Drop, Reason: "missing_enforce_scope"}
 	}
+	if d, ok := e.uninspectableDecision(pkt, state); ok {
+		return d
+	}
 	stopped := e.prepareDecodeCoverage(state, pkt, now, connection, history)
 	if e.observation != nil && (!stopped || pkt.Token.Inline()) {
 		e.observePacket(pkt, state)

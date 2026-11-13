@@ -115,9 +115,14 @@ Monitor rules never admit or deny traffic; independent nftables decisions,
 enforcing rules and strict enforce scopes still apply. See
 [ICS DPI modes](ics-dpi.md#dpi-modes).
 
-IEC 104 enforce rules require DPI enabled, its decoder enabled, NFQUEUE capture,
-and no overlapping IP or CIDR DPI exclusion. Domain exclusions do not exempt the
-IEC 104 envelope. Inside the IEC inspection envelope unmatched,
+Modbus, DNP3, IEC 104 and CIP enforce rules require NFQUEUE capture. If DPI or
+that protocol's decoder is disabled, the rule stays valid but its whole
+transport scope is dropped, for both ALLOW and DENY rules. Overlapping IP/CIDR
+DPI exclusions drop only the excluded flows within that scope. Warnings name
+the cause and repair in rule previews, ruleset status and authoring responses.
+These combinations do not trigger boot recovery or change management access.
+Monitor-effective rules keep their observation-only behavior. Domain exclusions
+do not exempt the IEC 104 envelope. Inside the IEC inspection envelope unmatched,
 malformed, unsupported, or broadcast object traffic cannot be allowed by a broad
 TCP rule. Enforce-mode tracking exhaustion is fail closed; monitor-mode exhaustion
 accepts new connections without inspection. These are protocol-specific limits,
@@ -220,19 +225,20 @@ prohibited command is actually stopped, not only which mode is configured.
 | --- | --- |
 | `monitoring` | The effective mode is monitor: the rule observes by design. |
 | `enforcing` | An inline path inspects every flow in the rule's scope. |
-| `partial` | Enforcing, but an exclusion lets some flows in scope skip inspection. |
-| `not_enforcing` | The effective mode is enforce, but nothing stops a prohibited command. |
+| `partial` | Some flows cannot be inspected. IP/CIDR-excluded enforce traffic is dropped; domain exclusions can still skip generic inspection. |
+| `not_enforcing` | Semantic inspection is unavailable. Reasons distinguish fail-closed transport drops from a missing enforcement path. |
 
-Each lowered state carries reasons with a code and a message:
+Each lowered state carries reasons with a code and a message. A fail-closed
+transport drop is not semantic inspection: it can block allowed commands too.
 
 | Code | Cause |
 | --- | --- |
 | `no-inline-path` | `nfqueueGroup` is 0 (validation prevents this; a direct engine apply can still carry it). |
 | `enforcement-disabled` | `dataplane.enforcement` is false, so nothing steers traffic to the engine. |
-| `dpi-disabled` | The DPI master switch is off. IEC 104 envelopes are inspected regardless. |
-| `decoder-disabled` | The rule's protocol decoder is off in `dpiIcsProtocols`. |
+| `dpi-disabled` | The DPI master switch is off; enforce rules drop their whole transport scope. |
+| `decoder-disabled` | The rule's protocol decoder is off in `dpiIcsProtocols`; enforce rules drop their whole transport scope. |
 | `queue-unavailable` | The engine does not hold the configured queue; the kernel drops the rule's traffic instead of inspecting it. |
-| `exclusion-overlap` | An IP or CIDR exclusion meets the rule's addresses (not IEC 104). |
+| `exclusion-overlap` | An IP or CIDR exclusion meets the rule's addresses; excluded enforce traffic is dropped, including IEC 104. |
 | `domain-exclusion` | A domain exclusion can resolve into the rule's scope (not IEC 104). |
 
 Exclusion reasons name the exclusion in `value`. Reasons that only the running

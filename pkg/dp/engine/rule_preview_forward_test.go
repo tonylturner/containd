@@ -15,7 +15,7 @@ func TestPreviewViaUnavailableUsesCandidateForwards(t *testing.T) {
 	e := &Engine{eventStore: events.NewStore(100).Writer("")}
 	forward := rules.ForwardMatch{Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp",
 		ListenPort: 1502, Backend: netip.MustParseAddrPort("10.0.0.2:502")}
-	e.ruleSnap.Store(&rules.Snapshot{ForwardMatches: map[string]rules.ForwardMatch{"running": forward}})
+	e.ruleSnap.Store(&rules.Snapshot{DPIEnabled: true, ForwardMatches: map[string]rules.ForwardMatch{"running": forward}})
 	e.eventStore.Append(events.Event{Transport: "tcp", SrcIP: "192.0.2.2", DstIP: "10.0.0.2", DstPort: 502})
 	entry := rules.Entry{ID: "via", Action: rules.ActionAllow, ViaForwards: []string{"candidate"},
 		ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "enforce"}}

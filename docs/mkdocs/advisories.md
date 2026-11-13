@@ -12,6 +12,7 @@ artifacts.
 | [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in the v0.1.16 management image | HIGH | v0.1.17 (Wolfi migration) or later |
 | [containd-2026-002](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json) | Forged audit actors and source provenance through untrusted X-User and X-Source headers | LOW (X-User CVSS 3.1: 2.7; X-Source not scored) | v0.1.42 (X-User); v0.1.43 (X-Source) |
 | [containd-2026-003](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-003.json) | Seven bundled ClamAV parser vulnerabilities exposed by HTTP antivirus scanning | HIGH (Cisco CNA CVSS 3.1: 7.5) | None available; workarounds below |
+| [containd-2026-004](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-004.json) | Uninspected Modbus and DNP3 traffic bypasses enforce-mode predicates | HIGH (CVSS 3.1: 7.5) | v0.1.44 (next scheduled release) |
 
 Use the advisory JSON for affected products/versions, remediation, references,
 and revision history. A project identifier can exist before a CVE/GHSA is
@@ -49,6 +50,22 @@ independently maintained backend. Disabling inspection removes that protection.
 No fixed containd release is available as of 2026-11-11; upstream fixes are
 ClamAV 1.5.4/1.4.6, and a fixed image follows once Wolfi publishes the updated
 1.5 package. See [AV settings](services.md#av) and the advisory for exact scope.
+
+Advisory 004 covers the combined management appliance and standalone engine
+from 0.1.37 through 0.1.43. With DPI or the relevant decoder off, or an
+overlapping IP/CIDR DPI exclusion, enforce-mode Modbus and DNP3 rules could
+admit traffic on transport scope alone: a read-only ALLOW admitted writes,
+and a DENY on a DNP3 operate admitted it. Source history establishes 0.1.37
+as affected; engine-level reproduction confirmed 0.1.39 and 0.1.42. Earlier
+versions remain untested, not declared unaffected. IEC 104 rejected these
+configuration conflicts through validation instead.
+Keep DPI and the relevant decoder enabled and remove overlapping IP/CIDR DPI
+exclusions, or replace affected rules with explicit transport-level DENY rules
+without ICS predicates. A transport DENY blocks otherwise permitted reads too.
+Upgrade to 0.1.44 when available; until then apply a workaround.
+The fix drops uninspectable enforce traffic for ALLOW and DENY alike, with
+configuration warnings rather than rejection. See [ICS DPI](ics-dpi.md) and the
+advisory for scope, version evidence and CVSS rationale.
 
 ## Discovery and downloads
 

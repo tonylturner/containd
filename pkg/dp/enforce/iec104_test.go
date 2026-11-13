@@ -12,6 +12,7 @@ import (
 
 func iecSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled: true,
 		Default:    rules.ActionDeny,
 		ZoneIfaces: map[string][]string{"lan4": {"eth1"}, "station": {"eth2"}},
 		Firewall: []rules.Entry{
@@ -93,7 +94,7 @@ func TestIEC104EnvelopeStateTouchesOnlyTheEnvelopeChain(t *testing.T) {
 		t.Fatalf("the states differ outside the envelope chain:\nclosed:\n%s\nopen:\n%s", closed, open)
 	}
 	// A ruleset without IEC rules has no envelope chain in either state.
-	modbusOnly := &rules.Snapshot{Default: rules.ActionDeny, Firewall: iecSnapshot().Firewall[3:]}
+	modbusOnly := &rules.Snapshot{DPIEnabled: true, Default: rules.ActionDeny, Firewall: iecSnapshot().Firewall[3:]}
 	a, _ := c.CompileFirewall(modbusOnly)
 	c.IEC104EnvelopeOpen = false
 	b, _ := c.CompileFirewall(modbusOnly)
@@ -137,7 +138,7 @@ func TestCompileFirewallIEC104WithoutQueueIsUnchanged(t *testing.T) {
 func TestCompileFirewallIEC104OutsidePortIsNotSteered(t *testing.T) {
 	c := NewCompiler()
 	c.QueueID = 100
-	snap := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
+	snap := &rules.Snapshot{DPIEnabled: true, Default: rules.ActionDeny, Firewall: []rules.Entry{{
 		ID: "iec-on-502", Action: rules.ActionAllow,
 		Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
 		ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"},
@@ -197,7 +198,7 @@ func TestSteersIEC104(t *testing.T) {
 		t.Fatal("no queue: nothing is steered")
 	}
 	c.QueueID = 100
-	if !c.SteersIEC104(iecSnapshot()) || c.SteersIEC104(&rules.Snapshot{}) || c.SteersIEC104(nil) {
+	if !c.SteersIEC104(iecSnapshot()) || c.SteersIEC104(&rules.Snapshot{DPIEnabled: true}) || c.SteersIEC104(nil) {
 		t.Fatal("SteersIEC104 must follow the IEC rules")
 	}
 }

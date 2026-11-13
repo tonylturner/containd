@@ -49,6 +49,9 @@ func (c *Compiler) writeInspectionChains(buf *bytes.Buffer, snap *rules.Snapshot
 // counter owner. Identity, schedule and message selectors cannot hide a
 // transport scope from inspection.
 func (c *Compiler) writeInspection(buf *bytes.Buffer, p *predicates, target chainTarget) error {
+	if err := c.writeUninspectable(buf, p, target); err != nil {
+		return err
+	}
 	if c.QueueID <= 0 {
 		return nil
 	}

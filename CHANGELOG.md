@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The account password dialog no longer moves focus 50 ms after it opens, so
+  fast typing in Current password no longer lands in New password.
+
+### Security
+
+- Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
+  protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
+  Uninspectable transport traffic is dropped for ALLOW and DENY alike;
+  configurations remain valid and rule warnings identify the cause and repair.
+  See CSAF advisory `containd-2026-004` for affected versions and workarounds.
+
 ## [0.1.43] - 2026-11-13
 
 ### Breaking

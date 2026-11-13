@@ -65,7 +65,7 @@ func TestValidateICSEnforceNeedsInlinePath(t *testing.T) {
 func TestValidateICSEnforceIEC104KeepsItsRules(t *testing.T) {
 	cfg := iec104Config(iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true}))
 	cfg.DataPlane.NFQueueGroup = 0
-	wantValidateError(t, cfg, "iec104 enforce needs NFQUEUE capture")
+	wantValidateError(t, cfg, "iec104 enforce needs an inline path")
 }
 
 // These are legal without a refusal; coverage reports what they lack.

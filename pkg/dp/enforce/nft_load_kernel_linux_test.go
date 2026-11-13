@@ -36,6 +36,16 @@ func TestKernelNFTLoadsGoldens(t *testing.T) {
 			return c, iecSnapshot()
 		},
 	}
+	for _, protocol := range []string{"modbus", "dnp3", "iec104"} {
+		for _, cause := range []string{"master", "decoder"} {
+			cases[protocol+"-"+cause] = func() (*Compiler, *rules.Snapshot) {
+				c := NewCompiler()
+				c.QueueID, c.NFLogGroup = 101, 100
+				return c, &rules.Snapshot{DPIEnabled: cause != "master", DPIICSProtocols: map[string]bool{protocol: cause != "decoder"},
+					Firewall: []rules.Entry{{ID: "guard", Action: rules.ActionAllow, Log: true, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}}}}
+			}
+		}
+	}
 	for _, g := range loweringGoldens {
 		cases[g.file] = func() (*Compiler, *rules.Snapshot) { return g.compiler(), g.snapshot() }
 	}

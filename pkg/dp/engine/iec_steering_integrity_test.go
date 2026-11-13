@@ -16,7 +16,7 @@ func TestMonitorCannotMaskInvalidEnforceEnvelope(t *testing.T) {
 		if reverse {
 			mid, eid = "z-monitor", "a-enforce"
 		}
-		snap := rules.Snapshot{Default: rules.ActionAllow, DPIMode: "monitor", Firewall: []rules.Entry{
+		snap := rules.Snapshot{DPIEnabled: true, Default: rules.ActionAllow, DPIMode: "monitor", Firewall: []rules.Entry{
 			{ID: mid, Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104"}},
 			{ID: eid, Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}},
 		}}

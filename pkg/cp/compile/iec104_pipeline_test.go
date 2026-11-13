@@ -146,10 +146,10 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 		t.Fatal("PreviewMatch must match the compiled command rule")
 	}
 
-	// The same policy is rejected before save when the decoder is off.
+	// A disabled decoder keeps the policy valid; transport fails closed.
 	cfg.DataPlane.DPIICSProtocols["iec104"] = false
-	if _, err := CompileSnapshot(&cfg); err == nil || !strings.Contains(err.Error(), "dpiIcsProtocols.iec104") {
-		t.Fatalf("compile with the decoder off err = %v, want rejection of enforce policy without an enabled IEC104 decoder", err)
+	if _, err := CompileSnapshot(&cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 

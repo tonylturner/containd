@@ -102,7 +102,7 @@ func TestRulesetPreviewCarriesCandidateCoverage(t *testing.T) {
 	}
 	want := []coverage.Rule{{RuleID: "read", Protocol: "modbus", Mode: "enforce", State: coverage.Partial,
 		Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Value: "10.1.0.4",
-			Message: "DPI exclusion 10.1.0.4 meets this rule's addresses; its flows skip inspection"}}}}
+			Message: "DPI exclusion 10.1.0.4 prevents inspection; matching transport traffic is dropped instead of bypassed; remove or narrow the exclusion"}}}}
 	if !reflect.DeepEqual(got.ICSCoverage, want) {
 		t.Fatalf("icsCoverage = %+v, want %+v", got.ICSCoverage, want)
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
-// Reuse the compiler's ordered shadow analysis and the existing warning
+// Reuse the compiler's shadow and inspection analysis and the existing warning
 // header; authoring responses retain their domain-specific JSON shapes.
 func candidateShadowWarnings(c *gin.Context, cfg *config.Config) bool {
 	snap, err := compile.CompileSnapshot(cfg)
@@ -18,7 +18,7 @@ func candidateShadowWarnings(c *gin.Context, cfg *config.Config) bool {
 	}
 	var messages []string
 	for _, w := range enforce.NewCompiler().RuleWarnings(&snap) {
-		if w.ShadowedBy != "" {
+		if w.ShadowedBy != "" || w.Predicate == enforce.PredicateInspection {
 			messages = append(messages, w.RuleID+": "+w.Message)
 		}
 	}

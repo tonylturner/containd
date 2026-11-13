@@ -48,7 +48,7 @@ func testKernelQueuedConditionalRecheck(t *testing.T, action rules.Action) {
 	repeatPolicyQueue(t, lab.ctx, qrQueue, false)
 	echoInNetns(t, lab.target, net.JoinHostPort(qrServer, strconv.Itoa(qrPort)))
 
-	snap := &rules.Snapshot{
+	snap := &rules.Snapshot{DPIEnabled: true,
 		Default: rules.ActionDeny,
 		IdentityBindings: []rules.IdentityBinding{
 			{IP: revoked, Identities: []string{"ops"}},

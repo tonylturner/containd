@@ -15,10 +15,10 @@ const (
 	Monitoring State = "monitoring"
 	// Enforcing: an inline path inspects every flow of the rule's scope.
 	Enforcing State = "enforcing"
-	// Partial: enforcing, but some flows of the scope can bypass inspection.
+	// Partial: some flows cannot be inspected; reasons distinguish drops from gaps.
 	Partial State = "partial"
-	// NotEnforcing: the effective mode is enforce, but nothing stops a
-	// prohibited command.
+	// NotEnforcing: semantic inspection is unavailable. Reasons explain whether
+	// traffic is dropped fail-closed or has no enforcement path.
 	NotEnforcing State = "not_enforcing"
 )
 
@@ -46,7 +46,7 @@ const (
 
 // Reason is one cause with an operator-facing message. Value names the
 // exclusion for exclusion codes. Matches is the runtime count of flows the
-// exclusion actually bypassed; zero in static evaluations. Runtime marks a
+// exclusion prevented from being inspected; zero in static evaluations. Runtime marks a
 // reason that only the running engine reports (queue-unavailable); a static
 // evaluation of the same snapshot and settings has every other reason, so a
 // candidate and an applied rule differ in configuration only when they

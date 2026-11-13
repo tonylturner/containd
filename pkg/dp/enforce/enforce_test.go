@@ -178,7 +178,8 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 	compiler.QueueID = 42
 
 	snap := &rules.Snapshot{
-		Default: rules.ActionDeny,
+		DPIEnabled: true,
+		Default:    rules.ActionDeny,
 		Firewall: []rules.Entry{
 			{
 				ID:        "ics1",
@@ -211,7 +212,8 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 	compiler := NewCompiler()
 	// QueueID is 0 (default) — no queue rules should be emitted.
 	snap := &rules.Snapshot{
-		Default: rules.ActionDeny,
+		DPIEnabled: true,
+		Default:    rules.ActionDeny,
 		Firewall: []rules.Entry{
 			{
 				ID:        "ics1",
@@ -289,7 +291,8 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 	compiler.NFLogGroup = 100
 
 	snap := &rules.Snapshot{
-		Default: rules.ActionDeny,
+		DPIEnabled: true,
+		Default:    rules.ActionDeny,
 		Firewall: []rules.Entry{
 			{
 				ID:        "modbus-fc-guard",

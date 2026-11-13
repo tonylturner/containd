@@ -17,6 +17,7 @@ import (
 // and ICS endpoints.
 func gateSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
+		DPIEnabled:       true,
 		Default:          rules.ActionDeny,
 		ForwardMatches:   map[string]rules.ForwardMatch{"pf-web": {Enabled: true, IngressDevices: []string{"eth0"}, Protocol: "tcp", ListenPort: 8080, Backend: netip.MustParseAddrPort("10.2.0.10:80")}},
 		ZoneIfaces:       map[string][]string{"it": {"eth1"}, "ot": {"eth2"}, "wan": {"eth0"}, "dmz": {"eth3"}},
