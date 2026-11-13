@@ -54,6 +54,7 @@ v2 configuration). CI uses golangci-lint action v9 with version v2.11.
 ```bash
 go mod tidy && git diff --exit-code go.mod go.sum
 go test -race ./...
+bash scripts/gate-kernel-tests.sh
 GOOS=linux go build ./...
 GOOS=linux go vet ./...
 GOOS=linux golangci-lint run ./...
@@ -66,6 +67,12 @@ docker buildx build --load --file build/Dockerfile.mgmt --tag containd/containd:
 
 The Docker command builds the management image used by CI. The release workflow
 also builds `build/Dockerfile.engine` for `linux/amd64` and `linux/arm64`.
+CI's independent `kernel-tests` job runs the script's eight default kernel test
+roots on `ubuntu-latest`, with verbose failure logs uploaded as
+`kernel-tests-log`. This is not every opt-in kernel test. The script requires
+Docker's Linux kernel, bridge netfilter and TUN; CI loads `br_netfilter` and `tun`
+on the host before launching its disposable test container. The local
+`dev-verify.sh` baseline ShellChecks this script but does not execute it.
 CI additionally runs npm audit, the public Compose quickstart, the AV scanning
 gate smoke against the just-built image, and a HIGH/CRITICAL Trivy image scan.
 The UI job installs Chromium and runs all Playwright specs, uploading the report

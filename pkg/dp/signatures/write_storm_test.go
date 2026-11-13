@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 func writeStormEvent(flowID, proto, kind string, write bool, timestamp time.Time, apduID string) dpi.Event {
@@ -228,11 +229,14 @@ func TestThresholdScopeFlowAndUnparseableConnectionFallback(t *testing.T) {
 
 func TestCustomThresholdDedupSetCapCountsUnretainedValues(t *testing.T) {
 	e := New()
+	e.maxValues = 3
+	ledger := limits.NewLedger(nil)
+	e.SetLimits(limits.Default(), limits.NewBudget(1), ledger)
 	e.Add(Signature{
 		ID:         "CUSTOM-DEDUP-CAP",
 		Protocol:   "test",
 		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
-		Threshold:  &Threshold{Count: maxThresholdDedupValues + 2, WindowSeconds: 10, DedupAttr: "command_id"},
+		Threshold:  &Threshold{Count: 5, WindowSeconds: 10, DedupAttr: "command_id"},
 	})
 	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
 	match := func(id string) bool {
@@ -242,7 +246,7 @@ func TestCustomThresholdDedupSetCapCountsUnretainedValues(t *testing.T) {
 		}
 		return len(e.Match(ev)) != 0
 	}
-	for i := 0; i < maxThresholdDedupValues; i++ {
+	for i := 0; i < e.maxValues; i++ {
 		if match("unique-" + strconv.Itoa(i)) {
 			t.Fatalf("alerted at retained value %d", i+1)
 		}
@@ -254,11 +258,105 @@ func TestCustomThresholdDedupSetCapCountsUnretainedValues(t *testing.T) {
 	if st == nil {
 		t.Fatal("no threshold state for dedup cap test")
 	}
-	if len(st.seen) != maxThresholdDedupValues {
-		t.Fatalf("retained dedup values = %d, want cap %d", len(st.seen), maxThresholdDedupValues)
+	if len(st.seen) != e.maxValues || st.count != 4 {
+		t.Fatalf("retained dedup values = %d, count=%d, want cap %d and count 4", len(st.seen), st.count, e.maxValues)
 	}
 	if !match("overflow") {
-		t.Fatal("repeated unretained value was not counted at the documented cap")
+		t.Fatal("unretained identity was not counted")
+	}
+	if st.count != 5 || !st.fired {
+		t.Fatalf("unretained identity count=%d fired=%v, want 5/true", st.count, st.fired)
+	}
+	hits := ledger.Status(limits.TableSignatureWindows, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonTruncated || hits[0].Mode != limits.ModeObserve || hits[0].Total != 2 {
+		t.Fatalf("value truncation ledger hits %+v", hits)
+	}
+}
+
+func TestThresholdWindowsEvictOldestAndCount(t *testing.T) {
+	e := New()
+	e.maxWindows = 3
+	ledger := limits.NewLedger(nil)
+	e.SetLimits(limits.Default(), limits.NewBudget(1), ledger)
+	sig := Signature{ID: "window", Threshold: &Threshold{Count: 100, WindowSeconds: 600}}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 40; i++ {
+		ev := dpi.Event{FlowID: strconv.Itoa(i), Timestamp: start.Add(time.Duration(i) * time.Second)}
+		e.matchesMu.Lock()
+		e.passThreshold(sig, ev, ev.Timestamp)
+		e.matchesMu.Unlock()
+	}
+	if len(e.thresholds) != 3 || e.thresholdHighWater != 3 {
+		t.Fatalf("window occupancy=%d high-water=%d", len(e.thresholds), e.thresholdHighWater)
+	}
+	for i := 37; i < 40; i++ {
+		if e.thresholds[thresholdKey{sigID: "window", flowID: strconv.Itoa(i)}] == nil {
+			t.Fatalf("newest window %d was evicted", i)
+		}
+	}
+	for i := 0; i < 37; i++ {
+		if e.thresholds[thresholdKey{sigID: "window", flowID: strconv.Itoa(i)}] != nil {
+			t.Fatalf("old window %d survived", i)
+		}
+	}
+	hits := ledger.Status(limits.TableSignatureWindows, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonEvicted || hits[0].Mode != limits.ModeObserve || hits[0].Total != 37 {
+		t.Fatalf("window eviction ledger hits %+v", hits)
+	}
+}
+
+func TestThresholdWindowExpiryPrecedesLRUEviction(t *testing.T) {
+	e := New()
+	e.maxWindows = 3
+	ledger := limits.NewLedger(nil)
+	e.SetLimits(limits.Default(), limits.NewBudget(1), ledger)
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	insert := func(sig Signature, flowID string, at time.Time) {
+		t.Helper()
+		e.matchesMu.Lock()
+		e.passThreshold(sig, dpi.Event{FlowID: flowID}, at)
+		e.matchesMu.Unlock()
+	}
+	insert(Signature{ID: "short", Threshold: &Threshold{Count: 100, WindowSeconds: 1}}, "expired", start)
+	long := Signature{ID: "long", Threshold: &Threshold{Count: 100, WindowSeconds: 60}}
+	insert(long, "old-one", start)
+	insert(long, "old-two", start.Add(time.Second))
+	insert(long, "new-one", start.Add(2*time.Second))
+	if e.thresholds[thresholdKey{sigID: "short", flowID: "expired"}] != nil || len(e.thresholds) != 3 {
+		t.Fatal("expired window was not removed before admission")
+	}
+	if hits := ledger.Status(limits.TableSignatureWindows, limits.Occupancy{}).Hits; len(hits) != 0 {
+		t.Fatalf("expiry was counted as a capacity eviction: %+v", hits)
+	}
+	insert(long, "new-two", start.Add(3*time.Second))
+	if e.thresholds[thresholdKey{sigID: "long", flowID: "old-one"}] != nil {
+		t.Fatal("oldest live window was not evicted")
+	}
+	hits := ledger.Status(limits.TableSignatureWindows, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonEvicted || hits[0].Mode != limits.ModeObserve || hits[0].Total != 1 {
+		t.Fatalf("live-window eviction ledger hits %+v", hits)
+	}
+}
+
+func TestThresholdValueByteOverflowIsTruncated(t *testing.T) {
+	e := New()
+	e.maxValues = 10
+	e.maxValueBytes = 5
+	ledger := limits.NewLedger(nil)
+	e.SetLimits(limits.Default(), limits.NewBudget(1), ledger)
+	sig := Signature{ID: "bytes", Threshold: &Threshold{Count: 10, WindowSeconds: 30, DedupAttr: "value"}}
+	at := time.Now()
+	e.matchesMu.Lock()
+	e.passThreshold(sig, dpi.Event{FlowID: "byte-flow", Attributes: map[string]any{"value": "a"}}, at)
+	e.passThreshold(sig, dpi.Event{FlowID: "byte-flow", Attributes: map[string]any{"value": "bb"}}, at)
+	e.matchesMu.Unlock()
+	st := e.thresholds[thresholdKey{sigID: "bytes", flowID: "byte-flow"}]
+	if st == nil || len(st.seen) != 1 || st.valueBytes != 3 || st.count != 2 {
+		t.Fatalf("value bytes window %+v", st)
+	}
+	hits := ledger.Status(limits.TableSignatureWindows, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonTruncated || hits[0].Mode != limits.ModeObserve || hits[0].Total != 1 {
+		t.Fatalf("byte truncation ledger hits %+v", hits)
 	}
 }
 

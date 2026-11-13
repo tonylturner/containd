@@ -4,6 +4,8 @@ package itdpi
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
@@ -20,11 +22,15 @@ type tlsStreamKey struct {
 }
 
 type tlsConnection struct {
+	memory   *flow.InspectionMemory
 	refs     int
 	selected string
 }
 
 type tlsStream struct {
+	memory                                 *flow.InspectionMemory
+	enforcing                              bool
+	failure                                *dpi.StreamError
 	connection                             string
 	peer                                   *tlsConnection
 	anchored, stopped, encrypted, offers13 bool
@@ -40,11 +46,14 @@ func (d *TLSDecoder) StreamEnded(session string, dir dpi.StreamDir) {
 	defer d.mu.Unlock()
 	key := tlsStreamKey{session, dir}
 	if s := d.streams[key]; s != nil {
+		s.clearHello()
 		s.peer.refs--
 		if s.peer.refs == 0 {
 			delete(d.connections, s.connection)
+			s.peer.memory.Release()
 		}
 		delete(d.streams, key)
+		s.memory.Release()
 	}
 }
 
@@ -58,15 +67,14 @@ func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.Strea
 	key := tlsStreamKey{v.Session, v.Dir}
 	s := d.streams[key]
 	if s == nil {
-		connection := metadataConnectionKey(state, v)
-		peer := d.connections[connection]
-		if peer == nil {
-			peer = &tlsConnection{}
-			d.connections[connection] = peer
+		var err error
+		s, err = d.admit(state, v)
+		if err != nil {
+			return dpi.StreamResult{}, err
 		}
-		peer.refs++
-		s = &tlsStream{connection: connection, peer: peer}
-		d.streams[key] = s
+	}
+	if s.failure != nil {
+		return dpi.StreamResult{}, s.failure
 	}
 	var res dpi.StreamResult
 	for res.Consumed < len(v.Bytes) {
@@ -90,8 +98,13 @@ func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.Strea
 			switch p[0] {
 			case 22:
 				events, err := s.handshake(state, p[5:5+n])
-				if err != "" {
-					reason = err
+				if errors.Is(err, flow.ErrInspectionLimit) {
+					s.failure = dpi.StateLimitError(d.resources, s.enforcing, "tls", v.Base+int64(res.Consumed))
+					s.clearHello()
+					return dpi.StreamResult{}, s.failure
+				}
+				if err != nil {
+					reason = err.Error()
 					prior = events
 				} else {
 					metadataFrame(&res, v, 5+n, events)
@@ -105,7 +118,7 @@ func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.Strea
 					tls13 := s.peer.selected == "TLS1.3" || s.peer.selected == "" && s.offers13
 					if !tls13 {
 						s.encrypted = true
-						s.hello = nil
+						s.clearHello()
 					}
 					metadataFrame(&res, v, 5+n, nil)
 				}
@@ -119,7 +132,7 @@ func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.Strea
 		}
 		if reason != "" {
 			s.stopped = true
-			s.hello = nil
+			s.clearHello()
 			metadataStop(state, v, &res, s.anchored, "tls", reason, prior)
 		}
 	}
@@ -129,7 +142,7 @@ func (d *TLSDecoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.Strea
 
 // Consume each record once. Only hello bodies are retained; Certificate and
 // other potentially large messages are skipped by their 24-bit wire length.
-func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
+func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, error) {
 	var events []dpi.Event
 	for len(p) > 0 {
 		if s.headerN < 4 {
@@ -143,14 +156,16 @@ func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
 			s.remaining = int(s.header[1])<<16 | int(s.header[2])<<8 | int(s.header[3])
 			if s.typ == 1 || s.typ == 2 {
 				if s.remaining > maxTLSHello {
-					return events, "TLS hello size limit"
+					return events, fmt.Errorf("TLS hello size limit")
 				}
-				s.hello = s.hello[:0]
+				s.clearHello()
 			}
 		}
 		n := min(len(p), s.remaining)
 		if s.typ == 1 || s.typ == 2 {
-			s.hello = append(s.hello, p[:n]...)
+			if n > 0 && !replaceBytes(s.memory, &s.hello, p[:n]) {
+				return nil, flow.ErrInspectionLimit
+			}
 		}
 		s.remaining -= n
 		p = p[n:]
@@ -160,7 +175,7 @@ func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
 		if s.typ == 1 || s.typ == 2 {
 			ev, ok := tlsHelloEvent(st, s.typ, s.hello)
 			if !ok {
-				return events, "invalid TLS hello"
+				return events, fmt.Errorf("invalid TLS hello")
 			}
 			events = append(events, ev)
 			if s.typ == 1 {
@@ -173,11 +188,11 @@ func (s *tlsStream) handshake(st *flow.State, p []byte) ([]dpi.Event, string) {
 			} else {
 				s.peer.selected = ev.Attributes["tls_selected_version"].(string)
 			}
-			s.hello = nil
+			s.clearHello()
 		}
 		s.headerN = 0
 	}
-	return events, ""
+	return events, nil
 }
 
 func tlsHelloEvent(state *flow.State, typ byte, body []byte) (dpi.Event, bool) {

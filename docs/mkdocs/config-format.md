@@ -399,6 +399,33 @@ Limitations:
   ownership require manual upgrade cleanup; see the routing ownership guide.
 - NAT supports postrouting masquerade and DNAT/port-forwarding.
 
+## Traffic state sizing
+
+The optional `dataplane.limits` object has three fields. Omitted or zero values
+select the default **per field** without rewriting the saved configuration;
+zero never means unlimited. Nonzero values outside the inclusive bounds fail
+validation with the field name and bounds, including negative values.
+
+| Field | Default | Minimum nonzero | Maximum |
+| --- | --- | --- | --- |
+| `maxFlows` | 16,384 directional slots | 1,024 | 262,144 |
+| `maxTopTalkers` | 8,192 directional host-pair rows | 64 | 262,144 |
+| `maxInspectionBytes` | 67,108,864 (64 MiB) | 8,388,608 (8 MiB) | 1,073,741,824 (1 GiB) |
+
+Each connection reserves two flow slots: capacity is `maxFlows/2` connections,
+not `maxFlows` sessions. Inspection bytes cover retained inspection allocations,
+not engine memory. Protocol-specific table caps remain fixed; there are no
+per-table knobs or fail-open/closed setting. See
+[traffic state limits](dataplane.md#traffic-state-limits) for coverage and refusal
+behavior.
+
+For example: `"limits": {"maxFlows": 32768, "maxTopTalkers": 8192,
+"maxInspectionBytes": 134217728}` inside `dataplane`. The UI exposes these under
+**Firewall → DPI settings → Traffic state limits**, showing effective candidate
+values and defaults. CLI `show dataplane` shows stored, effective and default
+values; `set dataplane limits <field> <value>` stages a field. Commit to apply;
+a change to effective limits rebuilds the dataplane and resets traffic state.
+
 ## Configuration lifecycle
 
 Saving or importing validates and replaces the **candidate**; it does not change

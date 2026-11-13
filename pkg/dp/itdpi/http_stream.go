@@ -4,6 +4,7 @@ package itdpi
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"mime"
 	"strconv"
@@ -22,6 +23,10 @@ type httpStreamKey struct {
 }
 
 type httpStream struct {
+	id                uint64
+	memory            *flow.InspectionMemory
+	enforcing         bool
+	failure           *dpi.StreamError
 	key               httpStreamKey
 	connection        string
 	peer              *httpConnection
@@ -45,11 +50,16 @@ func (d *HTTPDecoder) StreamEnded(session string, dir dpi.StreamDir) {
 	defer d.mu.Unlock()
 	key := httpStreamKey{session, dir}
 	if s := d.streams[key]; s != nil {
+		s.dropH2()
+		s.clearFraming()
 		delete(s.peer.streams, key)
 		if len(s.peer.streams) == 0 {
+			s.peer.clearRequests()
 			delete(d.connections, s.connection)
+			s.peer.memory.Release()
 		}
 		delete(d.streams, key)
+		s.memory.Release()
 	}
 }
 
@@ -63,25 +73,25 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 	key := httpStreamKey{v.Session, v.Dir}
 	s := d.streams[key]
 	if s == nil {
-		connection := metadataConnectionKey(st, v)
-		peer := d.connections[connection]
-		if peer == nil {
-			peer = &httpConnection{streams: make(map[httpStreamKey]*httpStream)}
-			d.connections[connection] = peer
+		var err error
+		s, err = d.admit(st, v)
+		if err != nil {
+			return dpi.StreamResult{}, err
 		}
-		s = &httpStream{key: key, connection: connection, peer: peer}
-		d.streams[key] = s
-		peer.streams[key] = s
+	}
+	if s.failure != nil {
+		return dpi.StreamResult{}, s.failure
 	}
 	if v.Role != dpi.DirUnknown {
-		if !s.peer.acceptsStart(s.key, v.Role == dpi.ServerToClient) {
-			s.peer.methods, s.peer.dropped = nil, 0
+		if !s.peer.acceptsStart(s.id, v.Role == dpi.ServerToClient) {
+			s.peer.clearRequests()
+			s.peer.dropped = 0
 			s.peer.clientKnown, s.peer.serverKnown = false, false
 			s.peer.uncertain = true
 		}
-		s.peer.transportKey, s.peer.transportRole = s.key, v.Role
+		s.peer.transportKey, s.peer.transportRole = s.id, v.Role
 	}
-	s.role = s.peer.role(s.key)
+	s.role = s.peer.role(s.id)
 	var res dpi.StreamResult
 	d.httpReanchor(st, s, v, &res)
 	for res.Consumed < len(v.Bytes) {
@@ -89,10 +99,13 @@ func (d *HTTPDecoder) ParseStream(st *flow.State, v dpi.StreamView) (dpi.StreamR
 		p := v.Bytes[off:]
 		n, events, err := d.httpFrame(st, s, p)
 		if err != nil {
+			if errors.Is(err, flow.ErrInspectionLimit) {
+				return dpi.StreamResult{}, s.stateLimit(d.resources, v.Base+int64(off))
+			}
 			anchored := s.anchored
 			s.clearFraming()
 			s.resync = true
-			s.h2 = nil
+			s.dropH2()
 			s.anchored = false
 			s.suppressMalformed = true
 			s.peer.uncertain = true
@@ -187,7 +200,11 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 		if len(p) < len(h2Preface) {
 			return 0, nil, nil
 		}
-		s.h2 = newH2Stream()
+		var err error
+		s.h2, err = newH2Stream(s.memory)
+		if err != nil {
+			return 0, nil, err
+		}
 		s.anchored = true
 		return len(h2Preface), []dpi.Event{{FlowID: st.ID(), Proto: "http2", Kind: "preface", Attributes: httpTransport(st)}}, nil
 	}
@@ -198,7 +215,11 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 			return 0, nil, nil
 		}
 		if p[3] == 4 {
-			s.h2 = newH2Stream()
+			var err error
+			s.h2, err = newH2Stream(s.memory)
+			if err != nil {
+				return 0, nil, err
+			}
 			n, events, err := s.h2.frame(st, p)
 			if err == nil && n > 0 {
 				s.anchored = true
@@ -227,7 +248,7 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	}
 	response := strings.HasPrefix(line, "HTTP/")
 	if s.role != dpi.DirUnknown && response != (s.role == dpi.ServerToClient) ||
-		s.role == dpi.DirUnknown && !s.peer.acceptsStart(s.key, response) {
+		s.role == dpi.DirUnknown && !s.peer.acceptsStart(s.id, response) {
 		// Wrong-role text is not a message from this HTTP endpoint. It
 		// cannot dequeue requests, switch protocols or frame a peer's body.
 		return end, nil, nil
@@ -253,7 +274,11 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	switch {
 	case response && status == 101 && !s.peer.uncertain && s.peer.dropped == 0 && pending.acceptsUpgrade(headers):
 		if strings.EqualFold(headers["upgrade"], "h2c") {
-			s.h2 = newH2Stream()
+			var err error
+			s.h2, err = newH2Stream(s.memory)
+			if err != nil {
+				return 0, nil, err
+			}
 		} else {
 			d.httpTunnel(s.peer)
 		}
@@ -285,13 +310,15 @@ func (d *HTTPDecoder) httpFrame(st *flow.State, s *httpStream, p []byte) (int, [
 	}
 	if response {
 		if status != 101 && !s.peer.clientKnown && !s.peer.serverKnown {
-			s.peer.server, s.peer.serverKnown = s.key, true
+			s.peer.server, s.peer.serverKnown = s.id, true
 		}
 		if status >= 200 || status == 101 {
 			s.peer.response()
 		}
 	} else {
-		s.peer.request(s.key, method, headers)
+		if err := s.peer.request(s, method, headers); err != nil {
+			return 0, nil, err
+		}
 		if s.remaining > 0 || s.chunked {
 			s.body = &httpBody{incomplete: true}
 			if n := len(s.peer.methods); s.peer.dropped == 0 && n > 0 {

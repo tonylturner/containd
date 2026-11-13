@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 const (
@@ -80,6 +81,8 @@ type PortHinter interface {
 
 // Manager dispatches packets to registered decoders.
 type Manager struct {
+	resources   limits.Resources
+	bindings    map[bindingID]*limits.Lease
 	observation map[string]StreamDecoder // immutable explicit observation registry
 	streamMu    sync.Mutex               // one feed/parse/trim transaction across capture workers
 	decoders    []Decoder
@@ -102,6 +105,8 @@ type streamEnd struct {
 
 func NewManager(decoders ...Decoder) *Manager {
 	m := &Manager{
+		resources:   limits.NewResources(nil, nil),
+		bindings:    make(map[bindingID]*limits.Lease),
 		tcpByPort:   make(map[uint16][]Decoder),
 		udpByPort:   make(map[uint16][]Decoder),
 		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
@@ -111,6 +116,7 @@ func NewManager(decoders ...Decoder) *Manager {
 		flowStreams: make(map[string]map[string]struct{}),
 		streamFlows: make(map[string]map[string]struct{}),
 	}
+	m.reassembler.SetResources(m.resources)
 	for _, d := range decoders {
 		m.Add(d)
 	}
@@ -128,6 +134,9 @@ func (m *Manager) Decoders() []Decoder {
 func (m *Manager) Add(dec Decoder) {
 	if dec == nil {
 		return
+	}
+	if owner, ok := dec.(ResourceOwner); ok {
+		owner.SetResources(m.resources)
 	}
 	m.decoders = append(m.decoders, dec)
 	if ph, ok := dec.(PortHinter); ok {
@@ -219,7 +228,11 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
-	for _, d := range m.dispatch(state, state.ID(), nil) {
+	candidates := m.committedSelection(state, state.ID(), nil)
+	if len(candidates) == 0 {
+		candidates = m.supportedCandidates(state)
+	}
+	for _, d := range candidates {
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
 			errs = append(errs, err)

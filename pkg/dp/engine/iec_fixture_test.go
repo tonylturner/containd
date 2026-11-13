@@ -147,15 +147,20 @@ const (
 )
 
 func newIECHarness(t *testing.T, mode string) *iecHarness {
+	return newIECHarnessWithDPI(t, mode, true)
+}
+
+func newIECHarnessWithDPI(t *testing.T, mode string, dpiEnabled bool) *iecHarness {
 	t.Helper()
 	h := &iecHarness{t: t, policy: &fakePolicy{matched: true, mode: mode, allowType: 46}, inj: &session.Fake{}, settler: &fakeSettler{},
 		clock: time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC), deletes: make(chan conntrack.DeleteRequest, 8),
 		client: net.ParseIP("10.60.60.10"), server: net.ParseIP("10.30.30.30"), cport: 40000}
-	e, err := New(Config{DPIEnabled: true, DPIMode: "monitor", ResetInjector: h.inj})
+	e, err := New(Config{DPIEnabled: dpiEnabled, DPIMode: "monitor", ResetInjector: h.inj})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.dpiMgr = dpi.NewManager(stubIEC{})
+	e.dpiMgr.SetResources(e.inspectionResources())
 	e.iec.dpi = e.dpiMgr
 	e.iec.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
 	e.iec.settler = func() capture.Settler { return h.settler }

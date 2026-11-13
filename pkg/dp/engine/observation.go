@@ -3,6 +3,8 @@
 package engine
 
 import (
+	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/identify"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/observe"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -42,9 +45,10 @@ type observationContext struct {
 type observationRecord struct {
 	state  *flow.State
 	events []dpi.Event
+	loss   bool
 }
 
-func newLiveObserver(cfg Config) (*liveObserver, error) {
+func newLiveObserver(cfg Config, resources ...limits.Resources) (*liveObserver, error) {
 	var decoders []dpi.StreamDecoder
 	protocols := make([]identify.Protocol, 0, 4)
 	for _, d := range FilterDecoders(nil, cfg.DPIICSProtocols) {
@@ -57,9 +61,27 @@ func newLiveObserver(cfg Config) (*liveObserver, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(resources) > 0 {
+		manager.SetResources(resources[0])
+	}
 	live := &liveObserver{entries: make(map[identify.Key]*observationContext), now: time.Now}
 	budgets := identify.DefaultBudgets()
 	budgets.Protocols = protocols
+	maxFlows := cfg.Limits.MaxFlows
+	if maxFlows == 0 {
+		maxFlows = limits.DefaultMaxFlows
+	}
+	// There is no independent live context cap. The minimum permits
+	// construction with a tiny test limit that cannot admit any flow pair.
+	budgets.Entries = max(1, maxFlows/2)
+	// Legacy table accounting includes EntryCharge, which is <= twice its
+	// shared metadata credit; variable capacities are identical. This derived
+	// bound cannot refuse before the shared budget and is not a second knob.
+	capacity := manager.InspectionResources().Budget.Status().Limit
+	budgets.ChargedBytes = math.MaxInt
+	if capacity <= int64(math.MaxInt/2) {
+		budgets.ChargedBytes = max(identify.EntryCharge, budgets.BytesPerDirection, 2*int(capacity))
+	}
 	live.observer, err = observe.New(observe.Options{Budgets: budgets, Markers: budgets.Entries,
 		Manager: manager, Now: func() time.Time { return live.now() },
 		LegacyDecodes: func(key identify.Key, p identify.Protocol) bool { return legacyDecodes(live.entries[key], p) },
@@ -173,6 +195,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 		panic("observation requires a bound incarnation")
 	}
 	key := identify.Key(connection.Key)
+	admissionLost := false
 	ctx := live.entries[key]
 	if ctx == nil {
 		if !enabled {
@@ -186,6 +209,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 			ports[0], ports[1] = ports[1], ports[0]
 		}
 		ctx.refused = !live.observer.Open(key, identify.Meta{Transport: pkt.Proto, Ports: ports})
+		admissionLost = ctx.refused
 	}
 	dir := uint8(connection.Direction(st.Key))
 	ctx.states[dir], ctx.selected, ctx.iecOwned, ctx.snapshot = st, selected, iecOwned, snapshot
@@ -205,6 +229,9 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	}
 
 	records := append(e.observationPending, live.records(output)...)
+	if admissionLost {
+		records = append(records, observationRecord{state: st, loss: true})
+	}
 	e.observationPending = nil
 	live.syncMetrics()
 	e.flowMu.Unlock()
@@ -219,15 +246,17 @@ func (live *liveObserver) records(output observe.Output) []observationRecord {
 		if ctx := live.entries[id.Key]; ctx != nil {
 			for _, state := range ctx.states {
 				if state != nil {
-					records = append(records, observationRecord{state, []dpi.Event{id.Event}})
+					records = append(records, observationRecord{state: state, events: []dpi.Event{id.Event}})
 					break
 				}
 			}
 		}
 	}
 	for _, batch := range output.Batches {
-		if batch.State != nil && len(batch.Events) > 0 {
-			records = append(records, observationRecord{batch.State, batch.Events})
+		var se *dpi.StreamError
+		loss := errors.As(batch.Err, &se) && se.Kind == dpi.StreamStateLimit
+		if batch.State != nil && (len(batch.Events) > 0 || loss) {
+			records = append(records, observationRecord{state: batch.State, events: batch.Events, loss: loss})
 		}
 	}
 	return records
@@ -235,6 +264,12 @@ func (live *liveObserver) records(output observe.Output) []observationRecord {
 
 func (e *Engine) recordObservations(records []observationRecord) {
 	for _, record := range records {
+		if record.loss {
+			key := record.state.Key
+			e.recordLearnCaptureLoss(capture.Packet{SrcIP: key.SrcIP, DstIP: key.DstIP,
+				SrcPort: key.SrcPort, DstPort: key.DstPort, Proto: key.Proto,
+				PortsValid: true}, record.state.Connection.Load())
+		}
 		parsed := observationPacket(record.state)
 		e.RecordDPIEvents(record.state, parsed, record.events)
 		for _, ev := range record.events {

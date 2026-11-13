@@ -35,6 +35,30 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  kernel-tests:
+    name: kernel-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run privileged kernel gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            uname -a
+            # Bridge sysctls and the TUN device must exist before Docker starts.
+            sudo modprobe br_netfilter
+            sudo modprobe tun
+            bash scripts/gate-kernel-tests.sh
+          } 2>&1 | tee "$RUNNER_TEMP/kernel-tests.log"
+      - name: Upload kernel test log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kernel-tests-log
+          path: ${{ runner.temp }}/kernel-tests.log
+
   lint-go:
     runs-on: ubuntu-latest
     steps:

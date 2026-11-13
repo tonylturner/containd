@@ -154,6 +154,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("preview template ics", RoleAdmin, policyICSTemplateAPI(api, true))
 		r.RegisterRole("apply template ics", RoleAdmin, policyICSTemplateAPI(api, false))
 		r.RegisterRole("set dataplane dpi", RoleAdmin, setDataPlaneDPIAPI(api))
+		r.RegisterRole("set dataplane limits", RoleAdmin, setDataPlaneLimitsAPI(api))
 		r.RegisterRole("set dataplane nfqueue-group", RoleAdmin, setDataPlaneGroupAPI(api, "nfqueueGroup"))
 		r.RegisterRole("set dataplane nflog-group", RoleAdmin, setDataPlaneGroupAPI(api, "nflogGroup"))
 		r.RegisterRole("set firewall ics-rule", RoleAdmin, setFirewallICSRuleAPI(api))

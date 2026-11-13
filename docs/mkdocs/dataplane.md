@@ -86,6 +86,100 @@ For enablement, privileges, capture modes, and failure limits, see
 [Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
 [Policy Model](policy-model.md).
 
+## Traffic state limits
+
+`dataplane.limits` sizes engine userspace traffic state; see
+[configuration bounds and defaults](config-format.md#traffic-state-sizing).
+`maxFlows` counts **directional slots**: each tracked TCP, UDP or ICMP connection
+reserves two, so capacity is `maxFlows/2` connections. Unestablished connections
+expire after 30 seconds idle, before a completed TCP handshake or UDP/ICMP reply.
+Established connections keep a five-minute idle window.
+Expired entries are swept before refusing admission. Monitor/observation
+admissions can use only three quarters of the flow slots and inspection budget,
+leaving headroom for enforcement.
+
+`maxInspectionBytes` bounds **retained inspection allocations only**, not engine
+memory or RSS. Charges cover backing-allocation capacity, stream/binding/decoder
+metadata, reassembly/history, HTTP/TLS state, DNP3 assembly, IEC session metadata,
+frame ranges, byte streams and held-packet settlements. Identification prefixes,
+replay storage, observation metadata and packet stamps share the same budget.
+Both DPI managers and their decoders use one budget per configuration generation.
+Standalone owners without supplied resources use private finite budgets.
+
+Owners reserve metadata and backing capacity before admission or allocation.
+Stream admission also reserves the fixed out-of-order index.
+Replacement buffers reserve their full capacity while the old backing remains
+charged. Reslicing does not refund backing still in use. Each allocation keeps
+its original admission class; monitor allocations cannot use enforcement
+headroom. Strict history and frame-range reservations precede publication of
+inspection results. Refused stream admission creates neither a stream nor a
+failed-stream marker. An admitted stream already reserves its terminal metadata.
+
+HTTP/2 reserves a conservative fixed lifetime envelope before constructing each
+opaque HPACK decoder. This covers its configured table, string and input bounds,
+including internal replacement peaks; it does not account for exact backing.
+containd-owned compressed blocks and retained decoder input are charged by their
+full backing capacities separately. Held packets use a conservative payload,
+header and token convention; see [IEC 104 holdback diagnostics](ics-dpi.md#iec-104-holdback-diagnostics).
+Temporary per-call copies are separately bounded, not charged.
+Applying changed effective limits rebuilds the dataplane:
+traffic state and allocation high water reset; process-lifetime hit totals remain.
+Omitted values and explicit defaults have the same effective configuration.
+
+In an inline enforcing ICS scope, flow admission refusal drops the packet with
+reason `state_limit` without creating a reset or a new session marker. Retained
+inspection allocation refusal fails closed only for the affected session:
+current and held packets drop and that session is reset. Monitor, passive and
+non-ICS traffic instead follows ordinary firewall policy, with inspection loss
+counted, coverage incomplete and affected learner evidence withheld. A failed
+stream incarnation never resumes trusted parsing. Observational-table pressure
+never drops traffic. Flow refusal hits count packets; inspection-budget hits count
+once per stream refusal transition.
+
+Fixed caps supplement the three operator fields:
+
+| Table | Capacity and pressure behavior |
+| --- | --- |
+| Top recently active host pairs | `maxTopTalkers` directional rows; evict least recently active |
+| Rate trackers | 8,192 host-pair keys per tracker; rolling buckets, LRU eviction; incomplete rate coverage |
+| IEC sessions | 4,096 tuple slots; enforce refusal blocks, monitor refusal accepts uninspected |
+| IEC reconnect history | 4,096 entries; evict oldest |
+| IEC inventory points | 65,536 globally, also bounded by the 128×32×256 hierarchy; evict LRU point |
+| Signature windows | 4,096 windows; expire then evict oldest; 256 values and 16 KiB value bytes per window, truncate overflow |
+| Conformance connections | 65,536 identities × 64 codes; refuse new identity |
+| Verdict cache | 65,536 entries; eviction |
+| Pickup resets | 4,096 entries; refuse new entry |
+| HTTP correlation | 64 requests per FIFO; retain the prefix and count excess requests without methods, not a global decoder count cap |
+
+Flow-owned observation contexts need no independent table cap. Protocol
+statistics retain at most 64 names; further names count under `other`.
+Outside the inspection-byte claim are fixed-count event banks/feed/spill,
+signature match history, the anomaly ring, the transport 4 MiB reorder queue,
+after-verdict closures and the worker queue. DHCP, AV/HTTP scanning-gate state,
+nftables sets, eBPF and kernel conntrack are outside these engine traffic-state
+limits. This is not a bound on all appliance allocations.
+
+The **Diagnostics** page shows limits, occupancy, charged bytes, high water,
+recent pressure and hit totals. Byte quantities use binary units (KiB, MiB, GiB);
+counts remain plain numbers. Empty pressure and hit cells mean no recent
+pressure and no recorded hits respectively. Authenticated readers can also use
+`GET /api/v1/diagnostics/state-limits`; an unreachable engine returns 503,
+never a zero-pressure snapshot. Pressure means a hit in the last 60 seconds.
+`dataplane.state_limit` events coalesce pressure entry per table, with `table`,
+`reason`, `mode` and `limit`, rather than logging every refused packet.
+
+Prometheus exports `containd_dp_state_limit_hits_total{table,reason,mode}` and
+`containd_dp_state_entries{table}`, `containd_dp_state_limit{table}`,
+`containd_dp_state_charged_bytes{table}`, `containd_dp_state_high_water{table}`,
+plus `containd_dp_inspection_bytes{category}` (`stream`, `decoder`, `held`,
+`pairing`). In combined mode, scrape management `/metrics`; with separate
+engine and management processes, scrape the engine listener for these series.
+Labels are closed enums, never connection identities. Table units
+are entries (directional slots for flows), except `inspection_bytes`, whose
+limit and high water are bytes. Zero count limit means no aggregate count cap,
+not unlimited inspection bytes. Concurrent category samples need not sum
+exactly to the independently sampled budget total.
+
 ## Interface address ownership and upgrades
 
 Commit, rollback, restart replay, and periodic/event reconciliation add desired

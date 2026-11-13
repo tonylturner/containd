@@ -5,6 +5,7 @@ package identify
 import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"sort"
+	"strings"
 )
 
 // Remap maps each source direction to a destination direction. Only identity
@@ -16,7 +17,9 @@ func (r Remap) Valid() bool { return r == Remap{0, 1} || r == Remap{1, 0} }
 // Adoption reports a merge. On Conflict both entries remain finalized for the
 // caller to consume; otherwise only to survives. A terminal survivor is the
 // earlier terminal, even when the source key is newer.
-type Adoption struct{ Conflict bool }
+type Adoption struct {
+	Conflict, InspectionRefused bool
+}
 
 // Adopt rekeys or merges from into to. Invalid or absent sources do nothing.
 // Evidence disagreement finalizes both entries as Conflict without eviction.
@@ -27,17 +30,16 @@ func (t *Table) Adopt(from, to Key, remap Remap) (Adoption, bool) {
 	}
 	b := t.entries[to]
 	if b == nil {
-		remapEntry(a, remap)
-		t.entries[to] = a
-		delete(t.entries, from)
+		if !t.rekey(from, to, a, remap) {
+			return Adoption{Conflict: true, InspectionRefused: true}, true
+		}
 		return Adoption{}, true
 	}
 	if terminal(a.decision.State) || terminal(b.decision.State) {
 		if terminal(a.decision.State) && (!terminal(b.decision.State) || a.terminalOrder < b.terminalOrder) {
-			t.Release(to)
-			remapEntry(a, remap)
-			t.entries[to] = a
-			delete(t.entries, from)
+			if !t.rekey(from, to, a, remap) {
+				return Adoption{Conflict: true, InspectionRefused: true}, true
+			}
 		} else {
 			t.Release(from)
 		}
@@ -67,6 +69,11 @@ func (t *Table) Adopt(from, to Key, remap Remap) (Adoption, bool) {
 		}
 		if !t.allocate(b, target) {
 			t.counts.Overflow++
+			if b.decision.InspectionRefused {
+				t.finish(a, Budget)
+				t.finish(b, Budget)
+				return Adoption{Conflict: true, InspectionRefused: true}, true
+			}
 			return conflict()
 		}
 		if a.meta.Transport == ics.UDP {
@@ -106,6 +113,22 @@ func (t *Table) Adopt(from, to Key, remap Remap) (Adoption, bool) {
 		t.finish(b, Budget)
 	}
 	return Adoption{}, true
+}
+
+func (t *Table) rekey(from, to Key, e *entry, remap Remap) bool {
+	if !e.memory.Reserve(len(to)) {
+		t.markInspectionRefused(e)
+		t.finish(e, Budget)
+		return false
+	}
+	key := Key(strings.Clone(string(to)))
+	t.Release(to)
+	remapEntry(e, remap)
+	delete(t.entries, from)
+	t.entries[key] = e
+	e.memory.Refund(e.keyBytes)
+	e.keyBytes = len(to)
+	return true
 }
 
 func remapEntry(e *entry, r Remap) {

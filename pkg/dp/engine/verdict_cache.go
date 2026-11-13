@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
@@ -15,13 +16,15 @@ import (
 // same flow bypass full re-inspection. This is critical for NFQUEUE mode
 // where every packet is held in the kernel until userspace renders a verdict.
 type VerdictCache struct {
-	detached bool
-	mu       sync.RWMutex
-	entries  map[string]*cachedVerdict
-	ttl      time.Duration
-	maxSize  int
-	now      func() time.Time
-	changed  func(string, string, verdict.Verdict)
+	ledger    *limits.Ledger
+	detached  bool
+	mu        sync.RWMutex
+	entries   map[string]*cachedVerdict
+	ttl       time.Duration
+	maxSize   int
+	highWater int64
+	now       func() time.Time
+	changed   func(string, string, verdict.Verdict)
 }
 
 type cachedVerdict struct {
@@ -35,10 +38,14 @@ func NewVerdictCache(ttl time.Duration, maxSize int) *VerdictCache {
 		ttl = 30 * time.Second
 	}
 	if maxSize <= 0 {
-		maxSize = 65536
+		maxSize = limits.MaxVerdictCache
+	}
+	if maxSize > limits.MaxVerdictCache {
+		maxSize = limits.MaxVerdictCache
 	}
 	return &VerdictCache{
 		entries: make(map[string]*cachedVerdict, 256),
+		ledger:  limits.NewLedger(nil),
 		now:     time.Now,
 		ttl:     ttl,
 		maxSize: maxSize,
@@ -81,24 +88,41 @@ func (vc *VerdictCache) Put(flowHash string, v verdict.Verdict) {
 	if vc.changed != nil {
 		vc.changed("put", flowHash, v)
 	}
+	now := vc.now()
+	if entry := vc.entries[flowHash]; entry != nil {
+		entry.verdict = v
+		entry.createdAt = now
+		return
+	}
 	// Evict expired entries if we are at capacity.
 	if len(vc.entries) >= vc.maxSize {
 		vc.evictExpiredLocked()
 	}
-	// If still at capacity after eviction, remove oldest entries.
+	// If still at capacity after expiry, evict a bounded batch to make room.
 	if len(vc.entries) >= vc.maxSize {
 		count := 0
+		evictCount := max(vc.maxSize/4, 1)
 		for k := range vc.entries {
 			delete(vc.entries, k)
 			count++
-			if count >= vc.maxSize/4 {
+			vc.recordEviction()
+			if count >= evictCount {
 				break
 			}
 		}
 	}
 	vc.entries[flowHash] = &cachedVerdict{
 		verdict:   v,
-		createdAt: vc.now(),
+		createdAt: now,
+	}
+	if int64(len(vc.entries)) > vc.highWater {
+		vc.highWater = int64(len(vc.entries))
+	}
+}
+
+func (vc *VerdictCache) recordEviction() {
+	if vc.ledger != nil {
+		vc.ledger.Record(limits.TableVerdictCache, limits.ReasonEvicted, limits.ModeObserve)
 	}
 }
 
@@ -136,4 +160,10 @@ func (vc *VerdictCache) evictExpiredLocked() {
 			delete(vc.entries, k)
 		}
 	}
+}
+
+func (vc *VerdictCache) LimitOccupancy() limits.Occupancy {
+	vc.mu.RLock()
+	defer vc.mu.RUnlock()
+	return limits.Occupancy{Limit: int64(vc.maxSize), Entries: int64(len(vc.entries)), HighWater: vc.highWater}
 }

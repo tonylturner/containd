@@ -41,6 +41,9 @@ func NewObservationManager(decoders ...StreamDecoder) (*Manager, error) {
 			return nil, fmt.Errorf("duplicate observation protocol %q", p)
 		}
 		m.observation[p] = d
+		if owner, ok := d.(ResourceOwner); ok {
+			owner.SetResources(m.resources)
+		}
 	}
 	return m, nil
 }
@@ -90,6 +93,12 @@ func (m *Manager) InspectProtocolAt(protocol string, state *flow.State, pkt *Par
 	}
 	res.Framed = true
 	key, session, pos := streamKey(state, pkt)
+	// Observation streams have no wire-flow side maps: their owner is the
+	// explicit session, which releases this fixed binding in EndStream.
+	if err := m.bind(key, key, false); err != nil {
+		res.Err = err
+		return res
+	}
 	if err := m.reassembler.failure(key); err != nil {
 		res.Err, res.Failed = err, true
 		return res
@@ -110,6 +119,13 @@ func (m *Manager) InspectProtocolAt(protocol string, state *flow.State, pkt *Par
 	}
 	if res.Err != nil {
 		m.discard(key, true, res.Err)
+		if stateLimit(res.Err) {
+			res.Events, res.Frames = nil, nil
+			if m.reassembler.failure(key) == nil {
+				m.unbind(bindingID{key, key})
+			}
+			return res
+		}
 	}
 	if ev != nil {
 		res.Events = append(res.Events, *ev)

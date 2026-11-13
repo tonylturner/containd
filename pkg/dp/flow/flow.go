@@ -87,7 +87,10 @@ func appendIP(b []byte, ip net.IP) []byte {
 
 // State holds runtime flow state and timestamps.
 type State struct {
-	Key          Key
+	Key Key
+	// Admission is the connection's paired slot reservation. Only the engine's
+	// flow lock may inspect or mutate it; snapshots merely share the pointer.
+	Admission    *Admission `json:"-"`
 	idKey        MapKey
 	id           string
 	Connection   ConnectionSlot   `json:"-"`
@@ -107,6 +110,9 @@ type State struct {
 	// CaptureHook is receive-time provenance retained in learner snapshots,
 	// not inferred from correlation success or the current configuration.
 	CaptureHook string `json:"-"`
+	// InspectionRefused is terminal for this flow incarnation. The engine
+	// guards it with its flow lock, including detached replay.
+	InspectionRefused bool `json:"-"`
 }
 
 func NewState(key Key, now time.Time) *State {

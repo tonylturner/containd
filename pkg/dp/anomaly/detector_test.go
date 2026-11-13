@@ -4,12 +4,14 @@
 package anomaly
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 func TestWriteRateAnomalyDetection(t *testing.T) {
@@ -317,11 +319,48 @@ func TestRateTrackerBucketRollover(t *testing.T) {
 		t.Errorf("expected 2, got %d", count)
 	}
 
-	// After 6 minutes, old buckets should be GC'd.
+	// After several minutes, the fixed rolling array has replaced stale
+	// buckets and old events no longer contribute to the rate.
 	t6 := base.Add(7 * time.Minute)
-	rt.recordAt("flow1", t6)
-	if len(rt.buckets["flow1"]) > 5 {
-		t.Errorf("expected at most 5 minute buckets, got %d", len(rt.buckets["flow1"]))
+	if count := rt.recordAt("flow1", t6); count != 1 {
+		t.Errorf("stale minute buckets contributed to the rate: %d", count)
+	}
+}
+
+func TestRateTrackerEvictsLRUAndMarksCoverageIncomplete(t *testing.T) {
+	ledger := limits.NewLedger(nil)
+	rt := newRateTracker()
+	rt.maxKeys = 4
+	rt.ledger = ledger
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 44; i++ {
+		rt.recordAt(fmt.Sprintf("pair-%02d", i), base)
+	}
+	if len(rt.buckets) != 4 || rt.highWater != 4 || rt.complete {
+		t.Fatalf("rate tracker state entries=%d high-water=%d complete=%v", len(rt.buckets), rt.highWater, rt.complete)
+	}
+	status := ledger.Status(limits.TableRateTrackers, limits.Occupancy{})
+	if got := status.Hits; len(got) != 1 || got[0].Reason != limits.ReasonEvicted || got[0].Mode != limits.ModeObserve || got[0].Total != 40 {
+		t.Fatalf("eviction ledger hits = %+v", got)
+	}
+	if got := rt.recordAt("pair-43", base); got != 2 {
+		t.Fatalf("retained key count = %d, want 2", got)
+	}
+	if got := rt.recordAt("pair-00", base); got != 1 {
+		t.Fatalf("re-admitted evicted key count = %d, want 1", got)
+	}
+	if got := ledger.Status(limits.TableRateTrackers, limits.Occupancy{}).Hits[0].Total; got != 41 {
+		t.Fatalf("eviction count after LRU churn = %d, want 41", got)
+	}
+	d := New()
+	d.totalRate.maxKeys = 4
+	d.totalRate.ledger = limits.NewLedger(nil)
+	for i := 0; i < 44; i++ {
+		d.totalRate.recordAt(fmt.Sprintf("pair-%02d", i), base)
+	}
+	d.updateRateHighWater()
+	if d.RateCoverageComplete() {
+		t.Fatal("rate history eviction was not exposed as incomplete coverage")
 	}
 }
 

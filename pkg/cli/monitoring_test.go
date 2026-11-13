@@ -44,6 +44,9 @@ func TestMonitoringShowUnavailable(t *testing.T) {
 								if tc.name == "listeners" {
 									return jsonHTTPResponse(200, map[string]any{}, nil), nil
 								}
+								if tc.name == "top-talkers" {
+									return jsonHTTPResponse(200, map[string]any{"semantics": "recent", "complete": true, "rows": []any{}}, nil), nil
+								}
 								return jsonHTTPResponse(200, []any{}, nil), nil
 							}
 						},

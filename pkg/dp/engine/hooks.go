@@ -36,6 +36,16 @@ func newInlineHooks(onError func(error)) *inlineHooks {
 	}
 }
 
+// Rejected resolutions are never submitted and receive no OnVerdict. Settle
+// rejections are handled by their caller; returned Decision.Resolved rejections
+// arrive here with the original generation-bearing token.
+func (h *inlineHooks) onCaptureError(err error) {
+	var rejected *capture.ResolutionRejectedError
+	if errors.As(err, &rejected) && h.iec != nil {
+		h.iec.onVerdict(rejected.Token, 0, rejected.Err)
+	}
+}
+
 // onVerdict handles one verdict completion. Follow-up I/O registered for the
 // token is queued now that its verdict submission has completed.
 func (h *inlineHooks) onVerdict(tok capture.Token, v capture.Verdict, err error) {
@@ -78,7 +88,7 @@ func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 		reason = "queue down: " + ev.Err.Error()
 	}
 	h.iec.health.fault(faultQueue, reason)
-	h.iec.onSourceDown()
+	h.iec.onSourceDown(ev.Generation)
 }
 
 func (h *inlineHooks) reportWorkerOverflow(what string) {

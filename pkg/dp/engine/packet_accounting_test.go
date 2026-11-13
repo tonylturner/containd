@@ -34,7 +34,7 @@ func assertAccounting(t *testing.T, e *Engine, proto string, packets, bytes, eve
 			e.ProtoStats(), totalPackets, totalBytes, proto, packets, bytes, events, reads, writes, alerts)
 	}
 	var flowPackets, flowBytes int64
-	for _, fs := range e.TopTalkers(0) {
+	for _, fs := range e.TopTalkers(0).Rows {
 		flowPackets += fs.Packets
 		flowBytes += fs.Bytes
 		if fs.Protocol != proto {
@@ -241,7 +241,7 @@ func TestAccountingInvalidPacketHasNoTrustedFlow(t *testing.T) {
 	if len(got) != 1 || got[0].Protocol != "tcp" || got[0].PacketCount != 1 || got[0].ByteCount != 4 || got[0].EventCount != 0 {
 		t.Fatalf("invalid packet accounting = %+v", got)
 	}
-	if top := e.TopTalkers(0); len(top) != 0 {
+	if top := e.TopTalkers(0).Rows; len(top) != 0 {
 		t.Fatalf("invalid tuple produced flow counters: %+v", top)
 	}
 }

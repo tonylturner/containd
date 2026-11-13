@@ -14,8 +14,11 @@ docs-builder tests, the production build and all Playwright specs with Chromium.
 The Docker job builds the management/all-mode image, runs the AV gate and public
 Compose quickstart against that image, then scans it with Trivy.
 
-These checks do not run the opt-in privileged kernel test suite or every live
-smoke below. Mocked browser tests do not replace live backend or lab-path checks.
+The independent `kernel-tests` job runs the eight default roots selected by
+`bash scripts/gate-kernel-tests.sh` on `ubuntu-latest`, with a 30-minute job
+timeout. Failures upload verbose output as `kernel-tests-log`. This is a
+bounded kernel gate, not every privileged test or live smoke below. Mocked
+browser tests do not replace live backend or lab-path checks.
 
 ## Coverage Workflow
 
@@ -81,6 +84,61 @@ workflow's bounded polling block with fake API responses and no real sleeps.
 No workflow is dispatched and no registry is contacted. See
 [Update Policy](update-policy.md#when-latest-moves) for promotion and retry
 behavior.
+
+## Upgrade Matrix Smoke
+
+The release validation command exercises genuine published source images against
+the exact locally built candidate:
+
+```sh
+docker build -f build/Dockerfile.mgmt --build-arg COMMIT=$(git rev-parse HEAD) \
+  -t containd/containd:upgrade-local .
+UPGRADE_IMAGE=containd/containd:upgrade-local \
+  COMPOSE_PROJECT_NAME=upgrade-local-$(date +%s) \
+  bash scripts/smoke-upgrade.sh
+```
+
+It declares training rows for every release 0.1.30–0.1.42 and strict→strict rows
+for 0.1.39–0.1.42. Proven source-image defects are recorded as unsupported
+with the first fixed release; the fixture is not weakened to avoid them. An
+unexpected failure stops the run, and a candidate-side defect requires a
+product fix before continuing. An unexecuted row is not supported merely
+because another row has the same schema. A known attachment-order-dependent
+source defect remains unsupported even when a later attempt completes all
+assertions; `attemptResult` preserves that successful observation separately. See
+[Update Policy](update-policy.md) for supported paths and required deployment
+changes. This is an opt-in local release gate, not part of ordinary CI.
+
+Requires Docker Engine 28.1+, Compose 2.36.0+, Python 3 and registry access.
+The driver refuses existing project resources, selects unused private subnets,
+publishes only ephemeral loopback management ports and creates fresh private
+data for each row. It tears down its own containers, networks and volumes even
+on failure; pulled images remain. Do not supply an existing appliance data tree.
+
+`UPGRADE_RESULTS` selects a new evidence directory (default `build/<project>`).
+It contains secrets, stopped-data backups, logs, source digests, candidate image
+identity (tag, image ID and embedded source commit), named assertions, row wall
+times including teardown in `matrix.json`, the passing suffix floor in
+`support.json` and teardown evidence
+in `remaining-resources.json`. Keep it private. Successful checks cover distinct
+running/candidate configurations and IDS banks, previous snapshot retention,
+accounts/credentials, TLS/SSH identity, CAS epochs, migration audit idempotence,
+ready/protecting revision agreement and receiver-verified allowed/denied traffic
+after upgrade, restart and an explicit new commit. No split-mode or arbitrary
+service-configuration coverage is implied.
+
+For a focused reproduction, add `--from-version 0.1.35 --profile training`;
+omit both filters for release validation. The old
+`scripts/smoke-rule-modes-migration.sh` entry point delegates to that row with
+`RULE_MODES_IMAGE` and optional `RULE_MODES_RESULTS`, rather than maintaining
+another boot/teardown implementation. Target schema assertions use the current
+Go schema authority, not a release-number guess. Offline checks:
+
+```sh
+python3 -m unittest discover -s test/upgrade -p '*_test.py'
+bash -n scripts/smoke-upgrade.sh scripts/smoke-rule-modes-migration.sh
+shellcheck scripts/smoke-upgrade.sh scripts/smoke-rule-modes-migration.sh
+```
 
 ## UI Route Smoke
 
@@ -354,6 +412,19 @@ container command. The `pkg/dp/netcfg` management kernel test also needs a
 TUN device, OpenVPN and reverse-path filtering;
 `bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
 
+Run the same kernel gate as CI from the repository root:
+
+```bash
+bash scripts/gate-kernel-tests.sh
+```
+
+It requires Docker with a Linux kernel supporting nftables, NFQUEUE, NFLOG,
+TPROXY, network namespaces, bridge netfilter and TUN. On a Linux host, load
+`br_netfilter` and `tun` before starting the container (`sudo modprobe
+br_netfilter && sudo modprobe tun`); CI does this on its disposable runner.
+Docker Desktop supplies the Linux kernel on macOS. Cold runs need internet
+access for the Go image, Debian packages and Go modules.
+
 `bash scripts/gate-kernel-tests.sh` runs protection-bind
 (`TestProtectionBindKernel` in `pkg/dp/engine`), scanning-gate and
 management-routing kernel tests. The default filter includes
@@ -361,11 +432,19 @@ management-routing kernel tests. The default filter includes
 takeover; the other tests cover nft steering (`TestGateKernel`) and every
 golden nft ruleset (`TestKernelNFTLoadsGoldens`) in `pkg/dp/enforce`, gate
 policy routing (`TestGateRoutingKernel`) in `pkg/dp/netcfg`, and the gate
-manager (`TestGateManagerKernel`) in `pkg/app/engine`. The script builds a
-`golang` image with nftables, iproute2, Python and OpenVPN, passes
+manager (`TestGateManagerKernel`) in `pkg/app/engine`. Cross-zone accounting
+(`TestAccountingKernel` in `pkg/dp/enforce`) and its engine lifecycle
+(`TestTelemetryAccountingKernelLifecycle` in `pkg/dp/engine`) complete the
+eight default roots. All eight must pass; missing prerequisites fail the gate.
+WireGuard and the other opt-in kernel tests are outside this default filter.
+The script builds a `golang` image with nftables, iproute2, Python and OpenVPN, passes
 `/dev/net/tun` into the container, and runs it with `NET_ADMIN`, `NET_RAW` and
-`SYS_ADMIN` (network namespaces need the last one). It keeps the build and
-module caches in named Docker volumes and passes extra arguments to `go test`;
+`SYS_ADMIN` (network namespaces need the last one). Only this disposable
+container runs with `apparmor=unconfined`, allowing netns bind mounts and the
+bridge accounting test's private procfs mount without changing host policy.
+It publishes no host ports and uses neither host networking nor `--privileged`.
+It keeps the build and module caches in named Docker volumes and passes extra
+arguments to `go test`;
 `KERNEL_TEST_RUN` overrides its default test filter. It runs the packages one
 at a time (`go test -p 1`) because the netcfg and engine tests install the
 gate's policy routing in the namespace-global table 104010 and would remove

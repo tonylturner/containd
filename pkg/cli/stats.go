@@ -52,19 +52,23 @@ func showStatsTopTalkers(api *API) Command {
 			}
 		}
 		path := fmt.Sprintf("/api/v1/stats/top-talkers?n=%d", n)
-		var result []stats.FlowStats
+		var result stats.TopTalkers
 		if err := api.getJSON(ctx, path, &result); err != nil {
 			return monitoringUnavailable(out, "Top talkers", err)
 		}
 		if out == nil {
 			return nil
 		}
-		if len(result) == 0 {
+		fmt.Fprintf(out, "Top recently active host pairs: retained=%d limit=%d evicted=%d complete=%t since=%s\n", result.Retained, result.Limit, result.Evicted, result.Complete, fmtTime(result.Since))
+		if !result.Complete {
+			fmt.Fprintln(out, "History is incomplete: older recently active host pairs were evicted.")
+		}
+		if len(result.Rows) == 0 {
 			fmt.Fprintln(out, "No flow statistics.")
 			return nil
 		}
 		t := newTable("SRC_IP", "DST_IP", "PROTOCOL", "PACKETS", "BYTES")
-		for _, fs := range result {
+		for _, fs := range result.Rows {
 			t.addRow(
 				fs.SrcIP,
 				fs.DstIP,

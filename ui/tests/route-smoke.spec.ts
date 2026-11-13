@@ -2,6 +2,7 @@ import { simulationStatus } from "./fixtures/simulation";
 import { expect, test } from "./fixtures/topology-test";
 import { routes } from "./fixtures/routes";
 import { snapshot } from "./fixtures/iec104-inventory";
+import { stateLimits } from "./fixtures/state-limits";
 import { pressure } from "./fixtures/iec104-pressure";
 import { mockProtection } from "./fixtures/protection-api";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
@@ -290,6 +291,7 @@ function responseFor(pathname: string) {
     return json(adminUser);
   }
   if (pathname === "/api/v1/inventory/iec104") return json(snapshot);
+  if (pathname === "/api/v1/diagnostics/state-limits") return json(stateLimits);
   if (pathname === "/api/v1/diagnostics/iec104") return json(pressure);
   if (pathname === "/api/v1/dashboard") return json(dashboard);
   if (pathname === "/api/v1/learn/datasets" || pathname === "/api/v1/learn/watches") {
@@ -408,11 +410,9 @@ function responseFor(pathname: string) {
     return json({ running: false, interfaces: [] });
   }
   if (pathname === "/api/v1/simulation") return json(simulationStatus());
-  if (
-    pathname === "/api/v1/stats/protocols" ||
-    pathname === "/api/v1/stats/top-talkers"
-  ) {
-    return json([]);
+  if (pathname === "/api/v1/stats/protocols") return json([]);
+  if (pathname === "/api/v1/stats/top-talkers") {
+    return json({ semantics: "recent", limit: 8192, retained: 0, evicted: 0, since: "2026-11-12T00:00:00Z", complete: true, rows: [] });
   }
   if (pathname === "/api/v1/ids/rules") {
     return json({ enabled: false, rules: [] });

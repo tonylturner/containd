@@ -244,8 +244,8 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		n := 10
 		if q := c.Query("n"); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 && v <= 1000 {
-				n = v
+			if v, err := strconv.Atoi(q); err == nil {
+				n = max(1, min(1000, v))
 			}
 		}
 		result, err := sc.ListTopTalkers(c.Request.Context(), n)
@@ -253,8 +253,8 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusServiceUnavailable, "engine top talkers unavailable")
 			return
 		}
-		if result == nil {
-			result = []stats.FlowStats{}
+		if result.Rows == nil {
+			result.Rows = []stats.FlowStats{}
 		}
 		c.JSON(http.StatusOK, result)
 	}

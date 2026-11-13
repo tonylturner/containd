@@ -13,6 +13,13 @@ import (
 func (e *Engine) newRun() error {
 	hooks := newInlineHooks(e.onError)
 	cfg := e.captureConfig
+	onError := cfg.OnError
+	cfg.OnError = func(err error) {
+		hooks.onCaptureError(err)
+		if onError != nil {
+			onError(err)
+		}
+	}
 	cfg.OnSource, cfg.OnVerdict = hooks.onSource, hooks.onVerdict
 	cfg.PublicationFence = &e.policyMu
 	factory := e.captureFactory

@@ -39,7 +39,10 @@ DOCKERFILE
 # -p 1: the packages run one at a time because the netcfg and engine tests
 # install the gate's policy routing in the namespace-global table 104010,
 # and parallel packages would see and remove each other's objects.
+# Docker's default AppArmor profile denies the netns and nested procfs mounts.
+# Relax only this disposable container's profile, not the host's policy.
 docker run --rm --cpus 2 --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN --device /dev/net/tun \
+  --security-opt apparmor=unconfined \
   --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
   --sysctl net.ipv4.conf.all.rp_filter=1 --sysctl net.ipv4.conf.default.rp_filter=1 \
   --sysctl net.bridge.bridge-nf-call-iptables=0 --sysctl net.bridge.bridge-nf-call-ip6tables=0 \

@@ -31,6 +31,7 @@ func TestClippedArrivalNeverConfirms(t *testing.T) {
 		t.Fatal(d, table.Counters())
 	}
 	_, replay, ok := table.Take(testKey)
+	releaseReplayAfterTest(t, replay)
 	if !ok || !bytes.Equal(replay.Bytes[0], b[:1024]) {
 		t.Fatal("clipped prefix not retained", replay)
 	}
@@ -164,6 +165,7 @@ func TestClippedUDPStillUsesOriginalBoundary(t *testing.T) {
 		t.Fatal("valid long datagram falsely rejected", d)
 	}
 	_, replay, ok := table.Take(testKey)
+	releaseReplayAfterTest(t, replay)
 	if !ok || len(replay.Datagrams) != 1 || replay.Datagrams[0].Length != len(reply) ||
 		!bytes.Equal(replay.Bytes[0], reply[:24]) {
 		t.Fatal(replay)

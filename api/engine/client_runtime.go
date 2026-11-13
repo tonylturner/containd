@@ -109,29 +109,29 @@ func (c *HTTPClient) ListProtoStats(ctx context.Context) ([]stats.ProtoStats, er
 }
 
 // ListTopTalkers fetches directional host-pair/protocol counters derived from captured packets.
-func (c *HTTPClient) ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error) {
+func (c *HTTPClient) ListTopTalkers(ctx context.Context, n int) (stats.TopTalkers, error) {
 	u := c.BaseURL + "/internal/stats/top-talkers"
 	if n > 0 {
 		u += "?n=" + url.QueryEscape(fmt.Sprintf("%d", n))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return stats.TopTalkers{}, err
 	}
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return nil, err
+		return stats.TopTalkers{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, engineStatusError(resp, "engine top-talkers status")
+		return stats.TopTalkers{}, engineStatusError(resp, "engine top-talkers status")
 	}
-	var out []stats.FlowStats
+	var out stats.TopTalkers
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return stats.TopTalkers{}, err
 	}
-	if out == nil {
-		return []stats.FlowStats{}, nil
+	if out.Rows == nil {
+		out.Rows = []stats.FlowStats{}
 	}
 	return out, nil
 }

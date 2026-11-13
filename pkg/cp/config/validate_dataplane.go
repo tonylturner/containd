@@ -13,6 +13,9 @@ import (
 )
 
 func validateDataPlane(dp DataPlaneConfig) error {
+	if err := dp.Limits.Effective().Validate(); err != nil {
+		return err
+	}
 	if err := ics.ValidateToggles(dp.DPIICSProtocols); err != nil {
 		return err
 	}

@@ -37,7 +37,6 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 	if mode != modeEnforce {
 		r.State = Monitoring
 	}
-	iec := protocol == rules.ProtocolIEC104
 	if mode == modeEnforce {
 		if !s.Enforcement {
 			r.Lower(Reason{Code: EnforcementDisabled, Message: "nftables enforcement is off, so nothing steers this rule's traffic to the engine"})
@@ -46,8 +45,8 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 			r.Lower(Reason{Code: NoInlinePath, Message: "dataplane.nfqueueGroup is 0: the engine only observes copies and cannot hold or drop a command"})
 		}
 	}
-	// Monitoring IEC sessions retain their independent inspection path.
-	if !s.DPIEnabled && (!iec || mode == modeEnforce) {
+	// The master switch stops every ICS decoder, IEC 104 included.
+	if !s.DPIEnabled {
 		message := "DPI is switched off (dataplane.dpiEnabled), so no command of this rule is decoded"
 		if mode == modeEnforce {
 			message = "DPI is off; the kernel drops this rule's whole transport scope until DPI is enabled"
@@ -62,6 +61,7 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 		r.Lower(Reason{Code: DecoderDisabled, Message: message})
 	}
 	// Monitoring IEC sessions ignore exclusions; enforcing sessions drop IP/CIDR-excluded traffic.
+	iec := protocol == rules.ProtocolIEC104
 	if !iec || mode == modeEnforce {
 		for _, x := range s.Exclusions {
 			if iec && x.Type == "domain" {

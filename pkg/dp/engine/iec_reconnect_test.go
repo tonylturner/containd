@@ -4,10 +4,65 @@
 package engine
 
 import (
+	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
+
+func TestIECReconnectHistoryBound(t *testing.T) {
+	table := newIECTable("enforce", nil)
+	table.dpi = dpi.NewManager()
+	now := time.Now()
+	server := netip.MustParseAddrPort("10.30.30.30:2404")
+	client := func(i int) netip.AddrPort {
+		return netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 60, byte(i >> 8), byte(i)}), 40000)
+	}
+	abort := func(c netip.AddrPort, at time.Time) {
+		t.Helper()
+		key := iecKey{client: c, server: server}
+		s := &iecSession{id: "abort", client: c, server: server, mode: "enforce"}
+		table.mu.Lock()
+		table.sessions[key] = s
+		table.abortLocked(s, abortQueue, "", nil, at)
+		table.deleteLocked(key, s)
+		table.mu.Unlock()
+		o := table.reconnectLimitOccupancy()
+		if o.Limit != 4096 || o.Entries > o.Limit {
+			t.Fatalf("reconnect occupancy = %+v", o)
+		}
+	}
+	for i := range iecMaxReconnectHistory {
+		abort(client(i), now.Add(time.Duration(i)))
+	}
+	// The same client IP and server, with a new client port, refreshes its
+	// timestamp without evicting another pair.
+	refreshed := netip.AddrPortFrom(client(0).Addr(), 40001)
+	abort(refreshed, now.Add(time.Duration(iecMaxReconnectHistory)))
+	if status := table.ledger.Status(limits.TableIECReconnect, table.reconnectLimitOccupancy()); len(status.Hits) != 0 {
+		t.Fatalf("refresh evicted history: %+v", status)
+	}
+	abort(client(iecMaxReconnectHistory), now.Add(time.Duration(iecMaxReconnectHistory+1)))
+	if _, ok := table.reconnect[pairKey(client(1), server)]; ok {
+		t.Fatal("oldest abort retained")
+	}
+	if _, ok := table.reconnect[pairKey(client(0), server)]; !ok {
+		t.Fatal("refreshed abort evicted")
+	}
+	status := table.ledger.Status(limits.TableIECReconnect, table.reconnectLimitOccupancy())
+	if status.Entries != status.Limit || len(status.Hits) != 1 ||
+		status.Hits[0] != (limits.Hit{Reason: limits.ReasonEvicted, Mode: limits.ModeObserve, Total: 1}) {
+		t.Fatalf("eviction accounting = %+v", status)
+	}
+	table.now = func() time.Time { return now.Add(iecReconnectWindow + time.Second) }
+	table.expire()
+	if o := table.reconnectLimitOccupancy(); o.Entries != 0 {
+		t.Fatalf("expired reconnect history retained: %+v", o)
+	}
+}
 
 // TestIECRSTClosesOnlyAtReceivePoint sends bare RSTs into an established
 // incarnation: one at the sequence number the receiver expects next closes

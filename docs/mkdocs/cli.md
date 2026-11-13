@@ -112,7 +112,7 @@ revision or authorization decision.
   - `diag routing reconcile REPLACE`
   - `show ids rules`
   - `show audit`
-  - `show dataplane`
+  - `show dataplane` — stored, effective and default traffic-state limits
   - `show zones` / `show interfaces` (HTTP GET if API provided)
 - Mutating commands (API):
   - `set zone <name> [description]`
@@ -754,6 +754,10 @@ protection as active.
 
 ### DPI and capture groups
 
+- `set dataplane limits maxFlows|maxTopTalkers|maxInspectionBytes <value>` stages
+  one traffic-state limit; `0` selects its default, never unlimited. Bounds and
+  effective defaults are in [Config Format](config-format.md#traffic-state-sizing).
+  Applying changed effective values resets traffic state.
 - `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not firewall enforcement. With DPI off, enforce-effective ICS rules drop their whole transport scope rather than passing it uninspected.
 - `set dataplane dpi mode <monitor|enforce>` changes the global ICS mode.
 - `set dataplane dpi protocols <name=bool,...>` edits named IT protocol toggles.

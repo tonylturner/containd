@@ -198,8 +198,10 @@ while True:
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.connect(("198.18.70.2",18003)); s.send(b"x"); assert s.recv(64)==b"x"
 `)
 	counts := lab.counts(t, c, snap)
-	if queued.Load() != 1 || counts["police"].Packets != 2 || counts["tag"].Packets != 1 ||
-		counts["allow"].Packets != 1 || counts["observe"].Packets != 1 {
+	// The request and echo each queue once. Their marked repeats must not
+	// charge either the observation counter or the meter a second time.
+	if queued.Load() != 2 || counts["police"].Packets != 2 || counts["tag"].Packets != 1 ||
+		counts["allow"].Packets != 1 || counts["observe"].Packets != 2 {
 		t.Fatalf("repeated traversal charged twice: queued=%d counts=%v", queued.Load(), counts)
 	}
 }

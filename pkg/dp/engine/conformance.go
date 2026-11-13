@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -106,8 +107,8 @@ func (e *Engine) recordConformanceDecision(state *flow.State, pkt *dpi.ParsedPac
 }
 
 const (
-	conformanceMaxConnections = 65536
-	conformanceMaxCodes       = 64
+	conformanceMaxConnections = limits.MaxConformanceConnections
+	conformanceMaxCodes       = limits.MaxConformanceCodes
 )
 
 type conformanceConnection struct {
@@ -123,9 +124,13 @@ type inspectionFinding struct {
 // Saturation suppresses new alert identities rather than evicting live ones
 // and allowing repeated alerts to flood the store. Verdicts are unaffected.
 type conformanceAlerts struct {
-	mu         sync.Mutex
-	conns      map[string]*conformanceConnection
-	suppressed uint64
+	ledger         *limits.Ledger
+	mu             sync.Mutex
+	conns          map[string]*conformanceConnection
+	suppressed     uint64
+	highWater      int64
+	maxConnections int
+	maxCodes       int
 }
 
 func conformanceKey(state *flow.State) string {
@@ -145,8 +150,9 @@ func (a *conformanceAlerts) fresh(state *flow.State, field string, codes []strin
 	key := conformanceKey(state)
 	conn := a.conns[key]
 	if conn == nil {
-		if len(a.conns) >= conformanceMaxConnections {
+		if len(a.conns) >= a.connectionLimit() {
 			a.suppressed += uint64(len(codes))
+			a.recordRefused(len(codes))
 			return nil
 		}
 		if a.conns == nil {
@@ -154,17 +160,21 @@ func (a *conformanceAlerts) fresh(state *flow.State, field string, codes []strin
 		}
 		conn = &conformanceConnection{codes: make(map[inspectionFinding]uint64)}
 		a.conns[key] = conn
+		if int64(len(a.conns)) > a.highWater {
+			a.highWater = int64(len(a.conns))
+		}
 	}
 	var fresh []string
 	for _, code := range codes {
 		id := inspectionFinding{field: field, code: code}
 		if _, seen := conn.codes[id]; seen {
 			conn.codes[id]++
-		} else if len(conn.codes) < conformanceMaxCodes {
+		} else if len(conn.codes) < a.codeLimit() {
 			conn.codes[id] = 1
 			fresh = append(fresh, code)
 		} else {
 			a.suppressed++
+			a.recordRefused(1)
 		}
 	}
 	return fresh
@@ -194,6 +204,30 @@ func (a *conformanceAlerts) clear() {
 	defer a.mu.Unlock()
 	a.conns = nil
 	a.suppressed = 0
+	a.highWater = 0
+}
+
+func (a *conformanceAlerts) recordRefused(n int) {
+	if a.ledger == nil {
+		return
+	}
+	for range n {
+		a.ledger.Record(limits.TableConformance, limits.ReasonRefused, limits.ModeObserve)
+	}
+}
+
+func (a *conformanceAlerts) connectionLimit() int {
+	if a.maxConnections <= 0 {
+		return conformanceMaxConnections
+	}
+	return min(a.maxConnections, conformanceMaxConnections)
+}
+
+func (a *conformanceAlerts) codeLimit() int {
+	if a.maxCodes <= 0 {
+		return conformanceMaxCodes
+	}
+	return min(a.maxCodes, conformanceMaxCodes)
 }
 
 // recordConformanceAlert uses the IDS alert store/export path. action is
@@ -241,4 +275,10 @@ func firstFinding(ev dpi.Event) string {
 		}
 	}
 	return ""
+}
+
+func (a *conformanceAlerts) LimitOccupancy() limits.Occupancy {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return limits.Occupancy{Limit: int64(a.connectionLimit()), Entries: int64(len(a.conns)), HighWater: a.highWater}
 }

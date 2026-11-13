@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // HTTPDecoder emits minimal plaintext HTTP request/response metadata. It
@@ -18,11 +19,15 @@ import (
 // cookies and content that must not reach the event store or its exports.
 type HTTPDecoder struct {
 	mu          sync.Mutex
+	resources   limits.Resources
+	serial      uint64
 	streams     map[httpStreamKey]*httpStream
 	connections map[string]*httpConnection
 }
 
-func NewHTTPDecoder() *HTTPDecoder { return &HTTPDecoder{} }
+func NewHTTPDecoder() *HTTPDecoder {
+	return &HTTPDecoder{resources: limits.NewResources(nil, nil)}
+}
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *HTTPDecoder) Ports() (tcpPorts, udpPorts []uint16) {
@@ -52,6 +57,10 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	// Packet-local callers have no TCP offsets. Stream-aware callers go through
 	// the manager, which owns reassembly and the decoder lifetime.
 	local := NewHTTPDecoder()
+	d.mu.Lock()
+	local.SetResources(d.resources)
+	d.mu.Unlock()
+	defer local.StreamEnded("", dpi.DirUnknown)
 	res, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload, Role: pkt.Role, HasPacketStart: true})
 	var events []dpi.Event
 	for _, f := range res.Frames {

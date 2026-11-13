@@ -32,7 +32,12 @@ func (e *Engine) initIEC(cfg Config) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
 	t = newIECTable(cfg.DPIMode, &e.zones)
+	t.ledger = e.ledger
+	t.resources = e.inspectionResources()
 	t.detached = e.detached
+	if e.ledger != nil {
+		t.pickups.ledger = e.ledger
+	}
 	t.inventory = e.inventory
 	t.learnDelivery = func(id string) {
 		e.recordLearnOutcome([]dpi.Event{{Proto: "iec104", Kind: "evidence.delivery", Attributes: map[string]any{"apdu_id": id, "delivery": "delivered"}, Timestamp: time.Now().UTC()}})

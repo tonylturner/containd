@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // DiscoveredAsset represents one IP, protocol and role observation from ICS traffic.
@@ -36,18 +37,23 @@ type assetKey struct {
 // Inventory maintains bounded, thread-safe legacy assets and a separately
 // synchronized passive IEC 104 inventory. Construct it with New.
 type Inventory struct {
-	mu       sync.RWMutex
-	assets   *bounded[assetKey, *DiscoveredAsset]
-	overflow InventoryOverflow
-	iec104   iec104Store
+	stateLimits limits.Limits
+	resources   limits.Resources
+	mu          sync.RWMutex
+	assets      *bounded[assetKey, *DiscoveredAsset]
+	overflow    InventoryOverflow
+	iec104      iec104Store
 }
 
 // New creates a new empty Inventory.
 func New() *Inventory {
-	return &Inventory{
-		assets: newBounded[assetKey, *DiscoveredAsset](MaxAssets),
-		iec104: newIEC104Store(),
+	inv := &Inventory{
+		stateLimits: limits.Default(),
+		resources:   limits.NewResources(nil, nil),
+		assets:      newBounded[assetKey, *DiscoveredAsset](MaxAssets),
 	}
+	resetIEC104Store(&inv.iec104)
+	return inv
 }
 
 // RecordEvent extracts ICS metadata from a DPI event and updates the
@@ -242,9 +248,7 @@ func (inv *Inventory) Clear() {
 	inv.assets = newBounded[assetKey, *DiscoveredAsset](MaxAssets)
 	inv.overflow = InventoryOverflow{}
 	inv.iec104.mu.Lock()
-	inv.iec104.pairs = newBounded[pairKey, *pairState](MaxIEC104Pairs)
-	inv.iec104.overflow = InventoryOverflow{}
-	inv.iec104.busyObservations.Store(0)
+	resetIEC104Store(&inv.iec104)
 	inv.iec104.mu.Unlock()
 }
 

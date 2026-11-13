@@ -46,12 +46,17 @@ Setup alone does not turn on DPI, protocol decoders or firewall enforcement,
 and does not change Monitor into blocking. Review those settings, the candidate
 diff and per-rule coverage; use **Commit-confirmed** to apply safely.
 
+The DPI master switch applies to every ICS decoder, including IEC 104. When
+`dataplane.dpiEnabled` is off, no ICS command is decoded or evaluated against
+ICS rules; ordinary firewall policy still determines packet delivery.
+Validation also requires DPI to be enabled for IEC 104 enforce rules.
+
 Monitor-only traffic needs DPI, its decoder and capture:
 
 - With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
   Monitor rules add no packet steering.
 - With a nonzero queue group, monitor-only ICS traffic still passes through the
-  engine's single NFQUEUE capture source. The engine feeds the decoder once,
+  engine's single NFQUEUE capture source in both tracked directions. The engine feeds the decoder once,
   then immediately releases the packet back to the ruleset without a monitor
   hold. An observation mark prevents repeat queueing through any ICS queue rule.
   Later L4 rules, established-connection handling and the default policy decide
@@ -65,6 +70,18 @@ still decides the packet; monitor matches remain independent observations.
 Disabled DPI/decoders, exclusions and capture loss limit observations. Enforce
 mode alone does not prove protection either:
 see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+
+Generic Modbus, DNP3 and CIP inline scopes also inspect replies in enforce mode,
+using the connection's original client and post-DNAT backend even with NAT.
+`ics.direction` restricts message matching, not which direction reaches inspection.
+Existing response-matching enforcing `DENY` and `RESET` rules therefore apply
+inline, and strict parsing or stream failures in enforcing scopes can veto
+reply packets. Monitor response matches remain would-decisions only.
+An unmatched generic reply still skips the ordinary message default deny;
+explicit matching rules and kernel transport admission still apply. This is
+not request/reply authorization pairing or atomic whole-message buffering:
+earlier segments of a split generic message can already have been forwarded
+before a later segment reveals a denial.
 
 ### Shadow evidence and applied-policy counters
 
@@ -628,10 +645,19 @@ Undecoded codes are `dnp3.link_payload`, `dnp3.transport_incomplete`,
 `dnp3.object_limit`, `dnp3.object_qualifier`, `dnp3.object_truncated` and
 `dnp3.object_unsupported`. Inspection bounds are 64 KiB application bytes,
 1024 link segments per fragment, 1024 application fragments per response,
-4096 station contexts, 16 MiB retained storage (including payload, duplicate
-bytes, provenance and context charges), 1024 object headers per fragment and
-8192 point records total. Incomplete transport/application assemblies expire
-after 30 seconds idle or 60 seconds absolute.
+4096 station contexts, retained storage of `min(16 MiB, maxInspectionBytes/4)`
+per decoder instance (including payload, duplicate bytes, provenance and context
+charges, full backing capacities and replacement peaks), 1024 object headers per
+fragment and 8192 point records total. Incomplete transport/application assemblies
+expire after 30 seconds idle or 60 seconds absolute. The local retained-storage
+sublimit reports `dnp3.assembly_budget`; it shares the global
+`dataplane.limits.maxInspectionBytes` budget. A global reservation refusal
+terminates inspection of that stream: enforcing inline ICS scope fails closed
+with `state_limit`, while monitor/passive traffic follows ordinary firewall
+policy with incomplete coverage and affected learner evidence withheld.
+Each retained allocation keeps its session's admission class. The decoder uses
+separate class reservations under one aggregate local sublimit, so monitor allocations
+cannot consume enforcement headroom.
 
 IEC 104 events carry `direction` (`request` from the client, `response` from
 the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
@@ -802,8 +828,9 @@ Content-Length, invalid chunk framing and invalid transfer-coding order are
 framing errors. A correlated final server response to an incomplete request body
 permits the client direction to re-anchor; an interim response does not.
 
-HTTP/1 has no terminal inspection state. After a framing error, it emits one
-`malformed` event for an anchored direction and enters resynchronization. Further
+HTTP/1 framing errors are recoverable unless the shared inspection budget refuses
+an allocation. After a framing error, it emits one `malformed` event for an
+anchored direction and enters resynchronization. Further
 unrecognized bytes are consumed silently until successful re-anchoring; random
 mid-body pickup does not produce per-packet errors. In resynchronization,
 close-delimited or otherwise uncertain bodies, and CONNECT/upgrade tunnels, a
@@ -825,8 +852,8 @@ is passive metadata inspection, not proof of what an HTTP endpoint accepted.
 A bounded queue of 64 outstanding request methods and upgrade offers correlates
 responses when both directions are observed. HEAD replies and 1xx/204/304
 responses never consume body bytes, regardless of Content-Length; interim
-responses do not dequeue the request. Exceeding the queue bound does not stop
-inspection or emit a malformed event. The retained FIFO prefix preserves its
+responses do not dequeue the request. Exceeding this count bound alone does not
+stop inspection or emit a malformed event. The retained FIFO prefix preserves its
 known body boundaries; extra requests retain only an outstanding count. Once
 those methods are unknown, ambiguous response bodies use packet-boundary
 resynchronization. Correlation can recover after final replies drain at followed
@@ -866,7 +893,13 @@ HTTP/2 limits are fixed inspection ceilings, not truncated metadata:
 16 KiB per frame, 64 KiB per compressed header block, 32 KiB per decoded
 header list (including the RFC 7540 32-byte overhead per field), and a
 4 KiB dynamic table per direction. Larger negotiated frame/table sizes are
-not supported. TLS metadata inspection is best-effort: a stream picked up without
+not supported. Each opaque HPACK decoder also reserves a conservative fixed
+lifetime envelope for internal storage and replacement peaks, not exact backing.
+containd-owned compressed blocks and retained decoder input are charged separately
+by full backing capacity. The shared `maxInspectionBytes` budget can refuse
+admission or growth before these protocol ceilings.
+
+TLS metadata inspection is best-effort: a stream picked up without
 a valid TLS record is silently ignored. After anchoring, malformed TLS frames
 emit at most one malformed event per direction, then consume subsequent bytes
 silently until stream end. This terminal TLS state also applies to sequence-number
@@ -874,6 +907,16 @@ streams used by live capture. HTTP/2 malformed frames, invalid HPACK, interrupte
 CONTINUATION sequences and exceeded framing/HPACK limits emit one malformed event
 and enter HTTP resynchronization; they do not resume a damaged HPACK context.
 Normal TCP splits and coalesced frames preserve HTTP/2 metadata.
+
+Shared inspection-budget refusal emits neither successful metadata nor a
+malformed-protocol event. HTTP, HTTP/2 and TLS reserve metadata, owned keys and
+retained buffers before publishing successful metadata. HTTP request correlation
+survives the requesting direction until its response or connection retirement.
+FIFO reslicing retains the full backing charge.
+A refusal records `inspection_bytes/refused` in the effective mode and stops
+trusted inspection for that stream incarnation. Ordinary firewall policy still
+applies outside inline enforcing ICS scopes. Recovered capacity does not restart
+the stream. See [traffic state limits](dataplane.md#traffic-state-limits).
 
 An HTTP/1 `Upgrade: h2c` request remains an `http/request` event; its body is
 skipped before recognizing the client's connection preface. A server `101` response
@@ -1280,12 +1323,25 @@ and [CLI](cli.md#learner-evidence) for the replacement requests and commands.
 
 IEC 104 tracking shares a **4,096-entry session table** across monitor and enforce
 envelopes, including retained closed sessions and abort tombstones. At capacity,
-new monitor-mode connections are accepted **without stream inspection**. Each
-untracked SYN emits `ics.session` with `outcome: untracked`, `mode: monitor`,
-`reason: bound`, and `limit: 4096`, on the client/server tuple without a session
-or APDU ID. Midstream traffic stays untracked; existing sessions remain inspected.
-New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
-at capacity.
+new monitor-mode connections are accepted **without stream inspection**. Pressure is counted as
+`iec_sessions/refused/monitor` and emits the coalesced `dataplane.state_limit`
+pressure-entry event (`table: iec_sessions`, `reason: refused`, `mode: monitor`,
+`limit: 4096`), not a per-SYN `ics.session` event. Events coalesce at most once
+per table per 60 seconds. Enforce refusals count in the effective enforce mode.
+Midstream traffic stays untracked. Existing sessions continue inspection unless
+their own retained-allocation growth is refused. New SYNs can be tracked when
+tuple slots and shared inspection credits are available. Enforce envelopes remain
+fail closed at capacity.
+
+Session admission reserves 4 KiB of metadata. Directional byte streams, history,
+ACK replacements and retained frame ranges also share `maxInspectionBytes`,
+including full backing capacities and old-plus-new replacement peaks.
+The budget can refuse admission or growth before the fixed protocol limits.
+An admitted enforcing session then aborts with `bound` diagnostics and
+`state_limit`, dropping current and held traffic and resetting only that session.
+Monitor sessions stop trusted parsing and retain incomplete coverage until the
+incarnation retires, even after credits recover. In-window RST and FIN close
+criteria still apply.
 
 In an enforce envelope a session starts only at a SYN of a handshake that
 connection tracking has not seen complete. A SYN sent into an established
@@ -1392,7 +1448,11 @@ Validation does not check `op`; a condition with another `op` never matches.
 An optional `threshold` of `count` (at least 2) and `windowSeconds` (at least 1)
 alerts once per flow ID when that many events match in one window. The window
 starts at the first matching event. The signature does not alert again for that
-flow ID until the window has passed.
+flow ID until the window has passed. The engine keeps at most 4,096 windows:
+when full it drops expired windows first, then the oldest live window, and
+counts the eviction as `signature_windows` `evicted`. An evicted identity that
+matches again starts a fresh window and can alert before the original window
+would have passed.
 
 Two optional threshold fields change what counts:
 
@@ -1401,8 +1461,9 @@ Two optional threshold fields change what counts:
   Events whose flow ID is not a connection tuple keep their own counter.
 - `dedupAttr`: an event attribute. Matching events with the same nonempty value
   count once in a window. The built-in write storm uses `apdu_id`. A window
-  retains at most 256 values; past that, new values still count but are not
-  remembered.
+  retains at most 256 values and 16 KiB of value text; past that, new values
+  still count but are not remembered, and each is counted as
+  `signature_windows` `truncated`.
 
 ```json
 {
@@ -1523,12 +1584,25 @@ oldest pending age and active sessions beside the fixed limits. The engine holds
 incomplete APDUs until every byte is framed and allowed. Held bytes include
 retransmissions. An empty hold queue has zero packets, bytes and age.
 
-Limits are 256 held packets globally, 32 packets and 65,536 payload bytes per
-session, a one-second pending timeout, and 4,096 tracked tuple slots. Closed
-sessions and abort tombstones occupy slots; replacement handshakes reuse their
-slot. Capture shutdown makes active sessions zero, but retained tuple slots can
+Limits are 256 held-packet settlement owners globally, 32 queued packets and
+65,536 queued payload bytes per session, a one-second pending timeout, and
+4,096 tracked tuple slots. Closed sessions and abort tombstones occupy slots;
+replacement handshakes reuse their slot. Capture shutdown makes active sessions
+zero, but retained tuple slots can
 remain until expiry or rebuild. The shared reset/block worker has 256 queue slots.
-There are no tuning controls.
+The global settlement-owner bound includes packets released from the visible
+hold queue but still awaiting verdict submission. Shared budget credits can
+therefore outlive an empty queue.
+
+The protocol-specific limits are fixed. The shared `maxInspectionBytes` budget
+can refuse a hold earlier. Each held packet charges its payload length plus a
+fixed 256-byte header allowance and a 512-byte token metadata charge before it
+joins the queue. This conservative convention does not measure captured headers
+or kernel skb residency. A generation-bearing token owns that credit until
+verdict completion, settlement rejection or source flush. Repeated notifications
+cannot refund twice. Shutdown and reconfiguration release remaining ownership
+after capture retirement. A refusal aborts before publishing successful inspection
+results or forwarding an earlier held prefix.
 
 Totals distinguish denied-command aborts from timeouts, saturation, midstream
 traffic, stream/framing/transport errors, policy changes and queue closure.
@@ -1581,7 +1655,9 @@ Engine unavailability displays an explicit unavailable state, not an empty
 inventory or zero counters; **Refresh** retries.
 
 Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
-points per CA. The least recently observed entry is evicted at each cap; idle
+points per CA, and to 65,536 points in total. The least recently observed entry
+is evicted at each cap, and a total-cap eviction removes the least recently
+observed point anywhere and counts in the points overflow; idle
 entries expire after 24 hours on the next observation or read. Reads do not
 extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 assets,
 128 peers and 256 station addresses per asset, with the same asset LRU/expiry.
@@ -1635,14 +1711,26 @@ rule without explicit transport/ports covers only that protocol's registry
 ports. PCAP analysis without a rule snapshot reports scope as `unknown`.
 
 Evidence is bounded to 1 KiB per direction, 16 arrivals and 5 seconds per
-connection (with bounded entries and total bytes). Only passive decoding
-waits for confirmation. The 5-second evidence window is activity-driven:
-idle evidence finalizes on the next arrival, sweep, close or PCAP EOF, not on
+connection. Live observation identities are bounded by tracked flow slots, not a
+separate context cap. Identification and observation metadata, owned keys,
+prefixes, range/datagram indices, replay backing, packet stamps and decoder state
+share `maxInspectionBytes`. The budget can stop inspection earlier.
+Replay retains its prefix credit until synchronous decoding releases the last
+byte alias. Standalone identification also retains finite entry and byte bounds.
+Only passive decoding waits for confirmation. The 5-second evidence window is
+activity-driven: idle evidence finalizes on the next arrival, sweep, close or PCAP EOF, not on
 a promised timer deadline. PCAP deadlines use a nondecreasing capture-time
 watermark, so out-of-order timestamps do not rewind the evidence clock. Ambiguous evidence can resolve with later bytes;
 exhaustion or EOF yields an incomplete result with candidates retained.
 TCP identification requires SYN coverage: midstream capture does not confirm
 or start a passive decoder. Truncation, missing bytes, conflicting evidence
 and budget exhaustion can leave an identification incomplete. There is no
-fallback scan or midstream replay. Identification results and observation-decoded events
-retain the capture timestamps. PCAP analysis never increments live metrics.
+fallback scan or midstream replay. Allocation refusal before admission creates
+no identification. Refused growth, replay or stamp allocation, or passive
+session-ID allocation leaves an admitted incarnation with terminal incomplete
+coverage and withholds affected learner evidence. Identity adoption preserves
+this loss, including on a surviving transport partner after a refused rekey.
+Recovered credits do not restart that incarnation or replay its bytes again.
+Ordinary firewall policy remains unchanged. Identification results and
+observation-decoded events retain the capture timestamps. PCAP analysis never
+increments live metrics.

@@ -131,7 +131,7 @@ type SignaturesClient interface {
 // StatsClient is an optional interface for querying protocol and flow statistics.
 type StatsClient interface {
 	ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error)
-	ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error)
+	ListTopTalkers(ctx context.Context, n int) (stats.TopTalkers, error)
 }
 
 type ServicesValidator interface {
@@ -364,6 +364,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/pcap/analyze", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), analyzePCAPUploadHandler(engine))
 		protected.POST("/pcap/analyze/:name", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), analyzePCAPNameHandler(engine))
 		protected.GET("/diagnostics/iec104", iec104DiagnosticsHandler(engine))
+		protected.GET("/diagnostics/state-limits", stateLimitsHandler(engine))
 		protected.GET("/inventory", listInventoryHandler(engine))
 		protected.GET("/inventory/iec104", iec104InventoryHandler(engine))
 		protected.GET("/inventory/:ip", getInventoryAssetsHandler(engine))

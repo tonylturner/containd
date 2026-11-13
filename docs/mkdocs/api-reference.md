@@ -58,15 +58,37 @@ The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 ## Monitoring Availability
 
 Flows, protocol/top-talker statistics, anomalies, learner evidence and suggestion
-generation/staging, signatures and matches, interface runtime state
+generation/staging, signatures and matches, state-limit and IEC 104 diagnostics, interface runtime state
 return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
 when the required engine capability is missing or its call fails. The same
 convention applies to anomaly clears, learner dataset deletion and signature writes:
 unavailable operations never report a successful clear or change. Simulation
 preference persistence and engine delivery are reported separately below.
 A reachable backend with no observations still returns `200` with an empty
-list (learner pages use `{items: [], nextCursor?}`).
+list (learner pages use `{items: [], nextCursor?}`). Top-talker statistics instead
+return the retention object described below; diagnostics return snapshots.
 Retry unavailable requests rather than interpreting them as empty or stopped.
+
+## Recently active host pairs and state limits
+
+`GET /stats/top-talkers?n=10` returns an object, not an array:
+`{semantics: "recent", limit, retained, evicted, since, complete, rows}`.
+Rows are the top **recently active** directional host pairs by bytes, with
+source/destination/protocol tie ordering. Their counts are exact while retained;
+`complete: false` means history is incomplete because older rows were evicted,
+not a lifetime traffic ranking. `since` is tracker creation at the start of the
+configuration generation. `retained` counts all retained rows, not just the
+selected rows; `evicted` counts generation evictions. `n` defaults to 10 when
+absent or invalid, and numeric values clamp to 1–1,000. The internal endpoint,
+engine client and CLI use the same object.
+
+`GET /diagnostics/state-limits` returns `{tables, budget}` for authenticated
+readers, including view-role users. Tables expose `table`, `limit`, `entries`,
+`chargedBytes`, `highWater`, `pressure` and nonzero `hits` (`reason`, `mode`,
+`total`). The budget exposes `limit`, `inUse`, `highWater`, `byCategory`.
+Engine diagnostics unavailable is 503, never a fabricated empty snapshot.
+See [traffic state limits](dataplane.md#traffic-state-limits) for units,
+lifetimes, metrics, refusal behavior and what the byte bound excludes.
 
 ## WireGuard Address Families
 

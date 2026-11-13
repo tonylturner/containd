@@ -23,7 +23,9 @@
 // functions do not establish client/server roles; callers use TCP SYN metadata.
 //
 // Take transfers retained storage once, and leaves terminal metadata cached
-// until Release. For a confirmation the entire triggering payload is already
+// until Release. The receiver must call Replay.Release after its last use;
+// transferred backing remains charged to the same shared inspection budget.
+// For a confirmation the entire triggering payload is already
 // in Replay; never submit it twice. Replay.TriggerRetained makes failed admission explicit:
 // deadline, truncation, missing SYN, conflict and allocation refusal can end an
 // entry without retaining the triggering payload; clipping retains only its

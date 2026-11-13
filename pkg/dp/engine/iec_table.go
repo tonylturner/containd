@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -39,6 +40,7 @@ const (
 	iecIdleTTL              = 10 * time.Minute
 	iecResetRetries         = 3
 	iecResetWindow          = time.Second
+	iecMaxReconnectHistory  = 4096
 	iecReconnectWindow      = 10 * time.Minute
 	iecExpireInterval       = 100 * time.Millisecond
 	iecProtocol             = "iec104"
@@ -76,37 +78,40 @@ const (
 
 // iecSession is one IEC104 session incarnation, from its SYN.
 type iecSession struct {
-	id         string
-	flow       *flow.State // immutable service key captured at creation; client/server stay in packet space
-	client     netip.AddrPort
-	server     netip.AddrPort
-	ctx        rules.EvalContext // opener-oriented session tuple
-	mode       string            // envelope mode, fixed at the SYN
-	state      iecState
-	lastSeen   time.Time
-	endedAt    time.Time // closed or aborted
-	dirs       [2]*iecDir
-	held       []*heldPacket
-	heldBytes  int
-	stopParse  bool // monitor envelope: parsing stopped after a stream error
-	reconnects bool // first STARTDT con counts as a reconnect
-	reset      *connReset
-	next       *iecSession         // new incarnation whose handshake is pending
-	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
-	inventory  *iecInventoryLedger
+	memory         *flow.InspectionMemory
+	inspectionLost bool
+	id             string
+	flow           *flow.State // immutable service key captured at creation; client/server stay in packet space
+	client         netip.AddrPort
+	server         netip.AddrPort
+	ctx            rules.EvalContext // opener-oriented session tuple
+	mode           string            // envelope mode, fixed at the SYN
+	state          iecState
+	lastSeen       time.Time
+	endedAt        time.Time // closed or aborted
+	dirs           [2]*iecDir
+	held           []*heldPacket
+	heldBytes      int
+	stopParse      bool // monitor envelope: parsing stopped after a stream error
+	reconnects     bool // first STARTDT con counts as a reconnect
+	reset          *connReset
+	next           *iecSession         // new incarnation whose handshake is pending
+	apci           *anomaly.IEC104APCI // observational state, owned by this incarnation
+	inventory      *iecInventoryLedger
 }
 
 // iecDir is one direction of a session (client→server or server→client).
 type iecDir struct {
-	hasISN    bool
-	isn       uint32
-	seq       flow.SeqSpace
-	bytes     *flow.ByteStream
-	frames    []iecFrame // decided frames still retained, in order
-	framedEnd int64      // end of the last framed APDU
-	forwarded int64      // end of the bytes forwarded to the peer
-	finFwd    bool       // a FIN was forwarded
-	fin       bool
+	frameCharge int
+	hasISN      bool
+	isn         uint32
+	seq         flow.SeqSpace
+	bytes       *flow.ByteStream
+	frames      []iecFrame // decided frames still retained, in order
+	framedEnd   int64      // end of the last framed APDU
+	forwarded   int64      // end of the bytes forwarded to the peer
+	finFwd      bool       // a FIN was forwarded
+	fin         bool
 }
 
 type iecFrame struct{ start, end int64 }
@@ -121,18 +126,12 @@ type heldPacket struct {
 	since time.Time
 }
 
-func newIECDir(isn uint32) *iecDir {
-	return &iecDir{
-		hasISN: true,
-		isn:    isn,
-		seq:    flow.NewSeqSpace(isn),
-		bytes:  flow.NewByteStream(iecStreamMaxBytes, iecStreamMaxSegments),
-	}
-}
-
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
+	ledger        *limits.Ledger
+	resources     limits.Resources
+	settlements   map[capture.Token]*limits.Lease
 	detached      bool
 	mu            sync.Mutex
 	zones         *zoneCache // the engine's
@@ -182,18 +181,21 @@ type iecTable struct {
 // newIECTable returns a table that resolves zones through zones.
 func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 	return &iecTable{
-		zones:      zones,
-		now:        time.Now,
-		newPolicy:  newRulesPolicy,
-		safeRead:   iec104.SafeRead,
-		newID:      nextLiveSessionID,
-		ctDelete:   conntrack.Delete,
-		globalMode: globalMode,
-		sessions:   make(map[iecKey]*iecSession),
-		held:       make(map[capture.Token]*iecSession),
-		aborts:     make(map[capture.Token]*abortTxn),
-		reconnect:  make(map[string]time.Time),
-		pickups:    newPickupResets(),
+		ledger:      limits.NewLedger(nil),
+		resources:   limits.NewResources(nil, nil),
+		settlements: make(map[capture.Token]*limits.Lease),
+		zones:       zones,
+		now:         time.Now,
+		newPolicy:   newRulesPolicy,
+		safeRead:    iec104.SafeRead,
+		newID:       nextLiveSessionID,
+		ctDelete:    conntrack.Delete,
+		globalMode:  globalMode,
+		sessions:    make(map[iecKey]*iecSession),
+		held:        make(map[capture.Token]*iecSession),
+		aborts:      make(map[capture.Token]*abortTxn),
+		reconnect:   make(map[string]time.Time),
+		pickups:     newPickupResets(),
 
 		inventoryTokens: make(map[capture.Token]*iecSession),
 	}
@@ -210,6 +212,24 @@ func addrPort(ip net.IP, port uint16) (netip.AddrPort, bool) {
 
 func pairKey(client, server netip.AddrPort) string {
 	return client.Addr().String() + ">" + server.String()
+}
+
+// rememberReconnectLocked retains observational abort history. Refreshing a
+// pair does not consume another slot; new pairs displace the oldest abort.
+func (t *iecTable) rememberReconnectLocked(client, server netip.AddrPort, now time.Time) {
+	key := pairKey(client, server)
+	if _, exists := t.reconnect[key]; !exists && len(t.reconnect) >= iecMaxReconnectHistory {
+		var oldest string
+		var at time.Time
+		for k, aborted := range t.reconnect {
+			if oldest == "" || aborted.Before(at) || aborted.Equal(at) && k < oldest {
+				oldest, at = k, aborted
+			}
+		}
+		delete(t.reconnect, oldest)
+		t.ledger.Record(limits.TableIECReconnect, limits.ReasonEvicted, limits.ModeObserve)
+	}
+	t.reconnect[key] = now
 }
 
 // sessionCtx is the opener-oriented evaluation context of a session.
@@ -405,6 +425,7 @@ func (t *iecTable) deleteLocked(key iecKey, s *iecSession) iecActions {
 		t.tombstones--
 	}
 	delete(t.sessions, key)
+	s.releaseInspection()
 	return acts
 }
 

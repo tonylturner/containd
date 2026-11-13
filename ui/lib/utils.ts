@@ -6,17 +6,18 @@ export function formatTimestamp(ts: string | Date): string {
   });
 }
 
-/** Binary-unit size, whole numbers from 10 up: "512 B", "1.5 KB", "12 MB"; "-" when not a number. */
-export function formatBytes(bytes: number): string {
+/** Base-1024 size; IEC labels also omit redundant decimal zeros. "-" when not a number. */
+export function formatBytes(bytes: number, options: { iec?: boolean } = {}): string {
   if (!Number.isFinite(bytes)) return "-";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const units = options.iec ? ["B", "KiB", "MiB", "GiB", "TiB"] : ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit += 1;
   }
-  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+  const rounded = value.toFixed(value >= 10 || unit === 0 ? 0 : 1);
+  return `${options.iec ? Number(rounded) : rounded} ${units[unit]}`;
 }
 
 /**

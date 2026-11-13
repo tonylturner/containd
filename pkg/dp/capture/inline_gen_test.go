@@ -432,6 +432,12 @@ func TestInlineResolvedRejectionsAreReported(t *testing.T) {
 	if got := fx.completions(); len(got) != 0 {
 		t.Fatalf("rejected resolutions produced completions: %+v", got)
 	}
+	for i, want := range []Token{{gen: fx.gen.id, id: 42}, NewToken(fx.gen.id, 43)} {
+		var rej *ResolutionRejectedError
+		if !errors.As(errs[i], &rej) || rej.Token != want {
+			t.Fatalf("reported[%d] = %v, want rejected token %s", i, errs[i], want)
+		}
+	}
 }
 
 func TestInlineDuplicatePacketIDFailsSource(t *testing.T) {

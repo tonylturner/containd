@@ -69,9 +69,14 @@ func (m *Manager) releaseSelection(key string) {
 	delete(m.selected, key)
 	for flowID := range m.streamFlows[key] {
 		delete(m.flowStreams[flowID], key)
+		delete(m.streamFlows[key], flowID)
 		if len(m.flowStreams[flowID]) == 0 {
 			delete(m.flowStreams, flowID)
 		}
+		if len(m.streamFlows[key]) == 0 {
+			delete(m.streamFlows, key)
+		}
+		m.unbind(bindingID{flowID, key})
 	}
 	delete(m.streamFlows, key)
 }
@@ -80,14 +85,16 @@ func (m *Manager) releaseFlowSelection(flowID string) {
 	delete(m.selected, flowID)
 	for key := range m.flowStreams[flowID] {
 		delete(m.streamFlows[key], flowID)
-		if len(m.streamFlows[key]) != 0 {
-			continue // another wire leg still owns this session direction
+		delete(m.flowStreams[flowID], key)
+		if len(m.streamFlows[key]) == 0 {
+			if m.reassembler != nil {
+				m.reassembler.complete(key)
+			}
+			m.endStream(key)
+			m.releaseSelection(key)
 		}
-		if m.reassembler != nil {
-			m.reassembler.complete(key)
-		}
-		m.endStream(key)
-		m.releaseSelection(key)
+		m.unbind(bindingID{flowID, key})
 	}
 	delete(m.flowStreams, flowID)
+	m.unbind(bindingID{flowID, flowID})
 }
