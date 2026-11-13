@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.43] - 2026-11-13
+
 ### Breaking
 
 - TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
@@ -2826,7 +2828,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.42...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.43...HEAD
+[0.1.43]: https://github.com/tonylturner/containd/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/tonylturner/containd/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/tonylturner/containd/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40

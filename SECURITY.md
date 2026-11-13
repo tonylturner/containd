@@ -124,8 +124,8 @@ Machine-readable publication points:
 Published advisories:
 
 - [containd-2026-001](security/csaf/advisories/containd-2026-001.json): inherited Debian package vulnerabilities in management 0.1.16.
-- [containd-2026-002](security/csaf/advisories/containd-2026-002.json): X-User actor spoofing in management lab/static-token sessions, fixed in 0.1.42.
-- [containd-2026-003](security/csaf/advisories/containd-2026-003.json): seven bundled ClamAV parser vulnerabilities affecting evidenced management and engine releases through 0.1.42; no fixed containd image yet, with HTTP scanning and ICAP workarounds.
+- [containd-2026-002](security/csaf/advisories/containd-2026-002.json): X-User actor spoofing in management lab/static-token sessions, fixed in 0.1.42, and X-Source audit source forgery, fixed in 0.1.43.
+- [containd-2026-003](security/csaf/advisories/containd-2026-003.json): seven bundled ClamAV parser vulnerabilities affecting evidenced management and engine releases through 0.1.43; no fixed containd image yet, with HTTP scanning and ICAP workarounds.
 
 Each release attaches generated provider metadata, published advisories and, when there are findings or applicable vendor statements, a digest-bound VEX document in `csaf-documents.tgz`. Untriaged scan findings remain `under_investigation`; that status is not a suppression. The directory is deployed to GitHub Pages when advisories merge to main and after each release; release archives remain the historical download source. See the [CSAF index](security/csaf/README.md) for discovery and publication details.
 
