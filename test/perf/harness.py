@@ -119,6 +119,24 @@ def check_memory(memory):
         raise Failure(f"VM available memory below 4 GiB ({available} bytes MemAvailable)")
 
 
+def bind_management(rt):
+    # Right after start, Docker can report the binding as "<host>:0" until the
+    # ephemeral host port is published. Wait for a real port, then check it.
+    address = ""
+
+    def published():
+        nonlocal address
+        result = rt.compose(["port", "appliance", "18080"], check=False)
+        address = result.stdout.strip()
+        return result.returncode == 0 and address.rsplit(":", 1)[-1] not in ("", "0")
+    rt.wait(published, "published management port")
+    host, port = address.rsplit(":", 1)
+    if host != "127.0.0.1" or int(port) in (8080, 8443, 2222, 9080, 9443):
+        raise Failure(f"unexpected management binding: {address}")
+    rt.base = f"http://{address}/api/v1"
+    wait_http(rt)
+
+
 def setup(rt, directory, protocol, mode, dpi):
     rt.env["PERF_RESULTS"] = str(directory)
     rt.owned = True  # Claimed before creation, including a partially failed up.
@@ -127,12 +145,7 @@ def setup(rt, directory, protocol, mode, dpi):
     (directory / "guest-meminfo-preflight.txt").write_text(memory)
     check_memory(memory)
     rt.compose(["up", "-d"])
-    address = rt.compose(["port", "appliance", "18080"]).stdout.strip()
-    host, port = address.rsplit(":", 1)
-    if host != "127.0.0.1" or int(port) in (8080, 8443, 2222, 9080, 9443):
-        raise Failure(f"unexpected management binding: {address}")
-    rt.base = f"http://{address}/api/v1"
-    wait_http(rt)
+    bind_management(rt)
     # Both endpoint default routes must traverse the appliance, not Docker's
     # bridge gateway. There is no shared endpoint network or NAT.
     for service, gateway, destination in (("client", rt.env["PERF_LAN_ENGINE"], rt.env["PERF_WAN_PEER"]),
@@ -170,12 +183,7 @@ def setup(rt, directory, protocol, mode, dpi):
     down_probe = connect(rt, "client", rt.env["PERF_WAN_PEER"], PORTS[protocol], expected=False)
     rt.compose(["start", "appliance"])
     # Docker may allocate a different ephemeral host port on container restart.
-    address = rt.compose(["port", "appliance", "18080"]).stdout.strip()
-    host, port = address.rsplit(":", 1)
-    if host != "127.0.0.1" or int(port) in (8080, 8443, 2222, 9080, 9443):
-        raise Failure(f"unexpected restarted management binding: {address}")
-    rt.base = f"http://{address}/api/v1"
-    wait_http(rt)
+    bind_management(rt)
     rt.wait(lambda: ready(rt, protocol, mode, dpi), "replayed policy after outage")
     write_json(directory / "appliance-down-control.json", down_probe)
     rt.check_oom()
