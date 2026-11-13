@@ -1,10 +1,11 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import Link from "next/link";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
-import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
+import { api, fetchDataPlane, type Interface, type InterfaceState } from "../../lib/api";
 import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
 import { formatEndpoint } from "../../lib/endpoint";
@@ -113,7 +114,8 @@ function firstIPv4(addrs: string[] | undefined | null): string | null {
 }
 
 export default function DiagnosticsPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [state, setState] = useState<InterfaceState[] | null>(null);
@@ -588,7 +590,7 @@ export default function DiagnosticsPage() {
                 </div>
               )}
               <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-(--text)">{reachRes.output}</pre>
-              {!isAdmin() && (
+              {!isAdmin && (
                 <div className="mt-2 text-[11px] text-(--text-muted)">
                   Some diagnostics (like packet capture) require admin.
                 </div>

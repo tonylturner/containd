@@ -289,17 +289,80 @@ func TestCoordinateLossUsefulness(t *testing.T) {
 	}
 }
 
-func TestOpaqueIPv6ExtensionLossStaysConservative(t *testing.T) {
-	for _, proto := range []byte{0, 44, 60} {
-		t.Run(fmt.Sprint(proto), func(t *testing.T) {
-			cut := make([]byte, 14+48)
-			binary.BigEndian.PutUint16(cut[12:], 0x86dd)
-			cut[14], cut[19], cut[20] = 0x60, 128, proto
-			cut[37], cut[53] = 1, 2
-			cut[54] = 58 // MLD-style ICMPv6 next header; the chain remains opaque.
+func ipv6Cut(nextHeader uint8, payload []byte, declaredPayloadLength int) []byte {
+	frame := make([]byte, 14+40+len(payload))
+	binary.BigEndian.PutUint16(frame[12:], 0x86dd)
+	frame[14], frame[21] = 0x60, 128
+	binary.BigEndian.PutUint16(frame[18:20], uint16(declaredPayloadLength))
+	frame[20] = nextHeader
+	frame[37], frame[53] = 1, 2
+	copy(frame[54:], payload)
+	return frame
+}
+
+func TestWalkableIPv6ExtensionLossPreservesSuggestions(t *testing.T) {
+	chain := []byte{58, 0, 0, 0, 0, 0, 0, 0}
+	for _, tc := range []struct {
+		name string
+		next uint8
+	}{
+		{name: "hop-by-hop", next: 0},
+		{name: "first fragment", next: 44},
+		{name: "destination options", next: 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cut := ipv6Cut(tc.next, chain, 128)
+			_, r, out := imported(t, [][]byte{frame(1, 1), cut}, []int{66, len(cut)})
+			if len(out.Suggestions) != 1 || !r.Stats.Truncated ||
+				len(r.Dataset.Gaps) != 0 || len(r.Dataset.Losses) != 1 ||
+				r.Dataset.Losses[0].Code != "capture_unrelated" {
+				t.Fatalf("walkable ICMPv6 cut did not preserve suggestions: %+v %+v", r.Dataset, out)
+			}
+		})
+	}
+}
+
+func TestUnwalkableIPv6ExtensionLossStaysConservative(t *testing.T) {
+	overBudget := make([]byte, 264)
+	overBudget[0], overBudget[1] = 58, 32 // one 264-byte Hop-by-Hop header
+	for _, tc := range []struct {
+		name                  string
+		next                  uint8
+		payload               []byte
+		declaredPayloadLength int
+	}{
+		{
+			name:                  "cut mid-header",
+			next:                  0,
+			payload:               []byte{58, 1, 0, 0, 0, 0, 0, 0},
+			declaredPayloadLength: 128,
+		},
+		{
+			name:                  "ESP after hop-by-hop",
+			next:                  0,
+			payload:               []byte{50, 0, 0, 0, 0, 0, 0, 0},
+			declaredPayloadLength: 128,
+		},
+		{
+			name:                  "non-first fragment",
+			next:                  44,
+			payload:               []byte{58, 0, 0, 8, 0, 0, 0, 0},
+			declaredPayloadLength: 128,
+		},
+		{
+			name:                  "over byte budget",
+			next:                  0,
+			payload:               overBudget,
+			declaredPayloadLength: len(overBudget) + 36,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cut := ipv6Cut(tc.next, tc.payload, tc.declaredPayloadLength)
 			s, r, out := imported(t, [][]byte{frame(1, 1), cut}, []int{66, len(cut)})
-			if len(out.Suggestions) != 0 {
-				t.Fatal("opaque chain was declared disjoint", out)
+			if len(out.Suggestions) != 0 || !r.Stats.Truncated ||
+				len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Code != "capture_truncated" ||
+				r.Dataset.Losses[0].Scope != (evidence.LossScope{}) {
+				t.Fatalf("unwalkable IPv6 cut was not dataset-wide: %+v %+v", r.Dataset, out)
 			}
 			assertDirectLoss(t, s, r.Dataset)
 		})

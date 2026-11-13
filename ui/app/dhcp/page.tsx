@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
@@ -9,7 +10,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DHCPConfig, type DHCPLease, type Interface, type DHCPStatus } from "../../lib/api";
+import { api, type DHCPConfig, type DHCPLease, type Interface, type DHCPStatus } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { SaveStateLine } from "../../components/SaveStateLine";
@@ -37,7 +38,8 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
 }
 
 export default function DHCPPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { conflictProps, editor, cfg, setCfg, dirty, readConfig: adoptConfig, write, text, setText } = useConfigEditor(() => normalize(null), false);

@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
@@ -44,7 +45,6 @@ import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useHealth } from "../../hooks/useHealth";
 import { useProtection } from "../../hooks/useProtection";
 import { ProtectionRetry } from "../../components/ProtectionNotice";
-import { isAdmin } from "../../lib/api";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
@@ -60,6 +60,7 @@ import { TONE_COLORS, topologyStatus } from "./topology-status";
    ════════════════════════════════════════════════════════════════════ */
 
 function TopologyInner() {
+  const isAdmin = useIsAdmin();
   const [nodes, setNodes] = useState<Node<TopoNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -70,13 +71,14 @@ function TopologyInner() {
   const [nodeData, setNodeData] = useState<Record<string, TopoNodeData>>({});
   const health = useHealth();
   const protection = useProtection();
+  const enforcementState = health?.enforcement?.state;
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
 
   // ── Fetch & build ──
   const { refresh: fetchData } = useAsyncRefresh(useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await buildTopology();
+      const result = await buildTopology(enforcementState);
       if (signal?.aborted) return;
       if (!result) {
         setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
@@ -102,7 +104,7 @@ function TopologyInner() {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
-  }, []), { initialArgs: (signal): [AbortSignal] => [signal] });
+  }, [enforcementState]), { initialArgs: (signal): [AbortSignal] => [signal] });
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
@@ -169,7 +171,7 @@ function TopologyInner() {
           </div>
           {health?.enforcement?.state !== "enforcing" && <div className="flex flex-wrap items-center gap-2 text-amber">
             {status.action && <span className="text-xs">{status.action}</span>}
-            <ProtectionRetry isAdmin={isAdmin()} />
+            <ProtectionRetry isAdmin={isAdmin} />
           </div>}
           <div className={s.statusChip}>
             <span style={{ color: "#4a4030" }}>LAST SYNC</span>

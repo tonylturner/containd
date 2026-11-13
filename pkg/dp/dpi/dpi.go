@@ -40,6 +40,7 @@ type ParsedPacket struct {
 	HasOffset   bool      // the caller tracked the handshake and computed Offset
 	Session     string    // required when HasOffset
 	Dir         StreamDir // required when HasOffset
+	Role        StreamDir // optional known transport role; never changes stream identity
 	// FailClosed asks for a flow stream that cannot resynchronize: its
 	// consumed bytes are kept to verify retransmissions, and a framed
 	// error fails it until the flow ends instead of restarting it.

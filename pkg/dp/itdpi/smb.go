@@ -4,7 +4,11 @@
 package itdpi
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
+	"net"
+	"sync"
 	"unicode/utf16"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -13,7 +17,24 @@ import (
 
 // SMBDecoder parses SMBv1 and SMBv2/3 headers to emit negotiate, session setup,
 // tree connect, read, write, and other command events.
-type SMBDecoder struct{}
+const (
+	maxSMBDialects       = 64
+	maxSMBDialectBytes   = 4096
+	maxSMBNegotiationMap = 4096
+)
+
+type smbNegotiation struct {
+	dialects []string
+	previous string
+	next     string
+}
+
+type SMBDecoder struct {
+	mu              sync.Mutex
+	negotiations    map[string]*smbNegotiation
+	negotiationHead string
+	negotiationTail string
+}
 
 func NewSMBDecoder() *SMBDecoder { return &SMBDecoder{} }
 
@@ -101,7 +122,14 @@ func (d *SMBDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 	return nil, nil
 }
 
-func (d *SMBDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
+func (d *SMBDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
+	if state != nil {
+		d.mu.Lock()
+		d.removeSMB1Negotiation(smbNegotiationKey(state.Key))
+		d.mu.Unlock()
+	}
+	return nil, nil
+}
 
 func (d *SMBDecoder) parseSMBv1(state *flow.State, pkt *dpi.ParsedPacket, smb []byte) ([]dpi.Event, error) {
 	// SMBv1 header is 32 bytes minimum.
@@ -118,6 +146,16 @@ func (d *SMBDecoder) parseSMBv1(state *flow.State, pkt *dpi.ParsedPacket, smb []
 		"src_port":  pkt.SrcPort,
 		"dst_port":  pkt.DstPort,
 		"transport": pkt.Proto,
+	}
+	if cmd == 0x72 {
+		if smb[9]&0x80 != 0 {
+			if dialect, ok := d.selectedSMB1Dialect(state, smb); ok {
+				attrs["dialect"] = dialect
+			}
+		} else if dialects, ok := parseSMB1Dialects(smb); ok {
+			attrs["dialects_offered"] = dialects
+			d.storeSMB1Dialects(state, dialects)
+		}
 	}
 
 	ev := dpi.Event{
@@ -151,6 +189,15 @@ func (d *SMBDecoder) parseSMBv2(state *flow.State, pkt *dpi.ParsedPacket, smb []
 		"dst_port":   pkt.DstPort,
 		"transport":  pkt.Proto,
 	}
+	if cmd == 0x0000 {
+		if binary.LittleEndian.Uint32(smb[16:20])&1 != 0 {
+			if dialect, ok := parseSMB2SelectedDialect(smb); ok {
+				attrs["dialect"] = dialect
+			}
+		} else if dialects, ok := parseSMB2Dialects(smb); ok {
+			attrs["dialects_offered"] = dialects
+		}
+	}
 
 	// For TreeConnect, try to extract the share name from the payload.
 	if cmd == 0x0003 && len(smb) > 72 {
@@ -166,6 +213,166 @@ func (d *SMBDecoder) parseSMBv2(state *flow.State, pkt *dpi.ParsedPacket, smb []
 		Attributes: attrs,
 	}
 	return []dpi.Event{ev}, nil
+}
+
+func parseSMB2Dialects(smb []byte) ([]string, bool) {
+	if len(smb) < 100 || binary.LittleEndian.Uint16(smb[64:66]) != 36 {
+		return nil, false
+	}
+	count := int(binary.LittleEndian.Uint16(smb[66:68]))
+	if count == 0 || count > maxSMBDialects || count*2 > len(smb)-100 {
+		return nil, false
+	}
+	dialects := make([]string, count)
+	for i := range dialects {
+		dialects[i] = smbDialectName(binary.LittleEndian.Uint16(smb[100+i*2 : 102+i*2]))
+	}
+	return dialects, true
+}
+
+func parseSMB2SelectedDialect(smb []byte) (string, bool) {
+	if len(smb) < 70 || binary.LittleEndian.Uint16(smb[64:66]) != 65 {
+		return "", false
+	}
+	return smbDialectName(binary.LittleEndian.Uint16(smb[68:70])), true
+}
+
+func smbDialectName(dialect uint16) string {
+	switch dialect {
+	case 0x0202:
+		return "2.0.2"
+	case 0x0210:
+		return "2.1"
+	case 0x02ff:
+		return "2.??"
+	case 0x0300:
+		return "3.0"
+	case 0x0302:
+		return "3.0.2"
+	case 0x0311:
+		return "3.1.1"
+	default:
+		return fmt.Sprintf("0x%04x", dialect)
+	}
+}
+
+func parseSMB1Dialects(smb []byte) ([]string, bool) {
+	if len(smb) < 35 || smb[32] != 0 {
+		return nil, false
+	}
+	byteCount := int(binary.LittleEndian.Uint16(smb[33:35]))
+	if byteCount > maxSMBDialectBytes || 35+byteCount > len(smb) {
+		return nil, false
+	}
+	body := smb[35 : 35+byteCount]
+	var dialects []string
+	for len(body) > 0 && len(dialects) < maxSMBDialects {
+		if body[0] != 0x02 {
+			return nil, false
+		}
+		body = body[1:]
+		end := bytes.IndexByte(body, 0)
+		if end < 0 || end > 128 {
+			return nil, false
+		}
+		dialects = append(dialects, string(body[:end]))
+		body = body[end+1:]
+	}
+	if len(body) != 0 || len(dialects) == 0 {
+		return nil, false
+	}
+	return dialects, true
+}
+
+func (d *SMBDecoder) storeSMB1Dialects(state *flow.State, dialects []string) {
+	if state == nil {
+		return
+	}
+	key := smbNegotiationKey(state.Key)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.negotiations == nil {
+		d.negotiations = make(map[string]*smbNegotiation)
+	}
+	if negotiation, exists := d.negotiations[key]; exists {
+		negotiation.dialects = append([]string(nil), dialects...)
+		return
+	}
+	if len(d.negotiations) >= maxSMBNegotiationMap {
+		d.removeSMB1Negotiation(d.negotiationHead)
+	}
+	negotiation := &smbNegotiation{
+		dialects: append([]string(nil), dialects...),
+		previous: d.negotiationTail,
+	}
+	if d.negotiationTail == "" {
+		d.negotiationHead = key
+	} else {
+		d.negotiations[d.negotiationTail].next = key
+	}
+	d.negotiationTail = key
+	d.negotiations[key] = negotiation
+}
+
+func (d *SMBDecoder) selectedSMB1Dialect(state *flow.State, smb []byte) (string, bool) {
+	if state == nil {
+		return "", false
+	}
+	key := smbNegotiationKey(state.Key)
+	d.mu.Lock()
+	negotiation := d.negotiations[key]
+	d.removeSMB1Negotiation(key)
+	d.mu.Unlock()
+
+	if negotiation == nil || len(smb) < 35 {
+		return "", false
+	}
+	wordCount := int(smb[32])
+	if wordCount != 1 && wordCount != 13 && wordCount != 17 {
+		return "", false
+	}
+	byteCountOffset := 33 + wordCount*2
+	if len(smb) < byteCountOffset+2 {
+		return "", false
+	}
+	byteCount := int(binary.LittleEndian.Uint16(smb[byteCountOffset : byteCountOffset+2]))
+	if byteCount > len(smb)-(byteCountOffset+2) {
+		return "", false
+	}
+	index := binary.LittleEndian.Uint16(smb[33:35])
+	if index == 0xFFFF || int(index) >= len(negotiation.dialects) {
+		return "", false
+	}
+	return negotiation.dialects[index], true
+}
+
+// removeSMB1Negotiation unlinks one pending offer in constant time. The caller
+// must hold d.mu.
+func (d *SMBDecoder) removeSMB1Negotiation(key string) {
+	negotiation, exists := d.negotiations[key]
+	if !exists {
+		return
+	}
+	if negotiation.previous == "" {
+		d.negotiationHead = negotiation.next
+	} else {
+		d.negotiations[negotiation.previous].next = negotiation.next
+	}
+	if negotiation.next == "" {
+		d.negotiationTail = negotiation.previous
+	} else {
+		d.negotiations[negotiation.next].previous = negotiation.previous
+	}
+	delete(d.negotiations, key)
+}
+
+func smbNegotiationKey(key flow.Key) string {
+	src := net.JoinHostPort(key.SrcIP.String(), fmt.Sprint(key.SrcPort))
+	dst := net.JoinHostPort(key.DstIP.String(), fmt.Sprint(key.DstPort))
+	if src > dst {
+		src, dst = dst, src
+	}
+	return src + "|" + dst
 }
 
 // extractShareName attempts to find a UNC path (\\server\share) in the SMBv2

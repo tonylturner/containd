@@ -56,17 +56,21 @@ func FuzzDNSDecoderOnPacket(f *testing.F) {
 }
 
 func FuzzHTTPDecoderOnPacket(f *testing.F) {
-	dec := NewHTTPDecoder()
 	state := httpFlowState(12345, 80)
 
 	f.Add([]byte("GET /index.html HTTP/1.1\r\nHost: example.com\r\n\r\n"))
 	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nok"))
 	f.Add([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
+	f.Add([]byte("POST / HTTP/1.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n"))
+	f.Add([]byte("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"))
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nbodyHTTP/1.1 204 No Content\r\n\r\n"))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = parseHTTP(data)
-		_, _ = dec.OnPacket(state, &dpi.ParsedPacket{
+		fuzzITStream(data, NewHTTPDecoder(), state)
+		fuzzHTTPReply(data)
+		_, _ = NewHTTPDecoder().OnPacket(state, &dpi.ParsedPacket{
 			Payload: data,
 			Proto:   "tcp",
 			SrcPort: 12345,
@@ -76,21 +80,25 @@ func FuzzHTTPDecoderOnPacket(f *testing.F) {
 }
 
 func FuzzTLSDecoderOnPacket(f *testing.F) {
-	dec := NewTLSDecoder()
 	state := tlsFlowState(12345, 443)
 
 	f.Add(buildClientHello("example.com", nil))
 	f.Add(buildClientHello("secure.example.com", []string{"h2", "http/1.1"}))
 	f.Add([]byte{0x16, 0x03, 0x01})
 	f.Add([]byte{})
+	f.Add(append(tlsRecord([]byte{11, 1, 0, 0}), tlsRecord([]byte{0})...))
+	hello13 := helloWithExtensions([]byte{0, 43, 0, 5, 4, 3, 4, 3, 3})
+	retry := append(append([]byte(nil), hello13...), 20, 3, 3, 0, 1, 1)
+	f.Add(append(retry, hello13...))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = dec.OnPacket(state, &dpi.ParsedPacket{
+		_, _ = NewTLSDecoder().OnPacket(state, &dpi.ParsedPacket{
 			Payload: data,
 			Proto:   "tcp",
 			SrcPort: 12345,
 			DstPort: 443,
 		})
+		fuzzITStream(data, NewTLSDecoder(), state)
 		if len(data) >= 5 && data[0] == 0x16 {
 			recLen := int(data[3])<<8 | int(data[4])
 			if recLen > len(data)-5 {
@@ -117,6 +125,9 @@ func FuzzSNMPDecoderOnPacket(f *testing.F) {
 	f.Add(buildSNMPv2cPacket(1, "public", pduGetRequest, 1234, 0, 0, "1.3.6.1.2.1.1.1.0"))
 	f.Add(buildSNMPv2cPacket(1, "private", pduSetRequest, 5678, 0, 0, "1.3.6.1.2.1.1.5.0"))
 	f.Add(buildSNMPv1TrapPacket("public"))
+	f.Add(buildSNMPv2TrapPacket("public", "1.3.6.1.6.3.1.1.5.3"))
+	f.Add(buildSNMPv3Packet(0x01, "fuzz-user", false, "1.3.6.1.2.1.1.1.0"))
+	f.Add(buildSNMPv3Packet(0x03, "fuzz-user", true, "1.3.6.1.2.1.1.1.0"))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -170,9 +181,11 @@ func FuzzSMBDecoderOnPacket(f *testing.F) {
 	dec := NewSMBDecoder()
 	state := smbFlowState(49152, 445)
 
-	f.Add(buildSMBv2Packet(0x0000))
+	f.Add(buildSMB2NegotiateRequest(0x0202, 0x0210, 0x0300, 0x0302, 0x0311))
+	f.Add(buildSMB2NegotiateResponse(0x0311))
 	f.Add(buildSMBv2Packet(0x0009))
-	f.Add(buildSMBv1Packet(0x72))
+	f.Add(buildSMB1NegotiateRequest("NT LM 0.12", "SMB 2.???"))
+	f.Add(buildSMB1NegotiateResponse(17, 0))
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -232,4 +245,30 @@ func FuzzNTPDecoderOnPacket(f *testing.F) {
 			_ = formatRefID(data[:4], uint8(len(data)))
 		}
 	})
+}
+
+// Exercise manager reassembly/lifecycle as well as packet-local parsing. Each
+// input gets its own compression/encryption state, independent of fuzz order.
+func fuzzITStream(data []byte, decoder dpi.Decoder, state *flow.State) {
+	mgr := dpi.NewManager(decoder)
+	split := len(data) / 2
+	for _, legacy := range []bool{false, true} {
+		for i, p := range [][]byte{data[:split], data[split:]} {
+			off := int64(0)
+			if i == 1 {
+				off = int64(split)
+			}
+			pkt := &dpi.ParsedPacket{Payload: p, Proto: "tcp", HasOffset: !legacy, Session: "fuzz", Dir: dpi.ClientToServer, Offset: off, TCPSeqValid: legacy, TCPSeq: uint32(100 + off)}
+			if legacy {
+				pkt.Dir = dpi.DirUnknown
+				pkt.Session = ""
+			}
+			mgr.Inspect(state, pkt)
+		}
+		if legacy {
+			_, _ = mgr.OnFlowEnd(state)
+		} else {
+			mgr.EndStream("fuzz")
+		}
+	}
 }

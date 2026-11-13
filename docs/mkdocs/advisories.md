@@ -10,7 +10,7 @@ artifacts.
 | ID | Issue | Severity | Fixed version |
 | --- | --- | --- | --- |
 | [containd-2026-001](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-001.json) | Inherited Debian 12 CVEs in the v0.1.16 management image | HIGH | v0.1.17 (Wolfi migration) or later |
-| [containd-2026-002](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json) | Forged audit and lab review actors through X-User in management lab/static-token sessions | LOW (CVSS 3.1: 2.7) | v0.1.42 |
+| [containd-2026-002](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-002.json) | Forged audit actors and source provenance through untrusted X-User and X-Source headers | LOW (X-User CVSS 3.1: 2.7; X-Source not scored) | v0.1.42 (X-User); v0.1.43 (X-Source) |
 | [containd-2026-003](https://github.com/tonylturner/containd/blob/main/security/csaf/advisories/containd-2026-003.json) | Seven bundled ClamAV parser vulnerabilities exposed by HTTP antivirus scanning | HIGH (Cisco CNA CVSS 3.1: 7.5) | None available; workarounds below |
 
 Use the advisory JSON for affected products/versions, remediation, references,
@@ -22,17 +22,23 @@ The engine existed in those releases, but its exact affected package set is not
 established by runtime-base provenance alone; the advisory makes no engine
 affected/fixed assertion.
 
-Advisory 002 covers management releases from 0.1.2-beta through 0.1.41.
-Authenticated user sessions were unaffected; lab mode and static API tokens did
-not overwrite the header-supplied audit actor. The supported engine-only service
-does not register the management API, although its executable also supports
-management modes. Upgrade management to 0.1.42, use normal user sessions with lab
-mode disabled, or strip incoming `X-User` at a trusted reverse proxy that clients
-cannot bypass. This advisory covers actor attribution only, not other audit
-metadata.
+Advisory 002 covers two management API header-trust flaws. The X-User issue
+covers releases from 0.1.2-beta through 0.1.41: lab mode and static API tokens
+did not overwrite the header-supplied audit actor, while normal authenticated
+user sessions were unaffected. Upgrade management to 0.1.42, use normal user
+sessions with lab mode disabled, or strip incoming `X-User` at a trusted reverse
+proxy that clients cannot bypass. The separate X-Source issue affects releases
+0.1.37 through 0.1.42 and allows a caller to forge audit source labels persisted
+in records and forwarded to syslog; the label is not used for authorization.
+Strip incoming `X-Source` at a trusted reverse proxy that clients cannot bypass,
+or upgrade management to 0.1.43. The X-Source issue is not CVSS-scored because
+the demonstrated impact is limited to audit metadata integrity and the privilege
+level required to reach management operations varies by configuration. The
+supported engine-only service does not register the management API, although
+its executable also supports management modes.
 
 Advisory 003 covers the SBOM-evidenced management releases 0.1.17–0.1.23 and
-0.1.25–0.1.42, and engine releases 0.1.35–0.1.42, for all seven CVEs.
+0.1.25–0.1.43, and engine releases 0.1.35–0.1.43, for all seven CVEs.
 Management 0.1.16 is affected by five; its ClamAV 1.4.3 lacks the vulnerable
 1.5-only ZIP code for CVE-2026-20337/20338. No claim is made for releases without
 SBOM evidence, unpublished releases or inventories without ClamAV.
@@ -40,7 +46,7 @@ In **System > Services > Antivirus**, clear **Scan HTTP uploads** and
 **Scan HTTP downloads**, or disable **Enable AV/ICAP scanning**; save the
 candidate and commit it. Alternatively use **Remote scanner (ICAP)** with an
 independently maintained backend. Disabling inspection removes that protection.
-No fixed containd release is available as of 2026-11-05; upstream fixes are
+No fixed containd release is available as of 2026-11-11; upstream fixes are
 ClamAV 1.5.4/1.4.6, and a fixed image follows once Wolfi publishes the updated
 1.5 package. See [AV settings](services.md#av) and the advisory for exact scope.
 
@@ -71,9 +77,12 @@ Package assessments are scan-conditional: they appear only for the image and
 platform where the scanner reports that identifier. Unconditional vendor
 statements can also cover a release range without a scanner hit.
 
-### v0.1.42 package assessments
+### v0.1.42–v0.1.43 package assessments
 
-The vendor triage covers both images at 0.1.42, not future releases:
+The vendor triage covers both images at the releases named below, not future
+releases. The ClamAV assessment covers 0.1.42 and 0.1.43. The Go assessments
+cover 0.1.42; 0.1.43 updates those dependencies, and its scan does not report
+them:
 
 - Seven ClamAV parser CVEs (CVE-2026-20337, -20338, -20339, -20345, -20346,
   -20347 and -20348) are `known_affected` when ClamAV-mode HTTP upload/download
@@ -81,7 +90,7 @@ The vendor triage covers both images at 0.1.42, not future releases:
   clamd and the HTTP scanning gate, just as the engine in the combined appliance
   does. Disable ClamAV-mode HTTP scanning or use an independently maintained
   ICAP backend until a fixed image is available. Disabling scanning removes
-  that inspection protection. On 2026-11-05 the Wolfi security database lists
+  that inspection protection. On 2026-11-11 the Wolfi security database lists
   1.5.4-r2 as fixed, but neither architecture's package index publishes it.
 - GHSA-w67g-5rqw-f597 is `known_not_affected`: the shared binary uses WebSockets
   only as a server, and v1.5.1 uses cryptographic randomness for client masks.

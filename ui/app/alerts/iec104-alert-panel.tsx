@@ -1,9 +1,10 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useState } from "react";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { StatusBadge } from "../../components/StatusBadge";
-import { api, isAdmin, type TelemetryEvent } from "../../lib/api";
+import { api, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
 import type { EvidenceView } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
@@ -18,6 +19,7 @@ export function IEC104EvidencePanel({
   evidence: EvidenceView;
   onClose: () => void;
 }) {
+  const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState("");
@@ -78,7 +80,7 @@ export function IEC104EvidencePanel({
               Clearing resets all detected anomalies and detector tracking state,
               not historical alert events. New traffic can create more anomalies.
             </p>
-            {isAdmin() && (
+            {isAdmin && (
               <button
                 disabled={clearing}
                 className="mt-3 max-w-full rounded-xs border px-3 py-1.5 text-xs text-(--red) transition-ui disabled:opacity-50"

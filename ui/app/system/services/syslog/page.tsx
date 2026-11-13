@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../../../lib/use-config-form";
@@ -9,7 +10,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type SyslogConfig, type SyslogForwarder, type ServicesStatus } from "../../../../lib/api";
+import { api, type SyslogConfig, type SyslogForwarder, type ServicesStatus } from "../../../../lib/api";
 import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
@@ -25,7 +26,8 @@ import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 import { deliveryAttention, DeliverySummary } from "./delivery-summary";
 
 export default function SyslogPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Runs the protection-bind and scanning-gate kernel tests headless in a disposable golang
-# container on Docker's Linux kernel: the nft steering (TestGateKernel) and
-# cross-zone accounting (TestAccountingKernel and its engine lifecycle),
+# Runs the protection-bind, management-routing and scanning-gate kernel tests
+# headless in a disposable golang container on Docker's Linux kernel: the nft
+# steering (TestGateKernel), management routing and OpenVPN takeover
+# (TestManagementKernelMatrix), cross-zone accounting (TestAccountingKernel
+# and its engine lifecycle),
 # the nft load of every golden ruleset in pkg/dp/enforce, the gate policy
 # routing in pkg/dp/netcfg (TestGateRoutingKernel) and the gate manager in
 # pkg/app/engine (TestGateManagerKernel). Network namespaces need SYS_ADMIN
@@ -14,7 +16,7 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 go_version="$(sed -n 's/^go \([0-9.]*\)$/\1/p' "$root/go.mod")"
 image="containd-gate-kernel:${go_version}"
-run="${KERNEL_TEST_RUN:-^TestProtectionBindKernel$|^TestGateKernel$|^TestKernelNFTLoadsGoldens$|^TestGateRoutingKernel$|^TestGateManagerKernel$|^TestAccountingKernel$|^TestTelemetryAccountingKernelLifecycle$}"
+run="${KERNEL_TEST_RUN:-^TestProtectionBindKernel$|^TestGateKernel$|^TestKernelNFTLoadsGoldens$|^TestGateRoutingKernel$|^TestManagementKernelMatrix$|^TestGateManagerKernel$|^TestAccountingKernel$|^TestTelemetryAccountingKernelLifecycle$}"
 packages=(./pkg/dp/engine ./pkg/dp/enforce ./pkg/dp/netcfg ./pkg/app/engine)
 test_args=(-v)
 while (($#)); do
@@ -32,12 +34,12 @@ while (($#)); do
 done
 docker build -q -t "$image" - <<DOCKERFILE >/dev/null
 FROM golang:${go_version}
-RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 python3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 python3 openvpn && rm -rf /var/lib/apt/lists/*
 DOCKERFILE
 # -p 1: the packages run one at a time because the netcfg and engine tests
 # install the gate's policy routing in the namespace-global table 104010,
 # and parallel packages would see and remove each other's objects.
-docker run --rm --cpus 2 --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
+docker run --rm --cpus 2 --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN --device /dev/net/tun \
   --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
   --sysctl net.ipv4.conf.all.rp_filter=1 --sysctl net.ipv4.conf.default.rp_filter=1 \
   --sysctl net.bridge.bridge-nf-call-iptables=0 --sysctl net.bridge.bridge-nf-call-ip6tables=0 \

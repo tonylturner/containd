@@ -480,6 +480,62 @@ for (const path of routes) {
   });
 }
 
+for (const role of ["admin", "view", "logged-out"] as const) {
+  test(`static routes hydrate without role mismatches for ${role} visits`, async ({ page }) => {
+    test.setTimeout(240_000);
+    const hydrationErrors: string[] = [];
+    const hydrationPattern = /#(?:418|423|425)\b|Hydration failed|did not match/i;
+
+    page.on("console", (message) => {
+      if (
+        (message.type() === "warning" || message.type() === "error") &&
+        hydrationPattern.test(message.text())
+      ) {
+        hydrationErrors.push(message.text());
+      }
+    });
+    page.on("pageerror", (error) => {
+      if (hydrationPattern.test(error.message)) hydrationErrors.push(error.message);
+    });
+    await page.addInitScript((visitRole) => {
+      if (visitRole === "logged-out") {
+        localStorage.removeItem("containd.auth.token");
+        localStorage.removeItem("containd.auth.role");
+      } else {
+        localStorage.setItem("containd.auth.token", "test-token");
+        localStorage.setItem("containd.auth.role", visitRole);
+      }
+    }, role);
+    await page.route("**/api/v1/auth/**", async (route) => {
+      if (role === "logged-out") {
+        await route.fulfill(json({ error: "authentication required" }, 401));
+        return;
+      }
+      await route.fulfill(json({
+        ...adminUser,
+        role: role === "admin" ? "admin" : "view",
+      }));
+    });
+
+    if (role === "admin") {
+      const response = await page.goto("/firewall");
+      expect(await response?.text()).not.toContain("Create rule");
+      await expect(page.getByRole("button", { name: "Create rule", exact: true })).toBeVisible();
+    }
+
+    const visited: string[] = [];
+    for (const path of routes) {
+      const response = await page.goto(path);
+      expect(response, `document response for ${path}`).not.toBeNull();
+      await page.waitForLoadState("networkidle");
+      visited.push(path);
+    }
+
+    expect(visited).toEqual([...routes]);
+    expect(hydrationErrors).toEqual([]);
+  });
+}
+
 test("firewall ruleset preview lists rules that do not act as written", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
   await page.goto("/firewall");

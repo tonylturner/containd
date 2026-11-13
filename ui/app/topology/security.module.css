@@ -24,7 +24,7 @@
 .zoneSearch::placeholder { color: var(--text-dim); }
 .zoneSearch:focus { border-color: var(--amber); }
 .zoneDropdown { position: absolute; top: calc(100% + 4px); left: 0; width: 220px; background: var(--topo-surface); border: 1px solid var(--topo-border); z-index: 200; overflow: hidden; }
-.zoneDropdownItem { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; transition: background .1s; }
+.zoneDropdownItem { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .1s; }
 .zoneDropdownItem:hover { background: var(--amber-glow); }
 .zoneDropdownDot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .zoneDropdownName { font-family: var(--display); font-size: 8px; letter-spacing: 1px; }

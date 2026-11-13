@@ -161,11 +161,19 @@ func (q Query) Matches(e Event) bool {
 	case "proxy":
 		return strings.HasPrefix(e.Kind, "service.envoy.") || strings.HasPrefix(e.Kind, "service.nginx.")
 	case "dpi":
-		return e.Proto != "firewall" && !strings.HasPrefix(e.Kind, "service.")
-	case "firewall", "iec104":
+		return e.Proto != "firewall" && !isFirewallDecision(e) && !strings.HasPrefix(e.Kind, "service.")
+	case "firewall":
+		return isFirewallDecision(e)
+	case "iec104":
 		return e.Proto == q.Category
 	}
 	return true
+}
+
+// isFirewallDecision enumerates firewall decision event kinds emitted by the
+// dataplane. These events do not set Event.Proto.
+func isFirewallDecision(e Event) bool {
+	return e.Kind == "firewall.rule.hit"
 }
 
 func attributeEquals(e Event, key, value string) bool {

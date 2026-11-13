@@ -37,7 +37,7 @@ async function openMatrix(page: Page, count: number) {
   // Six zones are selected initially; exercise adding zones beyond that default.
   for (const name of names.slice(6)) {
     await page.getByPlaceholder("+ Add zone...").fill(name);
-    await page.locator('[class*="zoneDropdownItem"]').filter({ hasText: name.toUpperCase() }).click();
+    await page.getByRole("button", { name: `Add ${name.toUpperCase()} zone`, exact: true }).click();
   }
   await expect(matrix.locator('[class*="colHeader"]')).toHaveCount(count);
   return matrix;

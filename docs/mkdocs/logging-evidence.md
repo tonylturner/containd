@@ -5,8 +5,10 @@
 - Administrative audit records persist in SQLite. `CONTAIND_AUDIT_DB` defaults
   to `data/audit.db` for the binary; the container deployment uses `/data/audit.db`.
 - Firewall, DPI, IDS, AV, proxy, and service events are exposed through
-  `GET /api/v1/events`. Engine event history is bounded and in memory, not an
-  audit database or a durable delivery queue.
+  `GET /api/v1/events`. SNMPv1/v2c event attributes include their cleartext
+  community strings; treat event access and retention as sensitive. Engine
+  event history is bounded and in memory, not an audit database or a durable
+  delivery queue.
 - Management and engine application logs go to stdout. Embedded service managers
   also configure JSON files under `/data/logs/`: `proxy.log`, `dns.log`, `ntp.log`,
   `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
@@ -92,9 +94,13 @@ remain in their disclosures; they are not per-dataset completeness guarantees.
 ## Account and credential audit records
 
 Account and credential changes attempt to persist an audit record with their actor
-and source (`api` or `ssh`). Audit persistence failure does not block the operation;
-check the persistence status below for missing evidence. Refused logins, own
-password changes with a wrong current password and refused MFA changes are recorded with result `denied`.
+and a server-assigned source: HTTP API requests, including web-console requests,
+use `api`, while SSH sessions use `ssh`. Clients cannot set this value. System
+records use their producing entry point, including `management`, `signal` and
+`dhcp`. Audit persistence failure does not block the operation; check the
+persistence status below for missing evidence. Refused logins, own password
+changes with a wrong current password and refused MFA changes are recorded with
+result `denied`.
 Records never hold the password or code that was tried.
 
 | Action | Change |
@@ -129,7 +135,9 @@ Two working syslog paths are distinct:
   forwarding is best effort with retries, not a durable acknowledged stream.
   Each source (engine, services, audit) has independent progress per destination;
   one failed collector does not suppress another collector or source. The same
-  forwarders also carry audit records; see [Audit records over syslog](#audit-records-over-syslog).
+  forwarders also carry audit records. Forwarded SNMPv1/v2c events include the
+  cleartext community string in their attributes; configure collectors and
+  access controls accordingly. See [Audit records over syslog](#audit-records-over-syslog).
 - **Application logger sink**: `CONTAIND_LOG_SYSLOG_ADDR` and
   `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
   The default protocol is UDP; TCP and Unix sockets are also supported. These

@@ -103,11 +103,13 @@ func (s *stream) held() int { return s.stored() + len(s.hist) }
 
 // feedResult is the stream state after one segment.
 type feedResult struct {
-	buf    []byte // copy of the contiguous bytes from base
-	base   int64
-	gap    bool // bytes are buffered beyond a hole
-	err    *StreamError
-	failed error // the stream failed earlier; nothing was fed
+	buf            []byte // copy of the contiguous bytes from base
+	base           int64
+	gap            bool // bytes are buffered beyond a hole
+	err            *StreamError
+	failed         error // the stream failed earlier; nothing was fed
+	packetStart    int
+	hasPacketStart bool
 }
 
 // reassembler collects TCP payloads per stream direction so that decoders
@@ -259,13 +261,17 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 	if !s.verify {
 		s.hist = nil
 	}
-	err := s.add(s.resolve(pos), payload, r.maxSize)
+	off := s.resolve(pos)
+	inOrder := pos.kind != posAppend && s.mode == pos.kind && off == s.end() && len(payload) > 0
+	err := s.add(off, payload, r.maxSize)
 	r.bytesBuffered += s.held() - before
 	return feedResult{
-		buf:  append([]byte(nil), s.buf...),
-		base: s.base,
-		gap:  len(s.ooo) > 0,
-		err:  err,
+		buf:            append([]byte(nil), s.buf...),
+		base:           s.base,
+		gap:            len(s.ooo) > 0,
+		err:            err,
+		packetStart:    int(off - s.base),
+		hasPacketStart: inOrder && err == nil && off >= s.base && off+int64(len(payload)) <= s.end(),
 	}
 }
 
@@ -478,6 +484,28 @@ func (r *reassembler) trim(key string, base int64, n int) {
 	s.buf = s.buf[n:]
 	s.base += int64(n)
 	r.bytesBuffered += s.held() - before
+}
+
+// resync abandons held passive bytes through the highest observed position,
+// without forgetting sequence space or decoder lifetime. Strict decoders never
+// use this path. The next in-order payload can supply a new packet anchor.
+func (r *reassembler) resync(key string, pos position, size int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.streams[key]
+	if s == nil {
+		return
+	}
+	next := s.end()
+	if pos.kind != posAppend {
+		next = max(next, s.resolve(pos)+int64(size))
+	}
+	for _, seg := range s.ooo {
+		next = max(next, seg.end())
+	}
+	r.bytesBuffered -= s.held()
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.base = next
 }
 
 // fail discards a stream's bytes and marks it failed until complete,

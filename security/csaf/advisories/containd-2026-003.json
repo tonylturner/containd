@@ -18,14 +18,19 @@
     "tracking": {
       "id": "containd-2026-003",
       "status": "final",
-      "version": "1",
+      "version": "2",
       "initial_release_date": "2026-11-05T00:00:00Z",
-      "current_release_date": "2026-11-05T00:00:00Z",
+      "current_release_date": "2026-11-11T00:00:00Z",
       "revision_history": [
         {
           "number": "1",
           "date": "2026-11-05T00:00:00Z",
           "summary": "Initial publication of seven bundled ClamAV parser vulnerabilities, evidenced release scope and scanning workarounds."
+        },
+        {
+          "number": "2",
+          "date": "2026-11-11T00:00:00Z",
+          "summary": "Extend the affected management and engine ranges through 0.1.43, which still ships Wolfi clamav-1.5 1.5.2-r7."
         }
       ]
     },
@@ -37,7 +42,7 @@
       {
         "category": "general",
         "title": "Release and package evidence",
-        "text": "Scope was established from 72 published sbom-*.cdx.json assets across 36 releases. Management 0.1.16 contains Debian clamav 1.4.3+dfsg-1~deb12u2. Management 0.1.17 and 0.1.18 contain Wolfi clamav-1.5 1.5.2-r4; subsequent published management releases through 0.1.42 contain 1.5.2-r7. Engine releases 0.1.35 through 0.1.42 contain Wolfi clamav-1.5 1.5.2-r7. Package purls in these historical inventories identify amd64/x86_64. The management version ranges are split to exclude unpublished 0.1.24. No claim is made for releases lacking SBOM evidence (0.1.2-beta through 0.1.4-beta), unpublished 0.1.8/0.1.24, or inventories without ClamAV. The stated ranges cover the evidenced published stable releases, not hypothetical intervening or future releases."
+        "text": "Scope was established from 72 published sbom-*.cdx.json assets across 36 releases. Management 0.1.16 contains Debian clamav 1.4.3+dfsg-1~deb12u2. Management 0.1.17 and 0.1.18 contain Wolfi clamav-1.5 1.5.2-r4; subsequent published management releases through 0.1.42 contain 1.5.2-r7. Engine releases 0.1.35 through 0.1.42 contain Wolfi clamav-1.5 1.5.2-r7. Release 0.1.43 of both images installs clamav-1.5 from the same Wolfi index, which on 2026-11-11 publishes only 1.5.2-r7 for x86_64 and aarch64; the 0.1.43 release candidate contains 1.5.2-r7, and the 0.1.43 release VEX records the scanned package. Package purls in these historical inventories identify amd64/x86_64. The management version ranges are split to exclude unpublished 0.1.24. No claim is made for releases lacking SBOM evidence (0.1.2-beta through 0.1.4-beta), unpublished 0.1.8/0.1.24, or inventories without ClamAV. The stated ranges cover the evidenced stable releases, not hypothetical intervening or future releases."
       },
       {
         "category": "general",
@@ -107,10 +112,10 @@
           },
           {
             "category": "product_version_range",
-            "name": "vers:semver/>=0.1.25|<=0.1.42",
+            "name": "vers:semver/>=0.1.25|<=0.1.43",
             "product": {
-              "product_id": "containd-management-0.1.25-through-0.1.42",
-              "name": "containd management published releases 0.1.25 through 0.1.42 (Wolfi ClamAV 1.5.2)"
+              "product_id": "containd-management-0.1.25-through-0.1.43",
+              "name": "containd management published releases 0.1.25 through 0.1.43 (Wolfi ClamAV 1.5.2)"
             }
           }
         ]
@@ -121,10 +126,10 @@
         "branches": [
           {
             "category": "product_version_range",
-            "name": "vers:semver/>=0.1.35|<=0.1.42",
+            "name": "vers:semver/>=0.1.35|<=0.1.43",
             "product": {
-              "product_id": "containd-engine-0.1.35-through-0.1.42",
-              "name": "containd-engine published releases 0.1.35 through 0.1.42 (Wolfi ClamAV 1.5.2)"
+              "product_id": "containd-engine-0.1.35-through-0.1.43",
+              "name": "containd-engine published releases 0.1.35 through 0.1.43 (Wolfi ClamAV 1.5.2)"
             }
           }
         ]
@@ -152,8 +157,8 @@
       "product_status": {
         "known_affected": [
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ],
         "known_not_affected": [
           "containd-management-0.1.16"
@@ -169,8 +174,8 @@
           },
           "products": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -180,8 +185,8 @@
           "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -191,17 +196,17 @@
           "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -251,8 +256,8 @@
       "product_status": {
         "known_affected": [
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ],
         "known_not_affected": [
           "containd-management-0.1.16"
@@ -268,8 +273,8 @@
           },
           "products": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -279,8 +284,8 @@
           "details": "Exposure requires AV enabled in ClamAV mode with HTTP upload or download scanning selected and an untrusted body reaching that inspection path. The HTTP gate streams complete bodies to clamd using INSTREAM, allowing crafted content to reach the vulnerable parsers and terminate the scanner (denial of service). The combined appliance runs this engine path, and the standalone containd-engine also starts clamd and owns the HTTP scanning gate. This is a ClamAV scanning exposure, not a management API endpoint vulnerability.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -290,17 +295,17 @@
           "details": "In System > Services > Antivirus (/system/services/av), clear both Scan HTTP uploads and Scan HTTP downloads (services.av.httpUpload=false and services.av.httpDownload=false), or clear Enable AV/ICAP scanning (services.av.enabled=false). Save the candidate and commit it. Alternatively choose Mode: Remote scanner (ICAP) (services.av.mode=\"icap\") with an independently maintained, configured backend. Disabling inspection removes that protection; confirm the replacement backend is not vulnerable.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -347,8 +352,8 @@
         "known_affected": [
           "containd-management-0.1.16",
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ]
       },
       "scores": [
@@ -362,8 +367,8 @@
           "products": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -374,8 +379,8 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -386,18 +391,18 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -441,8 +446,8 @@
         "known_affected": [
           "containd-management-0.1.16",
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ]
       },
       "scores": [
@@ -456,8 +461,8 @@
           "products": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -468,8 +473,8 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -480,18 +485,18 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -535,8 +540,8 @@
         "known_affected": [
           "containd-management-0.1.16",
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ]
       },
       "scores": [
@@ -550,8 +555,8 @@
           "products": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -562,8 +567,8 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -574,18 +579,18 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -629,8 +634,8 @@
         "known_affected": [
           "containd-management-0.1.16",
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ]
       },
       "scores": [
@@ -644,8 +649,8 @@
           "products": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -656,8 +661,8 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -668,18 +673,18 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -723,8 +728,8 @@
         "known_affected": [
           "containd-management-0.1.16",
           "containd-management-0.1.17-through-0.1.23",
-          "containd-management-0.1.25-through-0.1.42",
-          "containd-engine-0.1.35-through-0.1.42"
+          "containd-management-0.1.25-through-0.1.43",
+          "containd-engine-0.1.35-through-0.1.43"
         ]
       },
       "scores": [
@@ -738,8 +743,8 @@
           "products": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -750,8 +755,8 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],
@@ -762,18 +767,18 @@
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         },
         {
           "category": "none_available",
-          "details": "No fixed containd release is available as of 2026-11-05. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
+          "details": "No fixed containd release is available as of 2026-11-11. A fixed release follows once Wolfi publishes clamav-1.5 with upstream version 1.5.4 or later; the Wolfi security database currently identifies 1.5.4-r2 as fixed, but the package is not yet published in either architecture index. The upstream fixes are ClamAV 1.5.4 and, for the five vulnerabilities affecting the 1.4 line, 1.4.6. The Debian bookworm fix for those five is 1.4.6+dfsg-0+deb12u1; availability of an upstream or distribution fix does not mean a fixed containd image has shipped.",
           "product_ids": [
             "containd-management-0.1.16",
             "containd-management-0.1.17-through-0.1.23",
-            "containd-management-0.1.25-through-0.1.42",
-            "containd-engine-0.1.35-through-0.1.42"
+            "containd-management-0.1.25-through-0.1.43",
+            "containd-engine-0.1.35-through-0.1.43"
           ]
         }
       ],

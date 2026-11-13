@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures/topology-test";
+import type { Page } from "@playwright/test";
 
 import { buildTopologyRules } from "../app/topology/topology-shared";
 import type { FirewallRule } from "../lib/api";
@@ -24,6 +25,50 @@ const counters = {
     { ruleId: "label-vendor", action: "TAG" as const, packets: 2, bytes: 120 },
   ],
 };
+
+async function mockTopology(
+  page: Page,
+  enforcementState: "enforcing" | "disabled",
+  counterStatus = 200,
+) {
+  let counterRequests = 0;
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/v1/firewall/counters") {
+      counterRequests++;
+      await route.fulfill(counterStatus === 200
+        ? { json: counters }
+        : { status: counterStatus, json: { error: "no applied ruleset" } });
+      return;
+    }
+    const data: Record<string, unknown> = {
+      "/api/v1/auth/me": { id: "admin", username: "containd", role: "admin" },
+      "/api/v1/auth/session": { id: "admin", username: "containd", role: "admin" },
+      "/api/v1/health": {
+        status: "ok",
+        component: "containd",
+        enforcement: { state: enforcementState, reason: "" },
+      },
+      "/api/v1/config": {
+        zones: [{ name: "it" }, { name: "ot" }],
+        interfaces: [{ name: "lan1", zone: "it", addresses: ["192.0.2.1/24"] }],
+        routing: { gateways: [], routes: [], rules: [] },
+        firewall: { rules },
+      },
+      "/api/v1/config/diff": { changed: false, changedSections: [] },
+      "/api/v1/interfaces/state": [],
+      "/api/v1/routing/os": {},
+      "/api/v1/flows": [],
+      "/api/v1/events": [],
+      "/api/v1/system/stats": {},
+    };
+    await route.fulfill({
+      json: data[path] ?? {},
+      headers: { "X-Containd-Revision": "0123456789abcdef.1" },
+    });
+  });
+  return () => counterRequests;
+}
 
 test("topology rules keep their action, kind and counters", () => {
   const built = buildTopologyRules(rules, { ok: true, data: counters });
@@ -59,6 +104,11 @@ test("the firewall node shows effects apart from deny and real hit counts", asyn
       "/api/v1/interfaces/state": [],
       "/api/v1/flows": [],
       "/api/v1/events": [],
+      "/api/v1/health": {
+        status: "ok",
+        component: "containd",
+        enforcement: { state: "enforcing", reason: "" },
+      },
       "/api/v1/firewall/counters": counters,
     };
     await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
@@ -110,4 +160,28 @@ test("topology reads health from the shared poll, not its own snapshot fetches",
   await expect(page.getByText("9.9.9").first()).toBeVisible();
   // Loading the physical snapshot adds no health fetch.
   expect(healthRequests).toBe(afterLogical);
+});
+
+test("topology does not request rule counters when enforcement is disabled", async ({ page }) => {
+  const getCounterRequests = await mockTopology(page, "disabled", 502);
+
+  await page.goto("/topology/");
+  await page.locator('.react-flow__node[data-id="fw-main"]').click();
+  const rule = page.getByLabel("Rule allow-hmi");
+  await expect(rule.locator("span").last()).toHaveText("—");
+  expect(getCounterRequests()).toBe(0);
+});
+
+test("topology leaves counters unavailable when the active ruleset counters fail", async ({ page }) => {
+  const getCounterRequests = await mockTopology(page, "enforcing", 502);
+
+  const countersLoaded = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/v1/firewall/counters",
+  );
+  await page.goto("/topology/");
+  await countersLoaded;
+  await page.locator('.react-flow__node[data-id="fw-main"]').click();
+  const rule = page.getByLabel("Rule allow-hmi");
+  await expect(rule.locator("span").last()).toHaveText("—");
+  expect(getCounterRequests()).toBeGreaterThan(0);
 });

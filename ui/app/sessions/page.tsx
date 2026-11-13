@@ -1,10 +1,11 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useMemo, useState, Fragment } from "react";
 
-import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
+import { api, type ConntrackEntry } from "../../lib/api";
 import type { ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -69,8 +70,9 @@ function replyTuple(e: ConntrackEntry): string {
 }
 
 export default function SessionsPage() {
+  const isAdmin = useIsAdmin();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const canKill = isAdmin();
+  const canKill = isAdmin;
   const confirm = useConfirm();
   const [entries, setEntries] = useState<ConntrackEntry[]>([]);
   const [error, setError] = useState<string | null>(null);

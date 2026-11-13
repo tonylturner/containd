@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
 import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
@@ -9,7 +10,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type Asset, type AVConfig, type ServicesStatus, type Zone } from "../../../../lib/api";
+import { api, type Asset, type AVConfig, type ServicesStatus, type Zone } from "../../../../lib/api";
 import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
@@ -30,7 +31,8 @@ const emptyICAPServer = { address: "", useTls: false, service: "" };
 const effectiveMode = <T extends string,>(mode: T | undefined): T | "clamav" => mode ?? "clamav";
 
 export default function AVPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const confirm = useConfirm();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();

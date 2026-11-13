@@ -562,6 +562,10 @@ Filters (`id`, `ruleId`, `mode`, `session`, `flow`, `apdu`, `kind`, `protocol`,
 Filters apply **before** the limit, with matches sorted newest-first by timestamp
 and ID, without evidence priority. Filters combine with AND; comma-separated
 `kind` prefixes combine with OR. `since` is inclusive RFC3339.
+The `firewall` category selects `firewall.rule.hit` events by kind, including
+kernel NFLOG and userspace rule decisions. `dpi` excludes firewall rule hits and
+service events. `iec104` continues to select events by the `iec104` protocol;
+`service`, `proxy` and `all` retain their service-kind and unfiltered behavior.
 
 Send `nextCursor` as `cursor` with the same filters to fetch older matches.
 Pagination searches retained memory, not durable history, and is not a snapshot:
@@ -687,7 +691,7 @@ Loss scopes depend on the available authority:
 | Code | Scope |
 | --- | --- |
 | `capture_loss` | Live transport overflow is retained synchronously at admission, even if Stop, deadline or policy change precedes worker processing. Overflow and IP truncation use wire five-tuple scope when ports are captured, otherwise host-pair/transport scope, matched against both verified NAT aliases or the common NFQUEUE forward-hook face. An already-indexed incarnation is retained as additional authority without waiting for a worker. |
-| `capture_truncated` | Offline cut record or IP-length truncation: wire five-tuple when ports are captured, otherwise host-pair/transport. Missing IP coordinates, an unreadable EtherType or a header-less final record excludes the dataset. Opaque IPv6 extension chains remain conservative, not unrelated. |
+| `capture_truncated` | Offline cut record or IP-length truncation: wire five-tuple when ports are captured, otherwise host-pair/transport. Missing IP coordinates, an unreadable EtherType or a header-less final record excludes the dataset. IPv6 Hop-by-Hop, Destination Options, first-fragment, AH, and Routing headers with zero Segments Left are walked from captured bytes, bounded to eight headers and 256 bytes. A proven non-TCP/UDP terminal is unrelated; truncated, malformed, over-budget, ESP, unknown/unsupported/experimental and non-first-fragment chains, Routing headers with segments remaining, and option headers containing Home Address remain dataset-wide. |
 | `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; missing identity excludes the dataset, never just an observation-time interval. |
 | `watch_restart`, `policy_changed` | Dataset-wide: wall-clock watch bounds cannot delimit packet timestamps after clock skew or capture lag. |
 | `watch_storage_loss`, `import_failed`, `ingest_failed`, `interrupted_import`, `collection_loss` | Dataset-wide, including collector initialization/storage failure, legacy unlocalized gaps and exhausted loss-localization capacity. Failed automatic stops retry with their retained loss authority. |

@@ -278,10 +278,12 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
   const mitreIds = (attrs["mitre_attack_ids"] as string[] | undefined) ?? [];
   const matchedPatterns = (attrs["matched_patterns"] as string[] | undefined) ?? [];
   const eventAttrs = (attrs["event_attrs"] as Record<string, unknown> | undefined) ?? {};
+  const offeredVersions = eventAttrs["tls_offered_versions"];
   const labels = (attrs["labels"] as Record<string, string> | undefined) ?? {};
 
   const isModbus = eventProto === "modbus";
   const isTLS = eventProto === "tls";
+  const isHTTP = eventProto === "http" || eventProto === "http2";
   const isDNP3 = eventProto === "dnp3";
   const isCIP = eventProto === "cip";
   const isIEC104 = eventProto === "iec104";
@@ -400,8 +402,14 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
             {eventAttrs["sni"] != null && (
               <DetailRow label="Server Name (SNI)" value={String(eventAttrs["sni"])} mono />
             )}
-            {eventAttrs["tls_version"] != null && (
-              <DetailRow label="TLS Version" value={String(eventAttrs["tls_version"])} mono />
+            {eventAttrs["tls_legacy_version"] != null && (
+              <DetailRow label="Legacy version" value={String(eventAttrs["tls_legacy_version"])} mono />
+            )}
+            {Array.isArray(offeredVersions) && offeredVersions.length > 0 && (
+              <DetailRow label="Offered versions" value={offeredVersions.map(String).join(", ")} mono />
+            )}
+            {eventAttrs["tls_selected_version"] != null && (
+              <DetailRow label="Selected version" value={String(eventAttrs["tls_selected_version"])} mono />
             )}
             {eventAttrs["cipher_suite"] != null && (
               <DetailRow label="Cipher Suite" value={String(eventAttrs["cipher_suite"])} mono />
@@ -451,6 +459,12 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
                 )}
               </div>
             )}
+          </DetailSection>
+        )}
+
+        {isHTTP && typeof eventAttrs["content_type"] === "string" && eventAttrs["content_type"] !== "" && (
+          <DetailSection label="HTTP Analysis">
+            <DetailRow label="Content type" value={eventAttrs["content_type"]} mono />
           </DetailSection>
         )}
 

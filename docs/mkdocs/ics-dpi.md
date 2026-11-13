@@ -521,6 +521,35 @@ and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decod
 specific attribute map. Inspect emitted events before authoring attribute-based
 [IDS conditions](ids-rules.md).
 
+### SMB metadata
+
+SMB events retain `version` as an SMB1/SMB2 **family hint** from the packet
+header; it is not negotiated-dialect evidence. SMB2/3 negotiate requests emit
+`dialects_offered` (at most 64 dialects), and negotiate responses emit `dialect`
+for the selected revision, including SMB 3.1.1. SMB1 negotiate requests emit
+their offered dialect strings, including `SMB 2.???` on the multi-protocol
+upgrade path. SMB1 responses expose the selected string when the matching
+request was observed on the same flow. Other SMB events continue to expose the
+command, SMB2 session ID and tree-connect share when present.
+
+### SNMP metadata
+
+SNMP events expose `version`; `pdu_type` is included when the PDU is readable.
+Readable non-v1-Trap PDUs also include `request_id` and `error_status`, and
+SetRequests include `write_operation: true`. SNMPv1/v2c events emit the
+cleartext `community` string (up to 512 bytes) and `oids`, the OIDs from the
+variable-binding list, in wire order. At most 32 OIDs are included;
+`oids_truncated: true` marks a longer list. SNMPv1 traps also expose
+`enterprise_oid`, `generic_trap` and `specific_trap`. SNMPv2 traps expose
+`trap_oid` when the `snmpTrapOID.0` binding contains an OID value.
+
+SNMPv3 exposes `msg_flags_auth`, `msg_flags_priv`, `msg_security_model` and
+`user_name` when a USM user name is present. It exposes scoped-PDU `oids` only
+when the PDU is not encrypted; authentication/privacy flags do not imply that
+the engine has verified credentials or decrypted content. SNMP community
+strings are included in event attributes, so event logs and syslog event
+forwarding carry them too. Protect those records and collectors accordingly.
+
 ### Decoded event fields
 
 `GET /api/v1/events` returns decoded events with IDs encoded as decimal JSON
@@ -711,14 +740,151 @@ For a `cip` IDS rule, this condition matches a connected-data CPF item using
 {"field": "attr.cpf_item_types", "op": "contains", "value": "0x00b1"}
 ```
 
-The TLS decoder emits a `client_hello` event with `sni`, `alpn`,
-`tls_version`, `cipher_suites`, `extensions`, `ja3`, `ja3_hash`, `src_port`,
-`dst_port` and `transport`. `ja3` follows the JA3 layout but is **not
-reference JA3**: it holds the ClientHello version, at most 50 cipher suites and
-the extension types. GREASE values are not removed, and the elliptic-curve and
-point-format fields are always empty. `ja3_hash` is the MD5 of that string. Do
-not compare it with JA3 values from other tools. `tls_version` is the
-ClientHello version field, so TLS 1.3 clients usually show `TLS1.2`.
+### TLS metadata
+
+The TLS decoder emits `tls/client_hello` with `sni`, `alpn`,
+`tls_legacy_version`, `tls_offered_versions`, `cipher_suites`, `extensions`,
+`ja3`, `ja3_hash`, `src_port`, `dst_port` and `transport`. TCP reassembly
+makes the fingerprint independent of packet boundaries; handshakes spanning
+TLS records are also supported. Incomplete hellos do not emit partial metadata.
+A ClientHello or ServerHello is limited to 64 KiB; individual cipher/extension
+lists are not truncated. Complete TLS records are consumed incrementally;
+only pending hello bodies are retained. Other handshake messages (including
+large Certificate messages) are skipped by their wire length. TLS 1.3
+compatibility ChangeCipherSpec records do not hide retry ClientHellos;
+a pre-TLS-1.3 ChangeCipherSpec ends plaintext inspection. A captured server
+selection takes precedence over a client offer for that decision.
+
+`ja3` is the reference [JA3](https://github.com/salesforce/ja3) string:
+`SSLVersion,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats`,
+preserving wire order and removing RFC 8701 GREASE values from each applicable
+list. `ja3_hash` is its lowercase MD5 digest, suitable for correlation with
+external JA3 tools and feeds (not a security hash). `cipher_suites` and
+`extensions` are ordered numeric lists with GREASE removed. JA3 uses the wire
+ClientHello version, **not** the highest offered or negotiated version.
+
+Version attributes replace the ambiguous `tls_version`:
+
+- `tls_legacy_version`: the hello's legacy version, for example `TLS1.2`
+  for a TLS 1.3 ClientHello or ServerHello. This is not a negotiation result.
+- `tls_offered_versions`: an ordered string list from ClientHello
+  `supported_versions`, excluding GREASE, for example `["TLS1.3", "TLS1.2"]`.
+  It is empty when that extension is absent; legacy offers are not inferred.
+- `tls_selected_version`: emitted on `tls/server_hello` only. It is the
+  ServerHello `supported_versions` selection when present, otherwise the
+  ServerHello version (TLS 1.2 and earlier). That event also carries
+  `tls_legacy_version`, ports and transport. A client offer alone never
+  establishes the selected version; this is a server selection, not proof
+  that the handshake completed. JA3S is not emitted.
+
+Known versions are `TLS1.0`, `TLS1.1`, `TLS1.2`, `TLS1.3`; other values use
+`0xNNNN`. TLS-encrypted HTTP/2 remains visible only through TLS metadata such
+as the ALPN offer `h2`; headers, streams and content are not decrypted.
+
+### Plaintext HTTP metadata
+
+The HTTP decoder emits `http/request` with `method`, `path`, `host`, `target`,
+`scheme`, `user_agent` and `content_type`, and `http/response` with `status`
+and `content_type`. Both include `src_port`, `dst_port` and `transport`.
+`content_type` is the trimmed Content-Type header value, including parameters
+such as `charset=utf-8`, not a MIME type inferred from the body. It is empty
+when HTTP/1 has no such header. Only complete headers are emitted; bodies,
+cookies, authorization headers and raw header blocks are not exported.
+HTTP/1 headers and trailers are limited to 32 KiB. A single valid Content-Length
+or a valid final `chunked` transfer coding determines body boundaries, even when
+body text begins a packet with an HTTP start line. Bodies are skipped without
+retaining their contents. Conflicting Content-Length/Transfer-Encoding, repeated
+Content-Length, invalid chunk framing and invalid transfer-coding order are
+framing errors. A correlated final server response to an incomplete request body
+permits the client direction to re-anchor; an interim response does not.
+
+HTTP/1 has no terminal inspection state. After a framing error, it emits one
+`malformed` event for an anchored direction and enters resynchronization. Further
+unrecognized bytes are consumed silently until successful re-anchoring; random
+mid-body pickup does not produce per-packet errors. In resynchronization,
+close-delimited or otherwise uncertain bodies, and CONNECT/upgrade tunnels, a
+later **in-order packet whose payload begins with a complete valid HTTP start
+line** can re-anchor inspection in that direction. A buffered substring, an
+out-of-order segment or a retransmission is not a new packet-boundary anchor.
+Incomplete headers can also be abandoned at such a boundary. Without packet
+position metadata, this recovery boundary is unavailable.
+Passive HTTP reassembly overflow or conflicting bytes also enter this bounded
+resynchronization policy rather than resetting diagnostic suppression on every
+packet. Fail-closed protocol inspection retains its strict stream failure rules.
+
+This deliberately favors renewed coverage over opaque suppression: WebSocket
+data or uncertain body text beginning a packet with a valid HTTP start line can
+produce HTTP events. It does not override a consistently declared body length
+or chunk framing. Capture gaps and encrypted payloads still limit coverage; this
+is passive metadata inspection, not proof of what an HTTP endpoint accepted.
+
+A bounded queue of 64 outstanding request methods and upgrade offers correlates
+responses when both directions are observed. HEAD replies and 1xx/204/304
+responses never consume body bytes, regardless of Content-Length; interim
+responses do not dequeue the request. Exceeding the queue bound does not stop
+inspection or emit a malformed event. The retained FIFO prefix preserves its
+known body boundaries; extra requests retain only an outstanding count. Once
+those methods are unknown, ambiguous response bodies use packet-boundary
+resynchronization. Correlation can recover after final replies drain at followed
+boundaries. Speculative re-anchors never restore tunnel authority: after a lost
+boundary, tunnel negotiation stays disabled for that connection, though HTTP
+metadata inspection continues.
+
+Transport roles use the connection initiator when known from a handshake or
+verified connection tracking, independently of reassembly direction identity.
+Otherwise request/response roles are inferred and can be revised on re-anchoring.
+Body-free packet-boundary requests can also revise an inferred direction; a
+contradictory body declaration cannot establish that endpoint's framing.
+With authoritative roles, wrong-role text does not consume request correlation
+or frame a peer's body.
+Reply-only capture still produces response metadata, but cannot establish a
+tunnel without a matching request. CONNECT does not suppress later plaintext
+requests while unanswered. Only a correlated server 2xx answering CONNECT or a
+validated server 101 establishes a tunnel; either direction can later re-anchor.
+Both sides of a 101 negotiation must include `Connection: Upgrade`, and every
+selected `Upgrade` protocol must have been offered. List-valued Connection,
+Upgrade and Transfer-Encoding fields combine across repeated header lines.
+Protocol names compare case-insensitively; versions match exactly. Unsolicited
+or unmatched 101 responses do not establish tunnels.
+
+Cleartext HTTP/2 prior knowledge (`h2c`) is recognized by the complete
+connection preface. It emits `http2/preface`, then decodes SETTINGS, HEADERS
+and CONTINUATION frames with a direction-local HPACK context shared across
+streams. `http2/request` carries `stream_id`, `method`, `path`, `authority`,
+`scheme` and `content_type` when present; CONNECT requests can omit path and
+scheme. `http2/response` carries `stream_id`, `status` and `content_type`
+when present. Both include ports and transport. Stream IDs correlate requests
+and responses within a connection, not across connections. Trailers and push
+promises update compression state without emitting additional requests.
+DATA bodies are never exported.
+
+HTTP/2 limits are fixed inspection ceilings, not truncated metadata:
+16 KiB per frame, 64 KiB per compressed header block, 32 KiB per decoded
+header list (including the RFC 7540 32-byte overhead per field), and a
+4 KiB dynamic table per direction. Larger negotiated frame/table sizes are
+not supported. TLS metadata inspection is best-effort: a stream picked up without
+a valid TLS record is silently ignored. After anchoring, malformed TLS frames
+emit at most one malformed event per direction, then consume subsequent bytes
+silently until stream end. This terminal TLS state also applies to sequence-number
+streams used by live capture. HTTP/2 malformed frames, invalid HPACK, interrupted
+CONTINUATION sequences and exceeded framing/HPACK limits emit one malformed event
+and enter HTTP resynchronization; they do not resume a damaged HPACK context.
+Normal TCP splits and coalesced frames preserve HTTP/2 metadata.
+
+An HTTP/1 `Upgrade: h2c` request remains an `http/request` event; its body is
+skipped before recognizing the client's connection preface. A server `101` response
+negotiating the pending request's `Upgrade: h2c` switches the reply direction to
+HTTP/2, where the reply to the upgrade request has stream ID 1. Upgrade settings
+are not correlated across directions. This is passive metadata inspection, not an HTTP/2 endpoint
+or an antivirus body scanner; encrypted HTTP/2 is not decrypted.
+
+Native IDS conditions use the same `content_type` attribute for HTTP/1 and
+cleartext HTTP/2, on requests and responses. Choose `proto: http` or
+`proto: http2` in the rule, or omit the protocol to match both. For example:
+
+```json
+{"field": "attr.content_type", "op": "contains", "value": "application/json"}
+```
 
 ## ICS Firewall Rule Predicates
 
@@ -1281,12 +1447,21 @@ and last retained messages are not connection lifecycle bounds; timestamp-only
 historical loss and missing coordinates exclude the dataset. A short IP/TCP
 header therefore cannot leave an earlier parent eligible for certification.
 A cut non-IP record with readable EtherType (including VLAN tags), or a known
-non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. Opaque
-IPv6 extension chains are not proof of unrelated traffic; their IP family comes
-from the decoded header, never IPv4-mapped address spelling. A cut opaque chain
-(including MLD-style traffic) still excludes the dataset. Ordinary unrelated
-ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less final
-record remains dataset-wide.
+non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. IPv6
+Hop-by-Hop, Destination Options, first fragments, AH, and Routing headers with
+zero Segments Left are walked from captured bytes, with a limit of eight
+extension headers and 256 bytes. A proven TCP/UDP terminal uses captured ports
+when present, otherwise host-pair/transport scope; a proven non-TCP/UDP terminal
+is unrelated. Routing headers with segments remaining and option headers
+containing a Home Address option are not scoped because they change the
+effective destination or source. Truncated or malformed chains, chains
+exceeding either limit, ESP, unknown, unsupported or experimental headers, and
+non-first fragments remain dataset-wide because they can hide a transport. An
+opaque chain (including MLD-style traffic without a walkable non-TCP/UDP
+terminal) is not proof of unrelated traffic. The IP family comes from the
+decoded header, never IPv4-mapped address spelling. Ordinary unrelated
+ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less
+final record remains dataset-wide.
 
 Live `capture_loss` is retained at transport admission, before worker processing,
 and delivered through AF_PACKET and NFQUEUE even with incomplete TCP headers.

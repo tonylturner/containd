@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import type { ConfigBase } from "../../lib/config-boundary";
 
 import { useConfigView, matchingRevisions } from "../../lib/use-config-revision";
@@ -17,7 +18,6 @@ import entityStyles from "../interfaces/entity-table.module.css";
 
 import {
   api,
-  isAdmin,
   type ApiResult,
   type ForwardPublishResult,
   type NATConfig,
@@ -41,6 +41,7 @@ const UNAVAILABLE = "NAT settings unavailable — the server did not return the 
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function NATPage() {
+  const isAdmin = useIsAdmin();
   const natView = useConfigView({ nat: { enabled: false } as NATConfig, zones: [] as Zone[], rules: null as FirewallRule[] | null });
   const { readConfig } = natView;
   const { nat, zones, rules } = natView.data;
@@ -53,7 +54,7 @@ export default function NATPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeWarning, setNoticeWarning] = useState(false);
   const writable = useRef(false);
-  useLayoutEffect(() => { writable.current = loaded && !loadError && isAdmin(); }, [loaded, loadError]);
+  useLayoutEffect(() => { writable.current = loaded && !loadError && isAdmin; }, [loaded, loadError, isAdmin]);
 
   const tips: Tip[] = [
     {
@@ -117,7 +118,7 @@ export default function NATPage() {
       }
     >
       <NetworkSetup current="/nat/" />
-      {!isAdmin() && (
+      {!isAdmin && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
@@ -254,6 +255,7 @@ function NATCard({
   revision: string;
   onSave: (revision: ConfigBase, cfg: NATConfig) => Promise<ApiResult<NATConfig> | null>;
 }) {
+  const isAdmin = useIsAdmin();
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, dirty } = useConfigEditor(() => snat(nat), true, revision);
   const enabled = !!cfg.enabled;
   const egressZone = cfg.egressZone ?? "";
@@ -298,14 +300,14 @@ function NATCard({
           </div>
           <div className="mt-2 flex items-center gap-3">
             <button
-              disabled={!isAdmin()}
+              disabled={!isAdmin}
               onClick={() => setEnabled((v) => !v)}
               className={
                 "rounded-xs border px-3 py-1.5 text-sm transition-ui " +
                 (enabled
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                   : "bg-(--surface2) text-(--text) ") +
-                (!isAdmin() ? " opacity-50" : "")
+                (!isAdmin ? " opacity-50" : "")
               }
             >
               {enabled ? "On" : "Off"}
@@ -323,7 +325,7 @@ function NATCard({
             Egress Zone
           </div>
           <select
-            disabled={!isAdmin()}
+            disabled={!isAdmin}
             value={egressZone}
             onChange={(e) => setEgressZone(e.target.value)}
             className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -351,7 +353,7 @@ function NATCard({
                 <label key={z.value} className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    disabled={!isAdmin()}
+                    disabled={!isAdmin}
                     checked={checked}
                     onChange={(e) => {
                       const next = e.target.checked;
@@ -373,7 +375,7 @@ function NATCard({
         </Card>
       </div>
 
-      {isAdmin() && (
+      {isAdmin && (
         <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
           <button
             disabled={!dirty}
@@ -417,6 +419,7 @@ function PortForwardsCard({
   onPublish: (revision: ConfigBase, forward: PortForward, allowRule: boolean) => Promise<ApiResult<ForwardPublishResult> | null>;
   onDelete: (revision: ConfigBase, id: string) => Promise<Awaited<ReturnType<typeof api.deletePortForward>> | null>;
 }) {
+  const isAdmin = useIsAdmin();
   const { conflictProps, editor, cfg: items, setCfg: setItems, readConfig: adoptConfig, write, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? [], true, revision);
   const form = useConfigForm({
     ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
@@ -559,7 +562,7 @@ function PortForwardsCard({
             </Link>.
           </div>
         </div>
-        {isAdmin() && (
+        {isAdmin && (
           <button
             onClick={save}
             disabled={!dirty || busy}
@@ -571,7 +574,7 @@ function PortForwardsCard({
       </div>
 
       <div className="p-4">
-        {!isAdmin() && (
+        {!isAdmin && (
           <div className="mb-3 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
             View-only mode: port forwarding changes are disabled.
           </div>
@@ -586,7 +589,7 @@ function PortForwardsCard({
         {rules === null && <p className="mb-3 text-xs text-(--text-muted)">Firewall rules unavailable; refresh before deleting a forward or viewing its rule links.</p>}
 
         <fieldset disabled={busy} className="min-w-0">
-        {isAdmin() && (
+        {isAdmin && (
           <div className="grid gap-2 md:grid-cols-6">
             <select
               aria-label="Ingress zone"
@@ -714,7 +717,7 @@ function PortForwardsCard({
                     {rules && !rules.some((r) => r.viaForwards?.includes(pf.id)) && "none"}
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
-                    {isAdmin() && (
+                    {isAdmin && (
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => toggle(pf.id, !pf.enabled)}

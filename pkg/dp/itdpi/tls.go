@@ -9,13 +9,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // TLSDecoder emits ClientHello metadata (SNI, ALPN when possible).
-type TLSDecoder struct{}
+type TLSDecoder struct {
+	mu          sync.Mutex
+	streams     map[tlsStreamKey]*tlsStream
+	connections map[string]*tlsConnection
+}
 
 func NewTLSDecoder() *TLSDecoder { return &TLSDecoder{} }
 
@@ -44,57 +49,22 @@ func (d *TLSDecoder) Supports(state *flow.State) bool {
 }
 
 func (d *TLSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil || len(pkt.Payload) < 6 {
+	if state == nil || pkt == nil || len(pkt.Payload) == 0 || pkt.Payload[0] != 22 {
 		return nil, nil
 	}
-	p := pkt.Payload
-	// TLS record: type(1)=0x16, version(2), length(2).
-	if p[0] != 0x16 || len(p) < 5 {
-		return nil, nil
+	local := NewTLSDecoder()
+	result, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload})
+	var events []dpi.Event
+	for _, frame := range result.Frames {
+		events = append(events, frame.Events...)
 	}
-	recLen := int(binary.BigEndian.Uint16(p[3:5]))
-	if 5+recLen > len(p) {
-		recLen = len(p) - 5
-	}
-	rec := p[5 : 5+recLen]
-	// Handshake: type(1)=0x01 ClientHello.
-	if len(rec) < 4 || rec[0] != 0x01 {
-		return nil, nil
-	}
-	hsLen := int(rec[1])<<16 | int(rec[2])<<8 | int(rec[3])
-	if 4+hsLen > len(rec) {
-		hsLen = len(rec) - 4
-	}
-	ch := rec[4 : 4+hsLen]
-	meta := parseClientHello(ch)
-	if meta.SNI == "" && meta.ALPN == "" && meta.JA3Hash == "" {
-		return nil, nil
-	}
-	attrs := map[string]any{
-		"sni":           meta.SNI,
-		"alpn":          meta.ALPN,
-		"tls_version":   meta.TLSVersion,
-		"cipher_suites": meta.CipherSuites,
-		"extensions":    meta.Extensions,
-		"ja3":           meta.JA3,
-		"ja3_hash":      meta.JA3Hash,
-		"src_port":      pkt.SrcPort,
-		"dst_port":      pkt.DstPort,
-		"transport":     pkt.Proto,
-	}
-	ev := dpi.Event{
-		FlowID:     state.ID(),
-		Proto:      "tls",
-		Kind:       "client_hello",
-		Attributes: attrs,
-	}
-	return []dpi.Event{ev}, nil
+	return events, err
 }
 
 func (d *TLSDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
 
 // ClientHelloSNI returns the visible SNI in a complete packet-local ClientHello.
-// Unlike telemetry's best-effort parser, exclusions must not use partial records.
+// Exclusions must not use partial records.
 // It works on every TCP port and does not reassemble fragmented handshakes.
 func ClientHelloSNI(p []byte) string {
 	if len(p) < 9 || p[0] != 0x16 || p[1] != 3 {
@@ -112,85 +82,94 @@ func ClientHelloSNI(p []byte) string {
 }
 
 type clientHelloMeta struct {
-	SNI          string
-	ALPN         string
-	TLSVersion   string
-	CipherSuites []uint16
-	Extensions   []uint16
-	JA3          string
-	JA3Hash      string
+	SNI             string
+	ALPN            string
+	LegacyVersion   string
+	OfferedVersions []string
+	CipherSuites    []uint16
+	Extensions      []uint16
+	JA3             string
+	JA3Hash         string
 }
 
 func parseClientHello(ch []byte) clientHelloMeta {
-	off := 0
-	if len(ch) < 2+32+1 {
+	if len(ch) < 35 || len(ch) > maxTLSHello {
 		return clientHelloMeta{}
 	}
-	clientVersion := binary.BigEndian.Uint16(ch[0:2])
-	off += 2  // client_version
-	off += 32 // random
-	if off >= len(ch) {
-		return clientHelloMeta{}
-	}
-	sidLen := int(ch[off])
-	off++
-	off += sidLen
+	version := binary.BigEndian.Uint16(ch[:2])
+	off := 35 + int(ch[34])
 	if off+2 > len(ch) {
 		return clientHelloMeta{}
 	}
-	csLen := int(binary.BigEndian.Uint16(ch[off : off+2]))
+	n := int(binary.BigEndian.Uint16(ch[off:]))
 	off += 2
-	csStart := off
-	off += csLen
-	if off >= len(ch) {
+	if n == 0 || n%2 != 0 || off+n >= len(ch) {
 		return clientHelloMeta{}
 	}
-	compLen := int(ch[off])
+	meta := clientHelloMeta{LegacyVersion: tlsVersionString(version), CipherSuites: parseCipherSuites(ch[off : off+n])}
+	off += n
+	n = int(ch[off])
 	off++
-	off += compLen
-	if off+2 > len(ch) {
+	if n == 0 || off+n > len(ch) {
 		return clientHelloMeta{}
 	}
-	extLen := int(binary.BigEndian.Uint16(ch[off : off+2]))
-	off += 2
-	if off+extLen > len(ch) {
-		return clientHelloMeta{}
-	}
-	exts := ch[off : off+extLen]
-	eoff := 0
-	meta := clientHelloMeta{
-		TLSVersion: tlsVersionString(clientVersion),
-	}
-	meta.CipherSuites = parseCipherSuites(ch[csStart : csStart+csLen])
-	for eoff+4 <= len(exts) {
-		typ := binary.BigEndian.Uint16(exts[eoff : eoff+2])
-		l := int(binary.BigEndian.Uint16(exts[eoff+2 : eoff+4]))
-		eoff += 4
-		if eoff+l > len(exts) {
+	off += n
+	var curves, points []uint16
+	if off < len(ch) {
+		if off+2 > len(ch) {
 			return clientHelloMeta{}
 		}
-		body := exts[eoff : eoff+l]
-		eoff += l
-		meta.Extensions = append(meta.Extensions, typ)
-		switch typ {
-		case 0x0000: // server_name
-			if name := parseSNI(body); name != "" {
-				meta.SNI = name
+		n = int(binary.BigEndian.Uint16(ch[off:]))
+		off += 2
+		if off+n != len(ch) {
+			return clientHelloMeta{}
+		}
+		for off < len(ch) {
+			if off+4 > len(ch) {
+				return clientHelloMeta{}
 			}
-		case 0x0010: // ALPN
-			if p := parseALPN(body); p != "" {
-				meta.ALPN = p
+			typ := binary.BigEndian.Uint16(ch[off:])
+			n = int(binary.BigEndian.Uint16(ch[off+2:]))
+			off += 4
+			if off+n > len(ch) {
+				return clientHelloMeta{}
+			}
+			body := ch[off : off+n]
+			off += n
+			if !isGREASE(typ) {
+				meta.Extensions = append(meta.Extensions, typ)
+			}
+			switch typ {
+			case 0:
+				meta.SNI = parseSNI(body)
+			case 16:
+				meta.ALPN = parseALPN(body)
+			case 10:
+				if len(body) < 2 || int(binary.BigEndian.Uint16(body)) != len(body)-2 || len(body)%2 != 0 {
+					return clientHelloMeta{}
+				}
+				curves = parseCipherSuites(body[2:])
+			case 11:
+				if len(body) < 1 || int(body[0]) != len(body)-1 {
+					return clientHelloMeta{}
+				}
+				points = nil
+				for _, p := range body[1:] {
+					points = append(points, uint16(p))
+				}
+			case 43:
+				if len(body) < 3 || int(body[0]) != len(body)-1 || len(body)%2 != 1 {
+					return clientHelloMeta{}
+				}
+				for _, v := range parseCipherSuites(body[1:]) {
+					meta.OfferedVersions = append(meta.OfferedVersions, tlsVersionString(v))
+				}
 			}
 		}
 	}
-	if eoff != len(exts) {
-		return clientHelloMeta{}
-	}
-	meta.JA3 = buildJA3(clientVersion, meta.CipherSuites, meta.Extensions)
-	if meta.JA3 != "" {
-		sum := md5.Sum([]byte(meta.JA3)) // nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5 -- JA3 fingerprints are standardized as MD5 over the canonical JA3 string.
-		meta.JA3Hash = fmt.Sprintf("%x", sum)
-	}
+	meta.JA3 = buildJA3(version, meta.CipherSuites, meta.Extensions, curves, points)
+	sum := md5.Sum([]byte(meta.JA3)) // nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5 -- JA3 standardizes MD5, not used for security.
+	meta.JA3Hash = fmt.Sprintf("%x", sum)
 	return meta
 }
 
@@ -225,7 +204,7 @@ func parseALPN(body []byte) string {
 	listLen := int(binary.BigEndian.Uint16(body[0:2]))
 	off := 2
 	if off+listLen > len(body) {
-		listLen = len(body) - off
+		return ""
 	}
 	end := off + listLen
 	var protos []string
@@ -235,14 +214,11 @@ func parseALPN(body []byte) string {
 		}
 		l := int(body[off])
 		off++
-		if off+l > len(body) {
-			break
+		if l == 0 || off+l > end {
+			return ""
 		}
 		protos = append(protos, string(body[off:off+l]))
 		off += l
-		if len(protos) >= 3 {
-			break
-		}
 	}
 	return strings.Join(protos, ",")
 }
@@ -253,35 +229,29 @@ func parseCipherSuites(buf []byte) []uint16 {
 	}
 	out := make([]uint16, 0, len(buf)/2)
 	for i := 0; i+1 < len(buf); i += 2 {
-		out = append(out, binary.BigEndian.Uint16(buf[i:i+2]))
-	}
-	if len(out) > 50 {
-		return out[:50]
+		v := binary.BigEndian.Uint16(buf[i : i+2])
+		if !isGREASE(v) {
+			out = append(out, v)
+		}
 	}
 	return out
 }
 
-func buildJA3(version uint16, ciphers []uint16, exts []uint16) string {
-	if len(ciphers) == 0 {
-		return ""
-	}
+// RFC 8701 reserves the sixteen equal-byte values 0x0a0a through 0xfafa.
+func isGREASE(v uint16) bool { return v&0x0f0f == 0x0a0a && byte(v) == byte(v>>8) }
+
+func buildJA3(version uint16, lists ...[]uint16) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%d,", version))
-	for i, c := range ciphers {
-		if i > 0 {
-			b.WriteByte('-')
+	fmt.Fprintf(&b, "%d", version)
+	for _, list := range lists {
+		b.WriteByte(',')
+		for i, v := range list {
+			if i > 0 {
+				b.WriteByte('-')
+			}
+			fmt.Fprintf(&b, "%d", v)
 		}
-		b.WriteString(fmt.Sprintf("%d", c))
 	}
-	b.WriteByte(',')
-	for i, e := range exts {
-		if i > 0 {
-			b.WriteByte('-')
-		}
-		b.WriteString(fmt.Sprintf("%d", e))
-	}
-	// curves and point formats omitted in v1 (set empty fields).
-	b.WriteString(",,")
 	return b.String()
 }
 

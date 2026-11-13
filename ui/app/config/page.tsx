@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../hooks/useIsAdmin";
 import { useConfigView } from "../../lib/use-config-revision";
 
 import { revisionError, ConfigEditNotice, useConfigEditor, useConfigLoad } from "../../lib/use-config-editor";
@@ -11,7 +12,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { api, isAdmin, type ConfigBackup, type ConfigBundle, type User } from "../../lib/api";
+import { api, type ConfigBackup, type ConfigBundle, type User } from "../../lib/api";
 import { factoryResetLoginGuidance } from "../../lib/recovery-guidance";
 import { ConfigDiffBlocks } from "./config-diff-blocks";
 import { ConfigChangeSummary } from "./config-change-summary";
@@ -53,7 +54,8 @@ export default function ConfigPageWrapper() {
 }
 
 function ConfigPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
   const searchParams = useSearchParams();

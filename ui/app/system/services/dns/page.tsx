@@ -1,5 +1,6 @@
 "use client";
 
+import { useIsAdmin } from "../../../../hooks/useIsAdmin";
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
 import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
@@ -9,7 +10,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
+import { api, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
 import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
@@ -22,7 +23,8 @@ import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 
 export default function DNSPage() {
-  const canEdit = isAdmin();
+  const isAdmin = useIsAdmin();
+  const canEdit = isAdmin;
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const status = servicesStatus?.dns ?? null;

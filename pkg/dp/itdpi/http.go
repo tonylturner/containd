@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -15,7 +16,11 @@ import (
 // HTTPDecoder emits minimal plaintext HTTP request/response metadata. It
 // never attaches raw payload bytes: headers and bodies carry credentials,
 // cookies and content that must not reach the event store or its exports.
-type HTTPDecoder struct{}
+type HTTPDecoder struct {
+	mu          sync.Mutex
+	streams     map[httpStreamKey]*httpStream
+	connections map[string]*httpConnection
+}
 
 func NewHTTPDecoder() *HTTPDecoder { return &HTTPDecoder{} }
 
@@ -44,23 +49,21 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil
 	}
-	// HTTP/2 cleartext preface.
-	if bytes.HasPrefix(pkt.Payload, []byte("PRI * HTTP/2.0")) {
-		ev := dpi.Event{
-			FlowID: state.ID(),
-			Proto:  "http2",
-			Kind:   "preface",
-			Attributes: map[string]any{
-				"transport": pkt.Proto,
-				"src_port":  pkt.SrcPort,
-				"dst_port":  pkt.DstPort,
-			},
-		}
-		return []dpi.Event{ev}, nil
+	// Packet-local callers have no TCP offsets. Stream-aware callers go through
+	// the manager, which owns reassembly and the decoder lifetime.
+	local := NewHTTPDecoder()
+	res, err := local.ParseStream(state, dpi.StreamView{Bytes: pkt.Payload, Role: pkt.Role, HasPacketStart: true})
+	var events []dpi.Event
+	for _, f := range res.Frames {
+		events = append(events, f.Events...)
 	}
+	return events, err
+}
+
+func http1Events(state *flow.State, pkt *dpi.ParsedPacket) []dpi.Event {
 	line, headers := parseHTTP(pkt.Payload)
 	if line == "" {
-		return nil, nil
+		return nil
 	}
 	if strings.HasPrefix(line, "HTTP/") {
 		parts := strings.SplitN(line, " ", 3)
@@ -69,17 +72,18 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 			status = parts[1]
 		}
 		attrs := map[string]any{
-			"status":    status,
-			"transport": pkt.Proto,
-			"src_port":  pkt.SrcPort,
-			"dst_port":  pkt.DstPort,
+			"status":       status,
+			"content_type": headers["content-type"],
+			"transport":    pkt.Proto,
+			"src_port":     pkt.SrcPort,
+			"dst_port":     pkt.DstPort,
 		}
 		ev := dpi.Event{FlowID: state.ID(), Proto: "http", Kind: "response", Attributes: attrs}
-		return []dpi.Event{ev}, nil
+		return []dpi.Event{ev}
 	}
 	parts := strings.SplitN(line, " ", 3)
 	if len(parts) < 2 {
-		return nil, nil
+		return nil
 	}
 	method := parts[0]
 	path := parts[1]
@@ -103,18 +107,19 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	}
 	ua := headers["user-agent"]
 	attrs := map[string]any{
-		"method":     method,
-		"path":       path,
-		"host":       host,
-		"target":     targetHost,
-		"scheme":     scheme,
-		"user_agent": ua,
-		"transport":  pkt.Proto,
-		"src_port":   pkt.SrcPort,
-		"dst_port":   pkt.DstPort,
+		"method":       method,
+		"content_type": headers["content-type"],
+		"path":         path,
+		"host":         host,
+		"target":       targetHost,
+		"scheme":       scheme,
+		"user_agent":   ua,
+		"transport":    pkt.Proto,
+		"src_port":     pkt.SrcPort,
+		"dst_port":     pkt.DstPort,
 	}
 	ev := dpi.Event{FlowID: state.ID(), Proto: "http", Kind: "request", Attributes: attrs}
-	return []dpi.Event{ev}, nil
+	return []dpi.Event{ev}
 }
 
 func (d *HTTPDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
@@ -124,7 +129,7 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 	if firstEnd < 0 {
 		return "", nil
 	}
-	first := strings.TrimSpace(string(payload[:firstEnd]))
+	first := strings.TrimSuffix(string(payload[:firstEnd]), "\r")
 	if !looksLikeHTTPLine(first) {
 		return "", nil
 	}
@@ -135,7 +140,7 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 		if end < 0 {
 			break
 		}
-		l := strings.TrimSpace(string(rest[:end]))
+		l := strings.Trim(strings.TrimSuffix(string(rest[:end]), "\r"), " \t")
 		rest = rest[end+1:]
 		if l == "" {
 			break
@@ -144,22 +149,20 @@ func parseHTTP(payload []byte) (string, map[string]string) {
 		if len(kv) != 2 {
 			continue
 		}
-		k := strings.ToLower(strings.TrimSpace(kv[0]))
-		v := strings.TrimSpace(kv[1])
+		k := strings.ToLower(strings.Trim(kv[0], " \t"))
+		v := strings.Trim(kv[1], " \t")
+		switch k {
+		case "upgrade", "connection", "transfer-encoding":
+			if previous, ok := headers[k]; ok {
+				v = previous + "," + v
+			}
+		}
 		headers[k] = v
 	}
 	return first, headers
 }
 
 func looksLikeHTTPLine(l string) bool {
-	if strings.HasPrefix(l, "HTTP/") {
-		return true
-	}
-	methods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "CONNECT ", "PATCH "}
-	for _, m := range methods {
-		if strings.HasPrefix(l, m) {
-			return true
-		}
-	}
-	return false
+	_, valid := httpStart([]byte(l + "\n"))
+	return valid
 }

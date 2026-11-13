@@ -42,13 +42,16 @@ func normalizeField(field string) string {
 // decoderAttribute is the supported scalar Sigma attribute vocabulary. Keep
 // additions tied to an emitting decoder; a log field or arbitrary attr.* name
 // is not evidence of an executable network predicate. Array-valued attributes
-// such as cipher_suites/extensions/requested_protocols need evaluator support.
+// need evaluator support; examples include cipher_suites, extensions,
+// requested_protocols, tls_offered_versions, dialects_offered, and oids.
 func decoderAttribute(field string) bool {
 	switch field {
 	// pkg/dp/itdpi/{http,dns,tls}.go
 	case "method", "path", "host", "target", "scheme", "user_agent", "status",
+		"content_type", "authority", "stream_id",
 		"id", "qr", "opcode", "rcode", "questions", "answers",
-		"qname", "qtype", "qclass", "sni", "alpn", "tls_version", "ja3", "ja3_hash":
+		"qname", "qtype", "qclass", "sni", "alpn", "tls_legacy_version",
+		"tls_selected_version", "ja3", "ja3_hash":
 		return true
 	// Common IT metadata and itdpi/{detect,ics_marker,ntp,rdp,smb,snmp,ssh}.go.
 	case "src_port", "dst_port", "transport", "detected", "ics",
@@ -56,9 +59,11 @@ func decoderAttribute(field string) bool {
 		"reference_id", "risk", "root_delay", "root_dispersion", "stratum",
 		"stratum_name", "version", "cookie",
 		"security_concern", "security_level", "selected_protocol", "stage",
-		"command", "session_id", "share", "community_auth", "community_length",
-		"error_status", "first_oid", "msg_security_model", "pdu_type", "request_id",
-		"write_operation", "comments", "encryption", "kex_algorithm", "software":
+		"command", "session_id", "share", "dialect", "community", "error_status",
+		"enterprise_oid", "generic_trap", "specific_trap", "trap_oid",
+		"msg_flags_auth", "msg_flags_priv", "msg_security_model", "pdu_type",
+		"request_id", "user_name", "write_operation", "comments", "encryption",
+		"kex_algorithm", "software":
 		return true
 	// Shared ICS keys emitted by modbus, dnp3 and iec104, including the
 	// information-object fields in iec104/asdu.go.
