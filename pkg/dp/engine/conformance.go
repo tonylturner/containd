@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -123,6 +124,7 @@ type inspectionFinding struct {
 // Saturation suppresses new alert identities rather than evicting live ones
 // and allowing repeated alerts to flood the store. Verdicts are unaffected.
 type conformanceAlerts struct {
+	ledger     *limits.Ledger
 	mu         sync.Mutex
 	conns      map[string]*conformanceConnection
 	suppressed uint64
@@ -241,4 +243,10 @@ func firstFinding(ev dpi.Event) string {
 		}
 	}
 	return ""
+}
+
+func (a *conformanceAlerts) LimitOccupancy() limits.Occupancy {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return limits.Occupancy{Limit: conformanceMaxConnections, Entries: int64(len(a.conns))}
 }

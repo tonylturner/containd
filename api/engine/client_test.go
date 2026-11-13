@@ -324,7 +324,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		if got := r.URL.Query().Get("n"); got != "3" {
 			t.Fatalf("top-talkers n = %q", got)
 		}
-		_ = json.NewEncoder(w).Encode([]stats.FlowStats{{SrcIP: "192.0.2.10", DstIP: "192.0.2.20", Protocol: "dns", Packets: 4, Bytes: 256}})
+		_ = json.NewEncoder(w).Encode(stats.TopTalkers{Semantics: "recent", Retained: 1, Complete: true, Rows: []stats.FlowStats{{SrcIP: "192.0.2.10", DstIP: "192.0.2.20", Protocol: "dns", Packets: 4, Bytes: 256}}})
 	})
 	mux.HandleFunc("/internal/inventory", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -452,7 +452,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("ConfigureRoutingReplace: %v", err)
 	}
 	talkers, err := c.ListTopTalkers(ctx, 3)
-	if err != nil || len(talkers) != 1 || talkers[0].Protocol != "dns" {
+	if err != nil || len(talkers.Rows) != 1 || talkers.Rows[0].Protocol != "dns" || talkers.Semantics != "recent" || talkers.Retained != 1 || !talkers.Complete {
 		t.Fatalf("ListTopTalkers = %#v, %v", talkers, err)
 	}
 	inv, err := c.ListInventory(ctx)

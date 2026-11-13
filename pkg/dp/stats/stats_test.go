@@ -28,7 +28,7 @@ func TestTrackerIndependentPacketAndEventCounters(t *testing.T) {
 	if ps.PacketCount != 1 || ps.ByteCount != 100 || ps.EventCount != 3 || ps.ReadCount != 1 || ps.WriteCount != 1 || ps.AlertCount != 1 || !ps.LastSeen.Equal(now) {
 		t.Fatalf("independent counters = %+v", ps)
 	}
-	top := tracker.TopTalkers(0)
+	top := tracker.TopTalkers(0).Rows
 	if len(top) != 1 || top[0].SrcIP != "10.0.0.1" || top[0].Packets != 1 || top[0].Bytes != 100 {
 		t.Fatalf("event attributes duplicated/changed packet flow: %+v", top)
 	}
@@ -44,7 +44,7 @@ func TestTrackerEventsWithoutPackets(t *testing.T) {
 	if got.Protocol != "unknown" || got.PacketCount != 0 || got.ByteCount != 0 || got.EventCount != 4 || got.ReadCount != 0 || got.WriteCount != 1 || !got.LastSeen.Equal(now) {
 		t.Fatalf("event-only stats = %+v", got)
 	}
-	if top := tracker.TopTalkers(1); len(top) != 0 {
+	if top := tracker.TopTalkers(1).Rows; len(top) != 0 {
 		t.Fatalf("event-only flows = %+v", top)
 	}
 }
@@ -121,11 +121,11 @@ func TestTrackerPacketsWithoutEventsAndTopTalkers(t *testing.T) {
 	if len(got) != 3 || got[0].Protocol != "modbus" || got[0].PacketCount != 5 || got[0].ByteCount != 500 || got[0].EventCount != 0 {
 		t.Fatalf("packet-only stats = %+v", got)
 	}
-	top := tracker.TopTalkers(0)
+	top := tracker.TopTalkers(0).Rows
 	if len(top) != 2 || top[0].SrcIP != "10.0.0.1" || top[0].Bytes != 500 || top[0].Packets != 5 || top[1].Bytes != 150 {
 		t.Fatalf("top talkers = %+v", top)
 	}
-	if top := tracker.TopTalkers(1); len(top) != 1 {
+	if top := tracker.TopTalkers(1).Rows; len(top) != 1 {
 		t.Fatalf("top 1 = %+v", top)
 	}
 }
@@ -157,8 +157,8 @@ func TestNilTracker(t *testing.T) {
 	if s := tracker.Stats(); s != nil {
 		t.Fatalf("expected nil stats, got %v", s)
 	}
-	if tt := tracker.TopTalkers(5); tt != nil {
-		t.Fatalf("expected nil top talkers, got %v", tt)
+	if tt := tracker.TopTalkers(5).Rows; len(tt) != 0 {
+		t.Fatalf("expected empty top talkers, got %v", tt)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestTrackerBinaryHostPairAggregation(t *testing.T) {
 	} {
 		tracker.RecordPacket(netip.MustParseAddr(tc.src), netip.MustParseAddr(tc.dst), "test", tc.bytes, now)
 	}
-	top := tracker.TopTalkers(0)
+	top := tracker.TopTalkers(0).Rows
 	if len(top) != 3 || top[0].SrcIP != "2001:db8::1" || top[0].Packets != 2 || top[0].Bytes != 18 ||
 		top[1].SrcIP != "10.0.0.1" || top[1].Packets != 2 || top[1].Bytes != 8 ||
 		top[2].SrcIP != "2001:db8::2" || top[2].Packets != 1 || top[2].Bytes != 1 {

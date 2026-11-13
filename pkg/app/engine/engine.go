@@ -28,6 +28,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/learn"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/telemetry"
@@ -64,6 +65,7 @@ var engineBootID = rand.Text()
 func initialEngineConfig(ifaces []string, enforceEnabled bool, enforceTable string) engine.Config {
 	return engine.Config{
 		Capture: capture.Config{Interfaces: ifaces},
+		Ledger:  limits.NewLedger(nil),
 		Enforce: engine.EnforceConfig{
 			Enabled:   enforceEnabled,
 			TableName: enforceTable,

@@ -207,10 +207,12 @@ func (e *Engine) ProtoStats() []stats.ProtoStats {
 }
 
 // TopTalkers returns the top N observed flows by byte count.
-func (e *Engine) TopTalkers(n int) []stats.FlowStats {
-	if e == nil || e.stats == nil {
-		return nil
+func (e *Engine) TopTalkers(n int) stats.TopTalkers {
+	if e == nil {
+		return (*stats.Tracker)(nil).TopTalkers(n)
 	}
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
 	return e.stats.TopTalkers(n)
 }
 

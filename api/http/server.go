@@ -131,7 +131,7 @@ type SignaturesClient interface {
 // StatsClient is an optional interface for querying protocol and flow statistics.
 type StatsClient interface {
 	ListProtoStats(ctx context.Context) ([]stats.ProtoStats, error)
-	ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error)
+	ListTopTalkers(ctx context.Context, n int) (stats.TopTalkers, error)
 }
 
 type ServicesValidator interface {

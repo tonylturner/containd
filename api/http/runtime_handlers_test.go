@@ -53,7 +53,8 @@ type runtimeMockEngine struct {
 	simAction           string
 	protoStatsResp      []stats.ProtoStats
 	protoStatsErr       error
-	topTalkersResp      []stats.FlowStats
+	topTalkersResp      stats.TopTalkers
+	topTalkersN         int
 	topTalkersErr       error
 	anomaliesResp       []anomaly.Anomaly
 	anomaliesErr        error
@@ -142,7 +143,8 @@ func (m *runtimeMockEngine) ListProtoStats(ctx context.Context) ([]stats.ProtoSt
 	return m.protoStatsResp, m.protoStatsErr
 }
 
-func (m *runtimeMockEngine) ListTopTalkers(ctx context.Context, n int) ([]stats.FlowStats, error) {
+func (m *runtimeMockEngine) ListTopTalkers(ctx context.Context, n int) (stats.TopTalkers, error) {
+	m.topTalkersN = n
 	return m.topTalkersResp, m.topTalkersErr
 }
 
@@ -401,7 +403,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	eng.flowsResp = []dpevents.FlowSummary{{FlowID: "flow-1", Application: "modbus", EventCount: 2}}
 	eng.simResp = engineclient.SimulationStatus{Running: false}
 	eng.protoStatsResp = []stats.ProtoStats{{Protocol: "modbus", PacketCount: 4}}
-	eng.topTalkersResp = []stats.FlowStats{{SrcIP: "10.0.0.1", DstIP: "10.0.0.2", Protocol: "tcp", Packets: 4}}
+	eng.topTalkersResp = stats.TopTalkers{Semantics: "recent", Complete: true, Retained: 1, Rows: []stats.FlowStats{{SrcIP: "10.0.0.1", DstIP: "10.0.0.2", Protocol: "tcp", Packets: 4}}}
 	eng.anomaliesResp = []anomaly.Anomaly{{Type: "malformed_frame", Protocol: "modbus", Severity: "high"}}
 	eng.conntrackResp = []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}, Tags: []string{"plc"}}}
 

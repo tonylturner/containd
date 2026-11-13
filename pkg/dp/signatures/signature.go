@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // Signature defines a pattern for detecting known ICS attack activity.
@@ -46,8 +47,10 @@ type Match struct {
 
 // Engine evaluates DPI events against a set of loaded signatures.
 type Engine struct {
-	signatures []Signature
-	mu         sync.RWMutex
+	stateLimits limits.Limits
+	resources   limits.Resources
+	signatures  []Signature
+	mu          sync.RWMutex
 
 	matchesMu  sync.Mutex
 	matches    []Match
@@ -58,8 +61,10 @@ type Engine struct {
 // New creates a new signature engine with default capacity for match history.
 func New() *Engine {
 	return &Engine{
-		matchCap: 4096,
-		matches:  make([]Match, 0, 256),
+		stateLimits: limits.Default(),
+		resources:   limits.NewResources(nil, nil),
+		matchCap:    4096,
+		matches:     make([]Match, 0, 256),
 	}
 }
 

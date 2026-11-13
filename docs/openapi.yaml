@@ -2913,6 +2913,17 @@ components:
         metric: {type: integer}
         table: {type: integer}
       type: object
+    TopTalkers:
+      type: object
+      required: [semantics, limit, retained, evicted, since, complete, rows]
+      properties:
+        semantics: {type: string, enum: [recent]}
+        limit: {type: integer, description: Retention cap; zero while retention is unbounded.}
+        retained: {type: integer}
+        evicted: {type: integer, format: uint64}
+        since: {type: string, format: date-time, description: Tracker creation time.}
+        complete: {type: boolean, description: No rows have been evicted since tracker creation.}
+        rows: {type: array, items: {$ref: '#/components/schemas/FlowStats'}}
     FlowStats:
       properties:
         bytes: {type: integer}
@@ -6419,7 +6430,7 @@ paths:
 
   /stats/top-talkers:
     get:
-      summary: Top source/destination pairs by traffic volume
+      summary: Top recently active directional host pairs by retained traffic volume
       tags: [Statistics]
       responses:
         "503":
@@ -6431,7 +6442,7 @@ paths:
           description: Top talkers
           content:
             application/json:
-              schema: {type: array, items: {$ref: '#/components/schemas/FlowStats'}}
+              schema: {$ref: '#/components/schemas/TopTalkers'}
       parameters:
       - name: n
         in: query

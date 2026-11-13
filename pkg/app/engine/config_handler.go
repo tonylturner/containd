@@ -20,12 +20,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // dataPlane is what the config handler drives. *engine.Engine implements it.
 type dataPlane interface {
 	ManagementReservation() *mgmtpath.Reservation
 	Events() *events.Store
+	Ledger() *limits.Ledger
 	SetICSParsing(map[string]string)
 	Reconfigure(fresh *engine.Engine) error
 	RetryProtection(context.Context) error
@@ -104,7 +106,7 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				current.mu.Unlock()
 			}
 			if !unchanged && !parsingOnly {
-				fresh, err := newEngineFor(logger, next, store, dp.ManagementReservation())
+				fresh, err := newEngineFor(logger, next, store, dp.ManagementReservation(), dp.Ledger())
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -129,14 +131,16 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 }
 
 // sameDataPlane reports whether two configurations are identical in every
-// field. Lists compare element by element in order; a nil and an empty list
-// or map differ, so the comparison errs towards a rebuild.
+// field after resolving limit defaults. Lists compare element by element in
+// order; a nil and an empty list or map differ, erring towards a rebuild.
 func sameDataPlane(a, b config.DataPlaneConfig) bool {
-	return reflect.DeepEqual(a, b)
+	ae, be := a.Limits.Effective(), b.Limits.Effective()
+	a.Limits, b.Limits = config.DataPlaneLimits{}, config.DataPlaneLimits{}
+	return ae == be && reflect.DeepEqual(a, b)
 }
 
 // newEngineFor builds an engine for a data-plane configuration.
-func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *events.Store, reservation *mgmtpath.Reservation) (*engine.Engine, error) {
+func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *events.Store, reservation *mgmtpath.Reservation, ledger *limits.Ledger) (*engine.Engine, error) {
 	var excl []engine.DPIExclusion
 	for _, e := range dp.DPIExclusions {
 		excl = append(excl, engine.DPIExclusion{Value: e.Value, Type: e.Type})
@@ -145,6 +149,8 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 	table := settings.TableName
 	return engine.New(engine.Config{
 		Capture: capture.Config{Interfaces: dp.CaptureInterfaces},
+		Limits:  dp.Limits.Effective(),
+		Ledger:  ledger,
 		Events:  store,
 		OnError: func(err error) {
 			logger.Errorf("data plane capture error: %v", err)

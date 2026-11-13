@@ -467,10 +467,11 @@ func DefaultConfig() *Config {
 
 // DataPlaneConfig controls runtime dataplane behavior; persisted in DB/exports.
 type DataPlaneConfig struct {
-	CaptureInterfaces []string `json:"captureInterfaces,omitempty"` // interface names for capture
-	Enforcement       bool     `json:"enforcement,omitempty"`       // enable nftables apply
-	EnforceTable      string   `json:"enforceTable,omitempty"`      // nftables table name
-	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
+	Limits            DataPlaneLimits `json:"limits,omitzero"`
+	CaptureInterfaces []string        `json:"captureInterfaces,omitempty"` // interface names for capture
+	Enforcement       bool            `json:"enforcement,omitempty"`       // enable nftables apply
+	EnforceTable      string          `json:"enforceTable,omitempty"`      // nftables table name
+	DPIMock           bool            `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
 
 	// DPI controls
 	DPIEnabled      bool              `json:"dpiEnabled,omitempty"`      // master DPI on/off

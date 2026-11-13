@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -146,10 +147,11 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 // at most iecMaxSessions connections; live lets the packet path skip it
 // when it holds none.
 type pickupResets struct {
-	mu    sync.Mutex
-	conns map[iecKey]*pickupReset
-	swept time.Time
-	live  atomic.Int32
+	ledger *limits.Ledger
+	mu     sync.Mutex
+	conns  map[iecKey]*pickupReset
+	swept  time.Time
+	live   atomic.Int32
 }
 
 // pickupReset associates challenge retries with the same denial generation.
@@ -161,7 +163,7 @@ type pickupReset struct {
 }
 
 func newPickupResets() *pickupResets {
-	return &pickupResets{conns: make(map[iecKey]*pickupReset)}
+	return &pickupResets{conns: make(map[iecKey]*pickupReset), ledger: limits.NewLedger(nil)}
 }
 
 // record keeps the resets sent to close a connection.
@@ -224,4 +226,10 @@ func (p *pickupResets) expireLocked(now time.Time) {
 		}
 	}
 	p.live.Store(int32(len(p.conns)))
+}
+
+func (p *pickupResets) LimitOccupancy() limits.Occupancy {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return limits.Occupancy{Limit: iecMaxSessions, Entries: int64(len(p.conns))}
 }

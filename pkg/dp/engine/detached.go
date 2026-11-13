@@ -20,6 +20,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
@@ -30,6 +31,7 @@ import (
 // enabled. ZoneAddresses is required; it must resolve the supplied topology
 // without consulting host interfaces.
 type DetachedConfig struct {
+	Limits          limits.Limits
 	Events          *events.Writer
 	DPIProtocols    map[string]bool
 	DPIICSProtocols map[string]bool
@@ -80,6 +82,9 @@ func NewDetached(cfg DetachedConfig) (*Detached, error) {
 		clearMarks: func(context.Context, uint32, uint32, uint32) (int, error) {
 			return 0, errDetachedAuthority
 		},
+	}
+	if err := e.initStateLimits(cfg.Limits, nil); err != nil {
+		return nil, err
 	}
 	e.zones.addrsFor = cfg.ZoneAddresses
 	e.verdictCache.detached = true
@@ -146,6 +151,7 @@ func (d *Detached) SetSignatures(defs []signatures.Signature) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if !d.closed {
+		next.SetLimits(d.engine.stateLimits, d.engine.budget, d.engine.ledger)
 		d.engine.policyMu.Lock()
 		d.engine.sigEngine = next
 		d.engine.policyMu.Unlock()

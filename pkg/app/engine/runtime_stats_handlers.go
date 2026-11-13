@@ -59,14 +59,11 @@ func topTalkersHandler(dpEngine *engine.Engine) http.HandlerFunc {
 		}
 		n := 10
 		if q := r.URL.Query().Get("n"); q != "" {
-			if v, err := strconv.Atoi(q); err == nil && v > 0 {
-				n = v
+			if v, err := strconv.Atoi(q); err == nil {
+				n = max(1, min(1000, v))
 			}
 		}
 		list := dpEngine.TopTalkers(n)
-		if list == nil {
-			list = []stats.FlowStats{}
-		}
 		writeJSON(w, list)
 	}
 }

@@ -135,11 +135,13 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("top talkers status = %d", rec.Code)
 		}
-		var out []map[string]any
+		var out struct {
+			Rows []map[string]any `json:"rows"`
+		}
 		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 			t.Fatalf("decode top talkers: %v", err)
 		}
-		if out == nil {
+		if out.Rows == nil {
 			t.Fatal("expected [] JSON, not null")
 		}
 

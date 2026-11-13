@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
@@ -15,6 +16,7 @@ import (
 // same flow bypass full re-inspection. This is critical for NFQUEUE mode
 // where every packet is held in the kernel until userspace renders a verdict.
 type VerdictCache struct {
+	ledger   *limits.Ledger
 	detached bool
 	mu       sync.RWMutex
 	entries  map[string]*cachedVerdict
@@ -39,6 +41,7 @@ func NewVerdictCache(ttl time.Duration, maxSize int) *VerdictCache {
 	}
 	return &VerdictCache{
 		entries: make(map[string]*cachedVerdict, 256),
+		ledger:  limits.NewLedger(nil),
 		now:     time.Now,
 		ttl:     ttl,
 		maxSize: maxSize,
@@ -136,4 +139,10 @@ func (vc *VerdictCache) evictExpiredLocked() {
 			delete(vc.entries, k)
 		}
 	}
+}
+
+func (vc *VerdictCache) LimitOccupancy() limits.Occupancy {
+	vc.mu.RLock()
+	defer vc.mu.RUnlock()
+	return limits.Occupancy{Limit: int64(vc.maxSize), Entries: int64(len(vc.entries))}
 }

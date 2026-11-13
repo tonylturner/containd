@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // DiscoveredAsset represents one IP, protocol and role observation from ICS traffic.
@@ -36,17 +37,21 @@ type assetKey struct {
 // Inventory maintains bounded, thread-safe legacy assets and a separately
 // synchronized passive IEC 104 inventory. Construct it with New.
 type Inventory struct {
-	mu       sync.RWMutex
-	assets   *bounded[assetKey, *DiscoveredAsset]
-	overflow InventoryOverflow
-	iec104   iec104Store
+	stateLimits limits.Limits
+	resources   limits.Resources
+	mu          sync.RWMutex
+	assets      *bounded[assetKey, *DiscoveredAsset]
+	overflow    InventoryOverflow
+	iec104      iec104Store
 }
 
 // New creates a new empty Inventory.
 func New() *Inventory {
 	return &Inventory{
-		assets: newBounded[assetKey, *DiscoveredAsset](MaxAssets),
-		iec104: newIEC104Store(),
+		stateLimits: limits.Default(),
+		resources:   limits.NewResources(nil, nil),
+		assets:      newBounded[assetKey, *DiscoveredAsset](MaxAssets),
+		iec104:      newIEC104Store(),
 	}
 }
 

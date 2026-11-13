@@ -51,7 +51,7 @@ var monitoringOperations = []struct {
 }{
 	{"GET", "/flows", "", "engine flows unavailable", "[]", 200, false},
 	{"GET", "/stats/protocols", "", "engine protocol statistics unavailable", "[]", 200, false},
-	{"GET", "/stats/top-talkers", "", "engine top talkers unavailable", "[]", 200, false},
+	{"GET", "/stats/top-talkers", "", "engine top talkers unavailable", `{"semantics":"","limit":0,"retained":0,"evicted":0,"since":"0001-01-01T00:00:00Z","complete":false,"rows":[]}`, 200, false},
 	{"GET", "/anomalies", "", "engine anomalies unavailable", "[]", 200, false},
 	{"DELETE", "/anomalies", "", "engine anomalies unavailable", `{"status":"ok"}`, 200, true},
 	{"GET", "/signatures", "", "engine signatures unavailable", "[]", 200, false},
