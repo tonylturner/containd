@@ -3,6 +3,7 @@
 package enforce
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,8 +21,10 @@ func TestShadowWarnings(t *testing.T) {
 		// Shadowed:
 		{ID: "deny-http", SourceZones: []string{"it"}, Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "reset-https", SourceZones: []string{"dmz"}, Destinations: []string{"10.0.1.0/24"}, Protocols: tcp("443"), Action: rules.ActionReset},
-		{ID: "deny-modbus-write", Protocols: tcp("502"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{6}}, Action: rules.ActionDeny},
 		// Not shadowed:
+		// An omitted-selector denial covers unknown classes too; the earlier
+		// ordinary ICS ALLOW cannot claim unconditional coverage of it.
+		{ID: "deny-modbus-write", Protocols: tcp("502"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{6}}, Action: rules.ActionDeny},
 		{ID: "deny-any-zone", Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "deny-wider-net", SourceZones: []string{"it"}, Destinations: []string{"10.0.0.0/8"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "deny-wider-ports", SourceZones: []string{"it"}, Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("1-1024"), Action: rules.ActionDeny},
@@ -39,10 +42,77 @@ func TestShadowWarnings(t *testing.T) {
 			got = append(got, [2]string{w.RuleID, w.ShadowedBy})
 		}
 	}
-	want := [][2]string{{"deny-http", "allow-ot-web"}, {"deny-modbus-write", "allow-modbus"}, {"reset-https", "allow-ot-web"}}
+	want := [][2]string{{"deny-http", "allow-ot-web"}, {"reset-https", "allow-ot-web"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("shadowed = %v, want %v", got, want)
 	}
+}
+
+func TestDS34ShadowMessageClasses(t *testing.T) {
+	for _, protocol := range []string{"dnp3", "iec104"} {
+		for _, class := range []string{"autonomous", "session"} {
+			for _, inherited := range []bool{false, true} {
+				t.Run(protocol+"/"+class+fmt.Sprint("/inherited=", inherited), func(t *testing.T) {
+					mode := "enforce"
+					if inherited {
+						mode = ""
+					}
+					broad := rules.Entry{ID: "ordinary", Action: rules.ActionAllow,
+						ICS: rules.ICSPredicate{Protocol: protocol, Mode: mode}}
+					explicit := rules.Entry{ID: "explicit", Action: rules.ActionAllow,
+						ICS: rules.ICSPredicate{Protocol: protocol, Mode: mode, MessageClass: class}}
+					snap := &rules.Snapshot{DPIMode: "enforce", Firewall: []rules.Entry{broad, explicit}}
+					if w := shadowWarnings(snap); len(w) != 0 {
+						t.Fatalf("ordinary ALLOW shadows explicit class: %+v", w)
+					}
+					transport := broad
+					transport.ICS = rules.ICSPredicate{}
+					snap.Firewall = []rules.Entry{transport, explicit}
+					if w := shadowWarnings(snap); len(w) != 0 {
+						t.Fatalf("transport ALLOW shadows explicit class: %+v", w)
+					}
+					snap.Firewall = []rules.Entry{explicit, broad}
+					if unconditional(explicit) {
+						t.Fatal("explicit class is unconditional coverage")
+					}
+					if w := shadowWarnings(snap); len(w) != 0 {
+						t.Fatalf("explicit class shadows ordinary ALLOW: %+v", w)
+					}
+					for _, action := range []rules.Action{rules.ActionDeny, rules.ActionReset} {
+						broad.Action = action
+						snap.Firewall = []rules.Entry{broad, explicit}
+						if w := shadowWarnings(snap); len(w) != 1 || w[0].ShadowedBy != broad.ID {
+							t.Fatalf("%s must cover explicit class: %+v", action, w)
+						}
+					}
+				})
+			}
+		}
+	}
+	t.Run("ordinary-allows", func(t *testing.T) {
+		snap := &rules.Snapshot{DPIMode: "enforce", Firewall: []rules.Entry{
+			{ID: "broad", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3"}},
+			{ID: "read", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}}},
+		}}
+		if w := shadowWarnings(snap); len(w) != 1 {
+			t.Fatalf("ordinary ALLOW must cover ordinary ALLOW: %+v", w)
+		}
+		snap.Firewall[1].Action = rules.ActionDeny
+		if w := shadowWarnings(snap); len(w) != 0 {
+			t.Fatalf("ordinary ALLOW must not claim all-class denial coverage: %+v", w)
+		}
+	})
+	t.Run("plain-and-cip", func(t *testing.T) {
+		for _, protocol := range []string{"", "cip"} {
+			snap := &rules.Snapshot{Firewall: []rules.Entry{
+				{ID: "broad", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},
+				{ID: "denial", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},
+			}}
+			if w := shadowWarnings(snap); len(w) != 1 {
+				t.Fatalf("%q changed ordinary coverage: %+v", protocol, w)
+			}
+		}
+	})
 }
 
 func TestShadowUsesOnlyEarlierTerminals(t *testing.T) {

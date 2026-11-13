@@ -50,9 +50,35 @@ func covers(a, d rules.Entry) bool {
 	if p := a.ICS.Protocol; p != "" && !strings.EqualFold(p, d.ICS.Protocol) {
 		return false
 	}
+	if !messageClassesCover(a, d) {
+		return false
+	}
 	return zonesCover(a.ViaForwards, d.ViaForwards) && zonesCover(a.SourceZones, d.SourceZones) && zonesCover(a.DestZones, d.DestZones) &&
 		prefixesCover(a.Sources, d.Sources) && prefixesCover(a.Destinations, d.Destinations) &&
 		protocolsCover(a.Protocols, d.Protocols)
+}
+
+// Application ALLOWs with an omitted selector cover ordinary messages, not
+// autonomous traffic or session controls. DENY/RESET with no selector still
+// cover every class. Use the matcher vocabulary, including unknown, rather
+// than assuming that absence of a selector makes an ICS terminal universal.
+func messageClassesCover(a, d rules.Entry) bool {
+	// A transport ALLOW also cannot replace the explicit application rule
+	// needed for autonomous traffic or session controls.
+	if a.Action == rules.ActionAllow && a.ICS.MessageClass == "" && d.ICS.MessageClass != "" {
+		return false
+	}
+	for _, class := range []rules.MessageClass{
+		rules.ClassUnknown, rules.ClassRequest, rules.ClassSolicited,
+		rules.ClassAutonomous, rules.ClassSession,
+	} {
+		ctx := &rules.ICSContext{MessageClass: class}
+		if rules.MatchMessageClass(d.ICS, ctx, d.Action, false) &&
+			!rules.MatchMessageClass(a.ICS, ctx, a.Action, false) {
+			return false
+		}
+	}
+	return true
 }
 
 // zonesCover: an empty list matches every zone.
