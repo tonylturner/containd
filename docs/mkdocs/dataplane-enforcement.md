@@ -229,7 +229,7 @@ Each lowered state carries reasons with a code and a message:
 | --- | --- |
 | `no-inline-path` | `nfqueueGroup` is 0 (validation prevents this; a direct engine apply can still carry it). |
 | `enforcement-disabled` | `dataplane.enforcement` is false, so nothing steers traffic to the engine. |
-| `dpi-disabled` | The DPI master switch is off. IEC 104 envelopes are inspected regardless. |
+| `dpi-disabled` | The DPI master switch is off, so no ICS protocol is decoded. |
 | `decoder-disabled` | The rule's protocol decoder is off in `dpiIcsProtocols`. |
 | `queue-unavailable` | The engine does not hold the configured queue; the kernel drops the rule's traffic instead of inspecting it. |
 | `exclusion-overlap` | An IP or CIDR exclusion meets the rule's addresses (not IEC 104). |

@@ -72,10 +72,10 @@ func TestEvaluate(t *testing.T) {
 		{"every cause listed", modbusRule("r", ""), func(s *Settings) {
 			*s = Settings{DPIMode: "enforce", ICSProtocols: map[string]bool{"modbus": false}}
 		}, "enforce", NotEnforcing, []Code{EnforcementDisabled, NoInlinePath, DPIDisabled, DecoderDisabled}},
-		{"iec104 ignores exclusions and the DPI master switch", iec, func(s *Settings) {
+		{"iec104 reports disabled DPI and ignores exclusions", iec, func(s *Settings) {
 			s.DPIEnabled = false
 			s.Exclusions = []Exclusion{{Value: "10.1.0.4", Type: "ip"}, {Value: "*.example.com", Type: "domain"}}
-		}, "enforce", Enforcing, nil},
+		}, "enforce", NotEnforcing, []Code{DPIDisabled}},
 		{"iec104 decoder off", iec, func(s *Settings) { s.ICSProtocols = map[string]bool{"iec104": false} }, "enforce", NotEnforcing, []Code{DecoderDisabled}},
 		{"iec104 without queue", iec, func(s *Settings) { s.QueueID = 0 }, "enforce", NotEnforcing, []Code{NoInlinePath}},
 	}

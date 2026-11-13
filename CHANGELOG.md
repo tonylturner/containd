@@ -75,7 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - IEC 104 inspection now honors the DPI master switch, matching Modbus and
   DNP3: with DPI off, IEC 104 payloads no longer produce ICS decisions or
-  enforcement from decoded commands.
+  enforcement from decoded commands, and coverage reports `dpi-disabled` for
+  IEC 104 rules.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.
