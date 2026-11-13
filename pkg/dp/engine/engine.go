@@ -695,7 +695,15 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if pkt.Token.Inline() {
 		state.InlinePolicy.Store(inlinePolicy(pkt, e.ruleSnap.Load()))
 	}
-	e.bindTransport(state, connection)
+	retirements := e.bindTransport(state, connection)
+	// The capture callback already pins publication. Return losing-history
+	// drops through Resolved, never Settle (which could reacquire that fence
+	// behind a waiting writer). Protocol retirement preceded alias publication.
+	defer func() {
+		decision.Resolved = append(retirements.drops, decision.Resolved...)
+		retirements.drops = nil
+		e.sessions.finish(retirements)
+	}()
 	observeOnly := pkt.Token.Inline() && !e.enforcingPacketScope(pkt, state)
 	if pkt.Token.Inline() {
 		// Every inline success continues through current kernel admission.

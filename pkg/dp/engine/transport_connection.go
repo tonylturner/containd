@@ -236,13 +236,9 @@ func (e *Engine) newWireConnectionLocked(status string) *flow.Connection {
 	return c
 }
 
-func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
+func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) (retirements sessionActions) {
 	e.flowMu.Lock()
-	var retirements sessionActions
-	defer func() {
-		e.flowMu.Unlock()
-		e.sessions.apply(retirements)
-	}()
+	defer e.flowMu.Unlock()
 	old := state.Connection.Load()
 	if incoming == nil {
 		if old != nil {
@@ -307,6 +303,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			}
 		}
 	}
+	return retirements
 }
 
 func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) sessionActions {
