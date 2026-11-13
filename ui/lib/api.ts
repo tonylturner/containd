@@ -153,6 +153,7 @@ export type DPIExclusion = {
 };
 
 export type DataPlaneConfig = {
+  limits?: { maxFlows?: number; maxTopTalkers?: number; maxInspectionBytes?: number };
   captureInterfaces?: string[];
   enforcement?: boolean;
   enforceTable?: string;

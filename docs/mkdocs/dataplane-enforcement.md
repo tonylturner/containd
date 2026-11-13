@@ -119,9 +119,14 @@ IEC 104 enforce rules require DPI enabled, its decoder enabled, NFQUEUE capture,
 and no overlapping IP or CIDR DPI exclusion. Domain exclusions do not exempt the
 IEC 104 envelope. Inside the IEC inspection envelope unmatched,
 malformed, unsupported, or broadcast object traffic cannot be allowed by a broad
-TCP rule. Enforce-mode tracking exhaustion is fail closed; monitor-mode exhaustion
-accepts new connections without inspection. These are protocol-specific limits,
-not a universal fail-open/fail-closed guarantee. AV has separate failure settings;
+TCP rule. Engine userspace traffic-state exhaustion in an inline enforcing ICS scope
+fails closed only for the affected session. Flow admission refusal drops without
+a reset or session marker; inspection-allocation refusal drops current and held
+packets and resets that session. Monitor/passive/non-ICS traffic follows ordinary
+firewall policy with inspection loss, incomplete coverage and learner evidence
+withheld. Observational tables evict or suppress new identities without dropping
+traffic. See [traffic state limits](dataplane.md#traffic-state-limits) for fixed
+caps, headroom and the scope of the inspection-byte budget. AV has separate failure settings;
 see [Config Format](config-format.md). In an enforce envelope an IEC 104
 session starts only at a SYN of a handshake that the kernel's connection
 tracking has not seen complete. A SYN sent into an established connection
@@ -142,7 +147,8 @@ session and in an enforce envelope.
 With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
 closed when its stream cannot be inspected: a conflicting overlap, a
 retransmission that differs from or predates the bytes the engine kept,
-malformed framing, reassembly limits, a decoder fault, or a SYN with payload
+malformed framing, reassembly limits, retained inspection budget exhaustion
+(reason `state_limit`), a decoder fault, or a SYN with payload
 that does not start the connection's stream (reason `stream_resync`). The
 packet is dropped and only that session is reset, like an explicit ICS denial,
 without restarting inspection of its old bytes. A tuple tombstone keeps the
@@ -263,7 +269,8 @@ exclusions never lower a rule. Coverage appears in:
   [API Reference](api-reference.md)).
 
 Generic inline ICS streams in an enforce scope also fail closed on framing,
-reassembly and decoder faults, as described above. Outside an enforce scope,
+reassembly, decoder faults and retained inspection budget exhaustion
+(`state_limit`), as described above. Outside an enforce scope,
 a parse failure alone does not block delivery. Strict parsing can additionally
 deny decoded messages with conformance or undecoded findings; see
 [ICS DPI](ics-dpi.md).

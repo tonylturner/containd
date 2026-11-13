@@ -2248,8 +2248,73 @@ components:
     DPIExclusion:
       properties: {reason: {type: string}, type: {type: string}, value: {type: string}}
       type: object
+    StateLimits:
+      type: object
+      required: [tables, budget]
+      properties:
+        tables:
+          type: array
+          items:
+            type: object
+            required: [table, limit, entries, chargedBytes, highWater, pressure, hits]
+            properties:
+              table:
+                type: string
+                enum: [flows, inspection_bytes, top_talkers, rate_trackers, iec_sessions, iec_reconnect_history, inventory_points, signature_windows, conformance_connections, verdict_cache, pickup_reset, http_correlation]
+              limit: {type: integer, format: int64, description: 'Capacity in table units; zero means no aggregate count cap, not unlimited inspection bytes.'}
+              entries: {type: integer, format: int64, description: 'Retained entries; flows reports reserved directional slots.'}
+              chargedBytes: {type: integer, format: int64, description: Retained inspection allocation charges only; not total engine memory.}
+              highWater: {type: integer, format: int64, description: Generation high water in table units (bytes for inspection_bytes).}
+              pressure: {type: boolean, description: A hit in the last 60 seconds.}
+              hits:
+                type: array
+                description: Nonzero process-lifetime totals; survive dataplane rebuilds.
+                items:
+                  type: object
+                  required: [reason, mode, total]
+                  properties:
+                    reason: {type: string, enum: [refused, evicted, truncated]}
+                    mode: {type: string, enum: [enforce, monitor, observe]}
+                    total: {type: integer, format: uint64}
+        budget:
+          type: object
+          required: [limit, inUse, highWater, byCategory]
+          description: Concurrent best-effort sample; category counters need not sum to inUse during traffic.
+          properties:
+            limit: {type: integer, format: int64}
+            inUse: {type: integer, format: int64}
+            highWater: {type: integer, format: int64}
+            byCategory:
+              type: object
+              additionalProperties: false
+              properties:
+                stream: {type: integer, format: int64}
+                decoder: {type: integer, format: int64}
+                held: {type: integer, format: int64}
+                pairing: {type: integer, format: int64}
+    DataPlaneLimits:
+      type: object
+      description: Omitted or zero fields select defaults without rewriting stored configuration. No unlimited setting. Applying changed effective values rebuilds traffic state.
+      properties:
+        maxFlows:
+          type: integer
+          default: 16384
+          anyOf: [{enum: [0]}, {minimum: 1024, maximum: 262144}]
+          description: Directional slots; each connection reserves two (maxFlows/2 connections).
+        maxTopTalkers:
+          type: integer
+          default: 8192
+          anyOf: [{enum: [0]}, {minimum: 64, maximum: 262144}]
+          description: Recently active directional host-pair rows; least recently active rows are evicted.
+        maxInspectionBytes:
+          type: integer
+          format: int64
+          default: 67108864
+          anyOf: [{enum: [0]}, {minimum: 8388608, maximum: 1073741824}]
+          description: Retained inspection allocation budget only; not total engine memory.
     DataPlaneConfig:
       properties:
+        limits: {$ref: '#/components/schemas/DataPlaneLimits'}
         captureInterfaces: {items: {type: string}, type: array}
         dpiEnabled: {type: boolean}
         dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
@@ -4067,6 +4132,22 @@ components:
       schema: {type: string}
 
 paths:
+  /diagnostics/state-limits:
+    get:
+      tags: [Diagnostics]
+      summary: Read current traffic-state occupancy, limits and pressure
+      description: Available to authenticated readers. Engine unavailability is HTTP 503, never zero pressure. Occupancy and byte high water reset on a dataplane rebuild; hit totals last for the engine process lifetime.
+      responses:
+        "200":
+          description: Current generation occupancy and process-lifetime hits
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StateLimits'}
+        "503":
+          description: Engine diagnostics unavailable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /diagnostics/iec104:
     get:
       tags: [Diagnostics]
@@ -6439,7 +6520,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200":
-          description: Top talkers
+          description: Top recently active host pairs; history is incomplete when complete is false.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TopTalkers'}
@@ -8839,6 +8920,17 @@ paths:
 
 # Trusted engine operations, on the engine listener only; not public API paths.
 x-internal-paths:
+  /internal/diagnostics/state-limits:
+    get:
+      tags: [Diagnostics]
+      summary: Read engine traffic-state limits and occupancy
+      description: Trusted engine listener only; not public authentication. Samples the current generation and process ledger.
+      responses:
+        "200":
+          description: Current generation occupancy and process-lifetime hits
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StateLimits'}
   /internal/pcap/analyze:
     post:
       summary: Import a PCAP into the engine evidence authority (admin)

@@ -641,10 +641,16 @@ Undecoded codes are `dnp3.link_payload`, `dnp3.transport_incomplete`,
 `dnp3.object_limit`, `dnp3.object_qualifier`, `dnp3.object_truncated` and
 `dnp3.object_unsupported`. Inspection bounds are 64 KiB application bytes,
 1024 link segments per fragment, 1024 application fragments per response,
-4096 station contexts, 16 MiB retained storage (including payload, duplicate
-bytes, provenance and context charges), 1024 object headers per fragment and
+4096 station contexts, retained storage of `min(16 MiB, maxInspectionBytes/4)`
+per decoder instance (including payload, duplicate bytes, provenance and context
+charges), 1024 object headers per fragment and
 8192 point records total. Incomplete transport/application assemblies expire
-after 30 seconds idle or 60 seconds absolute.
+after 30 seconds idle or 60 seconds absolute. The local retained-storage
+sublimit reports `dnp3.assembly_budget`; it shares the global
+`dataplane.limits.maxInspectionBytes` budget. A global reservation refusal
+terminates inspection of that stream: enforcing inline ICS scope fails closed
+with `state_limit`, while monitor/passive traffic follows ordinary firewall
+policy with incomplete coverage and affected learner evidence withheld.
 
 IEC 104 events carry `direction` (`request` from the client, `response` from
 the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
@@ -1293,10 +1299,10 @@ and [CLI](cli.md#learner-evidence) for the replacement requests and commands.
 
 IEC 104 tracking shares a **4,096-entry session table** across monitor and enforce
 envelopes, including retained closed sessions and abort tombstones. At capacity,
-new monitor-mode connections are accepted **without stream inspection**. Each
-untracked SYN emits `ics.session` with `outcome: untracked`, `mode: monitor`,
-`reason: bound`, and `limit: 4096`, on the client/server tuple without a session
-or APDU ID. Midstream traffic stays untracked; existing sessions remain inspected.
+new monitor-mode connections are accepted **without stream inspection**. Pressure is counted as
+`iec_sessions/refused/monitor` and emits the coalesced `dataplane.state_limit`
+pressure-entry event (`table: iec_sessions`, `reason: refused`, `mode: monitor`,
+`limit: 4096`), not a per-SYN `ics.session` event. Midstream traffic stays untracked; existing sessions remain inspected.
 New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
 at capacity.
 

@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { api, fetchDataPlane, type Interface, type InterfaceState } from "../../lib/api";
+import { StateLimitsPanel } from "./state-limits";
 import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
 import { formatEndpoint } from "../../lib/endpoint";
@@ -205,6 +206,7 @@ export default function DiagnosticsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        <div className="lg:col-span-2"><StateLimitsPanel /></div>
         <div className="lg:col-span-2"><IECPressurePanel /></div>
         <Card title="Ping" padding="lg">
           <div className="grid gap-3 md:grid-cols-3">

@@ -12,6 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 func showVersion(ctx context.Context, out io.Writer, args []string) error {
@@ -127,10 +128,13 @@ func showDataPlane(api *API) Command {
 			return err
 		}
 		kvTable(out, map[string]string{
-			"captureInterfaces": joinCSV(dp.CaptureInterfaces),
-			"enforcement":       yesNoStr(dp.Enforcement),
-			"enforceTable":      firstNonEmpty(dp.EnforceTable, "containd"),
-			"dpiMock":           yesNoStr(dp.DPIMock),
+			"captureInterfaces":         joinCSV(dp.CaptureInterfaces),
+			"enforcement":               yesNoStr(dp.Enforcement),
+			"enforceTable":              firstNonEmpty(dp.EnforceTable, "containd"),
+			"dpiMock":                   yesNoStr(dp.DPIMock),
+			"limits.maxFlows":           fmt.Sprintf("%d effective (default %d; stored %d)", dp.Limits.Effective().MaxFlows, limits.DefaultMaxFlows, dp.Limits.MaxFlows),
+			"limits.maxTopTalkers":      fmt.Sprintf("%d effective (default %d; stored %d)", dp.Limits.Effective().MaxTopTalkers, limits.DefaultMaxTopTalkers, dp.Limits.MaxTopTalkers),
+			"limits.maxInspectionBytes": fmt.Sprintf("%d effective (default %d; stored %d)", dp.Limits.Effective().MaxInspectionBytes, limits.DefaultMaxInspectionBytes, dp.Limits.MaxInspectionBytes),
 		})
 		return nil
 	}

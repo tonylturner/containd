@@ -9,6 +9,7 @@ import { revisionError } from "../../lib/config-revision";
 
 import { ICSModeSelect } from "../ics/ics-mode-select";
 import { ICSInlinePrerequisite } from "../ics/ics-inline-prerequisite";
+import { StateLimitsSettings } from "./firewall-state-limits";
 import { InlineInspectionSetup } from "./firewall-inline-inspection";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { Card } from "../../components/Card";
@@ -68,7 +69,8 @@ export function DPIConfigSection({
     Object.entries(protos).some(([key, value]) => value !== true || !IT_PROTOCOLS.some(p => p.key === key)) ||
     Object.values(icsProtos).some(value => value !== true) || unsupportedICSKeys.length > 0 ||
     Object.entries(cfg.dpiIcsParsing ?? {}).some(([key, value]) => value !== "tolerant" || !ICS_DPI_PROTOCOLS.some(p => p.key === key)) || exclusions.length > 0 ||
-    !!cfg.nfqueueGroup || !!cfg.nflogGroup;
+    !!cfg.nfqueueGroup || !!cfg.nflogGroup ||
+    Object.values(cfg.limits ?? {}).some(value => value !== 0);
   const [disclosure, setDisclosure] = useState<{ revision: string; open: boolean } | null>(null);
   const expanded = disclosure?.revision === revision ? disclosure.open : nonDefault;
   useEffect(() => {
@@ -226,6 +228,9 @@ export function DPIConfigSection({
               </p>
               {needsInline && !cfg.nfqueueGroup && dpiMode !== "enforce" && <ICSInlinePrerequisite configured={available ? false : undefined} />}
             </div>
+
+            <StateLimitsSettings config={cfg} revision={revision} available={available} canEdit={canEdit}
+              onSave={(base, config) => save(() => config, base)} />
 
             {canEdit && <InlineInspectionSetup config={cfg} revision={revision} available={available}
               onSave={(base, config) => save(() => config, base)} />}
