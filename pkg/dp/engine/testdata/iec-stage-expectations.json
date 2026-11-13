@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "outcomes": [
+    {
+      "id": "lib60870-case-002",
+      "outcome": "accept"
+    },
+    {
+      "id": "lib60870-startdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "lib60870-stopdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "lib60870-testfr",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-004",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-005",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-078",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-095",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-startdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-stopdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-testfr",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-004",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-010",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-016",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-022",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-028",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-034",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-038",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-042",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-048",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-054",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-060",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-066",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-072",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-076",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-078",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-121",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-124",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-125",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-128",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-startdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-stopdt",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-testfr",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-startup-autonomous",
+      "outcome": "accept"
+    }
+  ],
+  "pending": [
+    {
+      "decision": "reset-process-105",
+      "ids": []
+    },
+    {
+      "decision": "group-gi-qoi-21-36",
+      "ids": [
+        "j60870-case-079",
+        "j60870-case-080",
+        "j60870-case-081",
+        "j60870-case-082",
+        "j60870-case-083",
+        "j60870-case-084",
+        "j60870-case-085",
+        "j60870-case-086",
+        "j60870-case-087",
+        "j60870-case-088",
+        "j60870-case-089",
+        "j60870-case-090",
+        "j60870-case-091",
+        "j60870-case-092",
+        "j60870-case-093",
+        "j60870-case-094"
+      ]
+    },
+    {
+      "decision": "counter-interrogation-101",
+      "ids": [
+        "c104-case-100",
+        "c104-case-101",
+        "c104-case-102",
+        "c104-case-103",
+        "c104-case-104",
+        "c104-case-105",
+        "c104-case-106",
+        "c104-case-107",
+        "c104-case-108",
+        "c104-case-109",
+        "c104-case-110",
+        "c104-case-111",
+        "c104-case-112",
+        "c104-case-113",
+        "c104-case-114",
+        "c104-case-115"
+      ]
+    },
+    {
+      "decision": "c104-stage-variants",
+      "ids": [
+        "c104-case-005",
+        "c104-case-011",
+        "c104-case-017",
+        "c104-case-023",
+        "c104-case-029",
+        "c104-case-035",
+        "c104-case-043",
+        "c104-case-049",
+        "c104-case-055",
+        "c104-case-061",
+        "c104-case-067",
+        "c104-case-073",
+        "c104-case-116",
+        "c104-case-117",
+        "c104-case-118"
+      ]
+    }
+  ]
+}
