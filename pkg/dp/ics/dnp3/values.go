@@ -6,8 +6,9 @@ import "encoding/binary"
 // Point is evidence, not a generic policy address. Index is absent for count-
 // only, all-object and virtual-address qualifiers: absence never means point zero.
 type Point struct {
-	Index *uint32 `json:"index,omitempty"`
-	CROB  *CROB   `json:"crob,omitempty"`
+	Value *ObjectValue `json:"-"`
+	Index *uint32      `json:"index,omitempty"`
+	CROB  *CROB        `json:"crob,omitempty"`
 }
 
 // CROB preserves every encoded value of group 12 variation 1.
@@ -74,6 +75,14 @@ func attachPoints(oh *ObjectHeader, b []byte, fc byte) {
 		}
 		if key == 0x0c01 && !headerOnlyFunction(fc) {
 			p.CROB = crobValue(b[pos : pos+11])
+		}
+		if !headerOnlyFunction(fc) {
+			if bits := packedObjectBits[key]; bits != 0 {
+				bit := int(i) * bits
+				p.Value = &ObjectValue{Bits: uint64(b[bit/8]>>uint(bit%8)) & ((1 << bits) - 1)}
+			} else {
+				p.Value = objectValue(key, b[pos:pos+size])
+			}
 		}
 		oh.Points = append(oh.Points, p)
 		pos += size

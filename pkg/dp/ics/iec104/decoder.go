@@ -106,11 +106,17 @@ func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamRe
 			res.NeedMore = true
 			break
 		}
-		res.Frames = append(res.Frames, dpi.DecodedFrame{
+		decoded := dpi.DecodedFrame{
 			Start:  start,
 			End:    start + int64(n),
 			Events: dc.apduEvents(start, v.Bytes[pos:pos+n]),
-		})
+			Unit:   decodeUnit(v.Bytes[pos:pos+n], dc.direction),
+		}
+		if err := dpi.ValidateDecodedFrame(decoded); err != nil {
+			res.Consumed = pos
+			return res, &dpi.FrameError{Offset: decoded.Start, Reason: err.Error(), Event: dc.unframeableEvent(decoded.Start, v.Bytes[pos:pos+n], err)}
+		}
+		res.Frames = append(res.Frames, decoded)
 		pos += n
 	}
 	res.Consumed = pos

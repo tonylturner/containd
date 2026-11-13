@@ -24,6 +24,12 @@ var validKinds = map[string]bool{
 func checkEvents(t *testing.T, res dpi.StreamResult) {
 	t.Helper()
 	for _, f := range res.Frames {
+		if err := dpi.ValidateDecodedFrame(f); err != nil {
+			t.Fatal(err)
+		}
+		if unit, ok := f.Unit.(*Unit); !ok || unit == nil || f.Pending {
+			t.Fatal("APDU without typed unit")
+		}
 		if len(f.Events) == 0 || len(f.Events) > 127 {
 			t.Fatalf("APDU [%d,%d) has %d events", f.Start, f.End, len(f.Events))
 		}
