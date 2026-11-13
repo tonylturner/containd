@@ -23,6 +23,9 @@ func ValidateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Mode != "" && p.Mode != "monitor" && p.Mode != "enforce" {
 		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
 	}
+	if err := validateMessageClass(p, ruleID); err != nil {
+		return err
+	}
 	if p.Protocol == "" {
 		if p.Mode != "" {
 			return fmt.Errorf("rule %s ics.mode requires ics.protocol", ruleID)

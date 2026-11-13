@@ -38,6 +38,7 @@ type EvalContext struct {
 
 // ICSContext represents decoded ICS metadata for rule evaluation.
 type ICSContext struct {
+	MessageClass    MessageClass
 	Protocol        string
 	FunctionCode    uint8
 	HasFunctionCode bool // true only when decoded, including FC 0
@@ -370,7 +371,7 @@ func contains(list []string, v string) bool {
 
 // Mode is operational metadata and deliberately does not narrow packets.
 func icsPredicateEmpty(p ICSPredicate) bool {
-	return p.Protocol == "" &&
+	return p.MessageClass == "" && p.Protocol == "" &&
 		len(p.FunctionCode) == 0 &&
 		p.UnitID == nil &&
 		len(p.Addresses) == 0 &&

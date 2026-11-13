@@ -12,6 +12,7 @@ func TestICSPredicateFieldCoverage(t *testing.T) {
 		pred       ICSPredicate
 		iecInvalid bool
 	}{
+		"MessageClass":      {ICSPredicate{MessageClass: "autonomous"}, false},
 		"Protocol":          {ICSPredicate{Protocol: ProtocolIEC104}, false},
 		"FunctionCode":      {ICSPredicate{FunctionCode: []uint8{0}}, true},
 		"UnitID":            {ICSPredicate{UnitID: u8(0)}, true},
