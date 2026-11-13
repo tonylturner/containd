@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -34,10 +35,11 @@ const (
 // carried out after the session lock is released; drops of held tokens are
 // already in decision.Resolved.
 type iecResult struct {
-	decision capture.Decision
-	inspect  []dpi.Event  // decoder events, recorded like any DPI events
-	findings []iecFinding // judged events with conformance findings
-	acts     iecActions
+	decision   capture.Decision
+	inspect    []dpi.Event  // decoder events, recorded like any DPI events
+	findings   []iecFinding // judged events with conformance findings
+	acts       iecActions
+	stateLimit bool
 }
 
 func accepted(reason string) iecResult {
@@ -104,6 +106,9 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 		return capture.Decision{}, false
 	}
 	e.recordPacketStats(pkt, state)
+	if res.stateLimit {
+		e.recordLearnPacketLoss(pkt)
+	}
 	parsed := dpi.ParsedPacket{Payload: pkt.Payload, Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 	if len(res.inspect) > 0 {
 		e.RecordDPIEvents(state, &parsed, res.inspect)
@@ -259,18 +264,14 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
 	// The bound counts tuple keys; a retained tuple reuses its existing key.
 	if prev == nil && len(t.sessions) >= iecMaxSessions {
+		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.Mode(mode))
 		if mode == "enforce" {
 			t.countAbort(abortBound)
 			return dropped(reasonIECFailClose)
 		}
-		// Monitor is fail open when observation capacity is exhausted. Do not
-		// allocate an incarnation or byte stream for this tuple.
-		res := accepted(reasonIECUntracked)
-		event := untrackedEvent(client, server, now)
-		key := state.ServiceKey()
-		event.service = &key
-		res.acts.events = append(res.acts.events, event)
-		return res
+		// Observation loss continues under ordinary policy, without an
+		// incarnation or byte stream. Housekeeping coalesces the limit event.
+		return accepted(reasonIECUntracked)
 	}
 	if len(pkt.Payload) > 0 {
 		return invalidIEC(mode) // SYN with data cannot open a tracked session.
@@ -300,6 +301,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 // tombstone then drops its later packets.
 func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, state *flow.State, now time.Time) iecResult {
 	if len(t.sessions) >= iecMaxSessions {
+		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.ModeEnforce)
 		// Unobserved enforce traffic must not bypass the shared table bound.
 		t.countAbort(abortBound)
 		return dropped(reasonIECFailClose)
@@ -650,9 +652,15 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 			reason := abortDeny
 			if failed && !denied {
 				reason = abortFraming
+				if res.stateLimit {
+					reason = abortBound
+				}
 			}
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
-			r.inspect, r.findings = res.inspect, res.findings
+			r.inspect, r.findings, r.stateLimit = res.inspect, res.findings, res.stateLimit
+			if r.stateLimit {
+				r.decision.Reason = "state_limit"
+			}
 			res.acts.merge(r.acts)
 			r.acts = res.acts
 			return r
@@ -675,7 +683,14 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 		Payload:   fresh, Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 		TCPSeq: d.seq.Seq(start), TCPSeqValid: true,
 		Offset: start, HasOffset: true, Session: s.id, Dir: dpiDir(dir),
+		FailClosed: s.mode == "enforce",
 	})
+	var limitErr *dpi.StreamError
+	if errors.As(ir.Err, &limitErr) && limitErr.Kind == dpi.StreamStateLimit {
+		res.stateLimit = true
+		t.stopParseLocked(s)
+		return false, "", true
+	}
 	res.inspect = append(res.inspect, ir.Events...)
 	if !ir.Framed {
 		if s.mode == "enforce" {

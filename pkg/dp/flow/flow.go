@@ -110,6 +110,9 @@ type State struct {
 	// CaptureHook is receive-time provenance retained in learner snapshots,
 	// not inferred from correlation success or the current configuration.
 	CaptureHook string `json:"-"`
+	// InspectionRefused is terminal for this flow incarnation. The engine
+	// guards it with its flow lock, including detached replay.
+	InspectionRefused bool `json:"-"`
 }
 
 func NewState(key Key, now time.Time) *State {

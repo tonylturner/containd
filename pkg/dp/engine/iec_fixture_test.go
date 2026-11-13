@@ -160,6 +160,7 @@ func newIECHarnessWithDPI(t *testing.T, mode string, dpiEnabled bool) *iecHarnes
 		t.Fatal(err)
 	}
 	e.dpiMgr = dpi.NewManager(stubIEC{})
+	e.dpiMgr.SetResources(e.inspectionResources())
 	e.iec.dpi = e.dpiMgr
 	e.iec.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
 	e.iec.settler = func() capture.Settler { return h.settler }

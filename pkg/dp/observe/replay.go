@@ -3,6 +3,7 @@
 package observe
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -27,6 +28,9 @@ func (o *Observer) replay(key identify.Key, c *connection, r identify.Replay) []
 				return out
 			}
 			out = append(out, o.decode(key, c, c.stamps[i], r.Bytes[dg.Direction][dg.Range.Start:dg.Range.End]))
+			if c.binding != Observation {
+				return out
+			}
 		}
 		return out
 	}
@@ -44,6 +48,9 @@ func (o *Observer) replay(key identify.Key, c *connection, r identify.Replay) []
 			part := s
 			part.seq = seg.Sequence + uint32(lo)
 			out = append(out, o.decode(key, c, part, seg.Bytes[lo:hi]))
+			if c.binding != Observation {
+				return out
+			}
 		}
 	}
 	return out
@@ -66,6 +73,13 @@ func (o *Observer) decode(key identify.Key, c *connection, s stamp, data []byte)
 	}
 	result := o.opts.Manager.InspectProtocolAt(string(c.protocol), s.state, pkt, o.opts.Now())
 	batch.Events, batch.Err = result.Events, result.Err
+	var se *dpi.StreamError
+	if errors.As(result.Err, &se) && se.Kind == dpi.StreamStateLimit {
+		c.coverage = identify.Truncated
+		o.endBinding(c)
+		batch.Events = nil
+		return batch
+	}
 	for i := range batch.Events {
 		ev := &batch.Events[i]
 		if ev.Attributes == nil {

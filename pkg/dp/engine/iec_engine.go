@@ -32,6 +32,7 @@ func (e *Engine) initIEC(cfg Config) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
 	t = newIECTable(cfg.DPIMode, &e.zones)
+	t.ledger = e.ledger
 	t.detached = e.detached
 	if e.ledger != nil {
 		t.pickups.ledger = e.ledger

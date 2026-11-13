@@ -117,12 +117,37 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 	noteCorrelationInspection(state, pkt, correlationAdmitted)
 	scope := e.failClosedRule(pkt, state, &parsed)
 	parsed.FailClosed = scope != nil
+	e.flowMu.Lock()
+	refused := state.InspectionRefused
+	e.flowMu.Unlock()
+	if refused {
+		noteCorrelationInspection(state, pkt, false)
+		if scope != nil {
+			cause := &dpi.StreamError{Kind: dpi.StreamStateLimit}
+			return e.failClosed(pkt, state, &parsed, scope, "state_limit", "", cause)
+		}
+		return acceptDecision
+	}
 	res, panicErr := e.inspectFlow(state, &parsed)
 	if panicErr != nil {
 		e.dpiMgr.FailStream(state, &parsed, dpi.StreamDecoderPanic)
 		return e.failClosed(pkt, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
 	var streamErr *dpi.StreamError
+	if errors.As(res.Err, &streamErr) && streamErr.Kind == dpi.StreamStateLimit {
+		if scope != nil {
+			return e.failClosed(pkt, state, &parsed, scope, "state_limit", res.Proto, res.Err)
+		}
+		e.flowMu.Lock()
+		first := !state.InspectionRefused
+		state.InspectionRefused = true
+		e.flowMu.Unlock()
+		if first {
+			e.recordLearnPacketLoss(pkt)
+		}
+		noteCorrelationInspection(state, pkt, false)
+		return acceptDecision
+	}
 	if scope != nil && errors.As(res.Err, &streamErr) && streamErr.Kind == dpi.StreamNonAdmit {
 		return nonAdmitDecision(pkt)
 	}

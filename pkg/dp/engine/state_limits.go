@@ -9,6 +9,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
+func (e *Engine) inspectionResources() limits.Resources {
+	return limits.NewResources(e.budget, e.ledger)
+}
+
 // initStateLimits is shared by live and detached constructors. Operator bounds
 // belong to configuration validation, not to internal test/offline injection.
 func (e *Engine) initStateLimits(l limits.Limits, ledger *limits.Ledger) error {

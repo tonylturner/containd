@@ -92,6 +92,7 @@ func NewDetached(cfg DetachedConfig) (*Detached, error) {
 	e.sigEngine.LoadBuiltins()
 	e.counters.tracker.Store(e.stats)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.dpiMgr.SetResources(e.inspectionResources())
 	e.initIEC(Config{DPIMode: "monitor"})
 	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return errDetachedAuthority }
 	runID := newRunID()

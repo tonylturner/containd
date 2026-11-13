@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -133,6 +134,7 @@ func newIECDir(isn uint32) *iecDir {
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
+	ledger        *limits.Ledger
 	detached      bool
 	mu            sync.Mutex
 	zones         *zoneCache // the engine's
@@ -182,6 +184,7 @@ type iecTable struct {
 // newIECTable returns a table that resolves zones through zones.
 func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 	return &iecTable{
+		ledger:     limits.NewLedger(nil),
 		zones:      zones,
 		now:        time.Now,
 		newPolicy:  newRulesPolicy,

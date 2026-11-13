@@ -276,6 +276,7 @@ func New(cfg Config) (*Engine, error) {
 	e.eventStore = store.Writer("")
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.dpiMgr.SetResources(e.inspectionResources())
 	e.initIEC(cfg)
 	if err := e.newRun(); err != nil {
 		e.Close()
@@ -309,7 +310,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	if e.transport != nil {
-		observation, err := newLiveObserver(cfg)
+		observation, err := newLiveObserver(cfg, e.inspectionResources())
 		if err != nil {
 			return nil, err
 		}
