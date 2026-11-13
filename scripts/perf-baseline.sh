@@ -13,7 +13,8 @@ usage() {
 Usage: bash scripts/perf-baseline.sh [--bench-time 100x] [--profile] [--out-dir DIR]
 
 Runs the current dataplane performance baseline:
-  - pkg/dp/engine benchmarks
+  - pkg/dp/engine benchmarks, including state churn at 2x/10x/100x flow capacity
+    (BenchmarkStateChurn reports post-GC retained heap bytes)
   - pkg/dp/dpi benchmarks
   - pkg/dp/itdpi benchmarks
 

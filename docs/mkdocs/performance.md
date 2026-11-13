@@ -9,6 +9,7 @@ throughput or latency under live traffic.
 The baseline covers:
 
 - the engine packet path in `pkg/dp/engine`
+- bounded engine state churn at 2×, 10× and 100× offered flow-slot cardinality
 - TCP reassembly in `pkg/dp/dpi`
 - representative IT-DPI decoders in `pkg/dp/itdpi`
   - DNS
@@ -19,6 +20,7 @@ The benchmark entry points live in:
 
 - `pkg/dp/dpi/reassembly_bench_test.go`
 - `pkg/dp/engine/bench_test.go`
+- `pkg/dp/engine/state_churn_bench_test.go`
 - `pkg/dp/engine/packet_accounting_bench_test.go`
 - `pkg/dp/engine/stream_fail_closed_test.go`
 - `pkg/dp/engine/transport_bench_test.go`
@@ -36,6 +38,18 @@ This runs:
 
 ```bash
 go test ./pkg/dp/engine ./pkg/dp/dpi ./pkg/dp/itdpi -run=^$ -bench=. -benchmem -benchtime=100x
+```
+
+`BenchmarkStateChurn` reports `postGC-heap-B`: process-wide `HeapAlloc` after
+forced garbage collection with the populated engine still live. Compare the
+plateau across offered cardinalities on the same host and toolchain; this is
+not an inspection-byte charge or a whole-process memory bound. Each iteration
+advances an injected clock beyond flow expiry before offering another wave.
+
+For a focused short run:
+
+```bash
+go test ./pkg/dp/engine -run=^$ -bench=^BenchmarkStateChurn -benchtime=3x -benchmem
 ```
 
 ## Capture Profiles
