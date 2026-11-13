@@ -381,8 +381,8 @@ func TestOpenAfterMidStreamPickup(t *testing.T) {
 	wantFrames(t, "first frame of the next connection", mgr.Inspect(st, failClosedSeg(7000, 0x00)), frameRange{0, 1})
 }
 
-// FailStream with StreamMidStream fails a live stream, and creates a
-// failed one for a direction without a stream, until a handshake SYN.
+// FailStream with StreamMidStream fails an admitted stream, including an
+// empty direction, until a handshake SYN.
 func TestFailStreamMidStream(t *testing.T) {
 	mgr, _, st := framedFixture()
 	mgr.Inspect(st, synSeg(100, true))
@@ -392,6 +392,7 @@ func TestFailStreamMidStream(t *testing.T) {
 	wantFrames(t, "after the handshake", mgr.Inspect(st, failClosedSeg(900, 0x00)), frameRange{0, 1})
 
 	mgr, _, st = framedFixture()
+	mgr.Inspect(st, failClosedSeg(100))
 	mgr.FailStream(st, failClosedSeg(100), StreamMidStream)
 	if res := mgr.Inspect(st, &ParsedPacket{Proto: "tcp", FailClosed: true}); !midStream(res.Err) || !res.Failed {
 		t.Fatalf("segment without payload Err=%v Failed=%v, want the mid-stream failure", res.Err, res.Failed)
@@ -423,8 +424,9 @@ func TestFailStreamKeepsStreamFailed(t *testing.T) {
 	mgr.Inspect(st, synSeg(105, true))
 	wantFrames(t, "after the flow's end", mgr.Inspect(st, failClosedSeg(105, 0x00)), frameRange{0, 1})
 
-	// The panic may come before the stream holds anything.
+	// The panic may come after admission but before the stream holds bytes.
 	mgr, _, st = framedFixture()
+	mgr.Inspect(st, failClosedSeg(100))
 	mgr.FailStream(st, failClosedSeg(100), StreamDecoderPanic)
 	if res := mgr.Inspect(st, failClosedSeg(100, 0x00)); !errors.As(res.Err, &se) || se.Kind != StreamDecoderPanic {
 		t.Fatalf("FailStream without a stream: Err = %v", res.Err)

@@ -63,10 +63,14 @@ func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamRe
 			break
 		}
 		raw := v.Bytes[pos : pos+n]
+		events, assemblyErr := d.assemble(state, v, decodeLinkFrame(raw), raw, LinkRange{v.Base + int64(pos), v.Base + int64(pos+n)}, now)
+		if assemblyErr != nil {
+			return dpi.StreamResult{}, assemblyErr
+		}
 		res.Frames = append(res.Frames, dpi.DecodedFrame{
 			Start:  v.Base + int64(pos),
 			End:    v.Base + int64(pos+n),
-			Events: d.assemble(state, v, decodeLinkFrame(raw), raw, LinkRange{v.Base + int64(pos), v.Base + int64(pos+n)}, now),
+			Events: events,
 		})
 		pos += n
 	}
@@ -82,7 +86,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if pkt == nil || len(pkt.Payload) == 0 {
 		return nil, nil
 	}
-	res, err := d.ParseStream(state, dpi.StreamView{Session: flowID(state), Base: pkt.Offset, Bytes: pkt.Payload})
+	res, err := d.ParseStream(state, dpi.StreamView{Session: flowID(state), Base: pkt.Offset, Bytes: pkt.Payload, Enforcing: pkt.FailClosed})
 	var events []dpi.Event
 	for _, f := range res.Frames {
 		events = append(events, f.Events...)
@@ -91,7 +95,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if errors.As(err, &fe) {
 		return append(events, fe.Event), fe
 	}
-	return events, nil
+	return events, err
 }
 
 func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {

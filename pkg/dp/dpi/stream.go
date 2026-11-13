@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // StreamDir is the direction of one TCP byte stream within a session.
@@ -35,6 +36,9 @@ type StreamView struct {
 	// Role is transport authority, independent of Dir and stream identity.
 	// DirUnknown means that the connection initiator is not known.
 	Role StreamDir
+	// Enforcing is the effective scope of the session that owns allocations.
+	// An owner captures it at admission; retained storage never changes class.
+	Enforcing bool
 }
 
 // DecodedFrame is one complete frame at absolute range [Start,End).
@@ -119,6 +123,8 @@ const (
 	// its packet. Retries must retain the non-admitting continuation,
 	// rather than passing as already-inspected duplicate bytes.
 	StreamNonAdmit
+	// StreamStateLimit is a refused retained inspection allocation.
+	StreamStateLimit
 )
 
 func (k StreamErrKind) String() string {
@@ -141,6 +147,8 @@ func (k StreamErrKind) String() string {
 		return "denied"
 	case StreamNonAdmit:
 		return "non_admit"
+	case StreamStateLimit:
+		return "state_limit"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}
@@ -151,6 +159,17 @@ type StreamError struct {
 	Kind   StreamErrKind
 	Offset int64
 	Proto  string
+}
+
+// StateLimitError records a single allocation-refusal transition. Callers keep
+// the returned failure in already-admitted metadata until the stream ends.
+func StateLimitError(r limits.Resources, enforcing bool, proto string, offset int64) *StreamError {
+	mode := limits.ModeMonitor
+	if enforcing {
+		mode = limits.ModeEnforce
+	}
+	r.Ledger.Record(limits.TableInspection, limits.ReasonRefused, mode)
+	return &StreamError{Kind: StreamStateLimit, Proto: proto, Offset: offset}
 }
 
 func (e *StreamError) Error() string {
