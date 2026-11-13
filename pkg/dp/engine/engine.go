@@ -25,6 +25,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
@@ -47,6 +48,9 @@ type CaptureRunner interface {
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
+	stateLimits           limits.Limits
+	budget                *limits.Budget
+	ledger                *limits.Ledger
 	counters              counterState
 	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
@@ -160,6 +164,8 @@ type EnforceConfig struct {
 }
 
 type Config struct {
+	Limits  limits.Limits
+	Ledger  *limits.Ledger
 	Capture capture.Config
 	// NewCapture supplies capture consumers. Nil uses capture.NewManager.
 	// A replacement run uses the same factory with new, epoch-fenced callbacks.
@@ -256,6 +262,10 @@ func New(cfg Config) (*Engine, error) {
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
 	e.counters.tracker.Store(e.stats)
+	if err := e.initStateLimits(cfg.Limits, cfg.Ledger); err != nil {
+		return nil, err
+	}
+
 	store := cfg.Events
 	if store == nil {
 		store = events.NewStore(4096)
@@ -366,6 +376,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.localIPv4 = fresh.localIPv4
 	e.transport = fresh.transport
 	e.updater = fresh.updater
+	e.stateLimits, e.budget, e.ledger = fresh.stateLimits, fresh.budget, fresh.ledger
 	e.dpiMgr = fresh.dpiMgr
 	e.inspectionRegistry.Add(1)
 	e.inventory = fresh.inventory
@@ -378,6 +389,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.dpiMode = fresh.dpiMode
 	e.icsParsing.Store(fresh.icsParsing.Load())
 	e.conformance.clear()
+	e.conformance.ledger = e.ledger
 	e.dpiExclusions = fresh.dpiExclusions
 	e.exclusionHits = fresh.exclusionHits
 	e.coverage = fresh.coverage
@@ -386,6 +398,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
 	e.flows = fresh.flows
+	e.syncFlowsActiveLocked()
 	e.tcpISNs = fresh.tcpISNs
 	e.transportISNs = fresh.transportISNs
 	e.transportCoverage = fresh.transportCoverage
@@ -529,6 +542,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, bool, err
 				return
 			case <-ticker.C:
 				metrics.GoroutinesActive.Set(float64(runtime.NumGoroutine()))
+				e.publishStateLimitTransitions()
 			}
 		}
 	}()
@@ -790,7 +804,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 		e.tcpISNs[key.MapKey()] = pkt.TCP.Seq
 	}
 	if !e.detached {
-		metrics.FlowsActive.Inc()
+		metrics.FlowsActive.Set(float64(len(e.flows)))
 	}
 	return state, forgotten
 }
@@ -823,7 +837,7 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	delete(e.transportISNs, index)
 	delete(e.transportCoverage, st)
 	if !e.detached {
-		metrics.FlowsActive.Dec()
+		metrics.FlowsActive.Set(float64(len(e.flows)))
 	}
 	return st
 }
@@ -842,7 +856,7 @@ func (e *Engine) sweepFlows(now time.Time) {
 			delete(e.transportISNs, k)
 			delete(e.transportCoverage, st)
 			if !e.detached {
-				metrics.FlowsActive.Dec()
+				metrics.FlowsActive.Set(float64(len(e.flows)))
 			}
 			if st != nil {
 				expired = append(expired, st)

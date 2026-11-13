@@ -69,7 +69,7 @@ func TestRulesetPreviewHandler(t *testing.T) {
 func TestRulesetPreviewSettingsMapping(t *testing.T) {
 	for _, table := range []string{"", "custom"} {
 		cfg := config.DataPlaneConfig{Enforcement: true, EnforceTable: table, NFLogGroup: 205}
-		dp, err := newEngineFor(zap.NewNop().Sugar(), cfg, nil, nil)
+		dp, err := newEngineFor(zap.NewNop().Sugar(), cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

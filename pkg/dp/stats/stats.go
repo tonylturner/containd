@@ -13,6 +13,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // ProtoStats holds per-protocol counters.
@@ -38,10 +39,13 @@ type FlowStats struct {
 
 // Tracker keeps packet/byte accounting separate from DPI event counters.
 type Tracker struct {
-	generation string
-	mu         sync.RWMutex
-	proto      map[string]*ProtoStats
-	flows      map[hostPair]*FlowStats
+	stateLimits limits.Limits
+	resources   limits.Resources
+	since       time.Time
+	generation  string
+	mu          sync.RWMutex
+	proto       map[string]*ProtoStats
+	flows       map[hostPair]*FlowStats
 }
 
 // hostPair deliberately excludes transport ports: top talkers aggregate all
@@ -55,9 +59,12 @@ type hostPair struct {
 // New creates a new statistics tracker.
 func New() *Tracker {
 	return &Tracker{
-		generation: rand.Text(),
-		proto:      make(map[string]*ProtoStats),
-		flows:      make(map[hostPair]*FlowStats),
+		since:       time.Now().UTC(),
+		generation:  rand.Text(),
+		stateLimits: limits.Default(),
+		resources:   limits.NewResources(nil, nil),
+		proto:       make(map[string]*ProtoStats),
+		flows:       make(map[hostPair]*FlowStats),
 	}
 }
 
@@ -155,27 +162,6 @@ func (t *Tracker) Stats() []ProtoStats {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].PacketCount > out[j].PacketCount
 	})
-	return out
-}
-
-// TopTalkers returns the top N flows by byte count descending.
-func (t *Tracker) TopTalkers(n int) []FlowStats {
-	if t == nil {
-		return nil
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	out := make([]FlowStats, 0, len(t.flows))
-	for _, fs := range t.flows {
-		out = append(out, *fs)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Bytes > out[j].Bytes
-	})
-	if n > 0 && n < len(out) {
-		out = out[:n]
-	}
 	return out
 }
 

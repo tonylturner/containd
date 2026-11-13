@@ -54,7 +54,7 @@ func TestCandidateAndAppliedCoverageAgree(t *testing.T) {
 		"queue not yet held":            {Enforcement: true, DPIEnabled: true, DPIMode: "enforce", NFQueueGroup: 101},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e, err := newEngineFor(zap.NewNop().Sugar(), dp, nil, nil)
+			e, err := newEngineFor(zap.NewNop().Sugar(), dp, nil, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

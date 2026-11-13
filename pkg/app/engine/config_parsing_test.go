@@ -42,7 +42,7 @@ func TestConfigPushParsingDoesNotReconfigureSessions(t *testing.T) {
 
 func TestNewEngineParsingOwnsConfigMap(t *testing.T) {
 	modes := map[string]string{"dnp3": "strict"}
-	e, err := newEngineFor(zap.NewNop().Sugar(), config.DataPlaneConfig{DPIICSParsing: modes}, nil, nil)
+	e, err := newEngineFor(zap.NewNop().Sugar(), config.DataPlaneConfig{DPIICSParsing: modes}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

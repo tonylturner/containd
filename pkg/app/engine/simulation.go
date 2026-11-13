@@ -103,6 +103,7 @@ func (sm *simulationManager) startLocked() {
 	}
 	detached, err := engine.NewDetached(engine.DetachedConfig{
 		Events:       sm.dpEngine.Events().Writer(wire.OriginDemo),
+		Limits:       sm.config.Limits.Effective(),
 		DPIProtocols: sm.config.DPIProtocols, DPIICSProtocols: sm.config.DPIICSProtocols,
 		DPIICSParsing: sm.config.DPIICSParsing, DPIExclusions: exclusions,
 		ZoneAddresses: topo.ZoneAddresses,

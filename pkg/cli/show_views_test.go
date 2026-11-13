@@ -200,7 +200,7 @@ func TestShowTelemetryViews(t *testing.T) {
 				}, nil), nil
 			},
 			"GET /api/v1/stats/top-talkers": func(req *http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(http.StatusOK, []stats.FlowStats{
+				return jsonHTTPResponse(http.StatusOK, stats.TopTalkers{Semantics: "recent", Retained: 1, Complete: true, Rows: []stats.FlowStats{
 					{
 						SrcIP:    "10.0.0.10",
 						DstIP:    "10.0.0.20",
@@ -208,7 +208,7 @@ func TestShowTelemetryViews(t *testing.T) {
 						Packets:  12,
 						Bytes:    640,
 					},
-				}, nil), nil
+				}}, nil), nil
 			},
 		},
 	}

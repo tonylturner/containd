@@ -11,6 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // Anomaly represents a detected protocol-level anomaly in ICS traffic.
@@ -68,6 +69,8 @@ const (
 
 // Detector is the protocol anomaly detection engine.
 type Detector struct {
+	stateLimits        limits.Limits
+	resources          limits.Resources
 	mu                 sync.Mutex
 	writeRateThreshold int
 	totalRateThreshold int
@@ -97,6 +100,8 @@ type Detector struct {
 // New creates a new anomaly Detector with the given options.
 func New(opts ...Option) *Detector {
 	d := &Detector{
+		stateLimits:               limits.Default(),
+		resources:                 limits.NewResources(nil, nil),
 		writeRateThreshold:        defaultWriteRateThreshold,
 		totalRateThreshold:        defaultTotalRateThreshold,
 		dnp3RestartFromNonMaster:  true,
