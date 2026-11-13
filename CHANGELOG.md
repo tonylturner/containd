@@ -146,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Remove synchronous full-history scans from IEC 104 incident retention so
+  monitor-mode inspection stays fast without changing observations or evidence.
 - The account password dialog no longer moves focus 50 ms after it opens, so
   fast typing in Current password no longer lands in New password.
 - Active-flow metrics derive from current occupancy and reset correctly on

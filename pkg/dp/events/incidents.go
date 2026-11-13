@@ -3,7 +3,11 @@
 
 package events
 
-import "github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+import (
+	"iter"
+
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+)
 
 const (
 	incidentCapacity = 128
@@ -47,27 +51,37 @@ func implicated(context, evidence Event) bool {
 	if apdu == "" {
 		return false
 	}
-	for _, key := range []string{eventfields.KeyAPDUID, eventfields.KeyTriggerAPDUID} {
-		if v, _ := eventfields.String(evidence.Attributes, key); v == apdu {
+	for id := range incidentAPDUIDs(evidence) {
+		if id == apdu {
 			return true
 		}
 	}
-	// Both live []string and JSON-decoded []any shapes occur in telemetry.
-	switch ids := evidence.Attributes[eventfields.KeyAPDUIDs].(type) {
-	case []string:
-		for _, id := range ids {
-			if id == apdu {
-				return true
+	return false
+}
+
+func incidentAPDUIDs(evidence Event) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for _, key := range []string{eventfields.KeyAPDUID, eventfields.KeyTriggerAPDUID} {
+			if id, _ := eventfields.String(evidence.Attributes, key); id != "" && !yield(id) {
+				return
 			}
 		}
-	case []any:
-		for _, id := range ids {
-			if id == apdu {
-				return true
+		// Both live []string and JSON-decoded []any shapes occur in telemetry.
+		switch ids := evidence.Attributes[eventfields.KeyAPDUIDs].(type) {
+		case []string:
+			for _, id := range ids {
+				if id != "" && !yield(id) {
+					return
+				}
+			}
+		case []any:
+			for _, value := range ids {
+				if id, ok := value.(string); ok && id != "" && !yield(id) {
+					return
+				}
 			}
 		}
 	}
-	return false
 }
 
 func (s *Store) retainIncident(ev Event) {
@@ -111,11 +125,8 @@ func (s *Store) retainIncident(ev Event) {
 	}
 	// Capture already-recorded decoded attempts. The reverse insertion order
 	// (decision before decoded events) is handled by the noncritical path above.
-	for i := range s.general.events {
-		candidate := s.general.at(i)
-		if sessionKey(candidate) == sessionKey(ev) && implicated(candidate, ev) {
-			s.pushIncident(r, candidate)
-		}
+	for _, i := range s.incidentContext.matches(s.general, ev) {
+		s.pushIncident(r, s.general.at(i))
 	}
 	s.pushIncident(r, ev)
 }
