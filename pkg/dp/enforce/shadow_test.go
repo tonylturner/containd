@@ -20,11 +20,9 @@ func TestShadowWarnings(t *testing.T) {
 		{ID: "allow-dnp3-read", Protocols: tcp("20000"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "dnp3", FunctionCode: []uint8{1}}, Action: rules.ActionAllow},
 		// Shadowed:
 		{ID: "deny-http", SourceZones: []string{"it"}, Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
+		{ID: "deny-modbus-write", Protocols: tcp("502"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{6}}, Action: rules.ActionDeny},
 		{ID: "reset-https", SourceZones: []string{"dmz"}, Destinations: []string{"10.0.1.0/24"}, Protocols: tcp("443"), Action: rules.ActionReset},
 		// Not shadowed:
-		// An omitted-selector denial covers unknown classes too; the earlier
-		// ordinary ICS ALLOW cannot claim unconditional coverage of it.
-		{ID: "deny-modbus-write", Protocols: tcp("502"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{6}}, Action: rules.ActionDeny},
 		{ID: "deny-any-zone", Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "deny-wider-net", SourceZones: []string{"it"}, Destinations: []string{"10.0.0.0/8"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "deny-wider-ports", SourceZones: []string{"it"}, Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("1-1024"), Action: rules.ActionDeny},
@@ -42,7 +40,7 @@ func TestShadowWarnings(t *testing.T) {
 			got = append(got, [2]string{w.RuleID, w.ShadowedBy})
 		}
 	}
-	want := [][2]string{{"deny-http", "allow-ot-web"}, {"reset-https", "allow-ot-web"}}
+	want := [][2]string{{"deny-http", "allow-ot-web"}, {"deny-modbus-write", "allow-modbus"}, {"reset-https", "allow-ot-web"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("shadowed = %v, want %v", got, want)
 	}
@@ -68,8 +66,12 @@ func TestDS34ShadowMessageClasses(t *testing.T) {
 					transport := broad
 					transport.ICS = rules.ICSPredicate{}
 					snap.Firewall = []rules.Entry{transport, explicit}
-					if w := shadowWarnings(snap); len(w) != 0 {
-						t.Fatalf("transport ALLOW shadows explicit class: %+v", w)
+					want := 1
+					if protocol == "iec104" {
+						want = 0 // IEC policy is a separate partition.
+					}
+					if w := shadowWarnings(snap); len(w) != want {
+						t.Fatalf("transport coverage changed: %+v", w)
 					}
 					snap.Firewall = []rules.Entry{explicit, broad}
 					if unconditional(explicit) {
@@ -102,8 +104,8 @@ func TestDS34ShadowMessageClasses(t *testing.T) {
 			t.Fatalf("ordinary ALLOW must not claim all-class denial coverage: %+v", w)
 		}
 	})
-	t.Run("plain-and-cip", func(t *testing.T) {
-		for _, protocol := range []string{"", "cip"} {
+	t.Run("plain-modbus-and-cip", func(t *testing.T) {
+		for _, protocol := range []string{"", "modbus", "cip"} {
 			snap := &rules.Snapshot{Firewall: []rules.Entry{
 				{ID: "broad", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},
 				{ID: "denial", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},

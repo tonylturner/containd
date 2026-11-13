@@ -63,10 +63,13 @@ func covers(a, d rules.Entry) bool {
 // cover every class. Use the matcher vocabulary, including unknown, rather
 // than assuming that absence of a selector makes an ICS terminal universal.
 func messageClassesCover(a, d rules.Entry) bool {
-	// A transport ALLOW also cannot replace the explicit application rule
-	// needed for autonomous traffic or session controls.
-	if a.Action == rules.ActionAllow && a.ICS.MessageClass == "" && d.ICS.MessageClass != "" {
-		return false
+	// Only these application protocols have autonomous/session classes.
+	// Modbus has requests and solicited replies only; unsupported units are
+	// rejected independently. Transport and CIP retain their coverage rules.
+	switch strings.ToLower(a.ICS.Protocol) {
+	case "dnp3", "iec104":
+	default:
+		return true
 	}
 	for _, class := range []rules.MessageClass{
 		rules.ClassUnknown, rules.ClassRequest, rules.ClassSolicited,
