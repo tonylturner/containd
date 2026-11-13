@@ -15,9 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `complete: false` reports incomplete history after eviction. Numeric `n`
   clamps to 1–1,000 (default 10 on absent or invalid input), with deterministic
   ties and bounded query selection memory.
-- IEC monitor session-table exhaustion emits coalesced `dataplane.state_limit`
-  pressure events instead of per-SYN `ics.session` untracked events.
-
 - Generic Modbus, DNP3 and CIP inline inspection now receives both tracked
   directions in enforce and monitor modes, including NAT and published
   services. Existing enforcing response denials and strict parsing vetoes
@@ -40,27 +37,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine memory). Omitted or zero fields select defaults without rewriting
   stored configuration; named bounds reject invalid values. UI and CLI show
   effective values and defaults. Changed effective limits rebuild traffic
-  state while preserving process hit totals.
-- Inline enforcing ICS scope fails closed on flow or inspection-budget refusal
+  state while preserving process hit totals. The shared inspection budget charges
+  DPI bindings, reassembly/history, DNP3 assembly, IEC metadata/frame ranges,
+  byte streams and held-token settlements, HTTP/TLS metadata and request
+  correlation, identification prefixes, passive replay and packet stamps.
+  Reservations precede allocation and result publication, include full backing
+  capacities and replacement peaks, and retain each owner's admission class.
+  Opaque HTTP/2 HPACK decoders reserve a conservative fixed lifetime envelope,
+  not exact backing. Held packets charge payload plus fixed header and token
+  credits until verdict completion, settlement rejection or source flush.
+  Inline enforcing ICS scope fails closed on flow or inspection-budget refusal
   for only the affected session. Flow refusal drops without reset or a new
   marker; allocation refusal drops current/held traffic and resets that session.
   Monitor/passive/non-ICS follows ordinary firewall policy with inspection loss,
   incomplete coverage and affected learner evidence withheld. Monitor/observe
   admissions stop at three quarters of flow and byte capacity, reserving
   enforcement headroom. Unestablished connections expire after 30 seconds idle;
-  established connections retain a five-minute idle window.
-- Fixed caps for observational rate trackers, IEC reconnect history and global
+  established connections retain a five-minute idle window. Inspection loss stays
+  terminal across identity adoption; recovered credits do not restart inspection.
+  Live observation identities derive capacity from tracked flow slots.
+  Fixed caps cover observational rate trackers, IEC reconnect history and global
   inventory points, signature windows/values, conformance identities, verdict
   cache, pickup resets and HTTP request correlation. Observational pressure
   evicts/truncates/suppresses identities, never drops traffic. Protocol statistics
   cap names at 64 and aggregate further names under `other`. DNP3 retains at
   most `min(16 MiB, maxInspectionBytes/4)` per decoder within the shared budget.
-- Authenticated `GET /api/v1/diagnostics/state-limits` and a compact Diagnostics
+  Authenticated `GET /api/v1/diagnostics/state-limits` and a compact Diagnostics
   table expose occupancy, charged bytes, high water, recent pressure and hits;
   byte values use binary units, and empty pressure/hit cells avoid idle noise.
   Engine unavailability returns 503. Enum-only Prometheus state-limit counters
   and gauges expose the same live process state. Pressure-entry events coalesce
-  per table; hit totals survive configuration rebuilds.
+  per table, replacing IEC monitor per-SYN untracked events; hit totals survive
+  configuration rebuilds.
 
 - An independent `kernel-tests` CI job runs the eight default privileged kernel
   test roots on every pull request and push to `main`, with verbose failure
