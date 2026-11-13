@@ -11,6 +11,14 @@ type ResourceOwner interface {
 
 type bindingID struct{ flow, stream string }
 
+// InspectionResources returns the immutable generation accounting dependencies.
+// Observation wrappers use the manager's authority, never a second budget.
+func (m *Manager) InspectionResources() limits.Resources {
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	return m.resources
+}
+
 func (m *Manager) SetResources(r limits.Resources) {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()

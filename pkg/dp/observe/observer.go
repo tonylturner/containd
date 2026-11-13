@@ -4,11 +4,14 @@ package observe
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/identify"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // New validates budgets and enabled decoders. It starts no workers; the caller
@@ -17,7 +20,7 @@ func New(opts Options) (*Observer, error) {
 	if opts.Markers <= 0 || opts.Manager == nil {
 		return nil, fmt.Errorf("observer requires positive marker capacity and dedicated manager")
 	}
-	table, err := identify.NewTable(opts.Budgets, opts.Now)
+	table, err := identify.NewTable(opts.Budgets, opts.Now, opts.Manager.InspectionResources())
 	if err != nil {
 		return nil, err
 	}
@@ -43,11 +46,19 @@ func (o *Observer) Open(key identify.Key, meta identify.Meta) bool {
 		o.counts.Refusals++
 		return false
 	}
-	if !o.table.Open(key, meta) {
+	r := o.opts.Manager.InspectionResources()
+	memory := flow.NewInspectionMemory(r, limits.ClassObserve, limits.CategoryDecoder)
+	if !memory.Reserve(int(limits.DecoderMetadataBytes) + len(key)) {
+		r.Ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeMonitor)
 		o.counts.Refusals++
 		return false
 	}
-	o.entries[key] = &connection{meta: meta}
+	if !o.table.Open(key, meta) {
+		memory.Release()
+		o.counts.Refusals++
+		return false
+	}
+	o.entries[identify.Key(strings.Clone(string(key)))] = &connection{meta: meta, memory: memory, keyBytes: len(key)}
 	return true
 }
 
@@ -61,6 +72,7 @@ func (o *Observer) Observe(key identify.Key, p Packet) Output {
 		return Output{}
 	}
 	d := p.Direction
+	c.lastDir = d
 	c.states[d], c.at[d] = p.State, p.At
 	var out Output
 	if c.meta.Transport == 6 && p.SYN {
@@ -92,7 +104,11 @@ func (o *Observer) Observe(key identify.Key, p Packet) Output {
 			if p.SYN {
 				seq++
 			}
-			c.stamps = append(c.stamps, stamp{d, seq, len(p.Payload), p.At, p.State, o.serial})
+			if !c.appendStamp(stamp{d, seq, len(p.Payload), p.At, p.State, o.serial}) {
+				o.markInspectionLoss(c, true)
+				o.table.Abort(key, identify.Budget)
+				return o.consume(key, c)
+			}
 		}
 		o.table.Observe(key, p.Arrival)
 		out.append(o.consume(key, c))
@@ -127,6 +143,7 @@ func (o *Observer) consume(key identify.Key, c *connection) Output {
 	if !ok {
 		return Output{}
 	}
+	defer replay.Release()
 	c.binding, c.protocol, c.coverage = None, d.Protocol, d.Coverage
 	if d.State == identify.Confirmed {
 		c.binding = Observation
@@ -134,9 +151,25 @@ func (o *Observer) consume(key identify.Key, c *connection) Output {
 			c.binding = Legacy
 		}
 	}
+	if d.InspectionRefused || c.inspectionLost {
+		o.markInspectionLoss(c, false)
+		c.binding = None
+		d.State, d.Coverage, d.InspectionRefused = identify.Incomplete, identify.Budget, true
+	}
 	o.serial++
 	c.ended = o.serial
-	c.session = fmt.Sprintf("observe/%d/%s/%s", o.serial, key, d.Protocol)
+	if c.binding == Observation {
+		charge := len("observe/") + 20 + 1 + len(key) + 1 + len(d.Protocol)
+		if !c.memory.Reserve(charge) {
+			o.markInspectionLoss(c, true)
+			c.binding = None
+			d.State, d.Coverage, d.InspectionRefused = identify.Incomplete, identify.Budget, true
+		} else {
+			c.session = fmt.Sprintf("observe/%d/%s/%s", o.serial, key, d.Protocol)
+			c.sessionCharge = len(c.session)
+			c.memory.Refund(charge - c.sessionCharge)
+		}
+	}
 	at := c.at[0]
 	if c.at[1].After(at) {
 		at = c.at[1]
@@ -178,7 +211,8 @@ func (o *Observer) consume(key identify.Key, c *connection) Output {
 		c.observed = true
 		out.Batches = o.replay(key, c, replay)
 	}
-	c.stamps = nil
+	out.append(o.inspectionLoss(key, c))
+	c.clearStamps()
 	o.table.Release(key)
 	return out
 }
@@ -211,7 +245,7 @@ func (o *Observer) Stop(key identify.Key) {
 		return
 	}
 	o.table.Release(key)
-	c.stamps = nil
+	c.clearStamps()
 	c.coverage = identify.Truncated
 	o.serial++
 	c.ended = o.serial
@@ -241,7 +275,9 @@ func (o *Observer) Release(key identify.Key) Output {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	out := o.finish(key)
-	delete(o.entries, key)
+	if c := o.entries[key]; c != nil {
+		o.releaseConnection(key, c)
+	}
 	return out
 }
 
@@ -254,7 +290,7 @@ func (o *Observer) Drain() Output {
 	var out Output
 	for key := range o.entries {
 		out.append(o.finish(key))
-		delete(o.entries, key)
+		o.releaseConnection(key, o.entries[key])
 	}
 	return out
 }

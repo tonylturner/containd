@@ -37,20 +37,25 @@ func (o *Observer) replay(key identify.Key, c *connection, r identify.Replay) []
 	for _, s := range c.stamps {
 		// Replay owns both contiguous and out-of-order ranges. Select only bytes
 		// actually retained, never synthesize a gap or clip a missing suffix.
-		segments := []identify.Segment{{Sequence: r.Sequence[s.dir], Bytes: r.Bytes[s.dir]}}
-		segments = append(segments, r.Pending[s.dir]...)
-		for _, seg := range segments {
+		visit := func(seg identify.Segment) {
 			start := int(int32(s.seq - seg.Sequence))
 			lo, hi := max(0, start), min(len(seg.Bytes), start+s.length)
 			if lo >= hi {
-				continue
+				return
 			}
 			part := s
 			part.seq = seg.Sequence + uint32(lo)
 			out = append(out, o.decode(key, c, part, seg.Bytes[lo:hi]))
+		}
+		visit(identify.Segment{Sequence: r.Sequence[s.dir], Bytes: r.Bytes[s.dir]})
+		for _, seg := range r.Pending[s.dir] {
 			if c.binding != Observation {
-				return out
+				break
 			}
+			visit(seg)
+		}
+		if c.binding != Observation {
+			return out
 		}
 	}
 	return out
@@ -75,6 +80,7 @@ func (o *Observer) decode(key identify.Key, c *connection, s stamp, data []byte)
 	batch.Events, batch.Err = result.Events, result.Err
 	var se *dpi.StreamError
 	if errors.As(result.Err, &se) && se.Kind == dpi.StreamStateLimit {
+		c.inspectionLost, c.lossReported = true, true
 		c.coverage = identify.Truncated
 		o.endBinding(c)
 		batch.Events = nil

@@ -11,7 +11,9 @@ import (
 )
 
 func TestObservationBudgetFailureIsTerminal(t *testing.T) {
-	r := limits.NewResources(limits.NewBudget(1024), nil)
+	// Include the observer/identifier metadata and replay backing now charged
+	// before the decoder is reached; leave too little for its stream admission.
+	r := limits.NewResources(limits.NewBudget(8192), nil)
 	o, decoder := newObserver(t, func(opts *Options) { opts.Manager.SetResources(r) })
 	states := openTCP(t, o, "k")
 	out := payload(o, "k", states, 0, 100, request)

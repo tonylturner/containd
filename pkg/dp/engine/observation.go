@@ -4,6 +4,7 @@ package engine
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -66,6 +67,21 @@ func newLiveObserver(cfg Config, resources ...limits.Resources) (*liveObserver, 
 	live := &liveObserver{entries: make(map[identify.Key]*observationContext), now: time.Now}
 	budgets := identify.DefaultBudgets()
 	budgets.Protocols = protocols
+	maxFlows := cfg.Limits.MaxFlows
+	if maxFlows == 0 {
+		maxFlows = limits.DefaultMaxFlows
+	}
+	// There is no independent live context cap. The minimum permits
+	// construction with a tiny test limit that cannot admit any flow pair.
+	budgets.Entries = max(1, maxFlows/2)
+	// Legacy table accounting includes EntryCharge, which is <= twice its
+	// shared metadata credit; variable capacities are identical. This derived
+	// bound cannot refuse before the shared budget and is not a second knob.
+	capacity := manager.InspectionResources().Budget.Status().Limit
+	budgets.ChargedBytes = math.MaxInt
+	if capacity <= int64(math.MaxInt/2) {
+		budgets.ChargedBytes = max(identify.EntryCharge, budgets.BytesPerDirection, 2*int(capacity))
+	}
 	live.observer, err = observe.New(observe.Options{Budgets: budgets, Markers: budgets.Entries,
 		Manager: manager, Now: func() time.Time { return live.now() },
 		LegacyDecodes: func(key identify.Key, p identify.Protocol) bool { return legacyDecodes(live.entries[key], p) },
@@ -179,6 +195,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 		panic("observation requires a bound incarnation")
 	}
 	key := identify.Key(connection.Key)
+	admissionLost := false
 	ctx := live.entries[key]
 	if ctx == nil {
 		if !enabled {
@@ -192,6 +209,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 			ports[0], ports[1] = ports[1], ports[0]
 		}
 		ctx.refused = !live.observer.Open(key, identify.Meta{Transport: pkt.Proto, Ports: ports})
+		admissionLost = ctx.refused
 	}
 	dir := uint8(connection.Direction(st.Key))
 	ctx.states[dir], ctx.selected, ctx.iecOwned, ctx.snapshot = st, selected, iecOwned, snapshot
@@ -211,6 +229,9 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	}
 
 	records := append(e.observationPending, live.records(output)...)
+	if admissionLost {
+		records = append(records, observationRecord{state: st, loss: true})
+	}
 	e.observationPending = nil
 	live.syncMetrics()
 	e.flowMu.Unlock()

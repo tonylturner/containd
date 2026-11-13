@@ -25,6 +25,7 @@ func TestAdoptMoveRemaps(t *testing.T) {
 		t.Fatal(d)
 	}
 	_, r, _ := table.Take("to")
+	releaseReplayAfterTest(t, r)
 	if !bytes.Equal(r.Bytes[1], fixtures()[0].request) || r.Sequence != [2]uint32{200, 100} {
 		t.Fatal(r)
 	}
@@ -76,7 +77,8 @@ func TestAdoptPendingConflicts(t *testing.T) {
 			t.Fatal(result, ok)
 		}
 		for _, key := range []Key{testKey, "to"} {
-			d, _, ok := table.Take(key)
+			d, replay, ok := table.Take(key)
+			releaseReplayAfterTest(t, replay)
 			if !ok || d.State != Incomplete || d.Coverage != Conflict {
 				t.Fatal(d, ok)
 			}
@@ -170,6 +172,7 @@ func TestTriggerAdmissionContract(t *testing.T) {
 		}
 		observe(t, table, a)
 		_, r, ok := table.Take(testKey)
+		releaseReplayAfterTest(t, r)
 		if !ok || r.TriggerRetained {
 			t.Fatal(mode, r)
 		}

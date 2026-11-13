@@ -4,13 +4,18 @@ package identify
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"unsafe"
 
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 type entry struct {
+	memory, storage *flow.InspectionMemory
+	keyBytes        int
 	meta            Meta
 	prefixes        [2]prefix
 	datagrams       []Datagram
@@ -32,17 +37,18 @@ type entry struct {
 const EntryCharge = int(unsafe.Sizeof(entry{})) + int(unsafe.Sizeof(Key(""))) + 128
 
 type Table struct {
-	budgets Budgets
-	now     func() time.Time
-	entries map[Key]*entry
-	charged int
-	counts  Counters
-	serial  uint64
+	resources limits.Resources
+	budgets   Budgets
+	now       func() time.Time
+	entries   map[Key]*entry
+	charged   int
+	counts    Counters
+	serial    uint64
 }
 
 // NewTable requires positive budgets and an injected monotonic ingestion clock.
 // time.Now is suitable live; deterministic replay should supply its own clock.
-func NewTable(b Budgets, now func() time.Time) (*Table, error) {
+func NewTable(b Budgets, now func() time.Time, resources ...limits.Resources) (*Table, error) {
 	if now == nil || b.BytesPerDirection <= 0 || b.PendingRanges < 0 || b.Arrivals <= 0 ||
 		b.Duration <= 0 || b.UDPDatagrams <= 0 || b.Entries <= 0 || b.ChargedBytes < EntryCharge {
 		return nil, fmt.Errorf("invalid identification budgets or clock")
@@ -67,7 +73,11 @@ func NewTable(b Budgets, now func() time.Time) (*Table, error) {
 		b.UDPDatagrams > b.ChargedBytes/int(unsafe.Sizeof(Datagram{})) {
 		return nil, fmt.Errorf("identification capacities exceed charged-byte budget")
 	}
-	return &Table{budgets: b, now: now, entries: make(map[Key]*entry)}, nil
+	r := limits.NewResources(nil, nil)
+	if len(resources) != 0 {
+		r = limits.NewResources(resources[0].Budget, resources[0].Ledger)
+	}
+	return &Table{resources: r, budgets: b, now: now, entries: make(map[Key]*entry)}, nil
 }
 
 // Open admits an incarnation, without allocating prefix storage. Existing keys
@@ -83,7 +93,14 @@ func (t *Table) Open(key Key, meta Meta) bool {
 		t.counts.Overflow++
 		return false
 	}
-	e := &entry{meta: meta, opened: t.now(), decision: Decision{State: NeedMore}}
+	memory := flow.NewInspectionMemory(t.resources, limits.ClassObserve, limits.CategoryDecoder)
+	if !memory.Reserve(int(limits.DecoderMetadataBytes) + len(key)) {
+		t.resources.Ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeMonitor)
+		t.counts.Overflow++
+		return false
+	}
+	e := &entry{memory: memory, storage: flow.NewInspectionMemory(t.resources, limits.ClassObserve, limits.CategoryDecoder),
+		keyBytes: len(key), meta: meta, opened: t.now(), decision: Decision{State: NeedMore}}
 	for d, port := range meta.Ports {
 		for _, p := range protocols {
 			if !(meta.Transport == ics.UDP && port == ics.CIPImplicitPort) &&
@@ -92,7 +109,7 @@ func (t *Table) Open(key Key, meta Meta) bool {
 			}
 		}
 	}
-	t.entries[key] = e
+	t.entries[Key(strings.Clone(string(key)))] = e
 	t.charged += EntryCharge
 	return true
 }
@@ -219,6 +236,10 @@ func (t *Table) allocate(e *entry, p *prefix) bool {
 			return false
 		}
 		charge += n
+	}
+	if !e.storage.Reserve(charge) {
+		t.markInspectionRefused(e)
+		return false
 	}
 	if p.data == nil {
 		p.data = make([]byte, t.budgets.BytesPerDirection)
@@ -401,13 +422,35 @@ func (t *Table) Take(key Key) (Decision, Replay, bool) {
 	if !ok || e.taken || !terminal(e.decision.State) {
 		return Decision{}, Replay{}, false
 	}
-	replay := Replay{Datagrams: e.datagrams, TriggerRetained: e.triggerRetained}
+	var pending [2]int
+	for i, p := range e.prefixes {
+		for _, r := range p.ranges {
+			if r.start >= p.length {
+				pending[i]++
+			}
+		}
+	}
+	extra := (pending[0] + pending[1]) * int(unsafe.Sizeof(Segment{}))
+	if extra != 0 && !e.storage.Reserve(extra) {
+		t.markInspectionRefused(e)
+		t.finish(e, Budget)
+		t.charged -= retainedCharge(e)
+		clearEntryStorage(e)
+		e.taken = true
+		return e.decision, Replay{}, true
+	}
+	replay := Replay{memory: e.storage, Datagrams: e.datagrams, TriggerRetained: e.triggerRetained}
+	e.storage = nil
 	t.charged -= retainedCharge(e)
 	e.datagrams = nil
+	rangeCharge := 0
 	for i := range e.prefixes {
 		p := &e.prefixes[i]
 		replay.Bytes[i] = p.data[:p.length:p.length]
 		replay.Sequence[i] = p.base
+		if pending[i] != 0 {
+			replay.Pending[i] = make([]Segment, 0, pending[i])
+		}
 		for _, r := range p.ranges {
 			if r.start >= p.length {
 				replay.Pending[i] = append(replay.Pending[i], Segment{
@@ -416,7 +459,11 @@ func (t *Table) Take(key Key) (Decision, Replay, bool) {
 				})
 			}
 		}
+		rangeCharge += cap(p.ranges) * int(unsafe.Sizeof(span{}))
 		p.data, p.ranges, p.length = nil, nil, 0
+	}
+	if replay.memory != nil {
+		replay.memory.Refund(rangeCharge)
 	}
 	e.taken = true
 	return e.decision, replay, true
@@ -434,6 +481,24 @@ func (t *Table) Release(key Key) {
 	if e, ok := t.entries[key]; ok {
 		t.charged -= EntryCharge + retainedCharge(e)
 		delete(t.entries, key)
+		clearEntryStorage(e)
+		e.memory.Release()
+	}
+}
+
+func clearEntryStorage(e *entry) {
+	e.prefixes = [2]prefix{}
+	e.datagrams = nil
+	if e.storage != nil {
+		e.storage.Release()
+		e.storage = nil
+	}
+}
+
+func (t *Table) markInspectionRefused(e *entry) {
+	if !e.decision.InspectionRefused {
+		e.decision.InspectionRefused = true
+		t.resources.Ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeMonitor)
 	}
 }
 
