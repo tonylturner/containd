@@ -132,6 +132,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine impact from runtime-base provenance alone. The authoring template also
   uses distinct affected and fixed versioned products.
 
+### Removed
+
+- The `containd_dpi_decoder_packets_total` metric. Nothing ever incremented it,
+  so it never reported data. Per-protocol decoded event counts remain in
+  `GET /api/v1/stats/protocols`.
+
 ### Fixed
 
 - Active-flow metrics derive from current occupancy and reset correctly on

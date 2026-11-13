@@ -116,14 +116,6 @@ var GoroutinesActive = promauto.NewGauge(prometheus.GaugeOpts{
 	Help:      "Number of active goroutines.",
 })
 
-// DecoderPacketsTotal counts packets processed per decoder protocol.
-var DecoderPacketsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-	Namespace: namespace,
-	Subsystem: "dpi",
-	Name:      "decoder_packets_total",
-	Help:      "Packets processed per decoder protocol.",
-}, []string{"protocol"})
-
 // IDSRulesLoaded tracks the number of IDS rules currently loaded.
 var IDSRulesLoaded = promauto.NewGauge(prometheus.GaugeOpts{
 	Namespace: namespace,
