@@ -1,0 +1,1519 @@
+{
+  "version": 1,
+  "sequences": [
+    {
+      "id": "lib60870-case-002",
+      "peer": "lib60870 2.4.1@7a388e3e133999e1ca77ba7521d55d074b7cd2bc",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e000002002d010600010088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e020002002d010700010088130001"
+        }
+      ]
+    },
+    {
+      "id": "lib60870-startdt",
+      "peer": "lib60870 2.4.1@7a388e3e133999e1ca77ba7521d55d074b7cd2bc",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680407000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68040b000000"
+        }
+      ]
+    },
+    {
+      "id": "lib60870-stopdt",
+      "peer": "lib60870 2.4.1@7a388e3e133999e1ca77ba7521d55d074b7cd2bc",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680413000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680423000000"
+        }
+      ]
+    },
+    {
+      "id": "lib60870-testfr",
+      "peer": "lib60870 2.4.1@7a388e3e133999e1ca77ba7521d55d074b7cd2bc",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680443000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680483000000"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-004",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e040000002d010600010088130081"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e000006002d010700010088130081"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-005",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e060002002d010600010088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e020008002d010700010088130001"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-078",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e9800840064010600010000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e84009a0064010700010000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "681686009a000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e88009a0064010a00010000000014"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-079",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e9a008a0064010600010000000015"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e8a009c0064010700010000000015"
+        },
+        {
+          "direction": "response",
+          "apdu": "68168c009c000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e8e009c0064010a00010000000015"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-080",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e9c00900064010600010000000016"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e90009e0064010700010000000016"
+        },
+        {
+          "direction": "response",
+          "apdu": "681692009e000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e94009e0064010a00010000000016"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-081",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e9e00960064010600010000000017"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e9600a00064010700010000000017"
+        },
+        {
+          "direction": "response",
+          "apdu": "68169800a0000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e9a00a00064010a00010000000017"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-082",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ea0009c0064010600010000000018"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e9c00a20064010700010000000018"
+        },
+        {
+          "direction": "response",
+          "apdu": "68169e00a2000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ea000a20064010a00010000000018"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-083",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ea200a20064010600010000000019"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ea200a40064010700010000000019"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816a400a4000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ea600a40064010a00010000000019"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-084",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ea400a8006401060001000000001a"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ea800a6006401070001000000001a"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816aa00a6000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eac00a60064010a0001000000001a"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-085",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ea600ae006401060001000000001b"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eae00a8006401070001000000001b"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816b000a8000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eb200a80064010a0001000000001b"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-086",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ea800b4006401060001000000001c"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eb400aa006401070001000000001c"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816b600aa000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eb800aa0064010a0001000000001c"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-087",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eaa00ba006401060001000000001d"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eba00ac006401070001000000001d"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816bc00ac000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ebe00ac0064010a0001000000001d"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-088",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eac00c0006401060001000000001e"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ec000ae006401070001000000001e"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816c200ae000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ec400ae0064010a0001000000001e"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-089",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eae00c6006401060001000000001f"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ec600b0006401070001000000001f"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816c800b0000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eca00b00064010a0001000000001f"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-090",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eb000cc0064010600010000000020"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ecc00b20064010700010000000020"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816ce00b2000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ed000b20064010a00010000000020"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-091",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eb200d20064010600010000000021"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ed200b40064010700010000000021"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816d400b4000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ed600b40064010a00010000000021"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-092",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eb400d80064010600010000000022"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ed800b60064010700010000000022"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816da00b6000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680edc00b60064010a00010000000022"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-093",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eb600de0064010600010000000023"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ede00b80064010700010000000023"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816e000b8000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ee200b80064010a00010000000023"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-094",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eb800e40064010600010000000024"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ee400ba0064010700010000000024"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816e600ba000b83140001000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ee800ba0064010a00010000000024"
+        }
+      ]
+    },
+    {
+      "id": "j60870-case-095",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eba00ea0064010600020000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eea00bc0064010700020000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816ec00bc000b83140002000100000080000a0000fbff00"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eee00bc0064010a00020000000014"
+        }
+      ]
+    },
+    {
+      "id": "j60870-startdt",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680407000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68040b000000"
+        }
+      ]
+    },
+    {
+      "id": "j60870-stopdt",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680413000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680423000000"
+        }
+      ]
+    },
+    {
+      "id": "j60870-testfr",
+      "peer": "j60870 1.8.0 development snapshot@dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680443000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680483000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-004",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e04000c002d0106002d0088130081"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0c0006002d0107002d0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-005",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e06000e002d0106002d0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0e0008002d0107002d0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e100008002d010a002d0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-010",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e10001e002e0106002e0088130081"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e1e0012002e0107002e0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-011",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e120020002e0106002e0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e200014002e0107002e0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e220014002e010a002e0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-016",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e1c0030002f0106002f0088130081"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e30001e002f0107002f0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-017",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e1e0032002f0106002f0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e320020002f0107002f0088130001"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e340020002f010a002f0088130081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-022",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "681028004200300106003000881300010080"
+        },
+        {
+          "direction": "response",
+          "apdu": "681042002a00300107003000881300010080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-023",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68102a004400300106003000881300010000"
+        },
+        {
+          "direction": "response",
+          "apdu": "681044002c00300107003000881300010000"
+        },
+        {
+          "direction": "response",
+          "apdu": "681046002c0030010a003000881300010080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-028",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "681034005400310106003100881300010080"
+        },
+        {
+          "direction": "response",
+          "apdu": "681054003600310107003100881300010080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-029",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "681036005600310106003100881300010000"
+        },
+        {
+          "direction": "response",
+          "apdu": "681056003800310107003100881300010000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68105800380031010a003100881300010080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-034",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6812400066003201060032008813000100000080"
+        },
+        {
+          "direction": "response",
+          "apdu": "6812660042003201070032008813000100000080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-035",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6812420068003201060032008813000100000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "6812680044003201070032008813000100000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68126a00440032010a0032008813000100000080"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-038",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68114800740033010600330088130001000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "681174004a0033010700330088130001000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-042",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "681550007e003a0106003a008813008100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "68157e0052003a0107003a008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-043",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6815520080003a0106003a008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815800054003a0107003a008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815820054003a010a003a008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-048",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68155c0090003b0106003b008813008100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "681590005e003b0107003b008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-049",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68155e0092003b0106003b008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815920060003b0107003b008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815940060003b010a003b008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-054",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68156800a2003c0106003c008813008100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815a2006a003c0107003c008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-055",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68156a00a4003c0106003c008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815a4006c003c0107003c008813000100000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6815a6006c003c010a003c008813008100000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-060",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68177400b4003d0106003d0088130001008000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817b40076003d0107003d0088130001008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-061",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68177600b6003d0106003d0088130001000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817b60078003d0107003d0088130001000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817b80078003d010a003d0088130001008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-066",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68178000c6003e0106003e0088130001008000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817c60082003e0107003e0088130001008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-067",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68178200c8003e0106003e0088130001000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817c80084003e0107003e0088130001000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6817ca0084003e010a003e0088130001008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-072",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68198c00d8003f0106003f00881300010000008000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6819d8008e003f0107003f00881300010000008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-073",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68198e00da003f0106003f00881300010000000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6819da0090003f0107003f00881300010000000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6819dc0090003f010a003f00881300010000008000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-076",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "68189400e6004001060040008813000100000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6818e60096004001070040008813000100000000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-078",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680e9800ec0064010600010000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eec009a0064010700010000000014"
+        },
+        {
+          "direction": "response",
+          "apdu": "680eee009a0001811400010064000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ef0009a0003811400010068000001"
+        },
+        {
+          "direction": "response",
+          "apdu": "6812f2009a000d81140001006e00000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680ef4009a0064010a00010000000014"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-100",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ec400220165010600010000000005"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e2201c60065010700010000000005"
+        },
+        {
+          "direction": "response",
+          "apdu": "68122401c6000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e2601c60065010a00010000000005"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-101",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ec600280165010600010000000041"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e2801c80065010700010000000041"
+        },
+        {
+          "direction": "response",
+          "apdu": "68122a01c8000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e2c01c80065010a00010000000041"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-102",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ec8002e0165010600010000000042"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e2e01ca0065010700010000000042"
+        },
+        {
+          "direction": "response",
+          "apdu": "68123001ca000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e3201ca0065010a00010000000042"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-103",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eca00340165010600010000000043"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e3401cc0065010700010000000043"
+        },
+        {
+          "direction": "response",
+          "apdu": "68123601cc000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e3801cc0065010a00010000000043"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-104",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ecc003a0165010600010000000044"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e3a01ce0065010700010000000044"
+        },
+        {
+          "direction": "response",
+          "apdu": "68123c01ce000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e3e01ce0065010a00010000000044"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-105",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ece00400165010600010000000045"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e4001d00065010700010000000045"
+        },
+        {
+          "direction": "response",
+          "apdu": "68124201d0000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e4401d00065010a00010000000045"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-106",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ed000460165010600010000000081"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e4601d20065010700010000000081"
+        },
+        {
+          "direction": "response",
+          "apdu": "68124801d2000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e4a01d20065010a00010000000081"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-107",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ed2004c0165010600010000000082"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e4c01d40065010700010000000082"
+        },
+        {
+          "direction": "response",
+          "apdu": "68124e01d4000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5001d40065010a00010000000082"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-108",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ed400520165010600010000000083"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5201d60065010700010000000083"
+        },
+        {
+          "direction": "response",
+          "apdu": "68125401d6000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5601d60065010a00010000000083"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-109",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ed600580165010600010000000084"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5801d80065010700010000000084"
+        },
+        {
+          "direction": "response",
+          "apdu": "68125a01d8000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5c01d80065010a00010000000084"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-110",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ed8005e0165010600010000000085"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e5e01da0065010700010000000085"
+        },
+        {
+          "direction": "response",
+          "apdu": "68126001da000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e6201da0065010a00010000000085"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-111",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680eda006401650106000100000000c1"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e6401dc00650107000100000000c1"
+        },
+        {
+          "direction": "response",
+          "apdu": "68126601dc000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e6801dc0065010a000100000000c1"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-112",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680edc006a01650106000100000000c2"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e6a01de00650107000100000000c2"
+        },
+        {
+          "direction": "response",
+          "apdu": "68126c01de000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e6e01de0065010a000100000000c2"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-113",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ede007001650106000100000000c3"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e7001e000650107000100000000c3"
+        },
+        {
+          "direction": "response",
+          "apdu": "68127201e0000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e7401e00065010a000100000000c3"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-114",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ee0007601650106000100000000c4"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e7601e200650107000100000000c4"
+        },
+        {
+          "direction": "response",
+          "apdu": "68127801e2000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e7a01e20065010a000100000000c4"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-115",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680ee2007c01650106000100000000c5"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e7c01e400650107000100000000c5"
+        },
+        {
+          "direction": "response",
+          "apdu": "68127e01e4000f81250001008813000000000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e8001e40065010a000100000000c5"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-116",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680de4008201660105000100640000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680d8201e600660107000100640000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e8401e60001010500010064000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-117",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680de6008601660105000100680000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680d8601e800660107000100680000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e8801e80003010500010068000001"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-118",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680de8008a016601050001006e0000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680d8a01ea006601070001006e0000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68128c01ea000d01050001006e00000000000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-121",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6814ee00960167010600010000000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "68149601f00067010700010000000000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-124",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6816f400a0016b0106000100000000384900000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816a001f6006b0107000100000000384900000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-125",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6814f600a20167010600010001000000000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6814a201f80067010700010001000000000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-case-128",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "6816fc00ac016b0106000100010000384900000000010118"
+        },
+        {
+          "direction": "response",
+          "apdu": "6816ac01fe006b0107000100010000384900000000010118"
+        }
+      ]
+    },
+    {
+      "id": "c104-startdt",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680407000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68040b000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-stopdt",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680413000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680423000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-testfr",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680443000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680483000000"
+        }
+      ]
+    },
+    {
+      "id": "c104-startup-autonomous",
+      "peer": "c104 2.2.1@e9a145f0370879c22fa2d12f320f44b872264241",
+      "frames": [
+        {
+          "direction": "request",
+          "apdu": "680407000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "68040b000000"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0000000046010400010000000000"
+        },
+        {
+          "direction": "request",
+          "apdu": "680401000200"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0200000001010100010064000000"
+        },
+        {
+          "direction": "request",
+          "apdu": "680401000400"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0400000001010200010064000000"
+        },
+        {
+          "direction": "request",
+          "apdu": "680401000600"
+        },
+        {
+          "direction": "response",
+          "apdu": "680e0600000001010300010064000000"
+        },
+        {
+          "direction": "request",
+          "apdu": "680401000800"
+        }
+      ]
+    }
+  ]
+}
