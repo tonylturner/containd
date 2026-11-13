@@ -4,6 +4,7 @@
 package anomaly
 
 import (
+	"container/list"
 	"fmt"
 	"sync"
 	"time"
@@ -84,8 +85,9 @@ type Detector struct {
 	pairing          PairingStats
 	lastPendingSweep time.Time
 
-	writeRate *rateTracker
-	totalRate *rateTracker
+	writeRate     *rateTracker
+	totalRate     *rateTracker
+	rateHighWater int64
 
 	// IEC104 APDU IDs already counted for rates (bounded).
 	apduSeen  map[string]struct{}
@@ -112,6 +114,8 @@ func New(opts ...Option) *Detector {
 		apduSeen:                  make(map[string]struct{}),
 		ring:                      make([]Anomaly, ringSize),
 	}
+	d.writeRate.ledger = d.resources.Ledger
+	d.totalRate.ledger = d.resources.Ledger
 	for _, o := range opts {
 		o(d)
 	}
@@ -168,6 +172,7 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	fk := flowKey(srcIP, dstIP)
 
 	totalCount := d.totalRate.record(fk)
+	d.updateRateHighWater()
 	if totalCount > d.totalRateThreshold {
 		a := Anomaly{
 			Type:     "rate_anomaly",
@@ -189,6 +194,7 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	if isWrite, ok := ev.Attributes["is_write"].(bool); ok && isWrite {
 		writeKey := fk + ":write"
 		writeCount := d.writeRate.record(writeKey)
+		d.updateRateHighWater()
 		if writeCount > d.writeRateThreshold {
 			a := Anomaly{
 				Type:     "rate_anomaly",
@@ -318,6 +324,9 @@ func (d *Detector) Clear() {
 	d.lastPendingSweep = time.Time{}
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
+	d.writeRate.ledger = d.resources.Ledger
+	d.totalRate.ledger = d.resources.Ledger
+	d.rateHighWater = 0
 	d.apduSeen = make(map[string]struct{})
 	d.apduOrder = nil
 	d.ring = make([]Anomaly, ringSize)
@@ -452,72 +461,104 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	return out
 }
 
-// rateTracker tracks events per minute per key using minute-granularity buckets.
+const rateWindowBuckets = 6
+
+type minuteBucket struct {
+	minute int64
+	count  int
+}
+
+type rateEntry struct {
+	key     string
+	buckets [rateWindowBuckets]minuteBucket
+}
+
+// rateTracker tracks events per minute per key using fixed minute buckets and
+// an LRU-bounded set of host-pair keys.
 type rateTracker struct {
-	// key -> minute-bucket -> count
-	buckets map[string]map[int64]int
+	buckets   map[string]*list.Element
+	order     list.List
+	maxKeys   int
+	highWater int64
+	complete  bool
+	ledger    *limits.Ledger
 }
 
 func newRateTracker() *rateTracker {
 	return &rateTracker{
-		buckets: make(map[string]map[int64]int),
+		buckets:  make(map[string]*list.Element),
+		maxKeys:  limits.MaxRateTrackers,
+		complete: true,
 	}
 }
 
 // record adds an event for key at the current time and returns the rate
 // (events in the last minute).
 func (rt *rateTracker) record(key string) int {
-	now := time.Now()
-	currentMinute := now.Unix() / 60
-
-	if rt.buckets[key] == nil {
-		rt.buckets[key] = make(map[int64]int)
-	}
-	rt.buckets[key][currentMinute]++
-
-	// Sum events in the current minute bucket.
-	count := rt.buckets[key][currentMinute]
-
-	// Also include the previous minute, prorated.
-	prevMinute := currentMinute - 1
-	if prev, ok := rt.buckets[key][prevMinute]; ok {
-		// Simple approach: add previous minute's full count for a sliding window.
-		count += prev
-	}
-
-	// Garbage-collect old buckets (keep last 5 minutes).
-	cutoff := currentMinute - 5
-	for m := range rt.buckets[key] {
-		if m < cutoff {
-			delete(rt.buckets[key], m)
-		}
-	}
-
-	return count
+	return rt.recordAt(key, time.Now())
 }
 
 // recordAt is like record but uses a specific time. Used for testing.
 func (rt *rateTracker) recordAt(key string, t time.Time) int {
 	currentMinute := t.Unix() / 60
-
-	if rt.buckets[key] == nil {
-		rt.buckets[key] = make(map[int64]int)
-	}
-	rt.buckets[key][currentMinute]++
-
-	count := rt.buckets[key][currentMinute]
-
-	prevMinute := currentMinute - 1
-	if prev, ok := rt.buckets[key][prevMinute]; ok {
-		count += prev
-	}
-
-	cutoff := currentMinute - 5
-	for m := range rt.buckets[key] {
-		if m < cutoff {
-			delete(rt.buckets[key], m)
+	element := rt.buckets[key]
+	if element == nil {
+		if rt.maxKeys <= 0 {
+			rt.maxKeys = limits.MaxRateTrackers
 		}
+		if len(rt.buckets) >= rt.maxKeys {
+			oldest := rt.order.Back()
+			old := oldest.Value.(*rateEntry)
+			delete(rt.buckets, old.key)
+			rt.order.Remove(oldest)
+			rt.complete = false
+			if rt.ledger != nil {
+				rt.ledger.Record(limits.TableRateTrackers, limits.ReasonEvicted, limits.ModeObserve)
+			}
+		}
+		entry := &rateEntry{key: key}
+		element = rt.order.PushFront(entry)
+		rt.buckets[key] = element
+		if int64(len(rt.buckets)) > rt.highWater {
+			rt.highWater = int64(len(rt.buckets))
+		}
+	} else {
+		rt.order.MoveToFront(element)
 	}
-
+	entry := element.Value.(*rateEntry)
+	index := currentMinute % rateWindowBuckets
+	if index < 0 {
+		index += rateWindowBuckets
+	}
+	bucket := &entry.buckets[index]
+	if bucket.minute != currentMinute {
+		bucket.minute = currentMinute
+		bucket.count = 0
+	}
+	bucket.count++
+	count := bucket.count
+	prevMinute := currentMinute - 1
+	prevIndex := prevMinute % rateWindowBuckets
+	if prevIndex < 0 {
+		prevIndex += rateWindowBuckets
+	}
+	if previous := entry.buckets[prevIndex]; previous.minute == prevMinute {
+		count += previous.count
+	}
 	return count
+}
+
+func (d *Detector) updateRateHighWater() {
+	entries := int64(len(d.writeRate.buckets) + len(d.totalRate.buckets))
+	if entries > d.rateHighWater {
+		d.rateHighWater = entries
+	}
+}
+
+// RateCoverageComplete reports whether either rate history has ever lost a
+// tracked host pair during this detector generation.
+func (d *Detector) RateCoverageComplete() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.writeRate.complete && d.totalRate.complete
 }

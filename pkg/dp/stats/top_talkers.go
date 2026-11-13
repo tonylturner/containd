@@ -42,16 +42,19 @@ func (h *talkerHeap) Push(v any)        { *h = append(*h, v.(FlowStats)) }
 func (h *talkerHeap) Pop() any          { old := *h; v := old[len(old)-1]; *h = old[:len(old)-1]; return v }
 
 // TopTalkers selects at most n rows in O(retained log n) time and O(n) space.
-// n <= 0 returns all rows. No rows have been evicted by the current tracker.
+// n <= 0 returns all rows retained by the tracker.
 func (t *Tracker) TopTalkers(n int) TopTalkers {
-	out := TopTalkers{Semantics: "recent", Complete: true, Rows: []FlowStats{}}
+	out := TopTalkers{Semantics: "recent", Rows: []FlowStats{}}
 	if t == nil {
 		return out
 	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	out.Limit = t.topTalkerLimit()
 	out.Since = t.since
 	out.Retained = len(t.flows)
+	out.Evicted = t.evicted
+	out.Complete = t.evicted == 0
 	if n <= 0 || n > out.Retained {
 		n = out.Retained
 	}

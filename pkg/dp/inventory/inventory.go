@@ -47,12 +47,13 @@ type Inventory struct {
 
 // New creates a new empty Inventory.
 func New() *Inventory {
-	return &Inventory{
+	inv := &Inventory{
 		stateLimits: limits.Default(),
 		resources:   limits.NewResources(nil, nil),
 		assets:      newBounded[assetKey, *DiscoveredAsset](MaxAssets),
-		iec104:      newIEC104Store(),
 	}
+	resetIEC104Store(&inv.iec104)
+	return inv
 }
 
 // RecordEvent extracts ICS metadata from a DPI event and updates the
@@ -247,9 +248,7 @@ func (inv *Inventory) Clear() {
 	inv.assets = newBounded[assetKey, *DiscoveredAsset](MaxAssets)
 	inv.overflow = InventoryOverflow{}
 	inv.iec104.mu.Lock()
-	inv.iec104.pairs = newBounded[pairKey, *pairState](MaxIEC104Pairs)
-	inv.iec104.overflow = InventoryOverflow{}
-	inv.iec104.busyObservations.Store(0)
+	resetIEC104Store(&inv.iec104)
 	inv.iec104.mu.Unlock()
 }
 

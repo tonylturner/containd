@@ -4,6 +4,7 @@
 package stats
 
 import (
+	"container/list"
 	"crypto/rand"
 	"net/netip"
 	"sort"
@@ -46,6 +47,10 @@ type Tracker struct {
 	mu          sync.RWMutex
 	proto       map[string]*ProtoStats
 	flows       map[hostPair]*FlowStats
+	flowOrder   list.List
+	flowEntries map[hostPair]*list.Element
+	evicted     uint64
+	highWater   int64
 }
 
 // hostPair deliberately excludes transport ports: top talkers aggregate all
@@ -65,6 +70,7 @@ func New() *Tracker {
 		resources:   limits.NewResources(nil, nil),
 		proto:       make(map[string]*ProtoStats),
 		flows:       make(map[hostPair]*FlowStats),
+		flowEntries: make(map[hostPair]*list.Element),
 	}
 }
 
@@ -127,17 +133,44 @@ func (t *Tracker) RecordPacket(srcIP, dstIP netip.Addr, protocol string, bytes i
 	flowKey := hostPair{src: srcIP, dst: dstIP, protocol: ps.Protocol}
 	fs, ok := t.flows[flowKey]
 	if !ok {
+		limit := t.topTalkerLimit()
+		if len(t.flows) >= limit {
+			oldest := t.flowOrder.Back()
+			oldKey := oldest.Value.(hostPair)
+			delete(t.flows, oldKey)
+			delete(t.flowEntries, oldKey)
+			t.flowOrder.Remove(oldest)
+			t.evicted++
+			t.resources.Ledger.Record(limits.TableTopTalkers, limits.ReasonEvicted, limits.ModeObserve)
+		}
 		fs = &FlowStats{SrcIP: srcIP.String(), DstIP: dstIP.String(), Protocol: ps.Protocol}
 		t.flows[flowKey] = fs
+		t.flowEntries[flowKey] = t.flowOrder.PushFront(flowKey)
+		if int64(len(t.flows)) > t.highWater {
+			t.highWater = int64(len(t.flows))
+		}
+	} else {
+		t.flowOrder.MoveToFront(t.flowEntries[flowKey])
 	}
 	fs.Packets++
 	fs.Bytes += int64(bytes)
+}
+
+func (t *Tracker) topTalkerLimit() int {
+	limit := t.stateLimits.MaxTopTalkers
+	if limit <= 0 {
+		return limits.DefaultMaxTopTalkers
+	}
+	return min(limit, limits.MaxMaxTopTalkers)
 }
 
 // protocolLocked requires t.mu to be held.
 func (t *Tracker) protocolLocked(protocol string) *ProtoStats {
 	if protocol == "" {
 		protocol = "unknown"
+	}
+	if _, ok := t.proto[protocol]; !ok && protocol != "other" && len(t.proto) >= limits.MaxProtocols-1 {
+		protocol = "other"
 	}
 	ps, ok := t.proto[protocol]
 	if !ok {

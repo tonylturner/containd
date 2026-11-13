@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -223,6 +224,28 @@ func TestConformanceBoundedState(t *testing.T) {
 	other.Key.SrcPort++
 	if len(a.fresh(other, eventfields.KeyConformance, []string{"cip.a"})) != 0 {
 		t.Fatal("connection bound not applied")
+	}
+}
+
+func TestConformanceCapsCountEverySuppressedIdentity(t *testing.T) {
+	ledger := limits.NewLedger(nil)
+	a := conformanceAlerts{ledger: ledger, maxConnections: 3, maxCodes: 2}
+	first := conformanceState()
+	if got := a.fresh(first, eventfields.KeyConformance, []string{"one", "two", "three"}); !reflect.DeepEqual(got, []string{"one", "two"}) {
+		t.Fatalf("first connection fresh codes = %v", got)
+	}
+	for i := 0; i < 40; i++ {
+		state := conformanceState()
+		state.Key.SrcPort += uint16(i + 1)
+		a.fresh(state, eventfields.KeyConformance, []string{"code"})
+	}
+	occupancy := a.LimitOccupancy()
+	if occupancy.Limit != 3 || occupancy.Entries != 3 || occupancy.HighWater != 3 || a.suppressed != 39 {
+		t.Fatalf("conformance occupancy=%+v suppressed=%d", occupancy, a.suppressed)
+	}
+	hits := ledger.Status(limits.TableConformance, limits.Occupancy{}).Hits
+	if len(hits) != 1 || hits[0].Reason != limits.ReasonRefused || hits[0].Mode != limits.ModeObserve || hits[0].Total != 39 {
+		t.Fatalf("conformance refusal ledger hits %+v", hits)
 	}
 }
 

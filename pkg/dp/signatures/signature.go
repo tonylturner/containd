@@ -52,19 +52,26 @@ type Engine struct {
 	signatures  []Signature
 	mu          sync.RWMutex
 
-	matchesMu  sync.Mutex
-	matches    []Match
-	matchCap   int
-	thresholds map[thresholdKey]*thresholdState // guarded by matchesMu
+	matchesMu          sync.Mutex
+	matches            []Match
+	matchCap           int
+	thresholds         map[thresholdKey]*thresholdState // guarded by matchesMu
+	thresholdHighWater int64
+	maxWindows         int
+	maxValues          int
+	maxValueBytes      int
 }
 
 // New creates a new signature engine with default capacity for match history.
 func New() *Engine {
 	return &Engine{
-		stateLimits: limits.Default(),
-		resources:   limits.NewResources(nil, nil),
-		matchCap:    4096,
-		matches:     make([]Match, 0, 256),
+		stateLimits:   limits.Default(),
+		resources:     limits.NewResources(nil, nil),
+		matchCap:      4096,
+		matches:       make([]Match, 0, 256),
+		maxWindows:    maxThresholdKeys,
+		maxValues:     maxThresholdDedupValues,
+		maxValueBytes: limits.MaxSignatureValueBytes,
 	}
 }
 

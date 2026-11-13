@@ -144,14 +144,16 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 
 // pickupResets keeps the resets of picked-up connections for
 // iecResetWindow after they were sent, for answerPickupChallenge. It holds
-// at most iecMaxSessions connections; live lets the packet path skip it
+// at most limits.MaxPickupReset connections; live lets the packet path skip it
 // when it holds none.
 type pickupResets struct {
-	ledger *limits.Ledger
-	mu     sync.Mutex
-	conns  map[iecKey]*pickupReset
-	swept  time.Time
-	live   atomic.Int32
+	ledger     *limits.Ledger
+	mu         sync.Mutex
+	conns      map[iecKey]*pickupReset
+	swept      time.Time
+	live       atomic.Int32
+	highWater  int64
+	maxEntries int
 }
 
 // pickupReset associates challenge retries with the same denial generation.
@@ -163,7 +165,11 @@ type pickupReset struct {
 }
 
 func newPickupResets() *pickupResets {
-	return &pickupResets{conns: make(map[iecKey]*pickupReset), ledger: limits.NewLedger(nil)}
+	return &pickupResets{
+		conns:      make(map[iecKey]*pickupReset),
+		ledger:     limits.NewLedger(nil),
+		maxEntries: limits.MaxPickupReset,
+	}
 }
 
 // record keeps the resets sent to close a connection.
@@ -171,11 +177,24 @@ func (p *pickupResets) record(key iecKey, resets connReset, guard *deniedTCP, re
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.expireLocked(now)
-	if _, ok := p.conns[key]; !ok && len(p.conns) >= iecMaxSessions {
+	if _, ok := p.conns[key]; !ok && len(p.conns) >= p.limit() {
+		if p.ledger != nil {
+			p.ledger.Record(limits.TablePickupReset, limits.ReasonRefused, limits.ModeObserve)
+		}
 		return
 	}
 	p.conns[key] = &pickupReset{connReset: resets, guard: guard, report: report}
+	if int64(len(p.conns)) > p.highWater {
+		p.highWater = int64(len(p.conns))
+	}
 	p.live.Store(int32(len(p.conns)))
+}
+
+func (p *pickupResets) limit() int {
+	if p.maxEntries <= 0 {
+		return limits.MaxPickupReset
+	}
+	return min(p.maxEntries, limits.MaxPickupReset)
 }
 
 // challenge returns the reset to send again for a packet of from on key.
@@ -231,5 +250,5 @@ func (p *pickupResets) expireLocked(now time.Time) {
 func (p *pickupResets) LimitOccupancy() limits.Occupancy {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return limits.Occupancy{Limit: iecMaxSessions, Entries: int64(len(p.conns))}
+	return limits.Occupancy{Limit: int64(p.limit()), Entries: int64(len(p.conns)), HighWater: p.highWater}
 }

@@ -8,5 +8,9 @@ import "github.com/tonylturner/containd/pkg/dp/limits"
 func (d *Detector) LimitOccupancy() limits.Occupancy {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return limits.Occupancy{Entries: int64(len(d.writeRate.buckets) + len(d.totalRate.buckets))}
+	return limits.Occupancy{
+		Limit:     2 * limits.MaxRateTrackers,
+		Entries:   int64(len(d.writeRate.buckets) + len(d.totalRate.buckets)),
+		HighWater: d.rateHighWater,
+	}
 }
