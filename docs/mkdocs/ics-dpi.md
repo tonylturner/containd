@@ -51,7 +51,7 @@ Monitor-only traffic needs DPI, its decoder and capture:
 - With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
   Monitor rules add no packet steering.
 - With a nonzero queue group, monitor-only ICS traffic still passes through the
-  engine's single NFQUEUE capture source. The engine feeds the decoder once,
+  engine's single NFQUEUE capture source in both tracked directions. The engine feeds the decoder once,
   then immediately releases the packet back to the ruleset without a monitor
   hold. An observation mark prevents repeat queueing through any ICS queue rule.
   Later L4 rules, established-connection handling and the default policy decide
@@ -65,6 +65,18 @@ still decides the packet; monitor matches remain independent observations.
 Disabled DPI/decoders, exclusions and capture loss limit observations. Enforce
 mode alone does not prove protection either:
 see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+
+Generic Modbus, DNP3 and CIP inline scopes also inspect replies in enforce mode,
+using the connection's original client and post-DNAT backend even with NAT.
+`ics.direction` restricts message matching, not which direction reaches inspection.
+Existing response-matching enforcing `DENY` and `RESET` rules therefore apply
+inline, and strict parsing or stream failures in enforcing scopes can veto
+reply packets. Monitor response matches remain would-decisions only.
+An unmatched generic reply still skips the ordinary message default deny;
+explicit matching rules and kernel transport admission still apply. This is
+not request/reply authorization pairing or atomic whole-message buffering:
+earlier segments of a split generic message can already have been forwarded
+before a later segment reveals a denial.
 
 ### Shadow evidence and applied-policy counters
 

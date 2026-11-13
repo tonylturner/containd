@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- Generic Modbus, DNP3 and CIP inline inspection now receives both tracked
+  directions in enforce and monitor modes, including NAT and published
+  services. Existing enforcing response denials and strict parsing vetoes
+  now apply to replies; monitor rules remain observational. Unmatched generic
+  replies retain their existing message default-deny suppression.
 - TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
   `tls_offered_versions` (from `supported_versions`, GREASE removed) and, when
   the server reply is seen, `tls_selected_version`. IDS rules and Sigma rules

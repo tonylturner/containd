@@ -63,7 +63,7 @@ nftables enforces identity and schedule predicates on the rules it handles,
 with per-label address sets and absolute-time interval sets in the policy
 table, and decides established connections in their scope again before the
 conntrack accept. For a conditional ICS `ALLOW` queued to the engine, that
-recheck covers the replies and server packets the queue does not see. See
+recheck still decides transport admission in both directions after inspection. See
 [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
 When a commit changes the policy, established connections are also evaluated
 again on their next packet, without deleting their conntrack entries. See
@@ -174,8 +174,8 @@ the enforcing scope leaves admission entirely to the current kernel policy.
 Generic resets are **best-effort**, not confirmation that either peer closed.
 The engine uses the denied packet's SEQ for its receiver and ACK for its
 sender; without an ACK the sender's reset sequence is unavailable. Generic
-NFQUEUE rules do not automatically steer reverse traffic, so server-side RFC
-5961 challenge ACKs may not be observed. There is no IPv6 reset injector:
+ICS scopes steer both directions through NFQUEUE, including server-side RFC
+5961 challenge ACKs while the transport scope still matches. There is no IPv6 reset injector:
 IPv6 denies, and TCP denies when the injector is not ready, enforce the
 denial without injecting resets. An `ics.session` event per peer records
 `reset_sent`, `reset_failed`, or
@@ -285,6 +285,14 @@ runs in this order:
    steering jumps to the `iec104_envelope` chain and enforcing NFQUEUE lines
    use the `ics_enforce_queue` chain. Both chains mark the packets of
    connections whose handshake connection tracking has not seen complete.
+   Generic ICS enforce and monitor scopes select both tracked directions,
+   before established-admission fast paths, even when `ics.direction` selects
+   only requests or responses. They match the original client and post-DNAT
+   backend from conntrack, with interface zones swapped on replies; SNAT
+   does not replace the client identity. Monitor steering uses `ics_queue`
+   and never grants admission. Continuation marks prevent a second queue
+   traversal or duplicate meters and counters. Management reservations remain
+   outside ICS queues.
 3. `TAG` lines, by rule ID, which count matching connection openers and
    continue.
 4. Continuation guards, admission checks and ordered terminal evaluation.

@@ -73,7 +73,9 @@ func (c *Compiler) writeInspection(buf *bytes.Buffer, p *predicates, target chai
 						chain = monitorIECChain
 					}
 				}
-				lines, err := p.transportLines(target, e, true, counterStmt(e.ID)+" jump "+chain, !iec)
+				// Application direction selects messages, not capture. All ICS
+				// scopes use the same client/backend tuple and swapped reply zones.
+				lines, err := p.transportLines(target, e, true, counterStmt(e.ID)+" jump "+chain, false)
 				if err != nil {
 					return err
 				}
