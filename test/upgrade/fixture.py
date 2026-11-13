@@ -16,6 +16,47 @@ def has_cas(version):
     return patch(version) >= 37
 
 
+def source_address_defect(version, addresses, lan, wan):
+    """Recognize the proven pre-0.1.33 host-to-network address conversion."""
+    if patch(version) >= 33:
+        return False
+    live = {a['local'] for row in addresses for a in row.get('addr_info', [])}
+    return all(prefix + '.0' in live and prefix + '.2' not in live
+               for prefix in (lan, wan))
+
+
+def source_binding_defect(version, logs, interfaces):
+    devices = [row.get('device') for row in interfaces]
+    return (patch(version) in (33, 34)
+            and 'duplicate interface device binding:' in logs
+            and all(devices) and len(set(devices)) == len(devices))
+
+
+def qualify_source_result(result):
+    """A lucky attachment order cannot rehabilitate a proven source defect."""
+    row = dict(result)
+    if row['profile'] != 'training' or row['result'] != 'PASS':
+        return row
+    version = patch(row['from'])
+    if version in (30, 31, 32):
+        row.update(result='UNSUPPORTED', attemptResult='PASS', fixedIn='0.1.33',
+                   defect='static host addresses converted to network addresses during commit')
+    elif version == 34:
+        row.update(result='UNSUPPORTED', attemptResult='PASS', fixedIn='0.1.35',
+                   defect='commit can rebind distinct explicit interfaces and fail with duplicate device binding')
+    return row
+
+
+def supported_floor(results):
+    """A floor requires every later training/strict row, not just one old pass."""
+    outcomes = {(r['from'], r['profile']): qualify_source_result(r)['result'] for r in results}
+    for version, _ in MATRIX:
+        later = [(v, p) for v, p in MATRIX if patch(v) >= patch(version)]
+        if all(outcomes.get(row) == 'PASS' for row in later):
+            return version
+    return None
+
+
 def schema_authority(root):
     text = (root / 'pkg/cp/config/version.go').read_text()
     return re.search(r'SchemaVersionCurrent\s*=\s*"([^"]+)"', text)[1]
@@ -33,7 +74,7 @@ def seed(base, version, devices, lan, wan, bank):
     cfg['interfaces'] = []
     for name, zone, address in [('lan1', 'lan', lan), ('wan', 'wan', wan)]:
         row = {'name': name, 'zone': zone, 'addresses': [address + '.2/24'],
-               'addressMode': 'static'}
+               'addressMode': 'static', 'access': {}}
         if patch(version) < 41:
             row['device'] = devices[name]
         cfg['interfaces'].append(row)
@@ -76,6 +117,17 @@ def assert_config(cfg, schema, bank, lan, wan):
     assert [r['action'] for r in rules] == ['ALLOW', 'DENY', 'DENY']
     assert rules[2]['ics']['mode'] == 'monitor'
     assert [r['id'] for r in cfg['ids']['rules']] == [f'upgrade-{bank}']
+
+
+def assert_source_config(cfg, expected):
+    for field in ('description', 'interfaces', 'zones'):
+        assert cfg[field] == expected[field], (field, cfg[field], expected[field])
+    assert cfg['system']['hostname'] == expected['system']['hostname']
+    assert cfg['dataplane']['enforcement'] is True
+    assert cfg['dataplane']['dpiMode'] == expected['dataplane']['dpiMode']
+    assert [r['id'] for r in cfg['ids']['rules']] == [r['id'] for r in expected['ids']['rules']]
+    assert [(r['id'], r['action']) for r in cfg['firewall']['rules']] == [
+        (r['id'], r['action']) for r in expected['firewall']['rules']]
 
 
 def assert_protection(status):

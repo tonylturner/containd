@@ -88,15 +88,21 @@ The release validation command exercises genuine published source images against
 the exact locally built candidate:
 
 ```sh
-docker build -f build/Dockerfile.mgmt -t containd/containd:upgrade-local .
+docker build -f build/Dockerfile.mgmt --build-arg COMMIT=$(git rev-parse HEAD) \
+  -t containd/containd:upgrade-local .
 UPGRADE_IMAGE=containd/containd:upgrade-local \
   COMPOSE_PROJECT_NAME=upgrade-local-$(date +%s) \
   bash scripts/smoke-upgrade.sh
 ```
 
 It declares training rows for every release 0.1.30–0.1.42 and strict→strict rows
-for 0.1.39–0.1.42. A failure stops the run; an unexecuted row is not supported
-merely because another row has the same schema. See
+for 0.1.39–0.1.42. Proven source-image defects are recorded as unsupported
+with the first fixed release; the fixture is not weakened to avoid them. An
+unexpected failure stops the run, and a candidate-side defect requires a
+product fix before continuing. An unexecuted row is not supported merely
+because another row has the same schema. A known attachment-order-dependent
+source defect remains unsupported even when a later attempt completes all
+assertions; `attemptResult` preserves that successful observation separately. See
 [Update Policy](update-policy.md) for supported paths and required deployment
 changes. This is an opt-in local release gate, not part of ordinary CI.
 
@@ -108,7 +114,9 @@ on failure; pulled images remain. Do not supply an existing appliance data tree.
 
 `UPGRADE_RESULTS` selects a new evidence directory (default `build/<project>`).
 It contains secrets, stopped-data backups, logs, source digests, candidate image
-identity, named assertions, row wall times in `matrix.json` and teardown evidence
+identity (tag, image ID and embedded source commit), named assertions, row wall
+times including teardown in `matrix.json`, the passing suffix floor in
+`support.json` and teardown evidence
 in `remaining-resources.json`. Keep it private. Successful checks cover distinct
 running/candidate configurations and IDS banks, previous snapshot retention,
 accounts/credentials, TLS/SSH identity, CAS epochs, migration audit idempotence,

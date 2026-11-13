@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import patch as mock_patch
 
 from fixture import (MATRIX, assert_config, assert_mode_audit, assert_protection, assert_revision,
-                     has_cas, schema_authority, seed)
+                     assert_source_config, has_cas, qualify_source_result, schema_authority, seed, source_address_defect,
+                     source_binding_defect, supported_floor)
 from run import API, Row, free_subnets, resources
 
 
@@ -40,6 +41,43 @@ class FixtureTests(unittest.TestCase):
         self.assertFalse(has_cas('0.1.36'))
         self.assertTrue(has_cas('0.1.37'))
 
+    def test_only_proven_source_address_failure_is_unsupported(self):
+        state = [{'addr_info': [{'local': '10.210.42.0'}, {'local': '10.211.42.0'}]}]
+        self.assertTrue(source_address_defect('0.1.31', state, '10.210.42', '10.211.42'))
+        self.assertFalse(source_address_defect('0.1.33', state, '10.210.42', '10.211.42'))
+        self.assertFalse(source_address_defect('0.1.31', [], '10.210.42', '10.211.42'))
+        state[0]['addr_info'].append({'local': '10.210.42.2'})
+        self.assertFalse(source_address_defect('0.1.31', state, '10.210.42', '10.211.42'))
+
+    def test_floor_requires_complete_passing_suffix_including_strict(self):
+        rows = [{'from': v, 'profile': p, 'result': 'PASS' if int(v.split('.')[2]) >= 33 else 'UNSUPPORTED'}
+                for v, p in MATRIX]
+        self.assertEqual(supported_floor(rows), '0.1.35')
+        self.assertIsNone(supported_floor(rows[:-1]))
+        rows[5]['result'] = 'UNSUPPORTED'
+        self.assertEqual(supported_floor(rows), '0.1.36')
+
+    def test_lucky_source_attempt_does_not_erase_proven_defect(self):
+        attempt = {'from': '0.1.34', 'profile': 'training', 'result': 'PASS'}
+        result = qualify_source_result(attempt)
+        self.assertEqual(result['result'], 'UNSUPPORTED')
+        self.assertEqual(result['attemptResult'], 'PASS')
+        self.assertEqual(result['fixedIn'], '0.1.35')
+        self.assertEqual(attempt['result'], 'PASS')
+        for version in ('0.1.33', '0.1.35'):
+            row = dict(attempt, **{'from': version})
+            self.assertEqual(qualify_source_result(row), row)
+        failure = dict(attempt, result='FAIL', phase='candidate', error='lost bank')
+        self.assertEqual(qualify_source_result(failure), failure)
+
+    def test_source_rebinding_failure_requires_distinct_valid_staged_devices(self):
+        rows = [{'device': 'eth1'}, {'device': 'eth0'}]
+        message = 'internal error: duplicate interface device binding: eth1'
+        self.assertTrue(source_binding_defect('0.1.34', message, rows))
+        self.assertFalse(source_binding_defect('0.1.35', message, rows))
+        self.assertFalse(source_binding_defect('0.1.34', 'some other error', rows))
+        self.assertFalse(source_binding_defect('0.1.34', message, [{'device': 'eth1'}, {'device': 'eth1'}]))
+
     def test_historical_modes_and_devices(self):
         self.assertEqual(self.cfg['dataplane']['dpiMode'], 'learn')
         self.assertEqual(self.cfg['interfaces'][0]['device'], 'eth0')
@@ -56,6 +94,21 @@ class FixtureTests(unittest.TestCase):
 
     def test_valid_migration(self):
         self.verify(self.migrated())
+
+    def test_source_bank_is_verified_before_candidate_boot(self):
+        assert_source_config(self.cfg, self.cfg)
+        wrong = copy.deepcopy(self.cfg)
+        wrong['ids']['rules'] = []
+        with self.assertRaises(AssertionError):
+            assert_source_config(wrong, self.cfg)
+
+    def test_physical_row_matches_empty_access_serialization(self):
+        for row in self.cfg['interfaces']:
+            self.assertEqual(row['access'], {})
+        wrong = copy.deepcopy(self.cfg)
+        wrong['interfaces'][0]['access'] = {'mgmt': False}
+        with self.assertRaises(AssertionError):
+            assert_source_config(wrong, self.cfg)
 
     def test_wrong_schema(self):
         cfg = self.migrated()
@@ -140,6 +193,18 @@ class FixtureTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             api.call('/config/candidate', {}, config_write=True)
 
+    def test_denied_config_write_keeps_base_without_success_ack(self):
+        api = API('http://127.0.0.1', None, True)
+        api.revision = '0123456789abcdef.1'
+        response = unittest.mock.MagicMock()
+        response.status, response.headers = 403, {}
+        response.read.return_value = b'{"error":"admin role required"}'
+        response.__enter__.return_value = response
+        with mock_patch.object(api.opener, 'open', return_value=response) as request:
+            api.call('/config/candidate', {}, expected=403, config_write=True)
+            self.assertEqual(api.revision, '0123456789abcdef.1')
+            self.assertEqual(request.call_args.args[0].get_header('X-containd-if-revision'), api.revision)
+
     def test_running_snapshot_uses_export_with_bank(self):
         api = API('http://127.0.0.1', None, True)
         cfg = self.migrated()
@@ -156,6 +221,36 @@ class FixtureTests(unittest.TestCase):
             self.assertEqual([c.args for c in call.call_args_list],
                              [('/config/candidate',), ('/ids/rules',)])
 
+    def test_protection_polls_documented_unavailable_collection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            class Run:
+                path = Path(tmp)
+            row = Row(Run(), '0.1.41', 'training', '10.210.42', '10.211.42')
+            row.api = unittest.mock.Mock()
+            ready = {'ready': True, 'state': 'protecting', 'desiredRevision': 'abc',
+                     'appliedRevision': 'abc', 'protectingRevision': 'abc'}
+            def observation(*_args, **kwargs):
+                self.assertEqual(kwargs, {'expected': (200, 502)})
+                row.api.last_status = 502 if row.api.call.call_count == 1 else 200
+                return {'ready': False, 'state': 'unknown'} if row.api.last_status == 502 else ready
+            row.api.call.side_effect = observation
+            with mock_patch('run.time.sleep'):
+                self.assertEqual(row.protection('restart'), 'abc')
+            self.assertEqual(row.api.call.call_count, 2)
+
+    def test_protection_never_accepts_502_even_with_ready_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            class Run:
+                path = Path(tmp)
+            row = Row(Run(), '0.1.41', 'training', '10.210.42', '10.211.42')
+            row.api = unittest.mock.Mock(last_status=502)
+            row.api.call.return_value = {'ready': True, 'state': 'protecting', 'desiredRevision': 'abc',
+                                        'appliedRevision': 'abc', 'protectingRevision': 'abc'}
+            with mock_patch('run.time.sleep'), self.assertRaises(AssertionError):
+                row.protection('restart')
+            self.assertEqual(row.api.call.call_count, 60)
+            self.assertEqual(row.checks, [])
+
     def test_manifest_is_private_and_names_every_attachment(self):
         with tempfile.TemporaryDirectory() as tmp:
             class Run:
@@ -167,6 +262,8 @@ class FixtureTests(unittest.TestCase):
                 row.manifest('candidate:test', True)
             doc = json.loads(row.compose_file.read_text())
             appliance = doc['services']['appliance']
+            self.assertTrue(doc['services']['origin']['init'])
+            self.assertTrue(doc['services']['client']['init'])
             self.assertEqual(appliance['ports'], ['127.0.0.1::18443'])
             self.assertEqual({n: c['interface_name'] for n, c in appliance['networks'].items()},
                              {'lan': 'lan1', 'wan': 'wan'})

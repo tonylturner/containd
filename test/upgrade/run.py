@@ -20,9 +20,20 @@ import urllib.error
 import urllib.request
 
 from fixture import (MATRIX, assert_config, assert_mode_audit, assert_protection, assert_revision,
-                     has_cas, patch, schema_authority, seed)
+                     assert_source_config, has_cas, patch, qualify_source_result, schema_authority, seed, source_address_defect,
+                     source_binding_defect, supported_floor)
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class UnsupportedSource(Exception):
+    """A reproduced defect in the published writer, not in the candidate."""
+    fixed_in = '0.1.33'
+    defect = 'static host addresses converted to network addresses during commit'
+
+    def __init__(self, defect, fixed_in='0.1.33'):
+        super().__init__(defect)
+        self.defect, self.fixed_in = defect, fixed_in
 
 
 def command(*args):
@@ -62,6 +73,7 @@ class API:
     def __init__(self, base, context, cas):
         self.base, self.context, self.cas = base, context, cas
         self.token, self.revision = '', ''
+        self.last_status = None
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context))
 
@@ -80,9 +92,11 @@ class API:
             response = error
         with response:
             body = response.read().decode()
-            if response.status != expected:
+            self.last_status = response.status
+            allowed = expected if isinstance(expected, tuple) else (expected,)
+            if response.status not in allowed:
                 raise RuntimeError(f'{path}: HTTP {response.status}, expected {expected}: {body}')
-            if path.startswith('/config') and (data is None or config_write):
+            if 200 <= response.status < 300 and path.startswith('/config') and (data is None or config_write):
                 revision = response.headers.get('X-Containd-Revision', '')
                 if self.cas:
                     assert revision, f'{path} missing revision acknowledgement'
@@ -116,6 +130,7 @@ class Row:
         self.compose_file = self.path / 'compose.json'
         self.checks = []
         self.api = None
+        self.phase = 'source'
         self.passwords = {u: 'UpgradeAa1-' + secrets.token_hex(16) for u in ('containd', 'upgrade-admin', 'upgrade-view')}
         save(self.path / 'credentials.json', self.passwords)
 
@@ -145,9 +160,9 @@ class Row:
                 'sysctls': {'net.ipv4.ip_forward': '1'}, 'environment': env,
                 'ports': [f'127.0.0.1::{port}'], 'volumes': [f'{self.data}:/data'],
                 'networks': attachments, 'command': ['all'], 'restart': 'no'},
-            'client': {'image': self.run.endpoint, 'cap_add': ['NET_ADMIN'],
+            'client': {'image': self.run.endpoint, 'init': True, 'cap_add': ['NET_ADMIN'],
                        'networks': {'lan': {'ipv4_address': self.lan + '.3'}}},
-            'origin': {'image': self.run.endpoint, 'cap_add': ['NET_ADMIN'],
+            'origin': {'image': self.run.endpoint, 'init': True, 'cap_add': ['NET_ADMIN'],
                        'networks': {'wan': {'ipv4_address': self.wan + '.3'}}}},
             'networks': {n: {'ipam': {'config': [{'subnet': p + '.0/24'}]}}
                          for n, p in [('lan', self.lan), ('wan', self.wan)]}}
@@ -239,9 +254,12 @@ else:
     def protection(self, phase):
         status = {}
         for _ in range(60):
-            status = self.api.call('/dataplane/protection')
-            save(self.path / f'protection-{phase}.json', status)
+            # The API explicitly returns an unknown/not-ready aggregate with
+            # HTTP 502 when engine collection is unavailable during startup.
+            status = self.api.call('/dataplane/protection', expected=(200, 502))
+            save(self.path / f'protection-{phase}.json', dict(status, httpStatus=self.api.last_status))
             try:
+                assert self.api.last_status == 200, status
                 revision = assert_protection(status)
                 self.check(phase + ' ready/protecting at one running generation')
                 return revision
@@ -297,8 +315,29 @@ else:
             save(self.path / f'seed-{bank}.json', cfg)
             self.api.call('/config/candidate', cfg, config_write=True)
             if bank != 'candidate':
-                self.api.call('/config/commit', {}, config_write=True)
+                try:
+                    self.api.call('/config/commit', {}, config_write=True)
+                except TimeoutError as error:
+                    addresses = json.loads(self.compose('exec', '-T', 'appliance', 'ip', '-j', 'addr'))
+                    save(self.path / 'source-failure-addresses.json', addresses)
+                    if source_address_defect(self.version, addresses, self.lan, self.wan):
+                        raise UnsupportedSource(UnsupportedSource.defect) from error
+                    raise
+                except RuntimeError as error:
+                    if self.api.last_status != 500:
+                        raise
+                    logs = self.compose('logs', '--no-color', 'appliance')
+                    if source_binding_defect(self.version, logs, cfg['interfaces']):
+                        raise UnsupportedSource(
+                            'commit rebinds distinct explicit interfaces and fails with duplicate device binding',
+                            fixed_in='0.1.35') from error
+                    raise
         self.traffic('source')
+        for bank in ('running', 'candidate'):
+            snapshot = self.api.snapshot(bank)
+            save(self.path / f'source-{bank}.json', snapshot)
+            assert_source_config(snapshot, seed(base, self.version, devices, self.lan, self.wan, bank))
+        self.check('source API retained the representative config and separate IDS banks')
         old_revision = self.api.revision
         self.stop('source')
         old_snapshots = self.snapshots()
@@ -308,6 +347,7 @@ else:
         old_key = hashlib.sha256(key.read_bytes()).hexdigest()
         old_cert = self.cert()
         self.check('clean stopped full-data backup and previous/running/candidate snapshots')
+        self.phase = 'candidate'
         self.boot(self.run.image, candidate=True)
         assert self.device_names() == {'lan1': 'lan1', 'wan': 'wan'}
         self.api.login('upgrade-admin', self.passwords['upgrade-admin'])
@@ -328,8 +368,12 @@ else:
                 assert new.get(field) == old.get(field), (field, old, new)
             self.api.login(username, self.passwords[username])
         self.api.call('/users', expected=403)
+        before_denial = self.api.revision
+        self.api.call('/config/candidate', json.loads((self.path / 'upgraded-candidate.json').read_text()),
+                      expected=403, config_write=True)
+        assert self.api.revision == before_denial
         self.api.login('upgrade-admin', self.passwords['upgrade-admin'])
-        self.check('account IDs/roles/profile/MFA flags and both credential logins retained; view denied admin API')
+        self.check('account IDs/roles/profile/MFA flags and credential logins retained; view denied config mutation')
         generation = self.protection('upgraded')
         self.traffic('upgraded')
         audit = self.audit()
@@ -381,9 +425,11 @@ class Run:
         self.schema = schema_authority(ROOT)
         self.current = None
         self.results = []
+        image = json.loads(command('docker', 'image', 'inspect', self.image))[0]
+        self.commit = image['Config'].get('Labels', {}).get('org.opencontainers.image.revision')
+        assert self.commit and self.commit != 'unknown', 'build candidate with --build-arg COMMIT=$(git rev-parse HEAD)'
         save(self.path / 'candidate.json', {'version': (ROOT / 'VERSION').read_text().strip(),
-            'commit': command('git', '-C', str(ROOT), 'rev-parse', 'HEAD').strip(),
-            'image': self.image, 'imageId': command('docker', 'image', 'inspect', '--format', '{{.Id}}', self.image).strip(),
+            'commit': self.commit, 'image': self.image, 'imageId': image['Id'],
             'schema': self.schema, 'project': self.project})
         (self.path / 'jwt-secret').write_text(self.secret)
 
@@ -404,19 +450,31 @@ class Run:
             for version, profile in rows:
                 self.current = Row(self, version, profile, lan, wan)
                 started = time.monotonic()
-                result = {'from': version, 'profile': profile, 'to': (ROOT / 'VERSION').read_text().strip(), 'result': 'FAIL'}
+                result = {'from': version, 'profile': profile, 'candidateImage': self.image,
+                          'candidateCommit': self.commit, 'result': 'FAIL'}
                 try:
                     self.current.execute()
                     result['result'] = 'PASS'
+                    result = qualify_source_result(result)
+                    if result['result'] == 'UNSUPPORTED':
+                        print(f'UNSUPPORTED {version} {profile}: attempt passed but source has a '
+                              f'proven defect; fixed in {result["fixedIn"]}', flush=True)
+                except UnsupportedSource as error:
+                    result.update(result='UNSUPPORTED', defect=error.defect, fixedIn=error.fixed_in)
+                    print(f'UNSUPPORTED {version} {profile}: {error.defect}; fixed in {error.fixed_in}', flush=True)
                 except Exception as error:
                     result['error'] = str(error)
+                    result['phase'] = self.current.phase
                     raise
                 finally:
-                    result['seconds'] = round(time.monotonic() - started, 2)
                     result['assertions'] = len(self.current.checks)
-                    self.results.append(result)
-                    save(self.path / 'matrix.json', self.results)
-                    self.cleanup()
+                    try:
+                        self.cleanup()
+                    finally:
+                        result['seconds'] = round(time.monotonic() - started, 2)
+                        self.results.append(result)
+                        save(self.path / 'matrix.json', self.results)
+            save(self.path / 'support.json', {'floor': supported_floor(self.results)})
         finally:
             self.cleanup()
 
@@ -426,8 +484,11 @@ def main():
     parser.add_argument('--from-version', choices=sorted({v for v, _ in MATRIX}),
                         help='focused diagnostic only; omit for release validation')
     parser.add_argument('--profile', choices=('training', 'strict'), help='focused diagnostic only')
+    parser.add_argument('--start-version', choices=sorted({v for v, _ in MATRIX}),
+                        help='resume validation at this source release; earlier rows remain unexecuted')
     args = parser.parse_args()
     rows = [(v, p) for v, p in MATRIX if (not args.from_version or args.from_version == v)
+            and (not args.start_version or patch(v) >= patch(args.start_version))
             and (not args.profile or args.profile == p)]
     if not rows:
         parser.error('no declared rows match')

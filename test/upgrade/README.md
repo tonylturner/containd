@@ -3,7 +3,8 @@
 Build the exact candidate from the repository root, then run the whole matrix:
 
 ```sh
-docker build -f build/Dockerfile.mgmt -t containd/containd:upgrade-local .
+docker build -f build/Dockerfile.mgmt --build-arg COMMIT=$(git rev-parse HEAD) \
+  -t containd/containd:upgrade-local .
 UPGRADE_IMAGE=containd/containd:upgrade-local \
   COMPOSE_PROJECT_NAME=upgrade-local-$(date +%s) \
   bash scripts/smoke-upgrade.sh
@@ -41,7 +42,16 @@ management publishes only ephemeral loopback ports, and engine/SSH are not
 published. Existing project resources or evidence directories are refused.
 `matrix.json` records each executed row's result, wall seconds and named assertion
 count. `remaining-resources.json` must show empty containers/networks/volumes.
-A failure stops the matrix and returns nonzero; no missing row is a pass.
+A reproduced source defect is recorded as `UNSUPPORTED`, with the first fixed
+release, and validation continues without changing the fixture. This includes
+the pre-0.1.33 address-conversion defect and 0.1.34 explicit-interface rebinding.
+A successful attempt on an already disqualified source still executes every
+assertion and records `attemptResult: PASS`, but remains `UNSUPPORTED`: a lucky
+attachment order does not erase a reproduced defect. Unexpected failures,
+including candidate-side failures on these sources, stop the matrix and return nonzero;
+no missing row is a pass. `support.json` records the oldest source whose entire
+later training/strict suffix passes. Candidate identity is its image tag, image
+ID and embedded source commit, not the pre-release VERSION value.
 Images are kept. This covers combined mode, not a split-process or arbitrary
 service/configuration upgrade, pending MFA challenges, or live session retention.
 

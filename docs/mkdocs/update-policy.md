@@ -9,10 +9,70 @@
 
 ## Direct-upgrade validation
 
-There is not yet a proven direct-upgrade support floor. Schema-reader acceptance
-alone is not a supported from→to matrix. The published-image smoke declares
-training 0.1.30–0.1.42 and strict→strict 0.1.39–0.1.42 as validation targets;
-these targets must not be read as passing support claims.
+The proven continuous direct-upgrade floor is **0.1.35**, for the candidate
+identified below: training 0.1.35–0.1.42 and strict→strict 0.1.39–0.1.42 all
+pass. Training 0.1.33 also passes individually, but does not lower the floor
+because 0.1.34 has a reproduced source defect. These are combined-mode,
+same-profile upgrades with a full stopped-data backup and, for sources before
+0.1.41, the required [Compose interface-name change](#interface-name-upgrade).
+Schema-reader acceptance alone is not an upgrade support claim.
+
+The following source releases are **unsupported** for the representative
+static-address configuration:
+
+| Source | Profile | Source defect | First fixed release |
+| --- | --- | --- | --- |
+| 0.1.30 | training | Commit converts host interface addresses to network addresses, removing management reachability | 0.1.33 |
+| 0.1.31 | training | Same host-address conversion defect | 0.1.33 |
+| 0.1.32 | training | Same host-address conversion defect | 0.1.33 |
+| 0.1.34 | training | Commit can reassign valid, distinct explicit bindings and fail with `duplicate interface device binding` | 0.1.35 |
+
+These failures occur in the published source writer, before candidate boot.
+The 0.1.33 release notes document preservation of static, DHCP and WireGuard
+host addresses during CIDR conversion. Do not remove static addresses from the
+test fixture or modify old databases to turn these rows into passing claims.
+The 0.1.35 release notes document the explicit-binding fix. The 0.1.34 failure
+depends on attachment order: a successful attempt does not erase a reproduced
+source defect or extend the continuous supported floor.
+
+### Measured matrix
+
+Validated on 2026-11-12 with Docker Desktop, Linux/arm64, against the local
+candidate image `containd/containd:upgrade-578f7729-continue`,
+built with embedded commit `ce93be97a5d12d935add68fc2952fce46510422d` and image ID
+`sha256:84b91d0faa9dbc427ddf3b97e0366c69c53943c595c844e1b4b1bd612953991b`.
+Its informational VERSION is `0.1.42` (before the release bump); target
+config schema is `0.1.11`. This is evidence for this candidate, not a
+promise for an untested future tag. Re-run the matrix before releasing it.
+
+| Source | Profile | Result | Wall seconds |
+| --- | --- | --- | ---: |
+| 0.1.30 | training | UNSUPPORTED | 19.53 |
+| 0.1.31 | training | UNSUPPORTED | 19.43 |
+| 0.1.32 | training | UNSUPPORTED | 18.41 |
+| 0.1.33 | training | PASS | 23.74 |
+| 0.1.34 | training | UNSUPPORTED (attempt passed) | 17.17 |
+| 0.1.35 | training | PASS | 20.11 |
+| 0.1.36 | training | PASS | 16.90 |
+| 0.1.37 | training | PASS | 17.08 |
+| 0.1.38 | training | PASS | 16.94 |
+| 0.1.39 | training | PASS | 17.09 |
+| 0.1.40 | training | PASS | 18.55 |
+| 0.1.41 | training | PASS | 18.16 |
+| 0.1.42 | training | PASS | 17.40 |
+| 0.1.39 | strict | PASS | 17.91 |
+| 0.1.40 | strict | PASS | 18.72 |
+| 0.1.41 | strict | PASS | 19.51 |
+| 0.1.42 | strict | PASS | 18.59 |
+
+Wall times include each source pull, seed, upgrade, checks and teardown, with
+cached images; they are not throughput or upgrade-downtime benchmarks. The
+rows total 315.24 seconds, excluding the shared endpoint image build.
+Every passing row completes 14 named assertion groups. The 0.1.34 attempt also
+completed all checks, but remains unsupported because its explicit-binding
+failure was reproduced on another attachment order. No candidate boot occurred
+for the address-conversion failures. All owned containers, networks and volumes
+were absent after teardown; pulled and built images were retained.
 
 For a release candidate, run the complete
 [upgrade matrix smoke](testing.md#upgrade-matrix-smoke) before tagging:
@@ -22,16 +82,23 @@ For a release candidate, run the complete
 2. Run `scripts/smoke-upgrade.sh` with `UPGRADE_IMAGE` pointing to that image,
    a unique `COMPOSE_PROJECT_NAME=upgrade-<id>` and a new private
    `UPGRADE_RESULTS` directory. Do not filter rows for release validation.
-3. Require every declared row to pass. Preserve `matrix.json`, source image
+3. Require every row at or above the supported floor to pass, including
+   strict rows where available. Preserve `matrix.json`, source image
    digests, row wall times and the empty `remaining-resources.json` teardown
    evidence privately. A failed or unexecuted row is not a pass.
 4. Publish only the demonstrated from→to rows and their profile/topology
    prerequisites. Recheck them against each new candidate; do not infer
    compatibility from matching schema versions or an image-only boot.
 
-The smoke stops on its first failure without repairing stored data or relaxing
-protection assertions. It covers combined mode and a representative routed
-policy, not every service or split deployment. Full stopped-data rollback
+A demonstrated source-image defect is recorded as unsupported, including its
+first fixed release, without altering the representative fixture. The smoke
+continues past those rows but stops on an unexpected or candidate-side failure,
+without repairing stored data or relaxing protection assertions. The floor is
+the oldest source from which every later training row and every available later
+strict row passes. The candidate is identified by image tag and embedded source
+commit; VERSION can still name the previous release before the release bump.
+It covers combined mode and a representative routed policy, not every service
+or split deployment. Full stopped-data rollback
 backups and the interface-name changes below remain mandatory.
 
 ## Release artifacts and security information
