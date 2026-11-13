@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The account password dialog no longer moves focus 50 ms after it opens, so
+  fast typing in Current password no longer lands in New password.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.
