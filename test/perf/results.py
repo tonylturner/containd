@@ -126,7 +126,10 @@ def summarize(row):
                 rtt_ms=quantiles, errors=main["errors"], timeouts=main["timeouts"],
                 cap_hits=row["cap_hits"], sustainable=(seconds >= 60 and
                     result["completed_sessions"] == result["sessions"] and
-                    not (main["errors"] + result["probe"]["errors"] + row["cap_hits"] +
+                    # Closed-loop load: falling short of the offered rate is saturation.
+                    main["success"] / seconds >= 0.99 * row["rate"] and
+                    not (main["errors"] + main["timeouts"] + result["probe"]["errors"] +
+                         result["probe"]["timeouts"] + row["cap_hits"] +
                          row["queue_delta"]["kernel_drops"] + row["queue_delta"]["user_drops"])),
                 forward_l3_mbps=8 * row["peer_network_delta"]["IpExtInOctets"] / seconds / 1e6,
                 forward_skb_pps=row["peer_network_delta"]["IpInReceives"] / seconds)

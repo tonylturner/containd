@@ -84,8 +84,8 @@ class Measurements(unittest.TestCase):
                          dict(secret="REDACTED", nested=dict(password="REDACTED")))
 
     def test_summary_and_smoke_label(self):
-        counts = dict(success=100, request_bytes=1200, reply_bytes=1300, errors=0, timeouts=0,
-                      rtt=dict(count=100, buckets=[100]))
+        counts = dict(success=6000, request_bytes=1200, reply_bytes=1300, errors=0, timeouts=0,
+                      rtt=dict(count=6000, buckets=[6000]))
         load = dict(schema=1, sessions=1, completed_sessions=1, main=counts, probe=counts, seconds=60)
         row = dict(protocol="modbus", mode="monitor", dpi=True, sessions=1, rate=100, stage="confirm",
                    load=load, cap_hits=0, queue_delta=dict(kernel_drops=0, user_drops=0),
@@ -97,6 +97,12 @@ class Measurements(unittest.TestCase):
         self.assertTrue(row["summary"]["sustainable"])
         self.assertIn("PLUMBING ONLY", tables([row], True))
         self.assertNotIn("0.000", tables([row], False))  # incomplete repeats omitted
+        counts["success"] = counts["rtt"]["count"] = counts["rtt"]["buckets"][0] = 5900
+        self.assertFalse(summarize(row)["sustainable"])  # below 99% of offered: saturated
+        counts["success"] = counts["rtt"]["count"] = counts["rtt"]["buckets"][0] = 6000
+        counts["timeouts"] = 1
+        self.assertFalse(summarize(row)["sustainable"])
+        counts["timeouts"] = 0
         row["cap_hits"] = 1
         self.assertFalse(summarize(row)["sustainable"])
         load["schema"] = 2

@@ -192,7 +192,9 @@ endpoint control is recorded as calibration, never as a routed result.
   engine flows are not TCP sessions. The independent probe adds one socket,
   explicitly outside the headline N.
 - **Sustainable:** a full 60-second steady hold with all N application-ready
-  sessions completing transactions, zero application errors/timeouts, zero
+  sessions completing transactions at no less than 99% of the offered rate
+  (the load is closed-loop, so a shortfall means saturation), zero
+  application errors/timeouts, zero
   unexpected NFQUEUE drops and zero cap-hit deltas. Effective state limits,
   occupancies and all refused/evicted/truncated ledger hits are recorded.
   This workload does not replace distinct-host-pair or incomplete-frame cap
