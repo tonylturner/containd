@@ -10,7 +10,8 @@ STAMP=$(date -u +%Y%m%d-%H%M%S)-$$
 RESULTS=${RULE_MODES_RESULTS:-$ROOT/build/rule-modes-$STAMP}
 IMAGE=${RULE_MODES_IMAGE:-containd/containd:rule-modes-$STAMP}
 mkdir -p "$RESULTS"
-docker build -f "$ROOT/build/Dockerfile.mgmt" -t "$IMAGE" "$ROOT"
+docker build -f "$ROOT/build/Dockerfile.mgmt" \
+  --build-arg COMMIT="$(git -C "$ROOT" rev-parse HEAD)" -t "$IMAGE" "$ROOT"
 PROJECT="rule-modes-$STAMP"
 COMPOSE_FILE="$ROOT/deploy/docker-compose.smoke.yml:$RESULTS/override.yml"
 export COMPOSE_FILE

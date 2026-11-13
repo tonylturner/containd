@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test roots on every pull request and push to `main`, with verbose failure
   logs. Its disposable test container allows the namespace and private procfs
   mounts needed on AppArmor-enabled Linux hosts.
+- An isolated published-image upgrade smoke with private
+  stopped-data backups, account/config retention assertions and routed
+  allow/deny checks. The rule-mode migration entry point shares this driver;
+  the demonstrated continuous floor is 0.1.35 (training 0.1.35–0.1.42 and
+  strict→strict 0.1.39–0.1.42). Training 0.1.33 also passes individually;
+  source defects exclude 0.1.30–0.1.32 and 0.1.34. The update policy lists
+  supported paths and requires a fresh matrix before each release.
 - Cleartext HTTP/2 inspection (prior-knowledge preface and `Upgrade: h2c`):
   bounded frame parsing and HPACK decoding report per-stream method, path,
   `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains
@@ -77,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Opening an older users database now reports password/MFA column migration
+  failures instead of silently ignoring them; already migrated columns are
+  left unchanged.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.

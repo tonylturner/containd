@@ -32,8 +32,11 @@ probes include a valid revision so precondition checks cannot mask the error
 under test. `scripts/config-revision.sh` shares this transport for local and
 in-container curl, preserving response bodies, status output and headers.
 
-The migration smoke writes to the historical 0.1.35 image without revision
-headers, then checks required and stale preconditions after upgrading.
+The upgrade matrix seeds genuine pre-0.1.37 images using their historical APIs
+without revision headers. All candidate/current writes chain real revision
+acknowledgements. The focused 0.1.35 rule-mode migration entry point delegates
+to the same isolated driver; see [upgrade fixtures](../upgrade/README.md).
+Upgrade data never uses this shared directory.
 Internal engine endpoints are not management configuration writes and do not
 use these headers.
 

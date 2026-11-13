@@ -7,6 +7,83 @@
 - Do not assume security backports for older releases unless release notes or
   an advisory explicitly state otherwise.
 
+## Direct-upgrade validation
+
+The proven continuous direct-upgrade floor is **0.1.35**, for the release
+candidate: training 0.1.35–0.1.42 and strict→strict 0.1.39–0.1.42 all
+pass. Training 0.1.33 also passes individually, but does not lower the floor
+because 0.1.34 has a reproduced source defect. These are combined-mode,
+same-profile upgrades with a full stopped-data backup and, for sources before
+0.1.41, the required [Compose interface-name change](#interface-name-upgrade).
+Schema-reader acceptance alone is not an upgrade support claim.
+
+The following source releases are **unsupported** for the representative
+static-address configuration:
+
+| Source | Profile | Source defect | First fixed release |
+| --- | --- | --- | --- |
+| 0.1.30 | training | Commit converts host interface addresses to network addresses, removing management reachability | 0.1.33 |
+| 0.1.31 | training | Same host-address conversion defect | 0.1.33 |
+| 0.1.32 | training | Same host-address conversion defect | 0.1.33 |
+| 0.1.34 | training | Commit can reassign valid, distinct explicit bindings and fail with `duplicate interface device binding` | 0.1.35 |
+
+These failures occur in the published source writer, before candidate boot.
+The 0.1.33 release notes document preservation of static, DHCP and WireGuard
+host addresses during CIDR conversion. Schema compatibility does not fix a
+source release that cannot commit the representative configuration.
+The 0.1.35 release notes document the explicit-binding fix. The 0.1.34 failure
+depends on attachment order: a successful attempt does not erase a reproduced
+source defect or extend the continuous supported floor.
+
+### Supported upgrade paths
+
+Validated on 2026-11-12 with Docker Desktop, Linux/arm64, against the release
+candidate (config schema `0.1.11`). These passing paths apply to that candidate,
+not an untested future release. The release owner retains private image identity
+and run evidence; revalidate against the exact candidate before each release.
+
+| From | To | Profile |
+| --- | --- | --- |
+| 0.1.33 | Release candidate | training |
+| 0.1.35 | Release candidate | training |
+| 0.1.36 | Release candidate | training |
+| 0.1.37 | Release candidate | training |
+| 0.1.38 | Release candidate | training |
+| 0.1.39 | Release candidate | training |
+| 0.1.40 | Release candidate | training |
+| 0.1.41 | Release candidate | training |
+| 0.1.42 | Release candidate | training |
+| 0.1.39 | Release candidate | strict→strict |
+| 0.1.40 | Release candidate | strict→strict |
+| 0.1.41 | Release candidate | strict→strict |
+| 0.1.42 | Release candidate | strict→strict |
+
+For a release candidate, run the complete
+[upgrade matrix smoke](testing.md#upgrade-matrix-smoke) before tagging:
+
+1. Build the management/all-mode image from the exact release source with a
+   unique local tag and record its image ID and source commit.
+2. Run `scripts/smoke-upgrade.sh` with `UPGRADE_IMAGE` pointing to that image,
+   a unique `COMPOSE_PROJECT_NAME=upgrade-<id>` and a new private
+   `UPGRADE_RESULTS` directory. Do not filter rows for release validation.
+3. Require every row at or above the supported floor to pass, including
+   strict rows where available. Preserve `matrix.json`, source image
+   digests, row wall times and the empty `remaining-resources.json` teardown
+   evidence privately. A failed or unexecuted row is not a pass.
+4. Publish only the demonstrated from→to rows and their profile/topology
+   prerequisites. Recheck them against each new candidate; do not infer
+   compatibility from matching schema versions or an image-only boot.
+
+A demonstrated source-image defect is recorded as unsupported, including its
+first fixed release, without altering the representative fixture. The smoke
+continues past those rows but stops on an unexpected or candidate-side failure,
+without repairing stored data or relaxing protection assertions. The floor is
+the oldest source from which every later training row and every available later
+strict row passes.
+It covers combined mode and a representative routed policy, not every service
+or split deployment. Full stopped-data rollback
+backups and the interface-name changes below remain mandatory.
+
 ## Release artifacts and security information
 
 Releases include signed images, SBOMs, image digests, and packaged CSAF provider
