@@ -77,37 +77,40 @@ const (
 
 // iecSession is one IEC104 session incarnation, from its SYN.
 type iecSession struct {
-	id         string
-	flow       *flow.State // immutable service key captured at creation; client/server stay in packet space
-	client     netip.AddrPort
-	server     netip.AddrPort
-	ctx        rules.EvalContext // opener-oriented session tuple
-	mode       string            // envelope mode, fixed at the SYN
-	state      iecState
-	lastSeen   time.Time
-	endedAt    time.Time // closed or aborted
-	dirs       [2]*iecDir
-	held       []*heldPacket
-	heldBytes  int
-	stopParse  bool // monitor envelope: parsing stopped after a stream error
-	reconnects bool // first STARTDT con counts as a reconnect
-	reset      *connReset
-	next       *iecSession         // new incarnation whose handshake is pending
-	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
-	inventory  *iecInventoryLedger
+	memory         *flow.InspectionMemory
+	inspectionLost bool
+	id             string
+	flow           *flow.State // immutable service key captured at creation; client/server stay in packet space
+	client         netip.AddrPort
+	server         netip.AddrPort
+	ctx            rules.EvalContext // opener-oriented session tuple
+	mode           string            // envelope mode, fixed at the SYN
+	state          iecState
+	lastSeen       time.Time
+	endedAt        time.Time // closed or aborted
+	dirs           [2]*iecDir
+	held           []*heldPacket
+	heldBytes      int
+	stopParse      bool // monitor envelope: parsing stopped after a stream error
+	reconnects     bool // first STARTDT con counts as a reconnect
+	reset          *connReset
+	next           *iecSession         // new incarnation whose handshake is pending
+	apci           *anomaly.IEC104APCI // observational state, owned by this incarnation
+	inventory      *iecInventoryLedger
 }
 
 // iecDir is one direction of a session (client→server or server→client).
 type iecDir struct {
-	hasISN    bool
-	isn       uint32
-	seq       flow.SeqSpace
-	bytes     *flow.ByteStream
-	frames    []iecFrame // decided frames still retained, in order
-	framedEnd int64      // end of the last framed APDU
-	forwarded int64      // end of the bytes forwarded to the peer
-	finFwd    bool       // a FIN was forwarded
-	fin       bool
+	frameCharge int
+	hasISN      bool
+	isn         uint32
+	seq         flow.SeqSpace
+	bytes       *flow.ByteStream
+	frames      []iecFrame // decided frames still retained, in order
+	framedEnd   int64      // end of the last framed APDU
+	forwarded   int64      // end of the bytes forwarded to the peer
+	finFwd      bool       // a FIN was forwarded
+	fin         bool
 }
 
 type iecFrame struct{ start, end int64 }
@@ -120,15 +123,6 @@ type heldPacket struct {
 	end   int64
 	fin   bool // the packet carries a FIN
 	since time.Time
-}
-
-func newIECDir(isn uint32) *iecDir {
-	return &iecDir{
-		hasISN: true,
-		isn:    isn,
-		seq:    flow.NewSeqSpace(isn),
-		bytes:  flow.NewByteStream(iecStreamMaxBytes, iecStreamMaxSegments),
-	}
 }
 
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
@@ -412,6 +406,7 @@ func (t *iecTable) deleteLocked(key iecKey, s *iecSession) iecActions {
 		t.tombstones--
 	}
 	delete(t.sessions, key)
+	s.releaseInspection()
 	return acts
 }
 

@@ -352,7 +352,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.stopNFLogLocked()
 	if prevIEC != nil {
 		prevIEC.flushHeldCredits()
-		prevIEC.stopInventory()
+		prevIEC.stopInspection()
 	}
 	e.clearFlowOwners()
 

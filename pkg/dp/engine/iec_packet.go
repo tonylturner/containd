@@ -281,15 +281,23 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 		t.countAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
-	n := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
-	n.dirs[iecDirClient] = newIECDir(pkt.TCP.Seq)
+	n := t.allocateSessionLocked(client, server, ctx, mode, state, now)
+	if n == nil {
+		return t.admissionLimitLocked(mode)
+	}
+	if err := t.allocateDirLocked(n, iecDirClient, pkt.TCP.Seq); err != nil {
+		n.releaseInspection()
+		return t.admissionLimitLocked(mode)
+	}
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
 	key := iecKey{client: client, server: server}
 	switch {
 	case prev != nil && prev.state == iecAborted:
+		prev.next.releaseInspection()
 		prev.next = n // the tombstone retires once the handshake validates
 	default:
 		t.sessions[key] = n
+		prev.releaseInspection()
 	}
 	res := accepted(reasonIECAccept)
 	res.acts.retired = true // a new connection on the tuple: the previous one is over
@@ -306,7 +314,10 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		t.countAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
-	s := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
+	s := t.allocateSessionLocked(client, server, ctx, "enforce", state, now)
+	if s == nil {
+		return t.admissionLimitLocked("enforce")
+	}
 	t.sessions[iecKey{client: client, server: server}] = s
 	dir := iecDirSrv
 	if fromClient {
@@ -358,14 +369,21 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		// The server refused the next incarnation: the tombstone stays,
 		// and the client's next SYN opens another.
 		s.next = nil
+		n.releaseInspection()
 		return accepted(reasonIECClosed), true
 	}
 	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
 		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
-		n.dirs[iecDirSrv] = newIECDir(pkt.TCP.Seq)
+		if err := t.allocateDirLocked(n, iecDirSrv, pkt.TCP.Seq); err != nil {
+			s.next = nil
+			n.releaseInspection()
+			return t.admissionLimitLocked(n.mode), true
+		}
 		n.state, n.lastSeen = iecEstablished, now
 		t.tombstones--
 		t.sessions[iecKey{client: s.client, server: s.server}] = n
+		s.next = nil
+		s.releaseInspection()
 		return accepted(reasonIECAccept), true
 	}
 	if currentMode == "enforce" {
@@ -440,12 +458,16 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 			return accepted(reasonIECEstablishedSYN)
 		}
 		if opens(s.mode, pkt) {
-			s.dirs[iecDirClient] = newIECDir(seq) // the client retried with a new ISN
+			if err := t.allocateDirLocked(s, iecDirClient, seq); err != nil {
+				return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
+			}
 			return accepted(reasonIECAccept)
 		}
 	case dir == iecDirSrv && f&capture.TCPFlagACK != 0 && pkt.TCP.Ack == c2s.isn+1:
 		if s2c := s.dirs[iecDirSrv]; s2c == nil {
-			s.dirs[iecDirSrv] = newIECDir(seq)
+			if err := t.allocateDirLocked(s, iecDirSrv, seq); err != nil {
+				return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
+			}
 			s.state, s.lastSeen = iecEstablished, now
 			return accepted(reasonIECAccept)
 		} else if s2c.isn == seq {
@@ -461,6 +483,9 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 	f := pkt.TCP.Flags
 	enforce := s.mode == "enforce"
 	if f&capture.TCPFlagSYN != 0 {
+		if s.stopParse {
+			return accepted(reasonIECAccept)
+		}
 		return t.handshakeLocked(s, dir, pkt, now)
 	}
 	if s.dirs[iecDirSrv] == nil {
@@ -474,11 +499,20 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		}
 		return accepted(reasonIECAccept)
 	}
-	if f&capture.TCPFlagACK != 0 {
-		t.ackLocked(s, 1-dir, pkt.TCP.Ack)
+	if !s.stopParse && f&capture.TCPFlagACK != 0 {
+		if err := t.ackLocked(s, 1-dir, pkt.TCP.Ack); err != nil {
+			return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
+		}
 	}
 	if f&capture.TCPFlagRST != 0 {
 		return t.rstLocked(s, dir, pkt, now)
+	}
+	if s.stopParse {
+		res := accepted(reasonIECAccept)
+		if f&capture.TCPFlagFIN != 0 {
+			t.finLocked(s, dir, pkt, &res)
+		}
+		return res
 	}
 	res := accepted(reasonIECAccept)
 	if len(pkt.Payload) > 0 {
@@ -506,13 +540,15 @@ func refuses(s *iecSession, dir int, pkt capture.Packet) bool {
 
 // ackLocked releases history the receiver of direction dir acknowledged, up
 // to what was forwarded to it.
-func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) {
+func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) error {
 	d := s.dirs[dir]
 	off := min(d.seq.Offset(ack), d.forwarded)
 	if off <= d.bytes.Floor() {
-		return
+		return nil
 	}
-	d.bytes.Ack(off)
+	if err := d.bytes.Ack(off); err != nil {
+		return err
+	}
 	floor := off
 	for _, h := range s.held {
 		if h.dir == dir {
@@ -523,7 +559,14 @@ func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) {
 	for i < len(d.frames) && d.frames[i].end <= floor {
 		i++
 	}
-	d.frames = d.frames[i:]
+	if i == len(d.frames) {
+		d.frames = nil
+		s.memory.Refund(d.frameCharge)
+		d.frameCharge = 0
+	} else {
+		d.frames = d.frames[i:]
+	}
+	return nil
 }
 
 // rstLocked handles an endpoint RST. A RST with data is dropped and aborts.
@@ -600,6 +643,7 @@ func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
 	s.apci = nil
 	s.state, s.endedAt = iecClosed, now
 	t.dpi.EndStream(s.id)
+	s.clearInspectionBytes()
 	return acts
 }
 
@@ -633,6 +677,9 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 	}
 	start, fresh, err := d.bytes.Add(cur.off, pkt.Payload)
 	if err != nil {
+		if errors.Is(err, flow.ErrInspectionLimit) {
+			return t.inspectionLimitLocked(s, cur, now)
+		}
 		res := iecResult{inspect: []dpi.Event{s.streamErrorEvent(dir, cur.off, err, now)}}
 		if enforce {
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
@@ -687,7 +734,17 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	})
 	var limitErr *dpi.StreamError
 	if errors.As(ir.Err, &limitErr) && limitErr.Kind == dpi.StreamStateLimit {
-		res.stateLimit = true
+		res.stateLimit = !s.inspectionLost
+		s.inspectionLost = true
+		t.stopParseLocked(s)
+		return false, "", true
+	}
+	if !s.retainFrames(d, ir.Frames) {
+		res.stateLimit = !s.inspectionLost
+		if res.stateLimit {
+			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.Mode(s.mode))
+		}
+		s.inspectionLost = true
 		t.stopParseLocked(s)
 		return false, "", true
 	}
@@ -703,7 +760,6 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	for _, f := range ir.Frames {
 		s.observeAPCILocked(dir, f, &res.acts, now)
 		t.observeInventoryLocked(s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
-		d.frames = append(d.frames, iecFrame{start: f.Start, end: f.End})
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
 	}
@@ -727,6 +783,7 @@ func (t *iecTable) stopParseLocked(s *iecSession) {
 	if !s.stopParse {
 		s.stopParse = true
 		t.dpi.EndStream(s.id)
+		s.clearInspectionBytes()
 	}
 }
 

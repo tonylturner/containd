@@ -61,7 +61,9 @@ func TestByteStreamInOrderOutOfOrderAndRetransmit(t *testing.T) {
 	if _, _, err = b.Add(1, []byte("bX")); !errors.Is(err, ErrOverlapConflict) {
 		t.Fatalf("conflicting retransmit = %v", err)
 	}
-	b.Ack(6)
+	if err := b.Ack(6); err != nil {
+		t.Fatal(err)
+	}
 	// Below the acknowledged point bytes are duplicates the receiver has.
 	if _, fresh, err = b.Add(0, []byte("ZZZZ")); err != nil || len(fresh) != 0 {
 		t.Fatalf("acknowledged duplicate = %q %v", fresh, err)
@@ -85,7 +87,9 @@ func TestByteStreamBounds(t *testing.T) {
 	if _, _, err := b.Add(8, []byte("9")); !errors.Is(err, ErrStreamBound) {
 		t.Fatalf("byte bound = %v", err)
 	}
-	b.Ack(8)
+	if err := b.Ack(8); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := b.Add(10, []byte("a")); err != nil {
 		t.Fatal(err)
 	}

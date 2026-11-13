@@ -95,6 +95,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
+	s.clearInspectionBytes()
 	t.dpi.EndStream(s.id)
 	if t.markAbort != nil {
 		t.markAbort(s.id)

@@ -238,7 +238,7 @@ func (e *Engine) Close() {
 	e.clearFlowOwners()
 	if e.iec != nil {
 		e.iec.flushHeldCredits()
-		e.iec.stopInventory()
+		e.iec.stopInspection()
 		if e.iec.injector != nil {
 			_ = e.iec.injector.Close()
 		}

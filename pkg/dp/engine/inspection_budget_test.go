@@ -71,7 +71,8 @@ func TestIECInspectionBudgetRefusalDisposition(t *testing.T) {
 			var losses atomic.Int32
 			h.e.SetLearnLossHook(func(evidence.CollectionLoss) { losses.Add(1) })
 			budget := h.e.budget
-			blocker, ok := budget.Reserve(limits.ClassEnforce, limits.CategoryHeld, budget.Status().Limit)
+			before := budget.Status()
+			blocker, ok := budget.Reserve(limits.ClassEnforce, limits.CategoryHeld, before.Limit-before.InUse)
 			if !ok {
 				t.Fatal("blocker")
 			}
@@ -105,8 +106,12 @@ func TestIECInspectionBudgetRefusalDisposition(t *testing.T) {
 					t.Fatal("budget exhaustion did not use the bound abort")
 				}
 			}
+			if budget.Status().InUse != limits.IECSessionMetadataBytes {
+				t.Fatal("IEC refusal retained credit beyond terminal session metadata")
+			}
+			h.e.Close()
 			if budget.Status().InUse != 0 {
-				t.Fatal("IEC refused admission retained stream credit")
+				t.Fatal("IEC shutdown retained session credit")
 			}
 		})
 	}
