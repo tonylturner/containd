@@ -216,8 +216,9 @@ refills them as they run out, and again after a wall-clock step. If the engine
 stops planning, the windows fail closed when the plan runs out: a scheduled
 `ALLOW` stops matching and a scheduled `DENY` applies at all times. For ICS
 rules that NFQUEUE steers to the engine, the engine evaluates both predicates on
-each client message, and nftables on the rest of the connection: replies and
-the server's own packets.
+decoded messages in either direction, and nftables independently enforces
+transport admission for the whole connection, including replies and the
+server's own packets.
 
 The conditions also apply to established connections, in both directions.
 When a binding is removed or a window ends, a connection that only a
