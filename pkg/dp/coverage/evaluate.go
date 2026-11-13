@@ -37,7 +37,6 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 	if mode != modeEnforce {
 		r.State = Monitoring
 	}
-	iec := protocol == rules.ProtocolIEC104
 	if mode == modeEnforce {
 		if !s.Enforcement {
 			r.Lower(Reason{Code: EnforcementDisabled, Message: "nftables enforcement is off, so nothing steers this rule's traffic to the engine"})
@@ -46,15 +45,13 @@ func evaluateEntry(e rules.Entry, s Settings) Rule {
 			r.Lower(Reason{Code: NoInlinePath, Message: "dataplane.nfqueueGroup is 0: the engine only observes copies and cannot hold or drop a command"})
 		}
 	}
-	// The IEC 104 envelope is inspected whatever the DPI master switch says.
-	if !s.DPIEnabled && !iec {
+	if !s.DPIEnabled {
 		r.Lower(Reason{Code: DPIDisabled, Message: "DPI is switched off (dataplane.dpiEnabled), so no command of this rule is decoded"})
 	}
 	if on, set := s.ICSProtocols[protocol]; set && !on {
 		r.Lower(Reason{Code: DecoderDisabled, Message: fmt.Sprintf("the %s decoder is switched off (dataplane.dpiIcsProtocols.%s)", protocol, protocol)})
 	}
-	// IEC 104 inspection ignores every DPI exclusion.
-	if !iec {
+	if protocol != rules.ProtocolIEC104 {
 		for _, x := range s.Exclusions {
 			addExclusionReason(&r, e, x)
 		}
