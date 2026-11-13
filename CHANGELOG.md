@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The account password dialog no longer moves focus 50 ms after it opens, so
+  fast typing in Current password no longer lands in New password.
+
+### Security
+
+- Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
+  protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
+  Uninspectable transport traffic is dropped for ALLOW and DENY alike;
+  configurations remain valid and rule warnings identify the cause and repair.
+  See CSAF advisory `containd-2026-004` for affected versions and workarounds.
+
+## [0.1.43] - 2026-11-13
+
 ### Breaking
 
 - TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
@@ -73,8 +88,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The account password dialog no longer moves focus 50 ms after it opens, so
-  fast typing in Current password no longer lands in New password.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.
@@ -96,11 +109,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
-  protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
-  Uninspectable transport traffic is dropped for ALLOW and DENY alike;
-  configurations remain valid and rule warnings identify the cause and repair.
-  See CSAF advisory `containd-2026-004` for affected versions and workarounds.
 - Audit records get their `source` from the server; the client-supplied
   `X-Source` header is ignored when records are stored and forwarded to syslog.
 - Advisory `containd-2026-003` revision 2: both images still ship Wolfi
@@ -2833,7 +2841,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.42...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.43...HEAD
+[0.1.43]: https://github.com/tonylturner/containd/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/tonylturner/containd/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/tonylturner/containd/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40
