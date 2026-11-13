@@ -217,20 +217,24 @@ CREATE TABLE IF NOT EXISTS factor_failures (
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create users schema: %w", err)
 	}
-	// Migrate existing databases: add must_change_password column if missing.
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_secret TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_enabled INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_grace_until INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_last_step INTEGER NOT NULL DEFAULT 0`)
-	var versionColumn int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='credential_version'`).Scan(&versionColumn); err != nil {
-		return fmt.Errorf("inspect credential version: %w", err)
-	}
-	if versionColumn == 0 {
-		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate credential version: %w", err)
+	// Add missing historical columns without hiding genuine migration failures.
+	for _, column := range []struct{ name, ddl string }{
+		{"must_change_password", `ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`},
+		{"mfa_totp_secret", `ALTER TABLE users ADD COLUMN mfa_totp_secret TEXT NOT NULL DEFAULT ''`},
+		{"mfa_totp_enabled", `ALTER TABLE users ADD COLUMN mfa_totp_enabled INTEGER NOT NULL DEFAULT 0`},
+		{"mfa_required", `ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0`},
+		{"mfa_grace_until", `ALTER TABLE users ADD COLUMN mfa_grace_until INTEGER NOT NULL DEFAULT 0`},
+		{"mfa_totp_last_step", `ALTER TABLE users ADD COLUMN mfa_totp_last_step INTEGER NOT NULL DEFAULT 0`},
+		{"credential_version", `ALTER TABLE users ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 0`},
+	} {
+		var exists int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name=?`, column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect users column %s: %w", column.name, err)
+		}
+		if exists == 0 {
+			if _, err := db.Exec(column.ddl); err != nil {
+				return fmt.Errorf("migrate users column %s: %w", column.name, err)
+			}
 		}
 	}
 	return nil

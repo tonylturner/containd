@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Opening an older users database now reports password/MFA column migration
+  failures instead of silently ignoring them; already migrated columns are
+  left unchanged.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.
