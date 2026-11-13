@@ -73,7 +73,7 @@ func newIECTable(globalMode string, zones *zoneCache) *sessionTable {
 	return &sessionTable{
 		ledger:      limits.NewLedger(nil),
 		resources:   limits.NewResources(nil, nil),
-		settlements: make(map[capture.Token]*limits.Lease),
+		settlements: make(map[capture.Token]*heldCredit),
 		zones:       zones,
 		now:         time.Now,
 		newID:       nextLiveSessionID,

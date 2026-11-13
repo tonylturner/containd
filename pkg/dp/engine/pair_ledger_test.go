@@ -250,6 +250,7 @@ func TestDS34DNP3(t *testing.T) {
 }
 
 func TestDS34Budget(t *testing.T) {
+	t.Run("non-borrowing-held-shares", testDS34HeldShares)
 	t.Run("pairing-refusal-and-churn", func(t *testing.T) {
 		now := time.Unix(1, 0)
 		for _, observe := range []bool{false, true} {

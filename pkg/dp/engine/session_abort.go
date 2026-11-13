@@ -231,7 +231,9 @@ func (t *sessionTable) apply(acts sessionActions) {
 		now := t.now()
 		for i, err := range errs {
 			if err != nil {
-				t.releaseHeldCreditLocked(acts.drops[i].Token)
+				if residencySettled(err) {
+					t.releaseHeldCreditLocked(acts.drops[i].Token)
+				}
 				t.countVerdictFailure(err)
 				acts.merge(t.completeLocked(acts.drops[i].Token, err, now))
 			}
@@ -279,7 +281,9 @@ func (t *sessionTable) settle(res []capture.Resolution) []error {
 // its generation went down: the kernel dropped it, so it leaves the ledger.
 func (t *sessionTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
-	t.releaseHeldCreditLocked(tok)
+	if residencySettled(err) {
+		t.releaseHeldCreditLocked(tok)
+	}
 	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)

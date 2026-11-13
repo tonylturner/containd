@@ -75,19 +75,23 @@ type trackedSession struct {
 
 // sessionDir is one direction of a session (client→server or server→client).
 type sessionDir struct {
-	frameCharge int
-	hasISN      bool
-	isn         uint32
-	seq         flow.SeqSpace
-	bytes       *flow.ByteStream
-	frames      []sessionFrame // decided frames still retained, in order
-	framedEnd   int64          // end of the last framed unit
-	forwarded   int64          // end of the bytes forwarded to the peer
-	finFwd      bool           // a FIN was forwarded
-	fin         bool
+	frameLease *limits.Lease
+	hasISN     bool
+	isn        uint32
+	seq        flow.SeqSpace
+	bytes      *flow.ByteStream
+	frames     []sessionFrame // decided frames still retained, in order
+	framedEnd  int64          // end of the last framed unit
+	forwarded  int64          // end of the bytes forwarded to the peer
+	finFwd     bool           // a FIN was forwarded
+	fin        bool
 }
 
-type sessionFrame struct{ start, end int64 }
+type sessionFrame struct {
+	start, end int64
+	covered    bool
+	nonAdmit   bool
+}
 
 type heldPacket struct {
 	tok   capture.Token
@@ -105,7 +109,7 @@ type sessionTable struct {
 	iecAdapter  // the only protocol binding; no separate tracker or lock
 	ledger      *limits.Ledger
 	resources   limits.Resources
-	settlements map[capture.Token]*limits.Lease
+	settlements map[capture.Token]*heldCredit
 	detached    bool
 	mu          sync.Mutex
 	zones       *zoneCache // the engine's
@@ -181,6 +185,7 @@ func (t *sessionTable) stateContext(state *flow.State) rules.EvalContext {
 
 func retainedSessionState(state *flow.State) *flow.State {
 	retained := &flow.State{Key: state.ServiceKey()}
+	retained.Connection.Store(state.Connection.Load())
 	if evidence := state.InlinePolicy.Load(); evidence != nil {
 		copy := *evidence
 		retained.InlinePolicy.Store(&copy)

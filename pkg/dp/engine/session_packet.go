@@ -39,6 +39,7 @@ type sessionResult struct {
 	findings   []iecFinding // judged events with conformance findings
 	acts       sessionActions
 	stateLimit bool
+	failure    pairReason
 }
 
 func accepted(reason string) sessionResult {
@@ -560,8 +561,10 @@ func (t *sessionTable) ackLocked(s *trackedSession, dir int, ack uint32) error {
 	}
 	if i == len(d.frames) {
 		d.frames = nil
-		s.memory.Refund(d.frameCharge)
-		d.frameCharge = 0
+		if d.frameLease != nil {
+			d.frameLease.Release()
+		}
+		d.frameLease = nil
 	} else {
 		d.frames = d.frames[i:]
 	}
@@ -706,6 +709,9 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 			if r.stateLimit {
 				r.decision.Reason = "state_limit"
 			}
+			if res.failure != "" {
+				r.decision.Reason = string(res.failure)
+			}
 			res.acts.merge(r.acts)
 			r.acts = res.acts
 			return r
@@ -737,12 +743,16 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 		t.stopParseLocked(s)
 		return false, "", true
 	}
-	if !s.retainFrames(d, ir.Frames) {
-		res.stateLimit = !s.inspectionLost
-		if res.stateLimit {
-			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.Mode(s.mode))
+	if err := t.retainFramesLocked(s, d, ir.Frames); err != nil {
+		if errors.Is(err, flow.ErrInspectionLimit) {
+			res.stateLimit = !s.inspectionLost
+			if res.stateLimit {
+				t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.Mode(s.mode))
+			}
+			s.inspectionLost = true
+		} else {
+			res.failure = pairUnsupported
 		}
-		s.inspectionLost = true
 		t.stopParseLocked(s)
 		return false, "", true
 	}
@@ -794,10 +804,10 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 	// Admit a possible hold before removing any old held token or publishing
 	// any successful result. A refusal must drop even a prefix this packet
 	// would otherwise have released.
-	if cur.end > d.framedEnd && pkt.Token.Inline() {
+	if !d.covered(cur.off, cur.end) && pkt.Token.Inline() {
 		remaining, bytes := len(s.held), s.heldBytes
 		for _, h := range s.held {
-			if h.dir == dir && h.end <= d.framedEnd {
+			if h.dir == dir && d.covered(h.off, h.end) {
 				remaining--
 				bytes -= int(h.end - h.off)
 			}
@@ -805,7 +815,7 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 		if remaining >= sessionMaxHeldPerSession || bytes+len(pkt.Payload) > sessionMaxHeldBytes || t.heldTotal-len(s.held)+remaining >= sessionMaxHeldGlobal {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		}
-		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true) {
+		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true, sessionProtocol(s.flow)) {
 			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeEnforce)
 			r := droppedWith("state_limit", t.abortLocked(s, abortBound, "", cur, now))
 			r.stateLimit = true
@@ -815,13 +825,15 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 	kept := s.held[:0]
 	finReleased := false
 	for _, h := range s.held {
-		if h.dir == dir && h.end <= d.framedEnd {
+		if h.dir == dir && d.covered(h.off, h.end) {
 			delete(t.held, h.tok)
 			t.heldTotal--
 			s.heldBytes -= int(h.end - h.off)
-			d.forwarded = max(d.forwarded, h.end)
-			finReleased = finReleased || (h.fin && h.end == d.bytes.Next())
-			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(h.mark, false)})
+			if !d.nonAdmitting(h.off, h.end) {
+				d.forwarded = max(d.forwarded, h.end)
+				finReleased = finReleased || (h.fin && h.end == d.bytes.Next())
+			}
+			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(h.mark, d.nonAdmitting(h.off, h.end))})
 			continue
 		}
 		kept = append(kept, h)
@@ -832,9 +844,13 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 		// forwarded, so it counts in the RST sequence.
 		t.finForwardedLocked(s, dir, &res)
 	}
-	if cur.end <= d.framedEnd || !pkt.Token.Inline() {
-		d.forwarded = max(d.forwarded, cur.end)
+	if d.covered(cur.off, cur.end) || !pkt.Token.Inline() {
 		res.decision.Action, res.decision.Reason = capture.Accept, reasonIECAccept
+		if d.nonAdmitting(cur.off, cur.end) {
+			res.decision = nonAdmitWithResolved(pkt, res.decision.Resolved)
+		} else {
+			d.forwarded = max(d.forwarded, cur.end)
+		}
 		return res
 	}
 	n := int(cur.end - cur.off)

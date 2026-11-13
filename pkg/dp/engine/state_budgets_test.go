@@ -114,7 +114,7 @@ func testStateBudgetHeadroom(t *testing.T) {
 	const charge = 1 + limits.HeldPacketHeaderAllowanceBytes + limits.HeldTokenMetadataBytes
 	for i := range 88 {
 		e.sessions.mu.Lock()
-		ok := e.sessions.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false)
+		ok := e.sessions.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false, "iec104")
 		e.sessions.mu.Unlock()
 		if ok != (i < 3) {
 			t.Fatalf("monitor token %d admitted=%t", i, ok)
@@ -125,7 +125,7 @@ func testStateBudgetHeadroom(t *testing.T) {
 		}
 	}
 	e.sessions.mu.Lock()
-	ok := e.sessions.holdCreditLocked(capture.NewToken(2, 1), 1, true)
+	ok := e.sessions.holdCreditLocked(capture.NewToken(2, 1), 1, true, "iec104")
 	e.sessions.mu.Unlock()
 	if !ok || e.budget.Status().InUse != 4*charge {
 		t.Fatal("monitor flood starved enforcement")
@@ -450,7 +450,7 @@ func testStateBudgetRebind(t *testing.T) {
 		b, table, epoch := e.budget, e.sessions, e.epoch.Load()
 		tok := capture.NewToken(uint64(i+1), 1)
 		table.mu.Lock()
-		ok := table.holdCreditLocked(tok, 1, true)
+		ok := table.holdCreditLocked(tok, 1, true, "iec104")
 		table.mu.Unlock()
 		if !ok {
 			t.Fatal("hold admission")
@@ -471,7 +471,7 @@ func testStateBudgetRebind(t *testing.T) {
 		// an old completion to refund its credit.
 		next := capture.NewToken(uint64(i+2), 1)
 		table.mu.Lock()
-		ok = table.holdCreditLocked(next, 1, true)
+		ok = table.holdCreditLocked(next, 1, true, "iec104")
 		table.mu.Unlock()
 		if !ok {
 			t.Fatal("new generation admission")

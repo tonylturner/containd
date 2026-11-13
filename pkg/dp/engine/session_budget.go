@@ -5,7 +5,6 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -47,7 +46,9 @@ func (t *sessionTable) allocateDirLocked(s *trackedSession, dir int, isn uint32)
 	if old := s.dirs[dir]; old != nil {
 		old.bytes.Release()
 		old.frames = nil
-		s.memory.Refund(old.frameCharge)
+		if old.frameLease != nil {
+			old.frameLease.Release()
+		}
 	}
 	s.dirs[dir] = &sessionDir{hasISN: true, isn: isn, seq: flow.NewSeqSpace(isn), bytes: stream}
 	return nil
@@ -77,10 +78,10 @@ func (s *trackedSession) clearInspectionBytes() {
 		if d != nil {
 			d.bytes.Release()
 			d.frames = nil
-			if s.memory != nil {
-				s.memory.Refund(d.frameCharge)
+			if d.frameLease != nil {
+				d.frameLease.Release()
 			}
-			d.frameCharge = 0
+			d.frameLease = nil
 		}
 	}
 }
@@ -112,23 +113,4 @@ func (t *sessionTable) stopInspection() {
 	clear(t.held)
 	clear(t.aborts)
 	t.heldTotal, t.tombstones = 0, 0
-}
-
-func (s *trackedSession) retainFrames(d *sessionDir, frames []dpi.DecodedFrame) bool {
-	if len(frames) == 0 {
-		return true
-	}
-	size := (len(d.frames) + len(frames)) * 16
-	if !s.memory.Reserve(size) {
-		return false
-	}
-	replacement := make([]sessionFrame, len(d.frames)+len(frames))
-	copy(replacement, d.frames)
-	for i, f := range frames {
-		replacement[len(d.frames)+i] = sessionFrame{start: f.Start, end: f.End}
-	}
-	old := d.frameCharge
-	d.frames, d.frameCharge = replacement, size
-	s.memory.Refund(old)
-	return true
 }

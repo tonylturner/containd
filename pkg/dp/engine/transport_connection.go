@@ -238,7 +238,11 @@ func (e *Engine) newWireConnectionLocked(status string) *flow.Connection {
 
 func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
+	var retirements sessionActions
+	defer func() {
+		e.flowMu.Unlock()
+		e.sessions.apply(retirements)
+	}()
 	old := state.Connection.Load()
 	if incoming == nil {
 		if old != nil {
@@ -287,14 +291,14 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			e.transport.authority.count("ambiguous")
 		}
 	}
-	e.adoptTransportPending(incoming, old)
+	retirements.merge(e.adoptTransportPending(incoming, old))
 	state.Connection.Store(incoming)
 	state.Tags = e.flowTags(state)
 	if incoming.Evidence != nil {
 		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
 			if peer := e.tupleStateLocked(tuple); peer != nil {
 				previous := peer.Connection.Load()
-				e.adoptTransportPending(incoming, previous)
+				retirements.merge(e.adoptTransportPending(incoming, previous))
 				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
 					e.mergeFlowSlotsLocked(state, peer)
 					peer.Connection.Store(incoming)
@@ -305,14 +309,19 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 	}
 }
 
-func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) {
+func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) sessionActions {
+	var acts sessionActions
 	if incoming.Evidence != nil && previous != nil && previous.ID == "" && previous.Key != incoming.Key {
+		// Retire the losing authorization history before publishing aliases.
+		// Its ledger is never merged into the surviving connection.
+		acts = e.sessions.retireMergedHistory(incoming, previous)
 		e.adoptObservationLocked(incoming, previous)
 		incoming.MergeHistory(previous)
 		if e.anomalyDetector != nil {
 			e.anomalyDetector.AdoptConnection(previous.Key, incoming)
 		}
 	}
+	return acts
 }
 
 func adoptTransport(previous, incoming *flow.Connection) *flow.Connection {
