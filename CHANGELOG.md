@@ -94,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
+  protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
+  Uninspectable transport traffic is dropped for ALLOW and DENY alike;
+  configurations remain valid and rule warnings identify the cause and repair.
 - Audit records get their `source` from the server; the client-supplied
   `X-Source` header is ignored when records are stored and forwarded to syslog.
 - Advisory `containd-2026-003` revision 2: both images still ship Wolfi

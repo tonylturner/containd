@@ -962,7 +962,12 @@ and commit. POST replaces the settings rather than merging them. Fields include:
 - `dpiMode` -- `"monitor"` (passive observation) or `"enforce"` (active policy
   enforcement), or empty (defaults to monitor); any other value is rejected.
   ICS rules that resolve to enforce need a nonzero `nfqueueGroup`.
-- `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)
+- `dpiEnabled` -- DPI master switch. When off, enforce-mode ICS rules remain
+  valid but drop their whole transport scope, including ALLOW rules.
+- `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`).
+  A disabled decoder makes its enforce rules drop their whole transport scope.
+  IP/CIDR exclusions drop only excluded traffic within an enforce scope.
+  Rule warnings describe the cause and repair; monitor-effective behavior is unchanged.
 
 See [DPI modes](ics-dpi.md#dpi-modes) for rule inheritance,
 `GET /api/v1/firewall/shadow-counters`, migration and downgrade behavior.

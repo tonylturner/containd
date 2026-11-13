@@ -754,7 +754,7 @@ protection as active.
 
 ### DPI and capture groups
 
-- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not enforcement.
+- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not firewall enforcement. With DPI off, enforce-effective ICS rules drop their whole transport scope rather than passing it uninspected.
 - `set dataplane dpi mode <monitor|enforce>` changes the global ICS mode.
 - `set dataplane dpi protocols <name=bool,...>` edits named IT protocol toggles.
 - `set dataplane dpi ics-protocols <name=bool,...>` edits named ICS protocol toggles.

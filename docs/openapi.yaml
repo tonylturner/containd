@@ -3627,7 +3627,7 @@ components:
     ICSCoverageRule:
       type: object
       required: [ruleId, protocol, mode, state]
-      description: Whether a firewall rule naming an ICS protocol actually stops a prohibited command.
+      description: Semantic inspection coverage of an ICS rule. Reasons distinguish fail-closed transport drops from a missing enforcement path.
       properties:
         ruleId: {type: string}
         protocol: {type: string}
@@ -3645,7 +3645,7 @@ components:
           enum: [no-inline-path, enforcement-disabled, dpi-disabled, decoder-disabled, queue-unavailable, exclusion-overlap, domain-exclusion]
         message: {type: string}
         value: {type: string, description: The exclusion, for exclusion codes.}
-        matches: {type: integer, description: Connections the exclusion exempted since the last apply; applied coverage only.}
+        matches: {type: integer, description: Connections excluded from inspection since the last apply; applied coverage only. Enforce IP/CIDR-excluded traffic is dropped.}
         runtime: {type: boolean, description: True for reasons only the running engine reports (queue-unavailable).}
     ICSEnforcementHealth:
       type: object
@@ -3670,12 +3670,14 @@ components:
         in zones), or sources and destinations that share no address family
         (addressFamily), or a via constraint with no matching enabled/bound forward
         (forward). A terminal may also be shadowed by an earlier covering terminal
-        (shadowedBy), of any deciding action.
+        (shadowedBy), of any deciding action. Inspection warnings (inspection) name
+        disabled DPI, a disabled decoder or an overlapping IP/CIDR exclusion;
+        uninspectable enforce transport traffic is dropped until repaired.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity, zone, addressFamily, forward]
+          enum: [identity, zone, addressFamily, forward, inspection]
         zones:
           type: array
           items: {type: string}

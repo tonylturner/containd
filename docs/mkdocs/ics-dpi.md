@@ -166,8 +166,11 @@ replacement request:
 
 The four supported industrial decoders are Modbus/TCP, DNP3, IEC 60870-5-104
 and CIP/EtherNet/IP. CIP is optional and can be disabled. An omitted protocol
-toggle leaves its decoder enabled. `dpiProtocols` controls the IT decoders
-separately. Enabling a decoder does not create a policy rule. For saved
+toggle leaves its decoder enabled. If `dpiEnabled` is false or an enforce rule's
+decoder is disabled in `dpiIcsProtocols`, the rule remains valid and drops its
+whole transport scope, for ALLOW and DENY alike. Enable DPI and the decoder to
+restore semantic inspection. Monitor-effective rules are unchanged.
+`dpiProtocols` controls the IT decoders separately. Enabling a decoder does not create a policy rule. For saved
 configurations affected by removed protocol support, see
 [upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
@@ -495,10 +498,11 @@ associations for hidden names. This is passive, unauthenticated DNS observation,
 not a hostname-authentication boundary.
 
 Domain exclusions **never bypass IEC 104 inspection or its enforcement
-envelopes**. Existing IP/CIDR overlap validation remains in force for IEC 104
-enforce rules. For other protocols exclusions stay allowed: an IP or CIDR
-exclusion that meets a rule's addresses, and any domain exclusion, make the
-rule report partial coverage (see
+envelopes**. IP/CIDR exclusions are valid for Modbus, DNP3, IEC 104 and CIP enforce
+rules, but matching traffic in those rules' transport scopes is **dropped**, not
+passed without inspection. Rule warnings identify the exclusion and recommend
+removing or narrowing it. Such exclusions report partial inspection coverage;
+domain exclusions can still bypass generic inspection (see
 [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage)).
 
 The existing DPI protocol statistics expose flow-hit totals in `eventCount`
