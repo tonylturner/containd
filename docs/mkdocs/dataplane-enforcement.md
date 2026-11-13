@@ -193,7 +193,8 @@ and operator connection revocations remain independent.
 A connection the engine did not see from its SYN is dropped (reason
 `stream_midstream`). This covers connections open across an engine restart or
 a data-plane configuration change, connections idle longer than the engine's
-5-minute flow timeout, and a connection whose tuple carries the SYN of a new
+flow timeout (30 seconds before a completed TCP handshake, five minutes once
+established), and a connection whose tuple carries the SYN of a new
 handshake while the engine still follows the old one. No flow block is
 installed. The engine resets the connection at both endpoints and drops its
 later packets; after tombstone expiry or eviction, another pickup can trigger
