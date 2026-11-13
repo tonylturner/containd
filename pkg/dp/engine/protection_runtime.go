@@ -235,8 +235,10 @@ func (e *Engine) Close() {
 	e.retireCaptureLocked()
 	e.stopNFLogLocked()
 	e.nflogLifetime = nil
+	e.clearFlowOwners()
 	if e.iec != nil {
-		e.iec.stopInventory()
+		e.iec.flushHeldCredits()
+		e.iec.stopInspection()
 		if e.iec.injector != nil {
 			_ = e.iec.injector.Close()
 		}

@@ -6,6 +6,8 @@ package flow
 import (
 	"bytes"
 	"errors"
+
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // Stream errors.
@@ -19,6 +21,8 @@ var (
 	// ErrBeforeStream reports a segment that starts before the first byte
 	// after the SYN.
 	ErrBeforeStream = errors.New("flow: segment before the stream start")
+	// ErrInspectionLimit means shared retained-allocation admission failed.
+	ErrInspectionLimit = errors.New("flow: inspection allocation refused")
 )
 
 // SeqSpace maps one direction's 32-bit TCP sequence numbers to absolute
@@ -62,6 +66,9 @@ func (s *SeqSpace) Advance(off int64) {
 // the receiver acknowledges it, and bytes below that point are duplicates
 // the receiver already holds, so they are not compared.
 type ByteStream struct {
+	memory   *InspectionMemory
+	released bool
+	segments [32]chunk
 	next     int64 // every byte below next was delivered
 	histBase int64
 	hist     []byte  // bytes [histBase, next)
@@ -81,7 +88,41 @@ func (c chunk) end() int64 { return c.off + int64(len(c.data)) }
 // NewByteStream returns a stream that holds at most maxBytes of history and
 // out-of-order data, in at most maxSegs out-of-order pieces.
 func NewByteStream(maxBytes, maxSegs int) *ByteStream {
-	return &ByteStream{maxBytes: maxBytes, maxSegs: maxSegs}
+	b, err := NewBudgetedByteStream(maxBytes, maxSegs, limits.NewResources(nil, nil), false)
+	if err != nil {
+		panic("flow: default byte stream metadata admission failed")
+	}
+	return b
+}
+
+// NewBudgetedByteStream reserves metadata before constructing a stream. The
+// fixed ceilings also bound per-call delivery copies to 64 KiB.
+func NewBudgetedByteStream(maxBytes, maxSegs int, r limits.Resources, enforcing bool) (*ByteStream, error) {
+	class := limits.ClassObserve
+	if enforcing {
+		class = limits.ClassEnforce
+	}
+	memory := NewInspectionMemory(r, class, limits.CategoryStream)
+	if !memory.Reserve(int(limits.StreamMetadataBytes) + 32*32) {
+		return nil, ErrInspectionLimit
+	}
+	b := &ByteStream{memory: memory, maxBytes: min(maxBytes, 64<<10), maxSegs: min(maxSegs, 32)}
+	b.ooo = b.segments[:0]
+	return b, nil
+}
+
+// Release retires all backing storage and metadata. It is idempotent; the
+// caller serializes it with Add and Ack using its stream/session lock.
+func (b *ByteStream) Release() {
+	if b == nil || b.released {
+		return
+	}
+	b.hist = nil
+	clear(b.segments[:])
+	b.ooo = nil
+	b.oooBytes = 0
+	b.released = true
+	b.memory.Release()
 }
 
 // Next returns the offset of the first byte not yet delivered.
@@ -98,10 +139,16 @@ func (b *ByteStream) Buffered() int { return len(b.hist) + b.oooBytes }
 // deliverable in order, starting at offset start (fresh is empty when
 // nothing new is contiguous). On error the stream is unchanged.
 func (b *ByteStream) Add(off int64, data []byte) (start int64, fresh []byte, err error) {
+	if b.released {
+		return b.next, nil, ErrInspectionLimit
+	}
 	if off < 0 {
 		return b.next, nil, ErrBeforeStream
 	}
 	end := off + int64(len(data))
+	if end < off {
+		return b.next, nil, ErrStreamBound
+	}
 	if err := b.compare(off, data); err != nil {
 		return b.next, nil, err
 	}
@@ -111,24 +158,65 @@ func (b *ByteStream) Add(off int64, data []byte) (start int64, fresh []byte, err
 	if off > b.next {
 		return b.next, nil, b.addOutOfOrder(off, data)
 	}
-	if len(b.hist)+b.oooBytes+int(end-b.next) > b.maxBytes {
+	next, drained, retainedOOO := end, 0, b.oooBytes
+	for _, c := range b.ooo {
+		if c.off > next {
+			break
+		}
+		next = max(next, c.end())
+		drained++
+		retainedOOO -= len(c.data)
+	}
+	size := int(next - b.histBase)
+	if size > b.maxBytes-retainedOOO {
 		return b.next, nil, ErrStreamBound
 	}
+	if !b.memory.Reserve(size) {
+		return b.next, nil, ErrInspectionLimit
+	}
+	hist := make([]byte, size)
+	copy(hist, b.hist)
+	copy(hist[b.next-b.histBase:], data[b.next-off:])
+	refund := cap(b.hist)
+	for _, c := range b.ooo[:drained] {
+		if c.end() > b.next {
+			lo := max(b.next, c.off)
+			copy(hist[lo-b.histBase:], c.data[lo-c.off:])
+		}
+		refund += cap(c.data)
+	}
 	start = b.next
-	b.hist = append(b.hist, data[b.next-off:]...)
-	b.next = end
-	b.drainOutOfOrder()
-	return start, append([]byte(nil), b.hist[start-b.histBase:]...), nil
+	b.hist, b.next = hist, next
+	copy(b.ooo, b.ooo[drained:])
+	clear(b.ooo[len(b.ooo)-drained:])
+	b.ooo = b.ooo[:len(b.ooo)-drained]
+	b.oooBytes = retainedOOO
+	b.memory.Refund(refund)
+	fresh = make([]byte, b.next-start)
+	copy(fresh, b.hist[start-b.histBase:])
+	return start, fresh, nil
 }
 
 // Ack drops history below off: the receiver acknowledged those bytes.
-func (b *ByteStream) Ack(off int64) {
+func (b *ByteStream) Ack(off int64) error {
+	if b.released {
+		return ErrInspectionLimit
+	}
 	off = min(off, b.next)
 	if off <= b.histBase {
-		return
+		return nil
 	}
-	b.hist = append([]byte(nil), b.hist[off-b.histBase:]...)
+	size := int(b.next - off)
+	if !b.memory.Reserve(size) {
+		return ErrInspectionLimit
+	}
+	hist := make([]byte, size)
+	copy(hist, b.hist[off-b.histBase:])
+	refund := cap(b.hist)
+	b.hist = hist
 	b.histBase = off
+	b.memory.Refund(refund)
+	return nil
 }
 
 // compare checks data against history and out-of-order pieces.
@@ -152,7 +240,8 @@ func (b *ByteStream) compare(off int64, data []byte) error {
 // addOutOfOrder stores the parts of data that no out-of-order piece covers.
 func (b *ByteStream) addOutOfOrder(off int64, data []byte) error {
 	end := off + int64(len(data))
-	var pieces []chunk
+	var storage [33]chunk
+	pieces := storage[:0]
 	cur := off
 	for _, c := range b.ooo {
 		if c.end() <= cur || c.off >= end {
@@ -173,8 +262,13 @@ func (b *ByteStream) addOutOfOrder(off int64, data []byte) error {
 	if len(b.hist)+b.oooBytes+added > b.maxBytes || len(b.ooo)+len(pieces) > b.maxSegs {
 		return ErrStreamBound
 	}
+	if !b.memory.Reserve(added) {
+		return ErrInspectionLimit
+	}
 	for _, p := range pieces {
-		b.insert(chunk{off: p.off, data: append([]byte(nil), p.data...)})
+		data := make([]byte, len(p.data))
+		copy(data, p.data)
+		b.insert(chunk{off: p.off, data: data})
 	}
 	b.oooBytes += added
 	return nil
@@ -188,17 +282,4 @@ func (b *ByteStream) insert(c chunk) {
 	b.ooo = append(b.ooo, chunk{})
 	copy(b.ooo[i+1:], b.ooo[i:])
 	b.ooo[i] = c
-}
-
-// drainOutOfOrder moves pieces that became contiguous into history.
-func (b *ByteStream) drainOutOfOrder() {
-	for len(b.ooo) > 0 && b.ooo[0].off <= b.next {
-		c := b.ooo[0]
-		b.ooo = b.ooo[1:]
-		b.oooBytes -= len(c.data)
-		if c.end() > b.next {
-			b.hist = append(b.hist, c.data[b.next-c.off:]...)
-			b.next = c.end()
-		}
-	}
 }

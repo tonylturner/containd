@@ -99,6 +99,9 @@ type Engine struct {
 	tcpISNs               map[flow.MapKey]uint32
 	tcpDecisions          [256]sync.Mutex
 	lastSweep             time.Time
+	lastCapacitySweep     time.Time
+	flowSlots             int
+	flowHighWater         int
 	verdictCache          *VerdictCache
 	inventory             *inventory.Inventory
 	anomalyDetector       *anomaly.Detector
@@ -273,6 +276,7 @@ func New(cfg Config) (*Engine, error) {
 	e.eventStore = store.Writer("")
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
+	e.dpiMgr.SetResources(e.inspectionResources())
 	e.initIEC(cfg)
 	if err := e.newRun(); err != nil {
 		e.Close()
@@ -306,7 +310,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	if e.transport != nil {
-		observation, err := newLiveObserver(cfg)
+		observation, err := newLiveObserver(cfg, e.inspectionResources())
 		if err != nil {
 			return nil, err
 		}
@@ -347,8 +351,10 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.retireCaptureLocked()
 	e.stopNFLogLocked()
 	if prevIEC != nil {
-		prevIEC.stopInventory()
+		prevIEC.flushHeldCredits()
+		prevIEC.stopInspection()
 	}
+	e.clearFlowOwners()
 
 	e.policyMu.Lock()
 	defer e.policyMu.Unlock()
@@ -398,6 +404,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
 	e.flows = fresh.flows
+	e.flowSlots, e.flowHighWater = fresh.flowSlots, fresh.flowHighWater
+	e.lastCapacitySweep = fresh.lastCapacitySweep
 	e.syncFlowsActiveLocked()
 	e.tcpISNs = fresh.tcpISNs
 	e.transportISNs = fresh.transportISNs
@@ -676,6 +684,9 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
 	state := e.trackTransportFlow(pkt, now, connection)
+	if state == nil {
+		return e.refuseFlow(pkt)
+	}
 	if pkt.Token.Inline() {
 		state.InlinePolicy.Store(inlinePolicy(pkt, e.ruleSnap.Load()))
 	}
@@ -705,37 +716,39 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 // whose Key.Dir records whether its sender opened the connection
 // (DirForward) or accepted it (DirReverse).
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
+	enforcing := e.flowEnforcing(pkt)
+	e.sweepBeforeAdmission(now, enforcing)
 	e.flowMu.Lock()
-	state, forgotten, needsSweep := e.trackFlowLocked(pkt, now)
+	state, forgotten := e.trackFlowLocked(pkt, now, enforcing, nil)
 	e.flowMu.Unlock()
-	e.finishFlowTracking(forgotten, needsSweep, now)
+	e.finishFlowTracking(forgotten)
 	return state
 }
 
-// Caller holds flowMu; stream cleanup and sweeping run after unlocking.
-func (e *Engine) trackFlowLocked(pkt capture.Packet, now time.Time) (*flow.State, []*flow.State, bool) {
-	state, forgotten := e.connectionStateLocked(pkt, now)
+// Caller holds flowMu; stream cleanup runs after unlocking.
+func (e *Engine) trackFlowLocked(pkt capture.Packet, now time.Time, enforcing bool, incoming *flow.Connection) (*flow.State, []*flow.State) {
+	state, forgotten := e.connectionStateLocked(pkt, now, enforcing, incoming)
+	if state == nil {
+		return nil, forgotten
+	}
+	connection := incoming
+	if connection == nil {
+		connection = state.Connection.Load()
+	}
+	state.Admission.Observe(pkt.Proto, connection.Direction(state.Key), pkt.TCP.Flags&capture.TCPFlagSYN != 0,
+		pkt.TCP.Flags&capture.TCPFlagACK != 0, handshakeMarked(pkt), pkt.TCP.Seq, pkt.TCP.Ack)
 	state.Touch(uint64(len(pkt.Payload)), now)
 	if state.Packets == 1 && state.Key.Dir == flow.DirForward {
 		e.countAddressExclusionLocked(state)
 	}
-	// Only check if sweep is due under the existing lock; do the actual
-	// sweep outside the critical path if needed.
-	needsSweep := now.Sub(e.lastSweep) >= 30*time.Second
-	if needsSweep {
-		e.lastSweep = now
-	}
-	return state, forgotten, needsSweep
+	return state, forgotten
 }
 
-func (e *Engine) finishFlowTracking(forgotten []*flow.State, needsSweep bool, now time.Time) {
+func (e *Engine) finishFlowTracking(forgotten []*flow.State) {
 	// End the forgotten connection's streams before this packet starts the
 	// new one.
 	for _, st := range forgotten {
 		e.endFlowStream(st, nil)
-	}
-	if needsSweep {
-		e.sweepFlows(now)
 	}
 }
 
@@ -746,7 +759,7 @@ func (e *Engine) finishFlowTracking(forgotten []*flow.State, needsSweep bool, no
 // handshake contradicts the recorded orientation, the states of the old
 // connection are forgotten and returned, for the caller to end their
 // streams once it releases e.flowMu. Must be called with e.flowMu held.
-func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow.State, []*flow.State) {
+func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time, enforcing bool, incoming *flow.Connection) (*flow.State, []*flow.State) {
 	key := flow.Key{
 		SrcIP:   pkt.SrcIP,
 		DstIP:   pkt.DstIP,
@@ -792,8 +805,33 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 			}
 		}
 	}
+	var admission *flow.Admission
+	if peer := e.tupleStateLocked(key.Reversed().Tuple()); peer != nil {
+		admission = peer.Admission
+	}
+	if admission == nil && incoming != nil && incoming.Evidence != nil {
+		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
+			if peer := e.tupleStateLocked(tuple); peer != nil {
+				previous := peer.Connection.Load()
+				if previous == nil || previous.Evidence == nil || sameGeneration(previous.Evidence, incoming.Evidence) {
+					admission = peer.Admission
+					break
+				}
+			}
+		}
+	}
+	if admission == nil {
+		if e.flowSlots+2 > e.flowCeiling(enforcing) {
+			return nil, forgotten
+		}
+		admission = flow.NewAdmission()
+		e.flowSlots += 2
+		e.flowHighWater = max(e.flowHighWater, e.flowSlots)
+	}
 	state := flow.NewState(key, now)
-	state.IdleTimeout = 5 * time.Minute
+	state.Admission = admission
+	admission.Retain()
+	state.IdleTimeout = 30 * time.Second
 	state.Tags = e.flowTags(state)
 	e.flows[key.MapKey()] = state
 	e.noteTransportSYNLocked(pkt, key)
@@ -826,12 +864,18 @@ func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
 // retirement tears down streams atomically under that lock before exposing an
 // unguarded tuple. sweepFlows ends idle streams too. Requires e.flowMu held.
 func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
-	index := key.MapKey()
+	return e.dropFlowIndexLocked(key.MapKey())
+}
+
+func (e *Engine) dropFlowIndexLocked(index flow.MapKey) *flow.State {
 	st, ok := e.flows[index]
 	if !ok {
 		return nil
 	}
 	e.releaseObservationLocked(st)
+	if st.Admission != nil && st.Admission.Release() {
+		e.flowSlots -= 2
+	}
 	delete(e.flows, index)
 	delete(e.tcpISNs, index)
 	delete(e.transportISNs, index)
@@ -847,20 +891,12 @@ func (e *Engine) sweepFlows(now time.Time) {
 	var expired []*flow.State
 	e.flowMu.Lock()
 	for k, st := range e.flows {
-		if st == nil || st.Expired(now) {
-			if st != nil {
-				e.releaseObservationLocked(st)
-			}
+		if st == nil {
 			delete(e.flows, k)
-			delete(e.tcpISNs, k)
-			delete(e.transportISNs, k)
-			delete(e.transportCoverage, st)
-			if !e.detached {
-				metrics.FlowsActive.Set(float64(len(e.flows)))
-			}
-			if st != nil {
-				expired = append(expired, st)
-			}
+			continue
+		}
+		if flowExpired(st, now) {
+			expired = append(expired, e.dropFlowIndexLocked(k))
 		}
 	}
 	var observationRecords []observationRecord

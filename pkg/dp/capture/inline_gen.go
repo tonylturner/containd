@@ -121,6 +121,20 @@ func (g *generation) deliver(id uint32, pkt Packet, h Handler) {
 	g.finish(tok, h(pkt))
 }
 
+// ResolutionRejectedError reports a Decision.Resolved entry that capture did
+// not submit. No OnVerdict follows for its Token; the owner of any state
+// charged to that Token releases it on this error.
+type ResolutionRejectedError struct {
+	Token Token
+	Err   error
+}
+
+func (e *ResolutionRejectedError) Error() string {
+	return fmt.Sprintf("capture: resolve %s: %v", e.Token, e.Err)
+}
+
+func (e *ResolutionRejectedError) Unwrap() error { return e.Err }
+
 // finish applies the Decision for tok: the current packet, its staged
 // Settle requests and the earlier tokens it resolves form one batch whose
 // Drops are submitted before its Accepts.
@@ -138,7 +152,7 @@ func (g *generation) finish(tok Token, d Decision) {
 	index := map[uint32]int{}
 	for _, r := range d.Resolved {
 		if err := routeError(true, g, r); err != nil {
-			rejected = append(rejected, fmt.Errorf("capture: resolve %s: %w", r.Token, err))
+			rejected = append(rejected, &ResolutionRejectedError{Token: r.Token, Err: err})
 			continue
 		}
 		if r.Token == tok {
@@ -146,7 +160,7 @@ func (g *generation) finish(tok Token, d Decision) {
 			continue
 		}
 		if _, ok := g.outstanding[r.Token.id]; !ok {
-			rejected = append(rejected, fmt.Errorf("capture: resolve %s: %w", r.Token, ErrUnknownToken))
+			rejected = append(rejected, &ResolutionRejectedError{Token: r.Token, Err: ErrUnknownToken})
 			continue
 		}
 		subs = mergeSubmission(subs, index, submission{tok: r.Token, v: r.Verdict, mark: r.Mark, notify: true})

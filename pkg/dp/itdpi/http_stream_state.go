@@ -10,19 +10,19 @@ import (
 // Session IDs distinguish incarnations when the caller provides them. Legacy
 // inspection has directional stream IDs; use the shared connection identity,
 // or the unordered wire tuple when no connection tracker is available.
-func metadataConnectionKey(st *flow.State, v dpi.StreamView) string {
+func metadataConnectionParts(st *flow.State, v dpi.StreamView) (string, string) {
 	if v.Dir != dpi.DirUnknown {
-		return "session/" + v.Session
+		return "session/", v.Session
 	}
 	if c := st.Connection.Load(); c != nil && c.Key != "" {
-		return "connection/" + c.Key
+		return "connection/", c.Key
 	}
 	k := st.Key
 	k.Dir = flow.DirForward
 	peer := k.Reversed()
 	peer.Dir = flow.DirForward
 	a, b := k.Hash(), peer.Hash()
-	return "wire/" + min(a, b)
+	return "wire/", min(a, b)
 }
 
 func metadataFrame(res *dpi.StreamResult, v dpi.StreamView, n int, events []dpi.Event) {

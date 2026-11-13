@@ -66,6 +66,7 @@ func TestPortsAndReplay(t *testing.T) {
 				t.Fatal(d)
 			}
 			_, replay, ok := table.Take(testKey)
+			releaseReplayAfterTest(t, replay)
 			if !ok || !bytes.Equal(replay.Bytes[0], f.request) || !bytes.Equal(replay.Bytes[1], f.reply) {
 				t.Fatalf("replay: %+v", replay)
 			}
@@ -167,6 +168,7 @@ func TestPrefixOrderingAndOverlap(t *testing.T) {
 			}
 			if d.State == Confirmed {
 				_, r, _ := table.Take(testKey)
+				releaseReplayAfterTest(t, r)
 				if !bytes.Equal(r.Bytes[0], f.request) {
 					t.Fatal(r)
 				}
@@ -358,6 +360,7 @@ func TestUDPDatagrams(t *testing.T) {
 		t.Fatal(d)
 	}
 	_, r, ok := table.Take(testKey)
+	releaseReplayAfterTest(t, r)
 	if !ok || len(r.Datagrams) != 2 || !bytes.Equal(r.Bytes[0], f.request) || !bytes.Equal(r.Bytes[1], f.reply) {
 		t.Fatal(r)
 	}
@@ -383,6 +386,7 @@ func TestUDPDatagrams(t *testing.T) {
 	observe(t, table, Arrival{Payload: f.request})
 	observe(t, table, Arrival{Payload: f.request})
 	_, r, ok = table.Take(testKey)
+	releaseReplayAfterTest(t, r)
 	if ok {
 		t.Fatal("candidate must not hand off", r)
 	}
@@ -429,6 +433,7 @@ func TestReplayPreservesPendingRanges(t *testing.T) {
 		t.Fatal(d)
 	}
 	_, r, ok := table.Take(testKey)
+	releaseReplayAfterTest(t, r)
 	if !ok || r.Sequence != [2]uint32{100, 200} ||
 		len(r.Pending[0]) != 1 || r.Pending[0][0].Sequence != 120 ||
 		string(r.Pending[0][0].Bytes) != "pending" || !bytes.Equal(r.Bytes[0], f.request) {

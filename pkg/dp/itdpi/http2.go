@@ -9,6 +9,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
@@ -16,20 +17,46 @@ import (
 
 const maxH2Frame = 16384
 const maxH2Block = 64 * 1024
+const hpackTableSize = 4096
+
+// hpackDecoderEnvelopeBytes audits x/net v0.62.0's opaque Decoder. The RFC
+// table retains at most 4096/32 entries, plus one insertion before eviction.
+// Allow twice those slots at 64 bytes each (HeaderField is <=40 on 64-bit),
+// 4096 indexed string bytes, and two maxHTTPHeaders strings for the incoming
+// literal. Each whole-block Write is <=maxH2Block: allow twice that capacity
+// for saveBuf/input retention. Tripling all variable terms covers old+new
+// slice/buffer replacement peaks; DecoderMetadataBytes covers fixed state.
+// The dependency-version/capacity proof test must be re-audited on upgrades.
+const hpackDecoderEnvelopeBytes = int(limits.DecoderMetadataBytes) +
+	3*(2*(hpackTableSize/32+1)*64+hpackTableSize+2*maxHTTPHeaders+2*maxH2Block)
 
 type h2Stream struct {
+	memory   *flow.InspectionMemory
 	decoder  *hpack.Decoder
 	started  bool
 	pending  uint32
 	block    []byte
+	input    []byte // last whole-block Write may still be referenced by Decoder
 	suppress bool
 }
 
-func newH2Stream() *h2Stream {
-	d := hpack.NewDecoder(4096, nil)
-	d.SetAllowedMaxDynamicTableSize(4096)
+func newH2Stream(memory *flow.InspectionMemory) (*h2Stream, error) {
+	if !memory.Reserve(hpackDecoderEnvelopeBytes) {
+		return nil, flow.ErrInspectionLimit
+	}
+	d := hpack.NewDecoder(hpackTableSize, nil)
+	d.SetAllowedMaxDynamicTableSize(hpackTableSize)
 	d.SetMaxStringLength(maxHTTPHeaders)
-	return &h2Stream{decoder: d}
+	return &h2Stream{memory: memory, decoder: d}, nil
+}
+
+func (s *h2Stream) release() {
+	if s.decoder == nil {
+		return
+	}
+	size := hpackDecoderEnvelopeBytes + cap(s.block) + cap(s.input)
+	s.decoder, s.block, s.input = nil, nil, nil
+	s.memory.Refund(size)
 }
 
 func (s *h2Stream) frame(st *flow.State, p []byte) (int, []dpi.Event, error) {
@@ -91,14 +118,15 @@ func (s *h2Stream) frame(st *flow.State, p []byte) (int, []dpi.Event, error) {
 		if len(s.block)+len(fragment) > maxH2Block {
 			return 0, nil, fmt.Errorf("HTTP/2 compressed header limit")
 		}
-		s.block = append(s.block, fragment...)
+		if !replaceBytes(s.memory, &s.block, fragment) {
+			return 0, nil, flow.ErrInspectionLimit
+		}
 		s.pending = id
 		if done {
 			attrs, kind, err := s.headers()
 			if err != nil {
 				return 0, nil, err
 			}
-			s.block = nil
 			s.pending = 0
 			if kind != "" && !s.suppress {
 				for k, v := range httpTransport(st) {
@@ -164,9 +192,16 @@ func (s *h2Stream) headers() (map[string]any, string, error) {
 			}
 		}
 	})
+	// The decoder outlives this result; do not retain its attribute map/strings
+	// through the callback between blocks.
+	defer s.decoder.SetEmitFunc(discardHPACKField)
 	s.decoder.SetEmitEnabled(true)
-	if _, err := s.decoder.Write(s.block); err != nil {
-		return nil, "", fmt.Errorf("invalid HPACK: %w", err)
+	oldInput := cap(s.input)
+	s.input, s.block = s.block, nil
+	_, writeErr := s.decoder.Write(s.input)
+	s.memory.Refund(oldInput)
+	if writeErr != nil {
+		return nil, "", fmt.Errorf("invalid HPACK: %w", writeErr)
 	}
 	if err := s.decoder.Close(); err != nil {
 		return nil, "", fmt.Errorf("incomplete HPACK: %w", err)
@@ -193,3 +228,5 @@ func (s *h2Stream) headers() (map[string]any, string, error) {
 	}
 	return attrs, "", nil // trailers update HPACK state, not a second request
 }
+
+func discardHPACKField(hpack.HeaderField) {}

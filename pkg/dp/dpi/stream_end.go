@@ -88,6 +88,9 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	key, _, _ := streamKey(state, pkt)
+	if !m.reassembler.contains(key) {
+		return
+	}
 	framer := firstFramer(m.dispatch(state, key, pkt))
 	if framer == nil {
 		return
@@ -150,6 +153,6 @@ func (r *reassembler) endPeer(key string, failClosed bool) bool {
 // later RST of its direction carries in window.
 func (r *reassembler) closeLocked(s *stream, next uint32) {
 	r.bytesBuffered -= s.held()
-	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.clearBytes()
 	s.closed, s.closeNext = true, next
 }

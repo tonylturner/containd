@@ -9,6 +9,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
+func (e *Engine) inspectionResources() limits.Resources {
+	return limits.NewResources(e.budget, e.ledger)
+}
+
 // initStateLimits is shared by live and detached constructors. Operator bounds
 // belong to configuration validation, not to internal test/offline injection.
 func (e *Engine) initStateLimits(l limits.Limits, ledger *limits.Ledger) error {
@@ -46,12 +50,11 @@ func (e *Engine) Ledger() *limits.Ledger {
 	return e.ledger
 }
 
-// LimitOccupancy reports actual directional states, not future reserved slots.
-// Flow admission is currently uncapped.
+// LimitOccupancy reports reserved directional slots, including unseen peers.
 func (e *Engine) LimitOccupancy() limits.Occupancy {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
-	return limits.Occupancy{Entries: int64(len(e.flows))}
+	return limits.Occupancy{Limit: int64(e.stateLimits.MaxFlows), Entries: int64(e.flowSlots), HighWater: int64(e.flowHighWater)}
 }
 func (e *Engine) syncFlowsActiveLocked() {
 	if !e.detached {

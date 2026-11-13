@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 func TestIECSessionTrackingBound(t *testing.T) {
@@ -58,22 +59,23 @@ func TestIECSessionTrackingBound(t *testing.T) {
 				t.Fatal("overflow traffic allocated sessions, held packets, or sent resets")
 			}
 			evs := h.eventsOf("ics.session")
+			if len(evs) != 0 {
+				t.Fatalf("capacity refusal emitted per-packet session events: %+v", evs)
+			}
+			hits := h.e.ledger.Status(limits.TableIECSessions, limits.Occupancy{}).Hits
+			wantHits := uint64(12) // each enforce admission attempt, including midstream
 			if mode == "monitor" {
-				if len(evs) != 3 {
-					t.Fatalf("untracked events = %+v, want one per overflow SYN", evs)
-				}
-				for _, ev := range evs {
-					if ev.Attributes["outcome"] != "untracked" || ev.Attributes["reason"] != "bound" ||
-						ev.Attributes["mode"] != "monitor" || ev.Attributes["limit"] != iecMaxSessions ||
-						ev.SrcIP != h.client.String() || ev.DstIP != h.server.String() || ev.DstPort != iec104Port {
-						t.Fatalf("untracked evidence = %+v", ev)
-					}
-					if _, ok := ev.Attributes["session_id"]; ok {
-						t.Fatal("untracked event claimed a session ID")
-					}
-				}
-			} else if len(evs) != 0 {
-				t.Fatalf("enforce overflow reported learn evidence: %+v", evs)
+				wantHits = 3 // only SYNs attempt to open observational sessions
+			}
+			if len(hits) != 1 || hits[0].Mode != limits.Mode(mode) || hits[0].Total != wantHits {
+				t.Fatalf("refusal hits: %+v, want %d/%s", hits, wantHits, mode)
+			}
+			h.e.publishStateLimitTransitions()
+			h.e.publishStateLimitTransitions()
+			evs = h.eventsOf("dataplane.state_limit")
+			if len(evs) != 1 || evs[0].Attributes["table"] != "iec_sessions" ||
+				evs[0].Attributes["mode"] != mode || evs[0].Attributes["reason"] != "refused" {
+				t.Fatalf("coalesced refusal event: %+v", evs)
 			}
 			// Existing sessions keep their stream and policy at capacity.
 			h.cport = trackedPort

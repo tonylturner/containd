@@ -20,8 +20,8 @@ func parseAssembly(t *testing.T, d *Decoder, session string, dir dpi.StreamDir, 
 	for k, c := range d.stations {
 		total += contextBytes(k, c)
 	}
-	if total != d.retained || total > maxRetainedBytes {
-		t.Fatalf("state accounting %d != %d", total, d.retained)
+	if total != d.retainedBytes() || total > maxRetainedBytes {
+		t.Fatalf("state accounting %d != %d", total, d.retainedBytes())
 	}
 	if err != nil || res.Consumed != len(wire) {
 		t.Fatalf("%+v %v", res, err)
@@ -163,8 +163,8 @@ func TestDNP3TransportAssemblyIsolationAndExpiry(t *testing.T) {
 		t.Fatal("station cross-talk")
 	}
 	d.StreamEnded("s", dpi.ServerToClient)
-	if d.retained != 0 || len(d.stations) != 0 {
-		t.Fatal("leaked state", d.retained)
+	if d.retainedBytes() != 0 || len(d.stations) != 0 {
+		t.Fatal("leaked state", d.retainedBytes())
 	}
 }
 func TestDNP3TransportAssemblyBounds(t *testing.T) {
@@ -198,7 +198,7 @@ func TestDNP3TransportAssemblyBounds(t *testing.T) {
 			parseAssembly(t, d, fmt.Sprint(i), dpi.ServerToClient, linkFrame(0x44, []byte{0x40}))
 		}
 		hasCode(t, expectOne(t, parseAssembly(t, d, "extra", dpi.ServerToClient, linkFrame(0x44, []byte{0x40}))), eventfields.KeyUndecoded, "dnp3.assembly_budget")
-		if len(d.stations) != maxStationContexts || d.retained > maxRetainedBytes {
+		if len(d.stations) != maxStationContexts || d.retainedBytes() > maxRetainedBytes {
 			t.Fatal("unbounded state")
 		}
 	})
@@ -371,7 +371,7 @@ func TestDNP3TransportAssemblyManagerCleanup(t *testing.T) {
 		t.Fatal(result, len(d.stations))
 	}
 	mgr.EndStream("managed")
-	if len(d.stations) != 0 || d.retained != 0 {
+	if len(d.stations) != 0 || d.retainedBytes() != 0 {
 		t.Fatal("Manager did not dispatch StreamEnded")
 	}
 	result = mgr.Inspect(st, &dpi.ParsedPacket{Proto: "tcp", Session: "managed", Dir: dpi.ServerToClient, HasOffset: true, Offset: 0, Payload: linkFrame(0x44, []byte{0x81})})

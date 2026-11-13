@@ -65,6 +65,9 @@ func (d *HTTPDecoder) ResyncStream(st *flow.State, v dpi.StreamView, cause *dpi.
 	if s == nil {
 		return nil // unanchored capture loss is not malformed HTTP
 	}
+	if s.failure != nil {
+		return nil
+	}
 	var events []dpi.Event
 	if s.anchored {
 		events = []dpi.Event{{FlowID: st.ID(), Proto: "http", Kind: "malformed",
@@ -72,7 +75,7 @@ func (d *HTTPDecoder) ResyncStream(st *flow.State, v dpi.StreamView, cause *dpi.
 	}
 	s.clearFraming()
 	s.resync, s.suppressMalformed, s.anchored = true, true, false
-	s.h2 = nil
+	s.dropH2()
 	s.peer.uncertain = true
 	return events
 }
@@ -80,6 +83,7 @@ func (d *HTTPDecoder) ResyncStream(st *flow.State, v dpi.StreamView, cause *dpi.
 func (d *HTTPDecoder) httpTunnel(peer *httpConnection) {
 	for _, s := range peer.streams {
 		s.clearFraming()
+		s.dropH2()
 		s.resync, s.anchored = true, false
 	}
 }
@@ -107,7 +111,7 @@ func (d *HTTPDecoder) httpReanchor(st *flow.State, s *httpStream, v dpi.StreamVi
 	// An earlier request-looking injection on the opposite endpoint must not
 	// permanently veto the real client's next packet. A contradictory body
 	// declaration is not allowed to establish framing for that endpoint.
-	if !recovering && s.role == dpi.DirUnknown && !response && !s.peer.acceptsStart(s.key, false) {
+	if !recovering && s.role == dpi.DirUnknown && !response && !s.peer.acceptsStart(s.id, false) {
 		candidate := v.Bytes[v.PacketStart:]
 		_, headers := parseHTTP(candidate)
 		_, length := headers["content-length"]
@@ -123,13 +127,14 @@ func (d *HTTPDecoder) httpReanchor(st *flow.State, s *httpStream, v dpi.StreamVi
 	if !rejected {
 		s.peer.uncertain = true
 	}
-	if s.role == dpi.DirUnknown && !s.peer.acceptsStart(s.key, response) {
-		s.peer.methods, s.peer.dropped = nil, 0
+	if s.role == dpi.DirUnknown && !s.peer.acceptsStart(s.id, response) {
+		s.peer.clearRequests()
+		s.peer.dropped = 0
 		s.peer.clientKnown, s.peer.serverKnown = false, false
 		if response {
-			s.peer.server, s.peer.serverKnown = s.key, true
+			s.peer.server, s.peer.serverKnown = s.id, true
 		} else {
-			s.peer.client, s.peer.clientKnown = s.key, true
+			s.peer.client, s.peer.clientKnown = s.id, true
 		}
 	}
 	var events []dpi.Event

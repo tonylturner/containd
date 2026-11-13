@@ -95,6 +95,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
+	s.clearInspectionBytes()
 	t.dpi.EndStream(s.id)
 	if t.markAbort != nil {
 		t.markAbort(s.id)
@@ -270,6 +271,7 @@ func (t *iecTable) apply(acts iecActions) {
 		now := t.now()
 		for i, err := range errs {
 			if err != nil {
+				t.releaseHeldCreditLocked(acts.drops[i].Token)
 				t.countVerdictFailure(err)
 				acts.merge(t.completeLocked(acts.drops[i].Token, err, now))
 			}
@@ -317,6 +319,7 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 // its generation went down: the kernel dropped it, so it leaves the ledger.
 func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
+	t.releaseHeldCreditLocked(tok)
 	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
@@ -344,9 +347,14 @@ func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
 // down: its held packets are gone and its byte ledger can no longer be
 // trusted. The kernel already dropped the held packets; their
 // completions (ErrQueueClosed) finish the aborts.
-func (t *iecTable) onSourceDown() {
+func (t *iecTable) onSourceDown(generation ...uint64) {
 	var acts iecActions
 	t.mu.Lock()
+	gen := uint64(0)
+	if len(generation) != 0 {
+		gen = generation[0]
+	}
+	t.flushHeldCreditsLocked(gen)
 	t.pressureOffline = true
 	now := t.now()
 	for _, s := range t.sessions {

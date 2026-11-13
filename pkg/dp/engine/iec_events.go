@@ -6,7 +6,6 @@ package engine
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"net/netip"
 	"sync/atomic"
 	"time"
 
@@ -45,7 +44,6 @@ const (
 	outcomeReconnected      = "reconnected"
 	outcomeEnforceUnhealthy = "enforce_unhealthy"
 	outcomeEnforceHealthy   = "enforce_healthy"
-	outcomeUntracked        = "untracked"
 )
 
 // iecAbortReason binds each fixed reason label to its process-lifetime counter.
@@ -189,25 +187,4 @@ func healthEvent(outcome, errText string, now time.Time) events.Event {
 		Attributes: attrs,
 		Timestamp:  now.UTC(),
 	}
-}
-
-// untrackedEvent reports a monitor-mode SYN accepted without tracking. There
-// is no incarnation, so it deliberately carries no session_id or apdu_id.
-func untrackedEvent(client, server netip.AddrPort, now time.Time) iecTelemetry {
-	return iecTelemetry{Event: events.Event{
-		Proto: eventfields.ProtoIEC104,
-		Kind:  eventfields.KindSession,
-		Attributes: map[string]any{
-			eventfields.KeyOutcome: outcomeUntracked,
-			eventfields.KeyMode:    "monitor",
-			eventfields.KeyReason:  "bound",
-			"limit":                iecMaxSessions,
-		},
-		Timestamp: now.UTC(),
-		SrcIP:     client.Addr().String(),
-		DstIP:     server.Addr().String(),
-		SrcPort:   client.Port(),
-		DstPort:   server.Port(),
-		Transport: "tcp",
-	}}
 }

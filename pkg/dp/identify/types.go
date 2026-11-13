@@ -2,7 +2,11 @@
 
 package identify
 
-import "time"
+import (
+	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/flow"
+)
 
 type State string
 
@@ -98,11 +102,12 @@ type Arrival struct {
 }
 
 type Decision struct {
-	State    State
-	Protocol Protocol // set only for a unique candidate/confirmed protocol
-	Coverage Coverage
-	Expected [2]Protocol
-	Results  [4]Result
+	InspectionRefused bool `json:"-"`
+	State             State
+	Protocol          Protocol // set only for a unique candidate/confirmed protocol
+	Coverage          Coverage
+	Expected          [2]Protocol
+	Results           [4]Result
 }
 
 // Counters count connections reaching each evidence/terminal category once,
@@ -130,8 +135,10 @@ type Segment struct {
 // Replay transfers ownership of retained bytes to the caller. For TCP, only
 // contiguous prefixes appear in Bytes, starting at Sequence. Pending preserves
 // all already-observed out-of-order bytes. UDP boundaries must be honored. The
-// table no longer charges these arrays after Take.
+// table no longer charges these arrays after Take. The receiver must Release
+// the replay after its last use, including aliases into its backing storage.
 type Replay struct {
+	memory *flow.InspectionMemory
 	// TriggerRetained reports that the entire last Observe payload was admitted.
 	// False means no caller may treat its missing bytes as replayed.
 	TriggerRetained bool
@@ -139,4 +146,16 @@ type Replay struct {
 	Sequence        [2]uint32
 	Pending         [2][]Segment
 	Datagrams       []Datagram
+}
+
+// Release relinquishes all replay backing storage and its shared-budget credit.
+// It is idempotent; no byte or segment alias may survive this call.
+func (r *Replay) Release() {
+	r.Bytes = [2][]byte{}
+	r.Pending = [2][]Segment{}
+	r.Datagrams = nil
+	if r.memory != nil {
+		r.memory.Release()
+		r.memory = nil
+	}
 }

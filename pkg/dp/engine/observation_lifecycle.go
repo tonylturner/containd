@@ -20,6 +20,9 @@ func (e *Engine) retireObservationLocked(st *flow.State, incoming *flow.Connecti
 				ports[0], ports[1] = ports[1], ports[0]
 			}
 			ctx.refused = !live.observer.Open(key, identify.Meta{Transport: st.Key.Proto, Ports: ports})
+			if ctx.refused {
+				e.observationPending = append(e.observationPending, observationRecord{state: st, loss: true})
+			}
 			if incoming != nil && incoming.Evidence != nil {
 				ctx.generation = incoming.Evidence
 			}
@@ -87,12 +90,19 @@ func (e *Engine) adoptObservationLocked(incoming, previous *flow.Connection) {
 	}
 	output := live.observer.Adopt(from, to, remap)
 	e.observationPending = append(e.observationPending, live.records(output)...)
+	if _, ok := live.observer.Lookup(to); !ok {
+		ctx.refused = true
+	}
 	if target := live.entries[to]; target == nil {
 		if remap[0] == 1 {
 			ctx.states[0], ctx.states[1] = ctx.states[1], ctx.states[0]
 		}
 		live.entries[to] = ctx
 	} else {
+		if ctx.refused {
+			target.refused = true
+			live.observer.Stop(to)
+		}
 		for d, state := range ctx.states {
 			if state != nil {
 				target.states[remap[d]] = state

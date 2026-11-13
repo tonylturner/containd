@@ -8,6 +8,9 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 const (
@@ -15,6 +18,9 @@ const (
 	// least the IEC104 holdback bound of 32 held packets per session, so
 	// the reassembler never fails before the engine's own bound.
 	maxOOOSegments = 32
+	// Each index slot is an int64 offset plus a slice descriptor. The
+	// embedded backing array is reserved in addition to stream metadata.
+	oooIndexBytes = maxOOOSegments * 32
 )
 
 // posKind says how a segment's position is given.
@@ -44,6 +50,11 @@ func (s oooSegment) end() int64 { return s.off + int64(len(s.data)) }
 // stream holds the bytes of one TCP stream direction that the manager has
 // not consumed yet.
 type stream struct {
+	memory                *flow.InspectionMemory
+	resources             limits.Resources
+	enforcing             bool
+	bufCharge, histCharge int
+	segments              [maxOOOSegments]oooSegment
 	// strict streams belong to a framed decoder: buffer bounds, the
 	// out-of-order bound and conflicting overlaps are errors. Other streams
 	// keep the sliding window (oldest bytes dropped) and ignore conflicts.
@@ -110,6 +121,7 @@ type feedResult struct {
 	failed         error // the stream failed earlier; nothing was fed
 	packetStart    int
 	hasPacketStart bool
+	enforcing      bool // allocation class captured at stream admission
 }
 
 // reassembler collects TCP payloads per stream direction so that decoders
@@ -120,6 +132,7 @@ type reassembler struct {
 	maxSize     int
 	idleTimeout time.Duration
 	lastSweep   time.Time
+	resources   limits.Resources
 
 	activeStreams int
 	bytesBuffered int
@@ -132,10 +145,12 @@ func newReassembler(maxStreamSize int, idleTimeout time.Duration) *reassembler {
 	if maxStreamSize <= 0 {
 		maxStreamSize = defaultReassemblyMax
 	}
+	maxStreamSize = min(maxStreamSize, defaultReassemblyMax)
 	return &reassembler{
 		streams:     make(map[string]*stream),
 		maxSize:     maxStreamSize,
 		idleTimeout: idleTimeout,
+		resources:   limits.NewResources(nil, nil),
 	}
 }
 
@@ -172,41 +187,48 @@ func seqDiff(a, b uint32) int32 {
 //
 // open reports whether the stream is anchored at this SYN and whether it
 // discarded the prior stream's accumulated state.
-func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) (anchored, discarded bool) {
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) (anchored, discarded bool, err *StreamError) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.streams[key]
+	if ok && stateLimit(s.failed) {
+		return false, false, nil
+	}
 	switch {
 	case !ok:
 		if failClosed && !handshake {
-			return false, false
+			return false, false, nil
 		}
 	case failClosed && s.failed != nil:
 		var se *StreamError
 		nonAdmit := errors.As(s.failed, &se) && se.Kind == StreamNonAdmit && s.synSeen && s.synSeq != seq
 		if !handshake || !midStream(s.failed) && !nonAdmit {
-			return false, false
+			return false, false, nil
 		}
 	case s.synSeen && s.synSeq == seq && !s.closed:
 		s.lastUpdate = now
-		return true, false
+		return true, false, nil
 	case failClosed && !s.closed:
 		if handshake {
 			r.loseLocked(s)
 			discarded = true
 		}
 		s.lastUpdate = now
-		return false, discarded
+		return false, discarded, nil
 	case failClosed && !handshake:
-		return false, false
+		return false, false, nil
 	}
 	if ok {
-		r.bytesBuffered -= s.held()
-	} else {
-		r.activeStreams++
+		r.completeLocked(key)
 	}
-	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, verify: failClosed, lastUpdate: now}
-	return true, ok
+	s, err = r.allocate(key, failClosed)
+	if err != nil {
+		return false, ok, err
+	}
+	s.strict, s.mode, s.seq0, s.synSeen, s.synSeq, s.verify, s.lastUpdate = true, posSeq, seq, true, seq, failClosed, now
+	r.streams[key] = s
+	r.activeStreams++
+	return true, ok, nil
 }
 
 // loseLocked drops the bytes of a live fail-closed stream, which keeps its
@@ -214,7 +236,7 @@ func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, ha
 func (r *reassembler) loseLocked(s *stream) {
 	r.bytesBuffered -= s.held()
 	s.base = s.end() // the position after the dropped bytes
-	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.clearBytes()
 	s.lost = true
 }
 
@@ -243,10 +265,16 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 		return feedResult{base: s.base}
 	}
 	if !ok || s.closed || s.lost && !verify { // neither holds bytes
-		if !ok {
-			r.activeStreams++
+		if ok {
+			r.completeLocked(key)
 		}
-		s = &stream{strict: strict, mode: pos.kind, seq0: pos.seq, keep: keep}
+		var err *StreamError
+		s, err = r.allocate(key, verify)
+		if err != nil {
+			return feedResult{err: err}
+		}
+		r.activeStreams++
+		s.strict, s.mode, s.seq0, s.keep = strict, pos.kind, pos.seq, keep
 		r.streams[key] = s
 	}
 	if s.failed != nil {
@@ -260,6 +288,8 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 	s.verify = strict && verify
 	if !s.verify {
 		s.hist = nil
+		s.memory.Refund(s.histCharge)
+		s.histCharge = 0
 	}
 	off := s.resolve(pos)
 	inOrder := pos.kind != posAppend && s.mode == pos.kind && off == s.end() && len(payload) > 0
@@ -272,6 +302,7 @@ func (r *reassembler) feed(key string, pos position, payload []byte, now time.Ti
 		err:            err,
 		packetStart:    int(off - s.base),
 		hasPacketStart: inOrder && err == nil && off >= s.base && off+int64(len(payload)) <= s.end(),
+		enforcing:      s.enforcing,
 	}
 }
 
@@ -304,8 +335,35 @@ func (s *stream) add(off int64, data []byte, maxSize int) *StreamError {
 		return err
 	}
 	if off == s.end() {
-		s.buf = append(s.buf, data...)
-		s.absorbOOO()
+		if s.strict {
+			next, absorbed := s.end()+int64(len(data)), 0
+			for absorbed < len(s.ooo) && s.ooo[absorbed].off <= next {
+				next = max(next, s.ooo[absorbed].end())
+				absorbed++
+			}
+			total := int(next - s.base)
+			for _, seg := range s.ooo[absorbed:] {
+				total += len(seg.data)
+			}
+			if total > maxSize {
+				return &StreamError{Kind: StreamOverflow, Offset: off}
+			}
+		}
+		// Lenient streams retain only a fixed-size window, even if a caller
+		// supplies a segment larger than the normal capture buffer.
+		if !s.strict && len(data) > maxSize {
+			s.base += int64(len(s.buf) + len(data) - maxSize)
+			s.buf = nil
+			s.memory.Refund(s.bufCharge)
+			s.bufCharge = 0
+			data = data[len(data)-maxSize:]
+		}
+		if err := s.appendBuffer(data); err != nil {
+			return err
+		}
+		if err := s.absorbOOO(); err != nil {
+			return err
+		}
 	} else if err := s.insertOOO(off, data, maxSize); err != nil {
 		return err
 	}
@@ -373,17 +431,21 @@ func (s *stream) checkOOOOverlap(off int64, data []byte) *StreamError {
 
 // absorbOOO moves out-of-order segments that the contiguous buffer now
 // reaches into it.
-func (s *stream) absorbOOO() {
+func (s *stream) absorbOOO() *StreamError {
 	for len(s.ooo) > 0 && s.ooo[0].off <= s.end() {
 		seg := s.ooo[0]
-		s.ooo = s.ooo[1:]
 		if tail := seg.end() - s.end(); tail > 0 {
-			s.buf = append(s.buf, seg.data[int64(len(seg.data))-tail:]...)
+			if err := s.appendBuffer(seg.data[int64(len(seg.data))-tail:]); err != nil {
+				return err
+			}
 		}
+		old := cap(seg.data)
+		copy(s.ooo, s.ooo[1:])
+		s.ooo[len(s.ooo)-1] = oooSegment{}
+		s.ooo = s.ooo[:len(s.ooo)-1]
+		s.memory.Refund(old)
 	}
-	if len(s.ooo) == 0 {
-		s.ooo = nil
-	}
+	return nil
 }
 
 // insertOOO merges data at off (beyond the contiguous end) into the sorted
@@ -394,43 +456,46 @@ func (s *stream) insertOOO(off int64, data []byte, maxSize int) *StreamError {
 	if s.strict && end-s.base > int64(maxSize) {
 		return &StreamError{Kind: StreamOverflow, Offset: off}
 	}
-	merged := oooSegment{off: off, data: append([]byte(nil), data...)}
-	out := make([]oooSegment, 0, len(s.ooo)+1)
-	placed := false
-	for _, seg := range s.ooo {
-		switch {
-		case seg.end() < merged.off:
-			out = append(out, seg)
-		case seg.off > merged.end():
-			if !placed {
-				out = append(out, merged)
-				placed = true
-			}
-			out = append(out, seg)
-		default: // overlapping or touching: union
-			merged = unionSegments(merged, seg)
-		}
+	first := 0
+	for first < len(s.ooo) && s.ooo[first].end() < off {
+		first++
 	}
-	if !placed {
-		out = append(out, merged)
+	last := first
+	lo, hi := off, end
+	for last < len(s.ooo) && s.ooo[last].off <= hi {
+		lo, hi = min(lo, s.ooo[last].off), max(hi, s.ooo[last].end())
+		last++
 	}
-	if len(out) > maxOOOSegments {
+	if len(s.ooo)-(last-first)+1 > maxOOOSegments {
 		if s.strict {
 			return &StreamError{Kind: StreamOutOfOrderLimit, Offset: off}
 		}
 		return nil // lenient: drop the segment, keep the bounded set
 	}
-	s.ooo = out
+	if hi-lo > int64(defaultReassemblyMax) {
+		return &StreamError{Kind: StreamOverflow, Offset: off}
+	}
+	if !s.memory.Reserve(int(hi - lo)) {
+		return s.allocationFailure()
+	}
+	merged := make([]byte, int(hi-lo))
+	copy(merged[off-lo:], data)
+	old := 0
+	for _, seg := range s.ooo[first:last] {
+		copy(merged[seg.off-lo:], seg.data)
+		old += cap(seg.data)
+	}
+	count := len(s.ooo)
+	if last == first {
+		s.ooo = s.ooo[:count+1]
+	}
+	copy(s.ooo[first+1:], s.ooo[last:count])
+	newCount := count - (last - first) + 1
+	clear(s.ooo[newCount:])
+	s.ooo = s.ooo[:newCount]
+	s.ooo[first] = oooSegment{off: lo, data: merged}
+	s.memory.Refund(old)
 	return nil
-}
-
-// unionSegments joins new data a with held segment b.
-func unionSegments(a, b oooSegment) oooSegment {
-	lo, hi := min(a.off, b.off), max(a.end(), b.end())
-	data := make([]byte, hi-lo)
-	copy(data[a.off-lo:], a.data)
-	copy(data[b.off-lo:], b.data) // held bytes win where a lenient stream conflicts
-	return oooSegment{off: lo, data: data}
 }
 
 // bound enforces the per-stream byte limit: an error for strict streams,
@@ -443,9 +508,9 @@ func (s *stream) bound(off int64, maxSize int) *StreamError {
 		return nil
 	}
 	if excess := len(s.buf) - maxSize; excess > 0 {
-		s.buf = append([]byte(nil), s.buf[excess:]...)
+		s.buf = s.buf[excess:]
 		s.base += int64(excess)
-		s.absorbOOO()
+		return s.absorbOOO()
 	}
 	return nil
 }
@@ -466,24 +531,24 @@ func firstDiff(a, b []byte) int {
 // trim consumes the first n bytes of the stream if its watermark is still
 // base (the view that was parsed). A verify stream moves them into its
 // history, which keeps the last maxSize consumed bytes.
-func (r *reassembler) trim(key string, base int64, n int) {
+func (r *reassembler) trim(key string, base int64, n int) *StreamError {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.streams[key]
 	if !ok || s.base != base || n <= 0 {
-		return
+		return nil
 	}
 	before := s.held()
 	n = min(n, len(s.buf))
 	if s.verify {
-		s.hist = append(s.hist, s.buf[:n]...)
-		if excess := len(s.hist) - r.maxSize; excess > 0 {
-			s.hist = s.hist[excess:]
+		if err := s.replaceHistory(n, r.maxSize); err != nil {
+			return err
 		}
 	}
 	s.buf = s.buf[n:]
 	s.base += int64(n)
 	r.bytesBuffered += s.held() - before
+	return nil
 }
 
 // resync abandons held passive bytes through the highest observed position,
@@ -504,27 +569,25 @@ func (r *reassembler) resync(key string, pos position, size int) {
 		next = max(next, seg.end())
 	}
 	r.bytesBuffered -= s.held()
-	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.clearBytes()
 	s.base = next
 }
 
 // fail discards a stream's bytes and marks it failed until complete,
-// creating the stream when there is none; later feeds return err. A failed
+// never creating an unadmitted stream; later feeds return err. A failed
 // stream keeps its first error.
 func (r *reassembler) fail(key string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.streams[key]
 	if !ok {
-		s = &stream{strict: true}
-		r.streams[key] = s
-		r.activeStreams++
-	}
-	if s.failed != nil {
 		return
 	}
+	if s.failed != nil {
+		err = s.failed
+	}
 	r.bytesBuffered -= s.held()
-	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.clearBytes()
 	s.closed, s.lost = false, false
 	s.failed = err
 }
@@ -561,6 +624,8 @@ func (r *reassembler) completeLocked(key string) {
 		r.bytesBuffered -= s.held()
 		delete(r.streams, key)
 		r.activeStreams--
+		s.clearBytes()
+		s.memory.Release()
 	}
 }
 
@@ -585,9 +650,7 @@ func (r *reassembler) sweep(now time.Time) []string {
 		}
 		switch {
 		case !s.verify || s.closed:
-			r.bytesBuffered -= s.held()
-			delete(r.streams, key)
-			r.activeStreams--
+			r.completeLocked(key)
 			expired = append(expired, key)
 		case s.stored() > 0:
 			r.loseLocked(s)
@@ -595,6 +658,8 @@ func (r *reassembler) sweep(now time.Time) []string {
 		default:
 			r.bytesBuffered -= len(s.hist)
 			s.hist = nil
+			s.memory.Refund(s.histCharge)
+			s.histCharge = 0
 			expired = append(expired, key)
 		}
 	}

@@ -102,21 +102,26 @@ type Status struct {
 }
 
 type connection struct {
-	meta     identify.Meta
-	syn      [2]bool
-	base     [2]uint32
-	high     [2]int64 // sequence-unwrapped largest payload end
-	roles    [2]dpi.StreamDir
-	states   [2]*flow.State
-	at       [2]time.Time
-	stamps   []stamp
-	observed bool
-	binding  Binding
-	protocol identify.Protocol
-	coverage identify.Coverage
-	session  string // frozen through adoption
-	fin      [2]bool
-	ended    uint64 // terminal order, not capture time
+	memory                       *flow.InspectionMemory
+	keyBytes, stampCharge        int
+	sessionCharge                int
+	lastDir                      uint8
+	inspectionLost, lossReported bool
+	meta                         identify.Meta
+	syn                          [2]bool
+	base                         [2]uint32
+	high                         [2]int64 // sequence-unwrapped largest payload end
+	roles                        [2]dpi.StreamDir
+	states                       [2]*flow.State
+	at                           [2]time.Time
+	stamps                       []stamp
+	observed                     bool
+	binding                      Binding
+	protocol                     identify.Protocol
+	coverage                     identify.Coverage
+	session                      string // frozen through adoption
+	fin                          [2]bool
+	ended                        uint64 // terminal order, not capture time
 }
 
 // Observer serializes table, bindings, replay, adoption and disposal. No

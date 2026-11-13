@@ -18,7 +18,7 @@ import (
 )
 
 // Inline generic ICS streams in an enforce scope fail closed on the existing
-// framing, reassembly and decoder faults. Denied bytes must never become a
+// framing, reassembly, decoder and state-limit faults. Denied bytes must never become a
 // harmless duplicate after cache expiry: the tuple tombstone drops the old
 // incarnation and a fresh kernel-tracked handshake retires it. Decoded denies,
 // stream failures and midstream pickups all use the same session-only reset.
@@ -100,6 +100,8 @@ func failClosedReason(err error) string {
 			return failClosedPanic
 		case dpi.StreamMidStream:
 			return failClosedMidStream
+		case dpi.StreamStateLimit:
+			return "state_limit"
 		}
 	}
 	return failClosedStream
@@ -131,7 +133,11 @@ func (e *Engine) failClosed(pkt capture.Packet, state *flow.State, parsed *dpi.P
 			eventfields.KeyError:    cause.Error(),
 		},
 	})
-	return capture.Decision{Action: capture.Drop, Reason: reasonStreamFailClosed}
+	decisionReason := reasonStreamFailClosed
+	if reason == "state_limit" {
+		decisionReason = reason
+	}
+	return capture.Decision{Action: capture.Drop, Reason: decisionReason}
 }
 
 // stillDenied keeps a failed stream denied without retrying any block.

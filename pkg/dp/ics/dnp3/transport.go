@@ -9,6 +9,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
 // Inspection limits, not wire-format limits. No timers or background workers.
@@ -17,7 +18,7 @@ const (
 	maxAssemblySegments = 1024
 	maxStationContexts  = 4096
 	maxRetainedBytes    = 16 * 1024 * 1024
-	contextCharge       = 1024
+	contextCharge       = int(limits.DNP3StationMetadataBytes)
 	assemblyIdle        = 30 * time.Second
 	assemblyLifetime    = 60 * time.Second
 )
@@ -43,6 +44,8 @@ type transportAssembly struct {
 	badCRC  bool
 }
 type stationContext struct {
+	class                 limits.Class
+	failure               *dpi.StreamError
 	requestSeq, requestFC byte
 	requestValid          bool
 	transport             *transportAssembly
@@ -56,10 +59,11 @@ type stationContext struct {
 // Decoder implements dpi.StreamDecoder and dpi.StreamEnder. A mutex also makes
 // direct packet callers safe; no decoder state escapes ParseStream.
 type Decoder struct {
-	mu       sync.Mutex
-	now      func() time.Time
-	stations map[stationKey]*stationContext
-	retained int
+	mu        sync.Mutex
+	now       func() time.Time
+	stations  map[stationKey]*stationContext
+	resources limits.Resources
+	leases    [2]*limits.Lease
 }
 
 func NewDecoder() *Decoder { return NewDecoderWithClock(time.Now) }
@@ -70,7 +74,7 @@ func NewDecoderWithClock(now func() time.Time) *Decoder {
 	if now == nil {
 		now = time.Now
 	}
-	return &Decoder{now: now, stations: make(map[stationKey]*stationContext)}
+	return &Decoder{now: now, stations: make(map[stationKey]*stationContext), resources: limits.NewResources(nil, nil)}
 }
 
 func contextBytes(k stationKey, c *stationContext) int {
@@ -82,8 +86,10 @@ func contextBytes(k stationKey, c *stationContext) int {
 }
 func (d *Decoder) remove(k stationKey) {
 	if c := d.stations[k]; c != nil {
-		d.retained -= contextBytes(k, c)
+		charge := contextBytes(k, c)
 		delete(d.stations, k)
+		c.retry, c.transport = nil, nil
+		d.refund(c.class, charge)
 	}
 }
 func (d *Decoder) prune(now time.Time) {
@@ -93,9 +99,9 @@ func (d *Decoder) prune(now time.Time) {
 			continue
 		}
 		if a := c.transport; a != nil && now.Sub(a.started) >= assemblyLifetime {
-			d.retained -= contextBytes(k, c)
+			old := contextBytes(k, c)
 			c.transport = nil
-			d.retained += contextBytes(k, c)
+			d.refund(c.class, old-contextBytes(k, c))
 		}
 		for i := range c.application {
 			a := &c.application[i]
@@ -118,18 +124,18 @@ func (d *Decoder) StreamEnded(session string, dir dpi.StreamDir) {
 func stationFor(v dpi.StreamView, f *DNP3Frame) stationKey {
 	return stationKey{v.Session, v.Dir, f.Source, f.Destination, f.Control&ControlDIR != 0}
 }
-func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw []byte, r LinkRange, now time.Time) []dpi.Event {
+func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw []byte, r LinkRange, now time.Time) ([]dpi.Event, error) {
 	k := stationFor(v, f)
 	var codes, undecoded []string
 	if f.badDataCRC {
 		codes = append(codes, "dnp3.data_crc")
 	}
-	linkEvent := func() []dpi.Event {
+	linkEvent := func() ([]dpi.Event, error) {
 		if len(codes)+len(undecoded) == 0 {
-			return nil
+			return nil, nil
 		}
 		ev := linkEvent(st, f, raw, codes, undecoded)
-		return []dpi.Event{ev}
+		return []dpi.Event{ev}, nil
 	}
 	if len(f.Data) == 0 {
 		// Primary reset-link-states resets only this station direction.
@@ -146,16 +152,31 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	c := d.stations[k]
 	if c == nil {
 		charge := contextCharge + len(k.session)
-		if len(d.stations) >= maxStationContexts || charge > maxRetainedBytes-d.retained {
+		if len(d.stations) >= maxStationContexts {
 			undecoded = append(undecoded, "dnp3.assembly_budget")
 			return linkEvent()
 		}
-		c = &stationContext{}
+		class := limits.ClassObserve
+		if v.Enforcing {
+			class = limits.ClassEnforce
+		}
+		local, global := d.reserve(class, charge)
+		if !local {
+			undecoded = append(undecoded, "dnp3.assembly_budget")
+			return linkEvent()
+		}
+		if !global {
+			return nil, dpi.StateLimitError(d.resources, v.Enforcing, "dnp3", v.Base)
+		}
+		c = &stationContext{class: class}
 		d.stations[k] = c
-		d.retained += charge
+	}
+	if c.failure != nil {
+		return nil, c.failure
 	}
 	before := contextBytes(k, c)
-	defer func() { d.retained += contextBytes(k, c) - before }()
+	reserved := before
+	defer func() { d.refund(c.class, reserved-contextBytes(k, c)) }()
 	c.touched = now
 	// Only confirmed user-data with FCV has a retry identity. Identical new
 	// unconfirmed FIR+FIN requests are legitimate and are never deduplicated.
@@ -171,11 +192,16 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 			}
 			return linkEvent()
 		}
-		if len(f.Data) > maxRetainedBytes-d.retained {
+		local, global := d.reserve(c.class, len(f.Data))
+		if !local {
 			undecoded = append(undecoded, "dnp3.assembly_budget")
 			c.transport = nil
 			return linkEvent()
 		}
+		if !global {
+			return nil, d.budgetFailure(c, v)
+		}
+		reserved += len(f.Data)
 		c.retry = copyBytes(f.Data)
 		c.fcb = fcb
 		c.retryValid = true
@@ -221,13 +247,16 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	// Reserve exact-size owned storage, accounting for provenance and retry
 	// bytes before allocation. Bounds include empty segments and metadata.
 	needed := len(a.data) + len(f.Data) - 1 + (len(a.ranges)+1)*16 + len(f.Data)
-	available := maxRetainedBytes - (d.retained - before + contextBytes(k, c))
-	old := cap(a.data) + cap(a.ranges)*16 + cap(a.last)
-	if needed-old > available {
+	local, global := d.reserve(c.class, needed)
+	if !local {
 		c.transport = nil
 		undecoded = append(undecoded, "dnp3.assembly_budget")
 		return linkEvent()
 	}
+	if !global {
+		return nil, d.budgetFailure(c, v)
+	}
+	reserved += needed
 	data := make([]byte, len(a.data)+len(f.Data)-1)
 	copy(data, a.data)
 	copy(data[len(a.data):], f.Data[1:])
@@ -257,7 +286,9 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	events := frameEvents(st, &complete, raw)
 	for i := range events {
 		attrs := events[i].Attributes
-		attrs["link_ranges"] = a.ranges
+		// Events have a separate, bounded lifetime from retained decoder state.
+		// Do not export the backing allocation charged to this assembly.
+		attrs["link_ranges"] = append([]LinkRange(nil), a.ranges...)
 		attrs["transport_segments"] = len(a.ranges)
 		attrs["stream_session"] = v.Session
 		attrs["stream_direction"] = uint8(v.Dir)
@@ -265,7 +296,7 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 		mergeCodes(attrs, eventfields.KeyConformance, codes)
 		mergeCodes(attrs, eventfields.KeyUndecoded, undecoded)
 	}
-	return events
+	return events, nil
 }
 func mergeCodes(attrs map[string]any, key string, codes []string) {
 	if len(codes) == 0 {

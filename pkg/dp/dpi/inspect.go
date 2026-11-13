@@ -43,9 +43,13 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	at := eventTime(state, pkt)
-	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
 	key, session, pos := streamKey(state, pkt)
+	if err := m.bind(state.ID(), key, pkt.FailClosed); err != nil {
+		res.Err, res.Framed = err, pkt.Proto == "tcp"
+		return res
+	}
+	m.eventTimes[state.ID()] = at
 	candidates := m.dispatch(state, key, pkt)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
@@ -63,15 +67,23 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	var errEvent *Event
 	var unanchoredPayload bool
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
-		anchored, discarded := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		anchored, discarded, err := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		if err != nil {
+			res.Err = err
+		}
 		if discarded {
 			m.endStream(key)
 		}
 		unanchoredPayload = pkt.FailClosed && len(pkt.Payload) > 0 && !anchored
 	}
+	if framer != nil && res.Err == nil {
+		if err := m.reassembler.admit(key, pos, pkt.HasOffset, pkt.FailClosed, time.Now()); err != nil {
+			res.Err = err
+		}
+	}
 	if stream && res.Err == nil {
 		if err := m.reassembler.failure(key); err != nil {
-			if pkt.HasOffset || pkt.FailClosed {
+			if pkt.HasOffset || pkt.FailClosed || stateLimit(err) {
 				res.Err, res.Failed = err, true // already reported with its event; not re-emitted
 				return res
 			}
@@ -80,7 +92,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	}
 	// A rejected SYN's payload must not replace an existing failure (in
 	// particular a non-admitting continuation) with a new resync/drop.
-	if unanchoredPayload {
+	if unanchoredPayload && res.Err == nil {
 		errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
 	}
 
@@ -93,7 +105,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 			fed.err.Proto = res.Proto
 			res.Err = fed.err // nothing was inspected: not malformed
 		case fed.err != nil:
-			if recovery, ok := framer.(StreamResynchronizer); ok && !pkt.FailClosed {
+			if recovery, ok := framer.(StreamResynchronizer); ok && !pkt.FailClosed && fed.err.Kind != StreamStateLimit {
 				fed.err.Proto = res.Proto
 				res.Events = append(res.Events, recovery.ResyncStream(state,
 					StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Role: pkt.Role}, fed.err)...)
@@ -104,12 +116,21 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 			}
 		case len(fed.buf) > 0:
 			view := StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Bytes: fed.buf,
-				PacketStart: fed.packetStart, HasPacketStart: fed.hasPacketStart, Role: pkt.Role}
+				PacketStart: fed.packetStart, HasPacketStart: fed.hasPacketStart, Role: pkt.Role, Enforcing: fed.enforcing}
 			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
 		}
 	}
 	if res.Err != nil {
-		m.discard(key, pkt.HasOffset || pkt.FailClosed, res.Err)
+		m.discard(key, pkt.HasOffset || pkt.FailClosed || stateLimit(res.Err), res.Err)
+		if stateLimit(res.Err) {
+			res.Events, res.Frames = nil, nil
+			if m.reassembler.failure(key) == nil {
+				m.releaseSelection(key)
+				delete(m.eventTimes, state.ID())
+				m.releaseFlowSelection(state.ID())
+			}
+			return res
+		}
 	}
 
 	for _, d := range candidates {
@@ -167,6 +188,10 @@ func (m *Manager) parseFramed(state *flow.State, pkt *ParsedPacket, sd StreamDec
 		m.streamEnds[key] = streamEnd{decoder: ender, session: v.Session, dir: v.Dir}
 	}
 	sr, err := sd.ParseStream(state, v)
+	if stateLimit(err) {
+		res.Err = err
+		return nil
+	}
 	var fe *FrameError
 	switch {
 	case err == nil || errors.As(err, &fe):
@@ -176,13 +201,18 @@ func (m *Manager) parseFramed(state *flow.State, pkt *ParsedPacket, sd StreamDec
 	default:
 		fe, sr = &FrameError{Offset: v.Base, Reason: err.Error()}, StreamResult{}
 	}
+	if fe == nil {
+		if err := m.reassembler.trim(key, v.Base, sr.Consumed); err != nil {
+			res.Err = err
+			return nil
+		}
+	}
 	for _, f := range sr.Frames {
 		res.Frames = append(res.Frames, f)
 		res.Events = append(res.Events, f.Events...)
 	}
 	res.NeedMore = sr.NeedMore
 	if fe == nil {
-		m.reassembler.trim(key, v.Base, sr.Consumed)
 		return nil
 	}
 	if fe.Event.Kind == "" {
@@ -190,6 +220,11 @@ func (m *Manager) parseFramed(state *flow.State, pkt *ParsedPacket, sd StreamDec
 	}
 	res.Err = fe
 	return &fe.Event
+}
+
+func stateLimit(err error) bool {
+	var se *StreamError
+	return errors.As(err, &se) && se.Kind == StreamStateLimit
 }
 
 // frameContractViolation checks the StreamResult invariants the manager
@@ -265,6 +300,7 @@ func (m *Manager) EndStream(session string) {
 		m.reassembler.complete(key)
 		m.endStream(key)
 		m.releaseSelection(key)
+		m.unbind(bindingID{key, key})
 	}
 }
 
