@@ -2,13 +2,56 @@
 package engine
 
 import (
+	"net"
 	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestUninspectableDecisionFastPath(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		inspectAll bool
+		protocols  map[string]bool
+		exclusions []DPIExclusion
+	}{
+		{name: "default decoders"},
+		{name: "enabled decoders", protocols: map[string]bool{"modbus": true, "dnp3": true, "iec104": true, "cip": true}},
+		{name: "unrelated IP exclusion", exclusions: []DPIExclusion{{Type: "ip", Value: "192.0.2.1"}}},
+		{name: "unrelated CIDR exclusion", exclusions: []DPIExclusion{{Type: "cidr", Value: "192.0.2.0/24"}}},
+		{name: "domain exclusion", exclusions: []DPIExclusion{{Type: "domain", Value: "example.com"}}},
+		{name: "inspect all", inspectAll: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Engine{
+				dpiEnabled:    !tc.inspectAll,
+				inspectAll:    tc.inspectAll,
+				coverage:      coverage.Settings{ICSProtocols: tc.protocols},
+				dpiExclusions: tc.exclusions,
+			}
+			// A nil evaluator makes any transport-scope rule walk fail.
+			// Available inspection must bypass even eligible enforcing rules.
+			e.ruleSnap.current.Store(&compiledRules{snapshot: &rules.Snapshot{
+				DPIMode: "enforce",
+				Firewall: []rules.Entry{clientToServer("guard", "502", rules.ActionAllow,
+					rules.ICSPredicate{Protocol: "modbus", Mode: "enforce", ReadOnly: true})},
+			}})
+			state := &flow.State{Key: flow.Key{
+				SrcIP: net.ParseIP(testClient), DstIP: net.ParseIP(testServer),
+				SrcPort: 41000, DstPort: 502, Proto: 6,
+			}}
+			pkt := capture.Packet{Token: capture.NewToken(1, 1)}
+			if got, decided := e.uninspectableDecision(pkt, state); decided {
+				t.Fatalf("decision=%+v, decided=%v; want no decision", got, decided)
+			}
+		})
+	}
+}
 
 func TestUninspectableEnforceDrops(t *testing.T) {
 	for _, tc := range []struct {
