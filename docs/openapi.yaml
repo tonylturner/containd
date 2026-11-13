@@ -758,16 +758,15 @@ components:
           descriptor (1, 3, 5, 7, 9, 11, 13, 15, 21, 30-37, 45-51, 58-64, 70, 100-103, 105, 107) and
           not the `unknown` class. Broadcast (CA 65535) and malformed
           objects never match an ALLOW.
-        - IEC104 enforce (effective mode: rule `mode`, else
-          `dataplane.dpiMode`, else monitor) is rejected on save, candidate,
-          commit and import unless `dataplane.dpiEnabled` is true,
-          `dataplane.dpiIcsProtocols.iec104` is not false,
-          `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
-          IP/CIDR `dataplane.dpiExclusions` entry overlaps an enforce rule's
-          sources or destinations.
-        - Any other rule naming an ICS protocol whose effective mode is enforce
-          is rejected on save, candidate, commit and import while
-          `dataplane.nfqueueGroup` is 0.
+        - A rule naming an ICS protocol whose effective mode (rule `mode`,
+          else `dataplane.dpiMode`, else monitor) is enforce is rejected on
+          save, candidate, commit and import while `dataplane.nfqueueGroup`
+          is 0.
+        - With `dataplane.dpiEnabled` false, the rule's decoder disabled in
+          `dataplane.dpiIcsProtocols`, or an overlapping IP/CIDR
+          `dataplane.dpiExclusions` entry, the configuration stays valid but
+          the enforce rule's uninspectable transport traffic is dropped and
+          the rule carries a warning.
       properties:
         protocol:
           type: string
@@ -3703,7 +3702,7 @@ components:
     ICSCoverageRule:
       type: object
       required: [ruleId, protocol, mode, state]
-      description: Whether a firewall rule naming an ICS protocol actually stops a prohibited command.
+      description: Semantic inspection coverage of an ICS rule. Reasons distinguish fail-closed transport drops from a missing enforcement path.
       properties:
         ruleId: {type: string}
         protocol: {type: string}
@@ -3721,7 +3720,7 @@ components:
           enum: [no-inline-path, enforcement-disabled, dpi-disabled, decoder-disabled, queue-unavailable, exclusion-overlap, domain-exclusion]
         message: {type: string}
         value: {type: string, description: The exclusion, for exclusion codes.}
-        matches: {type: integer, description: Connections the exclusion exempted since the last apply; applied coverage only.}
+        matches: {type: integer, description: Connections excluded from inspection since the last apply; applied coverage only. Enforce IP/CIDR-excluded traffic is dropped.}
         runtime: {type: boolean, description: True for reasons only the running engine reports (queue-unavailable).}
     ICSEnforcementHealth:
       type: object
@@ -3746,12 +3745,14 @@ components:
         in zones), or sources and destinations that share no address family
         (addressFamily), or a via constraint with no matching enabled/bound forward
         (forward). A terminal may also be shadowed by an earlier covering terminal
-        (shadowedBy), of any deciding action.
+        (shadowedBy), of any deciding action. Inspection warnings (inspection) name
+        disabled DPI, a disabled decoder or an overlapping IP/CIDR exclusion;
+        uninspectable enforce transport traffic is dropped until repaired.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity, zone, addressFamily, forward]
+          enum: [identity, zone, addressFamily, forward, inspection]
         zones:
           type: array
           items: {type: string}

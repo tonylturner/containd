@@ -370,8 +370,9 @@ export function DPIConfigSection({
 
             <div className="text-[10px] text-(--text-dim)">
               Monitor (safe) observes rule-local matches; learning is a separate, explicit operation.
-              You can select Enforce directly. DPI exclusions skip inspection for
-              specific IPs, CIDRs, or domains. TLS inspection covers handshake
+              You can select Enforce directly. If DPI or a decoder is off, enforce rules
+              drop their transport traffic. IP/CIDR exclusions drop matching traffic
+              in enforce scopes; other excluded traffic skips inspection. TLS inspection covers handshake
               metadata only (SNI, JA3) — full interception is planned.
             </div>
           </div>

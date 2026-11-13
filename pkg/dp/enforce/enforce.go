@@ -104,6 +104,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 	c.writeAdmissionChains(&buf, snap.AdmissionParity)
+	c.writeUninspectableChains(&buf, snap)
 	if err := writeRuleObjects(&buf, snap); err != nil {
 		return "", err
 	}
@@ -416,6 +417,8 @@ type RulePredicate string
 const (
 	// PredicateIdentity: no bound address satisfies the rule's identities.
 	PredicateIdentity RulePredicate = "identity"
+	// PredicateInspection: an enforce scope cannot be inspected and drops traffic.
+	PredicateInspection RulePredicate = "inspection"
 	// PredicateZone: none of the rule's source or destination zones has
 	// an interface (RuleWarning.Zones).
 	PredicateZone RulePredicate = "zone"
@@ -428,7 +431,8 @@ const (
 
 // RuleWarning reports a firewall rule that does not act as written: one
 // that matches nothing, because of the part of the rule Predicate names, or
-// a terminal hidden by an earlier covering terminal (ShadowedBy).
+// a terminal hidden by an earlier covering terminal (ShadowedBy), or an
+// enforce scope that drops transport traffic because inspection is unavailable.
 type RuleWarning struct {
 	RuleID     string        `json:"ruleId"`
 	Predicate  RulePredicate `json:"predicate,omitempty"`
@@ -440,7 +444,7 @@ type RuleWarning struct {
 
 // RuleWarnings lists, in rule ID order, snap's firewall rules that match
 // nothing (zones, addresses, identities or forwards), and terminals hidden
-// by earlier covering terminals (shadowWarnings).
+// by earlier covering terminals (shadowWarnings), and unavailable inspection.
 func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	if snap == nil {
 		return nil
@@ -458,6 +462,7 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	out = append(out, identityWarnings(snap, idx)...)
 	out = append(out, shadowWarnings(snap)...)
 	out = append(out, forwardWarnings(snap)...)
+	out = append(out, inspectionWarnings(snap)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
 	return out
 }

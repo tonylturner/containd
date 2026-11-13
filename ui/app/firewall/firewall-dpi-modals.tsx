@@ -537,8 +537,9 @@ export function DPIExclusionModal({
         </h2>
         <p className="text-xs text-(--text-muted) mb-3">
           Exclude specific IP addresses, CIDR ranges, or domains from deep
-          packet inspection. Traffic to or from excluded targets will bypass DPI
-          entirely.
+          packet inspection. In enforce-mode ICS scopes, traffic matching an IP or
+          CIDR exclusion is dropped, not allowed without inspection. Other excluded
+          traffic skips DPI.
         </p>
 
         <ConfigEditNotice {...editor.conflictProps} onReload={() => window.location.reload()} superseded={editor.editor.superseded || form.editor.superseded} />

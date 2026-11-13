@@ -20,14 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services. Existing enforcing response denials and strict parsing vetoes
   now apply to replies; monitor rules remain observational. Unmatched generic
   replies retain their existing message default-deny suppression.
-- TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
-  `tls_offered_versions` (from `supported_versions`, GREASE removed) and, when
-  the server reply is seen, `tls_selected_version`. IDS rules and Sigma rules
-  that used `tls_version` must move to the new fields.
-- SNMP events drop `community_auth`, `community_length` and `first_oid`. They
-  now carry the cleartext v1/v2c `community`, the bounded varbind list in `oids`
-  (with `oids_truncated`) and trap metadata. Event storage and syslog forwarding
-  therefore contain SNMP community strings.
 
 ### Added
 
@@ -36,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Docker Desktop resources with a 4 GiB VM available-memory guard,
   protocol-aware endpoints, raw JSON evidence and
   explicit application goodput, RTT and tested-session definitions.
-
 - Engine userspace traffic-state limits: `dataplane.limits.maxFlows`
   (16,384 directional slots, two per connection), `maxTopTalkers` (8,192 rows)
   and `maxInspectionBytes` (64 MiB of retained inspection allocations, not
@@ -75,7 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and gauges expose the same live process state. Pressure-entry events coalesce
   per table, replacing IEC monitor per-SYN untracked events; hit totals survive
   configuration rebuilds.
-
 - An independent `kernel-tests` CI job runs the eight default privileged kernel
   test roots on every pull request and push to `main`, with verbose failure
   logs. Its disposable test container allows the namespace and private procfs
@@ -87,6 +77,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strict→strict 0.1.39–0.1.42). Training 0.1.33 also passes individually;
   source defects exclude 0.1.30–0.1.32 and 0.1.34. The update policy lists
   supported paths and requires a fresh matrix before each release.
+
+### Removed
+
+- The `containd_dpi_decoder_packets_total` metric. Nothing ever incremented it,
+  so it never reported data. Per-protocol decoded event counts remain in
+  `GET /api/v1/stats/protocols`.
+
+### Fixed
+
+- Remove synchronous full-history scans from IEC 104 incident retention so
+  monitor-mode inspection stays fast without changing observations or evidence.
+- Active-flow metrics derive from current occupancy and reset correctly on
+  dataplane rebuilds rather than accumulating stale counts.
+- Opening an older users database now reports password/MFA column migration
+  failures instead of silently ignoring them; already migrated columns are
+  left unchanged.
+- IEC 104 inspection now honors the DPI master switch, matching Modbus and
+  DNP3: with DPI off, IEC 104 payloads no longer produce ICS decisions or
+  enforcement from decoded commands, and coverage reports `dpi-disabled` for
+  IEC 104 rules.
+- The account password dialog no longer moves focus 50 ms after it opens, so
+  fast typing in Current password no longer lands in New password.
+
+### Security
+
+- Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
+  protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
+  Uninspectable transport traffic is dropped for ALLOW and DENY alike;
+  configurations remain valid and rule warnings identify the cause and repair.
+  See CSAF advisory `containd-2026-004` for affected versions and workarounds.
+
+## [0.1.43] - 2026-11-13
+
+### Breaking
+
+- TLS events no longer carry `tls_version`. They report `tls_legacy_version`,
+  `tls_offered_versions` (from `supported_versions`, GREASE removed) and, when
+  the server reply is seen, `tls_selected_version`. IDS rules and Sigma rules
+  that used `tls_version` must move to the new fields.
+- SNMP events drop `community_auth`, `community_length` and `first_oid`. They
+  now carry the cleartext v1/v2c `community`, the bounded varbind list in `oids`
+  (with `oids_truncated`) and trap metadata. Event storage and syslog forwarding
+  therefore contain SNMP community strings.
+
+### Added
+
 - Cleartext HTTP/2 inspection (prior-knowledge preface and `Upgrade: h2c`):
   bounded frame parsing and HPACK decoding report per-stream method, path,
   `authority`, `stream_id`, status and content type. Encrypted HTTP/2 remains
@@ -138,28 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine impact from runtime-base provenance alone. The authoring template also
   uses distinct affected and fixed versioned products.
 
-### Removed
-
-- The `containd_dpi_decoder_packets_total` metric. Nothing ever incremented it,
-  so it never reported data. Per-protocol decoded event counts remain in
-  `GET /api/v1/stats/protocols`.
-
 ### Fixed
 
-- Remove synchronous full-history scans from IEC 104 incident retention so
-  monitor-mode inspection stays fast without changing observations or evidence.
-- The account password dialog no longer moves focus 50 ms after it opens, so
-  fast typing in Current password no longer lands in New password.
-- Active-flow metrics derive from current occupancy and reset correctly on
-  dataplane rebuilds rather than accumulating stale counts.
-
-- Opening an older users database now reports password/MFA column migration
-  failures instead of silently ignoring them; already migrated columns are
-  left unchanged.
-- IEC 104 inspection now honors the DPI master switch, matching Modbus and
-  DNP3: with DPI off, IEC 104 payloads no longer produce ICS decisions or
-  enforcement from decoded commands, and coverage reports `dpi-disabled` for
-  IEC 104 rules.
 - JA3 fingerprints follow the reference algorithm: GREASE values are removed,
   cipher, extension, curve and point-format lists are complete, and the result
   does not depend on how the ClientHello is split across TCP segments.
@@ -2913,7 +2929,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.42...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.43...HEAD
+[0.1.43]: https://github.com/tonylturner/containd/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/tonylturner/containd/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/tonylturner/containd/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/tonylturner/containd/compare/v0.1.39...v0.1.40

@@ -54,6 +54,14 @@ func TestDPIProtocolsRespectMasterOff(t *testing.T) {
 					ID: "iec104", Action: rules.ActionDeny,
 					ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}, Mode: mode},
 				}}})
+				if mode == "enforce" {
+					// An uninspectable enforce rule drops its transport scope.
+					syn := h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)
+					if got := h.e.handlePacket(syn); got.Action != capture.Drop || got.Reason != "ics_uninspectable_master" {
+						t.Fatalf("DPI-off enforce IEC 104 SYN = %+v, want ics_uninspectable_master drop", got)
+					}
+					return
+				}
 				h.handshake()
 				_, got := h.send(true, apdu(46, 6, 1, 2001, 1))
 				if got.Action != capture.Repeat {

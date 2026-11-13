@@ -139,7 +139,7 @@ func (c heldKernelCapture) Start(ctx context.Context, _ capture.Handler) error {
 
 func TestEngineKernelApplyRetiresHeldQueueAndKeepsBinding(t *testing.T) {
 	ctx := newFirstCommandLab(t)
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true}, NFQueueGroup: fcQueue})
+	e, err := New(Config{DPIEnabled: true, Enforce: EnforceConfig{Enabled: true}, NFQueueGroup: fcQueue})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestEngineKernelApplyRetiresHeldQueueAndKeepsBinding(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	snap := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
+	snap := rules.Snapshot{DPIEnabled: true, Default: rules.ActionDeny, Firewall: []rules.Entry{{
 		ID: "queued", Action: rules.ActionAllow, Protocols: []rules.Protocol{{Name: "udp", Port: "44818"}},
 		ICS: rules.ICSPredicate{Protocol: "cip", Mode: "enforce"},
 	}}}

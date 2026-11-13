@@ -211,6 +211,7 @@ func startFirstCommandEngine(t *testing.T, ctx context.Context) *Engine {
 // injector, and applies snap to this namespace's nft ruleset.
 func startKernelEngine(t *testing.T, ctx context.Context, snap rules.Snapshot) *Engine {
 	t.Helper()
+	snap.DPIEnabled = true
 	var errMu sync.Mutex
 	var errs []string
 	e, err := New(Config{

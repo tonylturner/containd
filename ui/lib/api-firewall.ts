@@ -153,16 +153,17 @@ export type FirewallRulePatch = Partial<
 };
 
 /**
- * The part of a rule that makes it match nothing: identities no bound address
+ * The part of a rule responsible for a warning: identities no bound address
  * satisfies, zones none of which has an interface, or sources and
- * destinations that share no address family.
+ * destinations that share no address family, or unavailable inspection.
  */
-export type RuleWarningPredicate = "identity" | "zone" | "addressFamily" | "forward";
+export type RuleWarningPredicate = "identity" | "zone" | "addressFamily" | "forward" | "inspection";
 
 /**
  * A firewall rule that does not act as written: it matches nothing because
  * of its `predicate`, or an earlier terminal covering all its traffic
- * shadows it (`shadowedBy`).
+ * shadows it (`shadowedBy`). Inspection warnings identify enforce scopes
+ * that drop transport traffic instead of inspecting it.
  */
 export type RuleWarning = {
   ruleId: string;

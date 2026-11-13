@@ -758,7 +758,7 @@ protection as active.
   one traffic-state limit; `0` selects its default, never unlimited. Bounds and
   effective defaults are in [Config Format](config-format.md#traffic-state-sizing).
   Applying changed effective values resets traffic state.
-- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not enforcement.
+- `set dataplane dpi enabled <on|off>` changes the DPI master toggle, not firewall enforcement. With DPI off, enforce-effective ICS rules drop their whole transport scope rather than passing it uninspected.
 - `set dataplane dpi mode <monitor|enforce>` changes the global ICS mode.
 - `set dataplane dpi protocols <name=bool,...>` edits named IT protocol toggles.
 - `set dataplane dpi ics-protocols <name=bool,...>` edits named ICS protocol toggles.

@@ -115,7 +115,7 @@ func TestAdmissionTailAndMasks(t *testing.T) {
 }
 
 func TestInspectionPriorityAndOnceOnlyEffects(t *testing.T) {
-	snap := &rules.Snapshot{Firewall: []rules.Entry{
+	snap := &rules.Snapshot{DPIEnabled: true, Firewall: []rules.Entry{
 		{ID: "first-allow", Action: rules.ActionAllow},
 		{ID: "monitor-generic", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}},
 		{ID: "monitor-iec", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}},
@@ -171,6 +171,7 @@ func forwardSnapshot() *rules.Snapshot {
 
 func packetPolicySnapshot() *rules.Snapshot {
 	snap := forwardSnapshot()
+	snap.DPIEnabled = true
 	snap.AdmissionParity = markabi.ParityBit
 	snap.IdentityBindings = []rules.IdentityBinding{
 		{IP: "198.51.100.5", Identities: []string{"ops"}},
@@ -319,7 +320,7 @@ func TestInspectionScheduleAdmissionHorizon(t *testing.T) {
 	for _, queue := range []int{0, 100} {
 		entry := rules.Entry{ID: "scheduled-deny", Action: rules.ActionDeny,
 			Schedule: maintenanceWindow, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "enforce"}}
-		p, err := newPredicates(&rules.Snapshot{Firewall: []rules.Entry{entry}}, queue)
+		p, err := newPredicates(&rules.Snapshot{DPIEnabled: true, Firewall: []rules.Entry{entry}}, queue)
 		if err != nil {
 			t.Fatal(err)
 		}
