@@ -80,8 +80,8 @@ func TestIECForgedSYNKernelRestartPickup(t *testing.T) {
 	e := startIECEngine(t, ctx)
 	// The engine stops as a crashed one does: the resets and conntrack
 	// deletes that would close its sessions go nowhere.
-	e.iec.injector = &session.Fake{}
-	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
+	e.sessions.injector = &session.Fake{}
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
 
 	const src = "198.18.50.46"
 	fcRun(ctx, t, "ip", "-n", fcClientNS, "addr", "add", src+"/24", "dev", "fcp0")

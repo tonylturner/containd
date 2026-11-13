@@ -53,8 +53,8 @@ func euSnapshot() rules.Snapshot {
 func TestIECRealDecoderAndEvaluator(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
-	h.e.iec.newPolicy = newRulesPolicy
+	h.e.sessions.dpi = h.e.dpiMgr
+	h.e.sessions.newPolicy = newRulesPolicy
 	h.e.LoadRules(euSnapshot())
 	h.handshake()
 	steps := []struct {
@@ -102,8 +102,8 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 	} {
 		h2 := newIECHarness(t, "enforce")
 		h2.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-		h2.e.iec.dpi = h2.e.dpiMgr
-		h2.e.iec.newPolicy = newRulesPolicy
+		h2.e.sessions.dpi = h2.e.dpiMgr
+		h2.e.sessions.newPolicy = newRulesPolicy
 		h2.e.LoadRules(euSnapshot())
 		h2.e.SetICSParsing(map[string]string{iecProtocol: string(bad.parsing)})
 		h2.handshake()
@@ -138,8 +138,8 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 func TestIECUnmatchedReplyStillDeniedAfterUSReplyMerge(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
-	h.e.iec.newPolicy = newRulesPolicy
+	h.e.sessions.dpi = h.e.dpiMgr
+	h.e.sessions.newPolicy = newRulesPolicy
 	snap := euSnapshot()
 	snap.Firewall = snap.Firewall[:1]
 	snap.Firewall[0].ICS.Direction = "request"

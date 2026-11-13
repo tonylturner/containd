@@ -314,7 +314,7 @@ func TestDenyResetUnavailable(t *testing.T) {
 					pkt.SrcIP, pkt.DstIP = net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
 					pkt.Queue = nil
 				case "injector":
-					f.e.iec.health.fault(faultInjector, "unavailable")
+					f.e.sessions.health.fault(faultInjector, "unavailable")
 				case "send_failure":
 					f.inj.SetError(errors.New("sendto: operation not permitted"))
 				}

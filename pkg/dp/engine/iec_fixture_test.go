@@ -161,11 +161,11 @@ func newIECHarnessWithDPI(t *testing.T, mode string, dpiEnabled bool) *iecHarnes
 	}
 	e.dpiMgr = dpi.NewManager(stubIEC{})
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.iec.dpi = e.dpiMgr
-	e.iec.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
-	e.iec.settler = func() capture.Settler { return h.settler }
-	e.iec.now = func() time.Time { return h.clock }
-	e.iec.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
+	e.sessions.dpi = e.dpiMgr
+	e.sessions.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
+	e.sessions.settler = func() capture.Settler { return h.settler }
+	e.sessions.now = func() time.Time { return h.clock }
+	e.sessions.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
 		h.deletes <- req
 		return nil
 	}

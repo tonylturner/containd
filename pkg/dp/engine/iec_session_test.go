@@ -194,7 +194,7 @@ func TestIECPendingTimeoutAborts(t *testing.T) {
 	h.handshake()
 	held, _ := h.send(true, iframe(46, 1)[:3])
 	h.clock = h.clock.Add(1100 * time.Millisecond)
-	h.e.iec.expire()
+	h.e.sessions.expire()
 	if len(h.settler.calls) != 1 || h.settler.calls[0][0] != (capture.Resolution{Token: held.Token, Verdict: capture.VerdictDrop}) {
 		t.Fatalf("settle calls = %+v", h.settler.calls)
 	}
@@ -258,7 +258,7 @@ func TestIECInjectorUnavailableFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &fakePolicy{matched: true, mode: "enforce"}
-	e.iec.newPolicy = func(*rulesSnapshot) iecPolicy { return p }
+	e.sessions.newPolicy = func(*rulesSnapshot) iecPolicy { return p }
 	e.LoadRules(iecSnapshot("enforce"))
 	h := &iecHarness{t: t, e: e, client: testClientIP, server: testServerIP, cport: 40000}
 	if d := e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 1, 0, nil)); d.Action != capture.Drop {
@@ -319,7 +319,7 @@ func TestIECPolicyChangeResetsSession(t *testing.T) {
 func TestIECUnframedStreamFailsClosed(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.e.dpiMgr = dpiManagerWithout()
-	h.e.iec.dpi = h.e.dpiMgr
+	h.e.sessions.dpi = h.e.dpiMgr
 	h.handshake()
 	if _, d := h.send(true, iframe(46, 1)); d.Action != capture.Drop {
 		t.Fatalf("unframed = %+v, want Drop", d)

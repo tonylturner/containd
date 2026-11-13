@@ -121,7 +121,7 @@ func TestIECSessionEventsCarryTags(t *testing.T) {
 	}))}
 	table := newIECTable("enforce", &zoneCache{})
 	table.snap, table.policy = snap, rules.NewEvaluator(snap)
-	s := &iecSession{id: "s1", client: netip.MustParseAddrPort(testClient + ":40000"), server: netip.MustParseAddrPort(testServer + ":2404")}
+	s := &trackedSession{id: "s1", client: netip.MustParseAddrPort(testClient + ":40000"), server: netip.MustParseAddrPort(testServer + ":2404")}
 	evs := table.withSessionTags([]iecTelemetry{s.sessionEvent(outcomeAborted, nil, time.Now()), {Event: healthEvent(outcomeEnforceHealthy, "", time.Now())}})
 	if got := evs[0].Attributes[events.KeyTags]; !reflect.DeepEqual(got, []string{"any", "telecontrol"}) {
 		t.Fatalf("session event tags = %v", got)

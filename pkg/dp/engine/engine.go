@@ -63,7 +63,7 @@ type Engine struct {
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
-	policyMu              sync.RWMutex // packet readers see snapshot and IEC policy as one generation
+	policyMu              sync.RWMutex // packet readers see snapshot and session policy as one generation
 	admission             admissionPolicy
 	clearMarks            func(context.Context, uint32, uint32, uint32) (int, error)
 	localIPv4             func(*rules.Snapshot) (map[string][]netip.Addr, error)
@@ -111,7 +111,7 @@ type Engine struct {
 	sigEngine             *signatures.Engine
 	stats                 *stats.Tracker
 	hooks                 *inlineHooks
-	iec                   *iecTable
+	sessions              *sessionTable
 	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
 	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
 	// written by SetGateAdmit and into every applied ruleset, under
@@ -277,7 +277,7 @@ func New(cfg Config) (*Engine, error) {
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.initIEC(cfg)
+	e.initSessions(cfg)
 	if err := e.newRun(); err != nil {
 		e.Close()
 		return nil, err
@@ -347,7 +347,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 		e.admission = admissionPolicy{}
 	}
 
-	prevIEC := e.iec
+	prevSessions := e.sessions
 	e.retireCaptureLocked()
 	e.stopNFLogLocked()
 
@@ -357,9 +357,9 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// after in-flight calls finish, and keep admission excluded until the swap.
 	e.policyMu.Lock()
 	defer e.policyMu.Unlock()
-	if prevIEC != nil {
-		prevIEC.flushHeldCredits()
-		prevIEC.stopInspection()
+	if prevSessions != nil {
+		prevSessions.flushHeldCredits()
+		prevSessions.stopInspection()
 	}
 	e.clearFlowOwners()
 
@@ -418,16 +418,16 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
-	fresh.iec.zones = &e.zones
+	fresh.sessions.zones = &e.zones
 	// The replacement table's counter callback must use the surviving
 	// engine's installed policy, not the discarded constructor's snapshots.
-	fresh.iec.shadow = e.countShadow
-	e.iec = fresh.iec
+	fresh.sessions.shadow = e.countShadow
+	e.sessions = fresh.sessions
 	if e.admission.dirty {
-		e.iec.health.fault(faultAdmission, "admission sweep requires recovery")
+		e.sessions.health.fault(faultAdmission, "admission sweep requires recovery")
 	}
 	if e.admission.gateDirty {
-		e.iec.health.fault(faultGateZones, "gate zone sweep requires recovery")
+		e.sessions.health.fault(faultGateZones, "gate zone sweep requires recovery")
 	}
 	e.flowMu.Unlock()
 	e.recordObservations(observationRecords)
@@ -441,10 +441,10 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// The fresh table enforces the loaded rules at once; sessions of the
 	// old run are unknown to it and are reset once.
 	if snap := e.ruleSnap.Load(); snap != nil {
-		e.iec.setPolicy(snap)
+		e.sessions.setPolicy(snap)
 	}
-	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
-		_ = prevIEC.injector.Close()
+	if prevSessions != nil && prevSessions.injector != nil && prevSessions.injector != e.sessions.injector {
+		_ = prevSessions.injector.Close()
 	}
 	return nil
 }
@@ -504,7 +504,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, bool, err
 	}
 	if err := runCapture.Start(runCtx, handler); err != nil {
 		if e.nfqueueGroup != 0 {
-			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
+			e.sessions.health.fault(faultQueue, "queue bind: "+err.Error())
 			e.gate.own(0)
 		}
 		runCancel()
@@ -538,7 +538,7 @@ func (e *Engine) start(ctx context.Context, ensureNFLog bool) (uint16, bool, err
 	}()
 	go func() {
 		defer run.Done()
-		e.iec.run(runCtx.Done())
+		e.sessions.run(runCtx.Done())
 	}()
 	go func() {
 		defer run.Done()
@@ -575,10 +575,10 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 	}
 	e.policyMu.Lock()
 	e.ruleSnap.Store(&snap)
-	acts := e.iec.installPolicy(&snap, false)
+	acts := e.sessions.installPolicy(&snap, false)
 	e.verdictCache.Flush()
 	e.policyMu.Unlock()
-	e.iec.apply(acts)
+	e.sessions.apply(acts)
 }
 
 func (e *Engine) CurrentRules() *rules.Snapshot {
@@ -712,7 +712,7 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 		e.observePacket(pkt, state)
 	}
 	if e.dpiMasterEnabled() {
-		if d, ok := e.handleIECPacket(pkt, state); ok {
+		if d, ok := e.handleSessionPacket(pkt, state); ok {
 			return d
 		}
 	}

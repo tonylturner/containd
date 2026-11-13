@@ -18,14 +18,14 @@ const (
 // one engine configuration. Capture calls them on its completion goroutine;
 // Reconfigure moves the hooks together with the fresh capture manager.
 type inlineHooks struct {
-	active  func() bool
-	source  func(capture.SourceEvent)
-	after   *afterVerdict
-	blocks  *worker
-	iec     *iecTable
-	gate    *envelopeGate // the engine's envelope gate (bindGate)
-	group   uint16        // this configuration's NFQUEUE group
-	onError func(error)
+	active   func() bool
+	source   func(capture.SourceEvent)
+	after    *afterVerdict
+	blocks   *worker
+	sessions *sessionTable
+	gate     *envelopeGate // the engine's envelope gate (bindGate)
+	group    uint16        // this configuration's NFQUEUE group
+	onError  func(error)
 }
 
 func newInlineHooks(onError func(error)) *inlineHooks {
@@ -41,8 +41,8 @@ func newInlineHooks(onError func(error)) *inlineHooks {
 // arrive here with the original generation-bearing token.
 func (h *inlineHooks) onCaptureError(err error) {
 	var rejected *capture.ResolutionRejectedError
-	if errors.As(err, &rejected) && h.iec != nil {
-		h.iec.onVerdict(rejected.Token, 0, rejected.Err)
+	if errors.As(err, &rejected) && h.sessions != nil {
+		h.sessions.onVerdict(rejected.Token, 0, rejected.Err)
 	}
 }
 
@@ -53,12 +53,12 @@ func (h *inlineHooks) onVerdict(tok capture.Token, v capture.Verdict, err error)
 		h.reportWorkerOverflow("block worker queue full")
 	}
 	if err != nil && !errors.Is(err, capture.ErrQueueClosed) && !errors.Is(err, capture.ErrTokenFlushed) {
-		h.iec.health.fault(faultVerdict, "verdict: "+err.Error())
+		h.sessions.health.fault(faultVerdict, "verdict: "+err.Error())
 		if h.onError != nil {
 			h.onError(err)
 		}
 	}
-	h.iec.onVerdict(tok, v, err)
+	h.sessions.onVerdict(tok, v, err)
 }
 
 // onSource handles inline source state changes. A source that goes down
@@ -76,7 +76,7 @@ func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 		h.onError(ev.Err)
 	}
 	if ev.Ready {
-		h.iec.health.sourceReady()
+		h.sessions.health.sourceReady()
 		h.gate.own(h.group)
 		return
 	}
@@ -87,12 +87,12 @@ func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 	if ev.Err != nil {
 		reason = "queue down: " + ev.Err.Error()
 	}
-	h.iec.health.fault(faultQueue, reason)
-	h.iec.onSourceDown(ev.Generation)
+	h.sessions.health.fault(faultQueue, reason)
+	h.sessions.onSourceDown(ev.Generation)
 }
 
 func (h *inlineHooks) reportWorkerOverflow(what string) {
-	h.iec.health.fault(faultWorker, what)
+	h.sessions.health.fault(faultWorker, what)
 	if h.onError != nil {
 		h.onError(errors.New("engine: " + what))
 	}

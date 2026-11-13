@@ -21,18 +21,18 @@ import (
 // resets for both peers, followed by exact conntrack deletion after its verdict.
 // IPv6 and an unavailable injector still produce per-peer outcome evidence.
 func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, reason string, d *deniedTCP) {
-	t := e.iec
+	t := e.sessions
 	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, okDst := addrPort(pkt.DstIP, pkt.DstPort)
 	available := okSrc && okDst && pkt.TCP.Valid && t.health.injectorReady()
-	key := iecKey{client: src, server: dst}
+	key := sessionKey{client: src, server: dst}
 	if state.Key.Dir == flow.DirReverse {
-		key = iecKey{client: dst, server: src}
+		key = sessionKey{client: dst, server: src}
 	}
 	connection := state.Connection.Load()
 	var resets connReset
 	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
-	receiver, sender := iecDirSrv, iecDirClient
+	receiver, sender := sessionDirSrv, sessionDirClient
 	if state.Key.Dir == flow.DirReverse {
 		receiver, sender = sender, receiver
 	}
@@ -44,12 +44,12 @@ func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		if d.retired {
-			for _, target := range []int{iecDirSrv, iecDirClient} {
+			for _, target := range []int{sessionDirSrv, sessionDirClient} {
 				e.genericResetEvent(state, proto, reason, target, "unavailable", nil)
 			}
 			return
 		}
-		for _, target := range []int{iecDirSrv, iecDirClient} { // as resetJob
+		for _, target := range []int{sessionDirSrv, sessionDirClient} { // as resetJob
 			tr := &resets.targets[target]
 			outcome := "unavailable"
 			var err error
@@ -73,8 +73,8 @@ func (e *Engine) genericResetEvent(state *flow.State, proto, reason string, targ
 	attrs := map[string]any{eventfields.KeyOutcome: outcome, eventfields.KeyTarget: targetNames[target], eventfields.KeyReason: reason}
 	if err != nil {
 		attrs[eventfields.KeyError] = err.Error()
-		if e.iec.onError != nil {
-			e.iec.onError(err)
+		if e.sessions.onError != nil {
+			e.sessions.onError(err)
 		}
 	}
 	k := state.Key
@@ -86,7 +86,7 @@ func (e *Engine) genericResetEvent(state *flow.State, proto, reason string, targ
 		Transport: "tcp", Attributes: attrs})
 }
 
-func (k iecKey) what() string {
+func (k sessionKey) what() string {
 	return "denied connection " + k.client.String() + " > " + k.server.String()
 }
 
@@ -104,7 +104,7 @@ func resetOutcome(err error) string {
 // answers, as a new incarnation retires an IEC104 tombstone. It runs
 // before the packet is decided; the packet itself drops or passes as any
 // other.
-func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
+func (t *sessionTable) answerPickupChallenge(pkt capture.Packet) {
 	if t.pickups.live.Load() == 0 || pkt.Proto != 6 || !pkt.TCP.Valid {
 		return
 	}
@@ -114,14 +114,14 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 		return
 	}
 	if pkt.TCP.Flags&capture.TCPFlagSYN != 0 && handshakeMarked(pkt) {
-		t.pickups.forget(iecKey{client: src, server: dst}, iecKey{client: dst, server: src})
+		t.pickups.forget(sessionKey{client: src, server: dst}, sessionKey{client: dst, server: src})
 		return
 	}
 	now := time.Now()
-	key, from := iecKey{client: src, server: dst}, iecDirClient
+	key, from := sessionKey{client: src, server: dst}, sessionDirClient
 	r, entry, ok := t.pickups.challenge(key, from, pkt.TCP, now)
 	if !ok {
-		key, from = iecKey{client: dst, server: src}, iecDirSrv
+		key, from = sessionKey{client: dst, server: src}, sessionDirSrv
 		if r, entry, ok = t.pickups.challenge(key, from, pkt.TCP, now); !ok {
 			return
 		}
@@ -143,13 +143,13 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 }
 
 // pickupResets keeps the resets of picked-up connections for
-// iecResetWindow after they were sent, for answerPickupChallenge. It holds
+// sessionResetWindow after they were sent, for answerPickupChallenge. It holds
 // at most limits.MaxPickupReset connections; live lets the packet path skip it
 // when it holds none.
 type pickupResets struct {
 	ledger     *limits.Ledger
 	mu         sync.Mutex
-	conns      map[iecKey]*pickupReset
+	conns      map[sessionKey]*pickupReset
 	swept      time.Time
 	live       atomic.Int32
 	highWater  int64
@@ -166,14 +166,14 @@ type pickupReset struct {
 
 func newPickupResets() *pickupResets {
 	return &pickupResets{
-		conns:      make(map[iecKey]*pickupReset),
+		conns:      make(map[sessionKey]*pickupReset),
 		ledger:     limits.NewLedger(nil),
 		maxEntries: limits.MaxPickupReset,
 	}
 }
 
 // record keeps the resets sent to close a connection.
-func (p *pickupResets) record(key iecKey, resets connReset, guard *deniedTCP, report func(int, error), now time.Time) {
+func (p *pickupResets) record(key sessionKey, resets connReset, guard *deniedTCP, report func(int, error), now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.expireLocked(now)
@@ -198,10 +198,10 @@ func (p *pickupResets) limit() int {
 }
 
 // challenge returns the reset to send again for a packet of from on key.
-func (p *pickupResets) challenge(key iecKey, from int, tcp capture.TCPMeta, now time.Time) (session.Reset, *pickupReset, bool) {
+func (p *pickupResets) challenge(key sessionKey, from int, tcp capture.TCPMeta, now time.Time) (session.Reset, *pickupReset, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if now.Sub(p.swept) > iecResetWindow {
+	if now.Sub(p.swept) > sessionResetWindow {
 		p.expireLocked(now)
 	}
 	entry := p.conns[key]
@@ -213,7 +213,7 @@ func (p *pickupResets) challenge(key iecKey, from int, tcp capture.TCPMeta, now 
 }
 
 // forget drops the resets of the keys.
-func (p *pickupResets) forget(keys ...iecKey) {
+func (p *pickupResets) forget(keys ...sessionKey) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, key := range keys {
@@ -223,7 +223,7 @@ func (p *pickupResets) forget(keys ...iecKey) {
 }
 
 // resent restarts the challenge window of a target after a resent reset.
-func (p *pickupResets) resent(key iecKey, target int, now time.Time) {
+func (p *pickupResets) resent(key sessionKey, target int, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c := p.conns[key]; c != nil {
@@ -232,13 +232,13 @@ func (p *pickupResets) resent(key iecKey, target int, now time.Time) {
 }
 
 // expireLocked drops the connections whose every reset is older than
-// iecResetWindow.
+// sessionResetWindow.
 func (p *pickupResets) expireLocked(now time.Time) {
 	p.swept = now
 	for key, c := range p.conns {
 		live := false
 		for _, tr := range c.targets {
-			live = live || tr.valid && now.Sub(tr.sent) <= iecResetWindow
+			live = live || tr.valid && now.Sub(tr.sent) <= sessionResetWindow
 		}
 		if !live {
 			delete(p.conns, key)

@@ -13,13 +13,13 @@ import (
 // newInjector opens the reset injector. Tests replace it.
 var newInjector = session.NewInjector
 
-// initIEC builds the IEC104 session table of one engine configuration. An
+// initSessions builds the session owner with its IEC104 binding. An
 // inline (NFQUEUE) engine opens the reset injector; when it cannot, the
 // configuration is kept, enforce envelopes fail closed and health reports
 // it.
-func (e *Engine) initIEC(cfg Config) {
+func (e *Engine) initSessions(cfg Config) {
 	store := e.eventStore
-	var t *iecTable
+	var t *sessionTable
 	emit := func(evs []iecTelemetry) {
 		for _, event := range evs {
 			e.recordLearnOutcome([]dpi.Event{{Proto: event.Proto, Kind: event.Kind, Attributes: event.Attributes, Timestamp: event.Timestamp}})
@@ -62,13 +62,13 @@ func (e *Engine) initIEC(cfg Config) {
 		}
 		t.injector = inj
 	}
-	e.iec = t
+	e.sessions = t
 }
 
 // IEC104Enforcement reports IEC104 enforcement health.
 func (e *Engine) IEC104Enforcement() IEC104Enforcement {
-	if e == nil || e.iec == nil {
+	if e == nil || e.sessions == nil {
 		return IEC104Enforcement{Healthy: true}
 	}
-	return e.iec.health.status()
+	return e.sessions.health.status()
 }

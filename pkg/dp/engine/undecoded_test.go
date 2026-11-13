@@ -147,9 +147,9 @@ func TestIECUndecodedPolicy(t *testing.T) {
 					tab.parsing = parsing
 					client := netip.MustParseAddrPort("10.60.60.10:40000")
 					server := netip.MustParseAddrPort("10.30.30.30:2404")
-					s := &iecSession{id: "session", client: client, server: server, mode: mode, ctx: tab.sessionCtx(client, server)}
+					s := &trackedSession{id: "session", client: client, server: server, iecSession: iecSession{mode: mode, ctx: tab.sessionCtx(client, server)}}
 					ev := undecodedEvent("iec104", both)
-					j := tab.judgeLocked(s, []dpi.Event{ev}, time.Now())
+					j := tab.iecAdapter.judgeLocked(tab, s, []dpi.Event{ev}, time.Now())
 					wantDrop := parsing == ics.Strict && mode == "enforce"
 					want, action := decisionAllow, "passed"
 					if wantDrop {

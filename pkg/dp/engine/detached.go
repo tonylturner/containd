@@ -93,11 +93,11 @@ func NewDetached(cfg DetachedConfig) (*Detached, error) {
 	e.counters.tracker.Store(e.stats)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.initIEC(Config{DPIMode: "monitor"})
-	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return errDetachedAuthority }
+	e.initSessions(Config{DPIMode: "monitor"})
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return errDetachedAuthority }
 	runID := newRunID()
 	var seq atomic.Uint64
-	e.iec.newID = func() string { return eventfields.SessionID(runID, seq.Add(1)) }
+	e.sessions.newID = func() string { return eventfields.SessionID(runID, seq.Add(1)) }
 	return &Detached{engine: e}, nil
 }
 
@@ -171,7 +171,7 @@ func (d *Detached) Run(ctx context.Context) {
 	d.done = make(chan struct{})
 	done := d.done
 	d.mu.Unlock()
-	d.engine.iec.run(ctx.Done())
+	d.engine.sessions.run(ctx.Done())
 	close(done)
 }
 

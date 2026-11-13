@@ -168,9 +168,9 @@ func firstCommandEngine(t *testing.T, mode string) (*Engine, *firstCommandUpdate
 		t.Fatalf("new engine: %v", err)
 	}
 	e.capture = idleCapture{}
-	e.iec.injector = &session.Fake{}
-	e.iec.health.clear(faultInjector)
-	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
+	e.sessions.injector = &session.Fake{}
+	e.sessions.health.clear(faultInjector)
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := e.Start(ctx); err != nil {

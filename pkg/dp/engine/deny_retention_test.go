@@ -260,8 +260,8 @@ func TestDenyRetentionConcurrentEvictionPublication(t *testing.T) {
 	pkt := f.segment(false, f.isn+f.next, 9000, ackPsh, firstCommandProtocols()[0].denied[0].frame)
 
 	// Pause reset preparation at its readiness check, after guard publication.
-	f.e.iec.health.mu.Lock()
-	release := sync.OnceFunc(f.e.iec.health.mu.Unlock)
+	f.e.sessions.health.mu.Lock()
+	release := sync.OnceFunc(f.e.sessions.health.mu.Unlock)
 	done := make(chan capture.Decision, 1)
 	finished := make(chan struct{})
 	t.Cleanup(func() {

@@ -258,7 +258,7 @@ func TestFailClosedOnDecoderPanic(t *testing.T) {
 			if len(logged) != 1 || !strings.Contains(logged[0], "decoder bug") {
 				t.Fatalf("logged = %v, want the panic reported once", logged)
 			}
-			h := f.e.iec.health
+			h := f.e.sessions.health
 			h.mu.Lock()
 			_, faulted := h.faults[faultWorker]
 			h.mu.Unlock()

@@ -7,15 +7,15 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
-func (t *iecTable) LimitOccupancy() limits.Occupancy {
+func (t *sessionTable) LimitOccupancy() limits.Occupancy {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return limits.Occupancy{Limit: iecMaxSessions, Entries: int64(len(t.sessions))}
+	return limits.Occupancy{Limit: sessionMaxSessions, Entries: int64(len(t.sessions))}
 }
-func (t *iecTable) reconnectLimitOccupancy() limits.Occupancy {
+func (t *sessionTable) reconnectLimitOccupancy() limits.Occupancy {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return limits.Occupancy{Limit: iecMaxReconnectHistory, Entries: int64(len(t.reconnect))}
+	return limits.Occupancy{Limit: sessionMaxReconnectHistory, Entries: int64(len(t.reconnect))}
 }
 
 func (e *Engine) httpCorrelationOccupancy() limits.Occupancy {

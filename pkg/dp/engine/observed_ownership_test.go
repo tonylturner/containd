@@ -79,8 +79,8 @@ func TestPolicyPublishExcludesPacketReaders(t *testing.T) {
 	e.LoadRules(rules.Snapshot{Version: "before"})
 	entered, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
-	build := e.iec.newPolicy
-	e.iec.newPolicy = func(snap *rules.Snapshot) iecPolicy {
+	build := e.sessions.newPolicy
+	e.sessions.newPolicy = func(snap *rules.Snapshot) iecPolicy {
 		close(entered)
 		<-release
 		return build(snap)

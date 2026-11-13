@@ -50,7 +50,7 @@ func TestReconfigureRunsQueueShutdownResetsBeforeStoppingWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.dpiMgr = dpi.NewManager(stubIEC{})
-	e.iec.dpi = e.dpiMgr
+	e.sessions.dpi = e.dpiMgr
 	e.LoadRules(iecSnapshot("enforce"))
 
 	oldHooks := e.hooks

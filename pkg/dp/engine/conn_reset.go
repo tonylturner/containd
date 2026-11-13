@@ -38,7 +38,7 @@ func observedResets(src, dst netip.AddrPort, tcp capture.TCPMeta) (toReceiver, t
 }
 
 // connReset is the reset state of a connection the engine closed, per
-// target endpoint (index iecDirClient or iecDirSrv).
+// target endpoint (index sessionDirClient or sessionDirSrv).
 type connReset struct {
 	targets [2]resetTarget
 }
@@ -52,14 +52,14 @@ type resetTarget struct {
 
 // challenge answers a challenge ACK (RFC 5961) that target from sent after
 // its reset: any of its packets that carries ACK and no RST. The reset
-// goes again at the ACK number, at most iecResetRetries times, within
-// iecResetWindow of the last one. It returns the reset to send.
+// goes again at the ACK number, at most sessionResetRetries times, within
+// sessionResetWindow of the last one. It returns the reset to send.
 func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (session.Reset, bool) {
 	if c == nil || tcp.Flags&capture.TCPFlagACK == 0 || tcp.Flags&capture.TCPFlagRST != 0 {
 		return session.Reset{}, false
 	}
 	tr := &c.targets[from]
-	if !tr.valid || tr.sent.IsZero() || tr.retries >= iecResetRetries || now.Sub(tr.sent) > iecResetWindow || tcp.Ack == tr.r.Seq {
+	if !tr.valid || tr.sent.IsZero() || tr.retries >= sessionResetRetries || now.Sub(tr.sent) > sessionResetWindow || tcp.Ack == tr.r.Seq {
 		return session.Reset{}, false
 	}
 	tr.retries++
@@ -68,7 +68,7 @@ func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (ses
 }
 
 // sendRST sends one reset. A failure makes enforcement unhealthy.
-func (t *iecTable) sendRST(r session.Reset) error {
+func (t *sessionTable) sendRST(r session.Reset) error {
 	if t.detached {
 		return errDetachedAuthority
 	}
@@ -84,7 +84,7 @@ func (t *iecTable) sendRST(r session.Reset) error {
 
 // deleteConntrack deletes the conntrack entry of a connection the engine
 // reset; what names the connection in the error report.
-func (t *iecTable) deleteConntrack(client, server netip.AddrPort, connection *flow.Connection, what string) {
+func (t *sessionTable) deleteConntrack(client, server netip.AddrPort, connection *flow.Connection, what string) {
 	if connection.Verified() {
 		client, server = connection.Evidence.Original.Source, connection.Evidence.Original.Destination
 	}

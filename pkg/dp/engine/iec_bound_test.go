@@ -18,21 +18,21 @@ func TestIECSessionTrackingBound(t *testing.T) {
 			h.handshake()
 			trackedPort := h.cport
 			// Real distinct-tuple SYNs exercise allocation, not a prefilled map.
-			for i := 1; i < iecMaxSessions; i++ {
+			for i := 1; i < sessionMaxSessions; i++ {
 				h.cport = trackedPort + uint16(i)
 				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != h.passingDisposition() {
 					t.Fatalf("SYN %d = %+v", i, d)
 				}
 			}
-			table := h.e.iec
-			if len(table.sessions) != iecMaxSessions {
-				t.Fatalf("tracked = %d, want %d", len(table.sessions), iecMaxSessions)
+			table := h.e.sessions
+			if len(table.sessions) != sessionMaxSessions {
+				t.Fatalf("tracked = %d, want %d", len(table.sessions), sessionMaxSessions)
 			}
 			table.newID = func() string {
 				t.Fatal("allocated an incarnation beyond the tracking bound")
 				return ""
 			}
-			h.cport = trackedPort + iecMaxSessions
+			h.cport = trackedPort + sessionMaxSessions
 			wantAction, wantReason := capture.Drop, reasonIECFailClose
 			if mode == "monitor" {
 				wantAction, wantReason = capture.Repeat, reasonIECUntracked
@@ -55,7 +55,7 @@ func TestIECSessionTrackingBound(t *testing.T) {
 					}
 				}
 			}
-			if len(table.sessions) != iecMaxSessions || len(h.inj.Resets()) != 0 || table.heldTotal != 0 {
+			if len(table.sessions) != sessionMaxSessions || len(h.inj.Resets()) != 0 || table.heldTotal != 0 {
 				t.Fatal("overflow traffic allocated sessions, held packets, or sent resets")
 			}
 			evs := h.eventsOf("ics.session")
@@ -84,7 +84,7 @@ func TestIECSessionTrackingBound(t *testing.T) {
 			}
 			// Expiry restores tracking; unobserved midstream packets do not
 			// allocate a learn session before the next SYN.
-			h.clock = h.clock.Add(iecIdleTTL + time.Second)
+			h.clock = h.clock.Add(sessionIdleTTL + time.Second)
 			table.expire()
 			if len(table.sessions) != 0 {
 				t.Fatalf("expired sessions retained: %d", len(table.sessions))
@@ -116,12 +116,12 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 			h := newIECHarness(t, tc.oldMode)
 			h.handshake()
 			trackedPort := h.cport
-			table := h.e.iec
+			table := h.e.sessions
 			client, _ := addrPort(h.client, h.cport)
 			server, _ := addrPort(h.server, iec104Port)
-			key := iecKey{client: client, server: server}
+			key := sessionKey{client: client, server: server}
 			prev := table.sessions[key]
-			wantState := iecClosed
+			wantState := sessionClosed
 			if tc.aborted {
 				p, d := h.send(true, iframe(45, 1))
 				if d.Action != capture.Drop || d.Reason != reasonIECAbort {
@@ -129,7 +129,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 				}
 				h.e.hooks.onVerdict(p.Token, capture.VerdictDrop, nil)
 				h.waitResets(2)
-				wantState = iecAborted
+				wantState = sessionAborted
 			} else if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != h.passingDisposition() {
 				t.Fatalf("close = %+v", d)
 			}
@@ -142,7 +142,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 				h.policy.mode = tc.mode
 				h.e.LoadRules(iecSnapshot(tc.mode))
 			}
-			for i := 1; i < iecMaxSessions; i++ {
+			for i := 1; i < sessionMaxSessions; i++ {
 				h.cport = trackedPort + uint16(i)
 				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != h.passingDisposition() {
 					t.Fatalf("filling SYN %d = %+v", i, d)
@@ -151,8 +151,8 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 			handle := func(p capture.Packet) capture.Decision {
 				t.Helper()
 				d := h.e.handlePacket(p)
-				if len(table.sessions) != iecMaxSessions {
-					t.Fatalf("tracked = %d, want %d", len(table.sessions), iecMaxSessions)
+				if len(table.sessions) != sessionMaxSessions {
+					t.Fatalf("tracked = %d, want %d", len(table.sessions), sessionMaxSessions)
 				}
 				return d
 			}
@@ -175,7 +175,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 					}
 				}
 			}
-			if n == nil || n == prev || n.id == prev.id || n.mode != tc.mode || n.state != iecSynSent || n.dirs[iecDirClient].isn != 777 {
+			if n == nil || n == prev || n.id == prev.id || n.mode != tc.mode || n.state != sessionSynSent || n.dirs[sessionDirClient].isn != 777 {
 				t.Fatalf("new tracked incarnation = %+v", n)
 			}
 			for _, p := range []capture.Packet{
@@ -187,11 +187,11 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 					t.Fatalf("new incarnation packet %+v = %+v", p.TCP, d)
 				}
 			}
-			if table.sessions[key] != n || n.state != iecEstablished || n.dirs[iecDirSrv].isn != 9000 || table.tombstones != 0 {
+			if table.sessions[key] != n || n.state != sessionEstablished || n.dirs[sessionDirSrv].isn != 9000 || table.tombstones != 0 {
 				t.Fatal("new handshake did not replace the retained incarnation")
 			}
 			// Only a new tuple consumes another key and must hit the cap.
-			h.cport = trackedPort + iecMaxSessions
+			h.cport = trackedPort + sessionMaxSessions
 			wantAction, wantReason := capture.Drop, reasonIECFailClose
 			if tc.mode == "monitor" {
 				wantAction, wantReason = capture.Repeat, reasonIECUntracked

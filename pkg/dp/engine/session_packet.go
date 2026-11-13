@@ -12,7 +12,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -31,27 +30,27 @@ const (
 	reasonIECEstablishedSYN = "iec104_established_syn"
 )
 
-// iecResult is the outcome of one IEC104 envelope packet. Its actions are
+// sessionResult is the outcome of one session envelope packet. Its actions are
 // carried out after the session lock is released; drops of held tokens are
 // already in decision.Resolved.
-type iecResult struct {
+type sessionResult struct {
 	decision   capture.Decision
 	inspect    []dpi.Event  // decoder events, recorded like any DPI events
 	findings   []iecFinding // judged events with conformance findings
-	acts       iecActions
+	acts       sessionActions
 	stateLimit bool
 }
 
-func accepted(reason string) iecResult {
-	return iecResult{decision: capture.Decision{Action: capture.Accept, Reason: reason}}
+func accepted(reason string) sessionResult {
+	return sessionResult{decision: capture.Decision{Action: capture.Accept, Reason: reason}}
 }
 
-func dropped(reason string) iecResult {
-	return iecResult{decision: capture.Decision{Action: capture.Drop, Reason: reason}}
+func dropped(reason string) sessionResult {
+	return sessionResult{decision: capture.Decision{Action: capture.Drop, Reason: reason}}
 }
 
 // Invalid transport input cannot change delivery in an observation session.
-func invalidIEC(mode string) iecResult {
+func invalidSession(mode string) sessionResult {
 	if mode == "enforce" {
 		return dropped(reasonIECInvalid)
 	}
@@ -59,7 +58,7 @@ func invalidIEC(mode string) iecResult {
 }
 
 // droppedWith drops the current packet and every held token of acts.
-func droppedWith(reason string, acts iecActions) iecResult {
+func droppedWith(reason string, acts sessionActions) sessionResult {
 	res := dropped(reason)
 	res.decision.Resolved = acts.drops
 	acts.drops = nil
@@ -68,27 +67,27 @@ func droppedWith(reason string, acts iecActions) iecResult {
 }
 
 func dpiDir(dir int) dpi.StreamDir {
-	if dir == iecDirClient {
+	if dir == sessionDirClient {
 		return dpi.ClientToServer
 	}
 	return dpi.ServerToClient
 }
 
 func dirName(dir int) string {
-	if dir == iecDirClient {
+	if dir == sessionDirClient {
 		return "request"
 	}
 	return "response"
 }
 
-// handleIECPacket decides a TCP packet to or from port 2404 when an IEC104
+// handleSessionPacket decides a TCP packet to or from port 2404 when an IEC104
 // envelope may apply. ok is false for packets outside every envelope; they
 // take the flow path unchanged. The packet is judged in the IEC104 parsing
 // mode in force now; conformance alerts and the connection's alert identity
 // are the engine's, so they are settled here, after the table decided.
-func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
-	t := e.iec
-	if t == nil || !isIECFlow(state) && !e.iecOwnsState(pkt, state) {
+func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
+	t := e.sessions
+	if t == nil || !isIECFlow(state) && !e.sessionOwnsState(pkt, state) {
 		return capture.Decision{}, false
 	}
 	res, ok := t.packet(pkt, state, e.ICSParsing(iecProtocol))
@@ -138,13 +137,13 @@ func iecConformanceAction(packet capture.Decision, decision string) string {
 	}
 }
 
-func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Parsing) (iecResult, bool) {
+func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Parsing) (sessionResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.pressureOffline = false
 	t.parsing = parsing
 	if !t.hasIEC {
-		return iecResult{}, false
+		return sessionResult{}, false
 	}
 	now := t.now()
 	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
@@ -166,25 +165,25 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Par
 		return t.synRSTLocked(s, state)
 	case s == nil:
 		return t.newPacketLocked(pkt, src, dst, state, now)
-	case s.state == iecAborted:
+	case s.state == sessionAborted:
 		return t.tombstonePacketLocked(s, dir, pkt, state, now)
-	case s.state == iecClosed:
+	case s.state == sessionClosed:
 		return t.closedPacketLocked(s, dir, pkt, state, now)
 	case reopensLocked(s, dir, pkt):
 		return t.reopenLocked(s, dir, pkt, state, now)
 	default:
 		res := t.livePacketLocked(s, dir, pkt, state, now)
-		_, res.decision.Notify = t.inventoryTokens[pkt.Token]
+		res.decision.Notify = t.iecAdapter.notifyLocked(pkt.Token)
 		return res, true
 	}
 }
 
 // nonIPv4Locked drops IPv6 traffic inside an enforce envelope.
-func (t *iecTable) nonIPv4Locked(state *flow.State) (iecResult, bool) {
+func (t *sessionTable) nonIPv4Locked(state *flow.State) (sessionResult, bool) {
 	ctx := t.stateContext(state)
 	matched, mode := t.envelopeLocked(ctx)
 	if !matched || mode != "enforce" {
-		return iecResult{}, false
+		return sessionResult{}, false
 	}
 	return dropped(reasonIECInvalid), true
 }
@@ -199,14 +198,14 @@ func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&cap
 // resets. An enforcing session or envelope drops it; monitor sessions
 // observe it without changing delivery, and untracked monitor traffic passes
 // like every other monitor packet not observed from its SYN.
-func (t *iecTable) synRSTLocked(s *iecSession, state *flow.State) (iecResult, bool) {
+func (t *sessionTable) synRSTLocked(s *trackedSession, state *flow.State) (sessionResult, bool) {
 	if s != nil {
 		_, mode := t.envelopeLocked(t.sessionContext(s))
-		return invalidIEC(mode), true
+		return invalidSession(mode), true
 	}
 	matched, mode := t.envelopeLocked(t.stateContext(state))
 	if !matched {
-		return iecResult{}, false
+		return sessionResult{}, false
 	}
 	if mode == "enforce" {
 		return dropped(reasonIECInvalid), true
@@ -228,12 +227,12 @@ func opens(mode string, pkt capture.Packet) bool {
 // into an established connection opens nothing and, without payload,
 // passes: the server answers it with a challenge ACK, a packet not
 // observed from its SYN, and that closes the connection.
-func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, state *flow.State, now time.Time) (iecResult, bool) {
-	if isSYN(pkt.TCP.Flags) && state.ServiceKey().Dir == flow.DirForward && servicePort(state, nil) == iec104Port {
+func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, state *flow.State, now time.Time) (sessionResult, bool) {
+	if isSYN(pkt.TCP.Flags) && t.iecAdapter.acceptsSYN(state) {
 		ctx := t.stateContext(state)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			return iecResult{}, false
+			return sessionResult{}, false
 		}
 		if !opens(mode, pkt) {
 			if len(pkt.Payload) > 0 {
@@ -250,7 +249,7 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 	ctx := t.stateContext(state)
 	matched, mode := t.envelopeLocked(ctx)
 	if !matched {
-		return iecResult{}, false
+		return sessionResult{}, false
 	}
 	if mode != "enforce" || pkt.TCP.Flags&capture.TCPFlagRST != 0 && len(pkt.Payload) == 0 {
 		// Monitor: observed, never parsed mid-stream. A bare RST closes.
@@ -261,9 +260,9 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 
 // openLocked starts a new incarnation from its SYN. prev is the tombstone
 // or closed session of the same tuple, if any.
-func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
+func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, state *flow.State, now time.Time) sessionResult {
 	// The bound counts tuple keys; a retained tuple reuses its existing key.
-	if prev == nil && len(t.sessions) >= iecMaxSessions {
+	if prev == nil && len(t.sessions) >= sessionMaxSessions {
 		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.Mode(mode))
 		if mode == "enforce" {
 			t.countAbort(abortBound)
@@ -274,7 +273,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 		return accepted(reasonIECUntracked)
 	}
 	if len(pkt.Payload) > 0 {
-		return invalidIEC(mode) // SYN with data cannot open a tracked session.
+		return invalidSession(mode) // SYN with data cannot open a tracked session.
 	}
 	if mode == "enforce" && !t.health.injectorReady() {
 		// No session can be reset: none may start.
@@ -285,14 +284,14 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	if n == nil {
 		return t.admissionLimitLocked(mode)
 	}
-	if err := t.allocateDirLocked(n, iecDirClient, pkt.TCP.Seq); err != nil {
+	if err := t.allocateDirLocked(n, sessionDirClient, pkt.TCP.Seq); err != nil {
 		n.releaseInspection()
 		return t.admissionLimitLocked(mode)
 	}
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
-	key := iecKey{client: client, server: server}
+	key := sessionKey{client: client, server: server}
 	switch {
-	case prev != nil && prev.state == iecAborted:
+	case prev != nil && prev.state == sessionAborted:
 		prev.next.releaseInspection()
 		prev.next = n // the tombstone retires once the handshake validates
 	default:
@@ -307,8 +306,8 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 // midstreamLocked drops a packet of a session not observed from its SYN
 // inside an enforce envelope and resets that session once. The
 // tombstone then drops its later packets.
-func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, state *flow.State, now time.Time) iecResult {
-	if len(t.sessions) >= iecMaxSessions {
+func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, state *flow.State, now time.Time) sessionResult {
+	if len(t.sessions) >= sessionMaxSessions {
 		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.ModeEnforce)
 		// Unobserved enforce traffic must not bypass the shared table bound.
 		t.countAbort(abortBound)
@@ -318,10 +317,10 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 	if s == nil {
 		return t.admissionLimitLocked("enforce")
 	}
-	t.sessions[iecKey{client: client, server: server}] = s
-	dir := iecDirSrv
+	t.sessions[sessionKey{client: client, server: server}] = s
+	dir := sessionDirSrv
 	if fromClient {
-		dir = iecDirClient
+		dir = sessionDirClient
 	}
 	acts := t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)
 	src, dst := client, server
@@ -340,7 +339,7 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 // answers challenge ACKs. A SYN with a new ISN starts the next incarnation
 // (opens); a retransmitted old SYN does not. The server's SYN-ACK of the
 // next incarnation, or its RST refusing that SYN (refuses), passes.
-func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (iecResult, bool) {
+func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
 	ctx := t.sessionContext(s)
 	_, currentMode := t.envelopeLocked(ctx)
 	tombstone := accepted(reasonIECTombstone)
@@ -348,17 +347,17 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		tombstone = dropped(reasonIECTombstone)
 	}
 	f := pkt.TCP.Flags
-	if dir == iecDirClient && isSYN(f) {
-		if c := s.dirs[iecDirClient]; c != nil && c.isn == pkt.TCP.Seq {
+	if dir == sessionDirClient && isSYN(f) {
+		if c := s.dirs[sessionDirClient]; c != nil && c.isn == pkt.TCP.Seq {
 			return tombstone, true
 		}
-		if s.next != nil && s.next.dirs[iecDirClient].isn == pkt.TCP.Seq {
+		if s.next != nil && s.next.dirs[sessionDirClient].isn == pkt.TCP.Seq {
 			return accepted(reasonIECAccept), true
 		}
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{acts: acts}, false
+			acts := t.deleteLocked(sessionKey{client: s.client, server: s.server}, s)
+			return sessionResult{acts: acts}, false
 		}
 		if !opens(mode, pkt) {
 			return tombstone, true
@@ -372,16 +371,16 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		n.releaseInspection()
 		return accepted(reasonIECClosed), true
 	}
-	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
-		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
-		if err := t.allocateDirLocked(n, iecDirSrv, pkt.TCP.Seq); err != nil {
+	if n := s.next; dir == sessionDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
+		pkt.TCP.Ack == n.dirs[sessionDirClient].isn+1 && len(pkt.Payload) == 0 {
+		if err := t.allocateDirLocked(n, sessionDirSrv, pkt.TCP.Seq); err != nil {
 			s.next = nil
 			n.releaseInspection()
 			return t.admissionLimitLocked(n.mode), true
 		}
-		n.state, n.lastSeen = iecEstablished, now
+		n.state, n.lastSeen = sessionEstablished, now
 		t.tombstones--
-		t.sessions[iecKey{client: s.client, server: s.server}] = n
+		t.sessions[sessionKey{client: s.client, server: s.server}] = n
 		s.next = nil
 		s.releaseInspection()
 		return accepted(reasonIECAccept), true
@@ -394,13 +393,13 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 
 // closedPacketLocked passes the payload-free tail of a closed session and
 // lets a new SYN open the next incarnation (opens).
-func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (iecResult, bool) {
-	if dir == iecDirClient && isSYN(pkt.TCP.Flags) && pkt.TCP.Seq != s.dirs[iecDirClient].isn {
+func (t *sessionTable) closedPacketLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
+	if dir == sessionDirClient && isSYN(pkt.TCP.Flags) && pkt.TCP.Seq != s.dirs[sessionDirClient].isn {
 		ctx := t.stateContext(state)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{acts: acts}, false
+			acts := t.deleteLocked(sessionKey{client: s.client, server: s.server}, s)
+			return sessionResult{acts: acts}, false
 		}
 		if opens(mode, pkt) {
 			return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
@@ -417,9 +416,9 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 // tuple of an established incarnation: a new ISN, no payload, and the
 // handshake mark, so connection tracking no longer holds the old
 // connection.
-func reopensLocked(s *iecSession, dir int, pkt capture.Packet) bool {
-	return s.state == iecEstablished && dir == iecDirClient && isSYN(pkt.TCP.Flags) &&
-		pkt.TCP.Seq != s.dirs[iecDirClient].isn && len(pkt.Payload) == 0 && handshakeMarked(pkt)
+func reopensLocked(s *trackedSession, dir int, pkt capture.Packet) bool {
+	return s.state == sessionEstablished && dir == sessionDirClient && isSYN(pkt.TCP.Flags) &&
+		pkt.TCP.Seq != s.dirs[sessionDirClient].isn && len(pkt.Payload) == 0 && handshakeMarked(pkt)
 }
 
 // reopenLocked ends an established incarnation whose tuple a new
@@ -427,7 +426,7 @@ func reopensLocked(s *iecSession, dir int, pkt capture.Packet) bool {
 // both endpoints are reset, and the client's retransmitted SYN opens the
 // next incarnation from the tombstone. A monitor incarnation closes, and the
 // SYN opens the next one at once.
-func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (iecResult, bool) {
+func (t *sessionTable) reopenLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
 	if s.mode == "enforce" {
 		return droppedWith(reasonIECAbort, t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)), true
 	}
@@ -443,42 +442,42 @@ func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, stat
 // sends, passes and changes nothing: the server answers it with a
 // challenge ACK, and the RST the client sends in reply closes the
 // incarnation (rstLocked). A SYN with payload is dropped.
-func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
+func (t *sessionTable) handshakeLocked(s *trackedSession, dir int, pkt capture.Packet, now time.Time) sessionResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
 	if len(pkt.Payload) > 0 {
-		return invalidIEC(s.mode)
+		return invalidSession(s.mode)
 	}
-	c2s := s.dirs[iecDirClient]
+	c2s := s.dirs[sessionDirClient]
 	switch {
-	case dir == iecDirClient && f&capture.TCPFlagACK == 0:
+	case dir == sessionDirClient && f&capture.TCPFlagACK == 0:
 		if seq == c2s.isn {
 			return accepted(reasonIECAccept)
 		}
-		if s.dirs[iecDirSrv] != nil {
+		if s.dirs[sessionDirSrv] != nil {
 			return accepted(reasonIECEstablishedSYN)
 		}
 		if opens(s.mode, pkt) {
-			if err := t.allocateDirLocked(s, iecDirClient, seq); err != nil {
+			if err := t.allocateDirLocked(s, sessionDirClient, seq); err != nil {
 				return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
 			}
 			return accepted(reasonIECAccept)
 		}
-	case dir == iecDirSrv && f&capture.TCPFlagACK != 0 && pkt.TCP.Ack == c2s.isn+1:
-		if s2c := s.dirs[iecDirSrv]; s2c == nil {
-			if err := t.allocateDirLocked(s, iecDirSrv, seq); err != nil {
+	case dir == sessionDirSrv && f&capture.TCPFlagACK != 0 && pkt.TCP.Ack == c2s.isn+1:
+		if s2c := s.dirs[sessionDirSrv]; s2c == nil {
+			if err := t.allocateDirLocked(s, sessionDirSrv, seq); err != nil {
 				return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
 			}
-			s.state, s.lastSeen = iecEstablished, now
+			s.state, s.lastSeen = sessionEstablished, now
 			return accepted(reasonIECAccept)
 		} else if s2c.isn == seq {
 			return accepted(reasonIECAccept)
 		}
 	}
-	return invalidIEC(s.mode)
+	return invalidSession(s.mode)
 }
 
 // livePacketLocked decides a packet of a live incarnation.
-func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
+func (t *sessionTable) livePacketLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) sessionResult {
 	s.lastSeen = now
 	f := pkt.TCP.Flags
 	enforce := s.mode == "enforce"
@@ -488,7 +487,7 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		}
 		return t.handshakeLocked(s, dir, pkt, now)
 	}
-	if s.dirs[iecDirSrv] == nil {
+	if s.dirs[sessionDirSrv] == nil {
 		if refuses(s, dir, pkt) {
 			res := accepted(reasonIECClosed)
 			res.acts.merge(t.closeLocked(s, now))
@@ -517,7 +516,7 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 	res := accepted(reasonIECAccept)
 	if len(pkt.Payload) > 0 {
 		res = t.dataLocked(s, dir, pkt, state, now)
-		if s.state == iecAborted {
+		if s.state == sessionAborted {
 			return res
 		}
 	}
@@ -532,15 +531,15 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 // accepts in SYN-SENT, one past its ISN (RFC 9293). It reaches the client,
 // which fails at once instead of retransmitting its SYN until it times out.
 // The client's kernel ignores any other RST.
-func refuses(s *iecSession, dir int, pkt capture.Packet) bool {
+func refuses(s *trackedSession, dir int, pkt capture.Packet) bool {
 	f := pkt.TCP.Flags
-	return dir == iecDirSrv && f&capture.TCPFlagRST != 0 && f&capture.TCPFlagACK != 0 &&
-		len(pkt.Payload) == 0 && pkt.TCP.Ack == s.dirs[iecDirClient].isn+1
+	return dir == sessionDirSrv && f&capture.TCPFlagRST != 0 && f&capture.TCPFlagACK != 0 &&
+		len(pkt.Payload) == 0 && pkt.TCP.Ack == s.dirs[sessionDirClient].isn+1
 }
 
 // ackLocked releases history the receiver of direction dir acknowledged, up
 // to what was forwarded to it.
-func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) error {
+func (t *sessionTable) ackLocked(s *trackedSession, dir int, ack uint32) error {
 	d := s.dirs[dir]
 	off := min(d.seq.Offset(ack), d.forwarded)
 	if off <= d.bytes.Floor() {
@@ -575,7 +574,7 @@ func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) error {
 // of what was forwarded to it (RFC 5961). Its receiver ignores any other,
 // or answers it with a challenge ACK, which a closed sender answers with a
 // RST at that sequence number.
-func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
+func (t *sessionTable) rstLocked(s *trackedSession, dir int, pkt capture.Packet, now time.Time) sessionResult {
 	if len(pkt.Payload) > 0 {
 		if s.mode == "enforce" {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortTransport, "", t.current(s, dir, pkt, now), now))
@@ -595,10 +594,10 @@ func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now tim
 
 // finLocked accepts a FIN that ends the received stream, after dropping the
 // direction's pending data.
-func (t *iecTable) finLocked(s *iecSession, dir int, pkt capture.Packet, res *iecResult) {
+func (t *sessionTable) finLocked(s *trackedSession, dir int, pkt capture.Packet, res *sessionResult) {
 	d := s.dirs[dir]
 	if d.seq.Offset(pkt.TCP.Seq)+int64(len(pkt.Payload)) != d.bytes.Next() {
-		*res = invalidIEC(s.mode)
+		*res = invalidSession(s.mode)
 		return
 	}
 	if len(pkt.Payload) == 0 {
@@ -609,7 +608,7 @@ func (t *iecTable) finLocked(s *iecSession, dir int, pkt capture.Packet, res *ie
 
 // finForwardedLocked records a forwarded FIN of direction dir and closes
 // the session once both directions finished.
-func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
+func (t *sessionTable) finForwardedLocked(s *trackedSession, dir int, res *sessionResult) {
 	d := s.dirs[dir]
 	d.fin, d.finFwd = true, true
 	if s.dirs[1-dir].fin {
@@ -620,7 +619,7 @@ func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
 
 // dropHeldLocked drops the held packets of one direction (dir -1: both).
 // Their settlement credits survive until completion, rejection or source flush.
-func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
+func (t *sessionTable) dropHeldLocked(s *trackedSession, dir int) []capture.Resolution {
 	var out []capture.Resolution
 	kept := s.held[:0]
 	for _, h := range s.held {
@@ -637,17 +636,16 @@ func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 	return out
 }
 
-func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
-	acts := t.endInventoryLocked(s)
+func (t *sessionTable) closeLocked(s *trackedSession, now time.Time) sessionActions {
+	acts := t.iecAdapter.endLocked(t, s)
 	acts.retired = true
-	s.apci = nil
-	s.state, s.endedAt = iecClosed, now
+	s.state, s.endedAt = sessionClosed, now
 	t.dpi.EndStream(s.id)
 	s.clearInspectionBytes()
 	return acts
 }
 
-func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
+func (t *sessionTable) current(s *trackedSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
 	off := s.dirs[dir].seq.Offset(pkt.TCP.Seq)
 	return &heldPacket{tok: pkt.Token, mark: pkt.Mark, dir: dir, off: off, end: off + int64(len(pkt.Payload)),
 		fin: pkt.TCP.Flags&capture.TCPFlagFIN != 0, since: now}
@@ -655,8 +653,8 @@ func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.
 
 // dataLocked judges a payload: its bytes are checked against what was
 // received, newly contiguous bytes are framed and judged, and the packet is
-// released only when every byte belongs to complete allowed APDUs.
-func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) iecResult {
+// released only when every byte belongs to complete allowed units.
+func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) sessionResult {
 	d := s.dirs[dir]
 	enforce := s.mode == "enforce"
 	cur := t.current(s, dir, pkt, now)
@@ -672,7 +670,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 		// A below-floor retransmission is not parseable, but still carries
 		// bytes of any command awaiting its original verdict completion.
 		res := dropped(reasonIECInvalid)
-		t.inventoryPacketLocked(s, cur, &res.acts)
+		t.iecAdapter.packetLocked(t, s, cur, &res.acts)
 		return res
 	}
 	start, fresh, err := d.bytes.Add(cur.off, pkt.Payload)
@@ -680,7 +678,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 		if errors.Is(err, flow.ErrInspectionLimit) {
 			return t.inspectionLimitLocked(s, cur, now)
 		}
-		res := iecResult{inspect: []dpi.Event{s.streamErrorEvent(dir, cur.off, err, now)}}
+		res := sessionResult{inspect: []dpi.Event{t.iecAdapter.streamErrorEvent(s, dir, cur.off, err, now)}}
 		if enforce {
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
 			r.inspect = res.inspect
@@ -691,8 +689,8 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 		return res
 	}
 	d.seq.Advance(d.bytes.Next())
-	var res iecResult
-	t.inventoryPacketLocked(s, cur, &res.acts)
+	var res sessionResult
+	t.iecAdapter.packetLocked(t, s, cur, &res.acts)
 	if len(fresh) > 0 && !s.stopParse {
 		denied, trigger, failed := t.inspectLocked(s, dir, pkt, state, start, fresh, &res, now)
 		if enforce && (denied || failed) {
@@ -723,7 +721,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 
 // inspectLocked frames and judges newly contiguous bytes. failed reports a
 // stream that cannot be enforced (no framing decoder, or a framing error).
-func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, start int64, fresh []byte, res *iecResult, now time.Time) (denied bool, trigger string, failed bool) {
+func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, start int64, fresh []byte, res *sessionResult, now time.Time) (denied bool, trigger string, failed bool) {
 	d := s.dirs[dir]
 	ir := t.dpi.Inspect(state, &dpi.ParsedPacket{
 		Timestamp: pkt.Timestamp,
@@ -758,8 +756,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	}
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
-		s.observeAPCILocked(dir, f, &res.acts, now)
-		t.observeInventoryLocked(s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
+		t.iecAdapter.frameLocked(t, s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
 	}
@@ -769,7 +766,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	if streamErr && len(ir.Events) > 0 {
 		judged = append(judged, ir.Events[len(ir.Events)-1]) // the error's malformed event
 	}
-	j := t.judgeLocked(s, judged, now)
+	j := t.iecAdapter.judgeLocked(t, s, judged, now)
 	res.acts.events = append(res.acts.events, j.events...)
 	res.findings = append(res.findings, j.findings...)
 	if streamErr {
@@ -778,8 +775,8 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	return j.denied, j.trigger, streamErr
 }
 
-func (t *iecTable) stopParseLocked(s *iecSession) {
-	s.apci = nil
+func (t *sessionTable) stopParseLocked(s *trackedSession) {
+	t.iecAdapter.stopParseLocked(s)
 	if !s.stopParse {
 		s.stopParse = true
 		t.dpi.EndStream(s.id)
@@ -791,7 +788,7 @@ func (t *iecTable) stopParseLocked(s *iecSession) {
 // and allowed, else holds it, and releases earlier held packets of the
 // direction that became covered. In an enforce envelope every decided
 // frame of a live session is allowed: a deny aborts at once.
-func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur *heldPacket, res iecResult, now time.Time) iecResult {
+func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Packet, cur *heldPacket, res sessionResult, now time.Time) sessionResult {
 	d := s.dirs[dir]
 	// Admit a possible hold before removing any old held token or publishing
 	// any successful result. A refusal must drop even a prefix this packet
@@ -804,7 +801,7 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 				bytes -= int(h.end - h.off)
 			}
 		}
-		if remaining >= iecMaxHeldPerSession || bytes+len(pkt.Payload) > iecMaxHeldBytes || t.heldTotal-len(s.held)+remaining >= iecMaxHeldGlobal {
+		if remaining >= sessionMaxHeldPerSession || bytes+len(pkt.Payload) > sessionMaxHeldBytes || t.heldTotal-len(s.held)+remaining >= sessionMaxHeldGlobal {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		}
 		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true) {
@@ -846,20 +843,4 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 	t.heldTotal++
 	res.decision.Action, res.decision.Reason = capture.Hold, reasonIECHold
 	return res
-}
-
-// streamErrorEvent is the malformed evidence of a byte-level stream error
-// (overlap conflict, bounds, bytes before the stream).
-func (s *iecSession) streamErrorEvent(dir int, off int64, err error, now time.Time) dpi.Event {
-	return dpi.Event{
-		Proto: eventfields.ProtoIEC104,
-		Kind:  iecKindMalformed,
-		Attributes: map[string]any{
-			eventfields.KeyError:     "stream: " + err.Error(),
-			eventfields.KeyDirection: dirName(dir),
-			eventfields.KeySessionID: s.id,
-			"offset":                 off,
-		},
-		Timestamp: now.UTC(),
-	}
 }

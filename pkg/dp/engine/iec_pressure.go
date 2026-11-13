@@ -61,11 +61,11 @@ func countIECVerdictFailure(err error) {
 	}
 }
 
-func (t *iecTable) pressure() IEC104Pressure {
+func (t *sessionTable) pressure() IEC104Pressure {
 	out := IEC104Pressure{InjectorFailures: pressureTotals.injector.Load(), Limits: IEC104PressureLimits{
-		HeldPackets: iecMaxHeldGlobal, HeldPacketsPerSession: iecMaxHeldPerSession,
-		HeldBytesPerSession: iecMaxHeldBytes, PendingSeconds: iecPendingTimeout.Seconds(),
-		Sessions: iecMaxSessions, ResetWorkerJobs: blockWorkerQueue,
+		HeldPackets: sessionMaxHeldGlobal, HeldPacketsPerSession: sessionMaxHeldPerSession,
+		HeldBytesPerSession: sessionMaxHeldBytes, PendingSeconds: sessionPendingTimeout.Seconds(),
+		Sessions: sessionMaxSessions, ResetWorkerJobs: blockWorkerQueue,
 	}, Aborts: make(map[string]uint64, len(iecAbortReasons)),
 		ResetWorkerRejections: pressureTotals.worker.Load(), VerdictFailures: pressureTotals.verdict.Load()}
 	for _, reason := range iecAbortReasons {
@@ -76,7 +76,7 @@ func (t *iecTable) pressure() IEC104Pressure {
 	now := t.now()
 	out.TrackedSessions = len(t.sessions)
 	for _, s := range t.sessions {
-		if !t.pressureOffline && (s.state == iecSynSent || s.state == iecEstablished) {
+		if !t.pressureOffline && (s.state == sessionSynSent || s.state == sessionEstablished) {
 			out.ActiveSessions++
 		}
 		// A tombstone can retain a replacement handshake, sharing its tuple slot.
@@ -97,7 +97,7 @@ func (t *iecTable) pressure() IEC104Pressure {
 func (e *Engine) IEC104Diagnostics() IEC104Pressure {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
-	return e.iec.pressure()
+	return e.sessions.pressure()
 }
 
 // IEC104PressureMetrics supplies an atomic scrape of current pressure.
@@ -114,13 +114,13 @@ func (e *Engine) IEC104PressureMetrics() map[string]float64 {
 	}
 }
 
-func (t *iecTable) countAbort(reason *iecAbortReason) {
+func (t *sessionTable) countAbort(reason *iecAbortReason) {
 	if !t.detached {
 		countIECAbort(reason)
 	}
 }
 
-func (t *iecTable) countVerdictFailure(err error) {
+func (t *sessionTable) countVerdictFailure(err error) {
 	if !t.detached {
 		countIECVerdictFailure(err)
 	}

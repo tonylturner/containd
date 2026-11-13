@@ -23,8 +23,8 @@ func TestIECReconnectHistoryBound(t *testing.T) {
 	}
 	abort := func(c netip.AddrPort, at time.Time) {
 		t.Helper()
-		key := iecKey{client: c, server: server}
-		s := &iecSession{id: "abort", client: c, server: server, mode: "enforce"}
+		key := sessionKey{client: c, server: server}
+		s := &trackedSession{id: "abort", client: c, server: server, iecSession: iecSession{mode: "enforce"}}
 		table.mu.Lock()
 		table.sessions[key] = s
 		table.abortLocked(s, abortQueue, "", nil, at)
@@ -35,17 +35,17 @@ func TestIECReconnectHistoryBound(t *testing.T) {
 			t.Fatalf("reconnect occupancy = %+v", o)
 		}
 	}
-	for i := range iecMaxReconnectHistory {
+	for i := range sessionMaxReconnectHistory {
 		abort(client(i), now.Add(time.Duration(i)))
 	}
 	// The same client IP and server, with a new client port, refreshes its
 	// timestamp without evicting another pair.
 	refreshed := netip.AddrPortFrom(client(0).Addr(), 40001)
-	abort(refreshed, now.Add(time.Duration(iecMaxReconnectHistory)))
+	abort(refreshed, now.Add(time.Duration(sessionMaxReconnectHistory)))
 	if status := table.ledger.Status(limits.TableIECReconnect, table.reconnectLimitOccupancy()); len(status.Hits) != 0 {
 		t.Fatalf("refresh evicted history: %+v", status)
 	}
-	abort(client(iecMaxReconnectHistory), now.Add(time.Duration(iecMaxReconnectHistory+1)))
+	abort(client(sessionMaxReconnectHistory), now.Add(time.Duration(sessionMaxReconnectHistory+1)))
 	if _, ok := table.reconnect[pairKey(client(1), server)]; ok {
 		t.Fatal("oldest abort retained")
 	}
@@ -57,7 +57,7 @@ func TestIECReconnectHistoryBound(t *testing.T) {
 		status.Hits[0] != (limits.Hit{Reason: limits.ReasonEvicted, Mode: limits.ModeObserve, Total: 1}) {
 		t.Fatalf("eviction accounting = %+v", status)
 	}
-	table.now = func() time.Time { return now.Add(iecReconnectWindow + time.Second) }
+	table.now = func() time.Time { return now.Add(sessionReconnectWindow + time.Second) }
 	table.expire()
 	if o := table.reconnectLimitOccupancy(); o.Entries != 0 {
 		t.Fatalf("expired reconnect history retained: %+v", o)
@@ -93,7 +93,7 @@ func TestIECRSTClosesOnlyAtReceivePoint(t *testing.T) {
 				t.Fatalf("RST = %+v, want Accept", d)
 			}
 			st, _ := h.sessionState()
-			if closed := st == iecClosed; closed != tc.closes {
+			if closed := st == sessionClosed; closed != tc.closes {
 				t.Fatalf("session state %d after the RST, want closed %v", st, tc.closes)
 			}
 			if tc.closes {
@@ -122,14 +122,14 @@ func TestIECRSTAtReceivePointDropsHeld(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("RST after the held bytes = %+v, want Accept", d)
 	}
-	if st, _ := h.sessionState(); st != iecEstablished {
+	if st, _ := h.sessionState(); st != sessionEstablished {
 		t.Fatalf("session state %d after a RST past the receive point, want established", st)
 	}
 	d = h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, at, 0, nil))
 	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0].Token != held.Token || d.Resolved[0].Verdict != capture.VerdictDrop {
 		t.Fatalf("RST at the receive point = %+v, want Accept dropping the held packet", d)
 	}
-	if st, _ := h.sessionState(); st != iecClosed {
+	if st, _ := h.sessionState(); st != sessionClosed {
 		t.Fatalf("session state %d, want closed", st)
 	}
 }
@@ -152,7 +152,7 @@ func TestIECReconnectSamePortAfterLostConnection(t *testing.T) {
 	if d := h.e.handlePacket(h.establishedSYN(777, iframe(46, 2))); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
 		t.Fatalf("SYN with data into the connection = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if st, _ := h.sessionState(); st != iecEstablished {
+	if st, _ := h.sessionState(); st != sessionEstablished {
 		t.Fatalf("session state %d after the SYNs, want established", st)
 	}
 	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagACK, h.sSeq, h.cSeq, nil)); d.Action != h.passingDisposition() {
@@ -161,7 +161,7 @@ func TestIECReconnectSamePortAfterLostConnection(t *testing.T) {
 	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("client RST at the challenge ACK = %+v, want Accept", d)
 	}
-	if st, _ := h.sessionState(); st != iecClosed {
+	if st, _ := h.sessionState(); st != sessionClosed {
 		t.Fatalf("session state %d after the RST, want closed", st)
 	}
 	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
@@ -212,7 +212,7 @@ func TestIECHandshakeSYNReopensEstablished(t *testing.T) {
 		if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
 			t.Fatalf("handshake SYN into the learn incarnation = %+v, want Accept", d)
 		}
-		if st, _ := h.sessionState(); st != iecSynSent {
+		if st, _ := h.sessionState(); st != sessionSynSent {
 			t.Fatalf("session state %d, want the next incarnation opened", st)
 		}
 	})

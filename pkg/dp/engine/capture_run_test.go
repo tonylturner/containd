@@ -168,7 +168,7 @@ func TestProtectionNewRunUsesConfiguredCaptureFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(e.Close)
-	if e.capture != runner || source == nil || e.iec.jobs != e.hooks.blocks {
+	if e.capture != runner || source == nil || e.sessions.jobs != e.hooks.blocks {
 		t.Fatal("New bypassed shared run wiring")
 	}
 	source(capture.SourceEvent{Ready: true})

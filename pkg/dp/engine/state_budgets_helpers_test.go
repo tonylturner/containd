@@ -25,7 +25,7 @@ func stateBudgetEngine(tb testing.TB, l limits.Limits, ledger *limits.Ledger, c 
 		tb.Fatal(err)
 	}
 	tb.Cleanup(e.Close)
-	e.observation.now, e.iec.now, e.deniedTCPNow, e.verdictCache.now = c.now, c.now, c.now, c.now
+	e.observation.now, e.sessions.now, e.deniedTCPNow, e.verdictCache.now = c.now, c.now, c.now, c.now
 	e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{
 		{ID: "enforce", Action: rules.ActionAllow, Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "enforce"}},
 		{ID: "monitor", Action: rules.ActionAllow, Protocols: []rules.Protocol{{Name: "tcp", Port: "1502"}}, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}},

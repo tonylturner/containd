@@ -45,8 +45,8 @@ func TestIECMonitorPacketExchange(t *testing.T) {
 			for i := range 8192 {
 				exchange(i)
 			}
-			for _, s := range e.iec.sessions {
-				if s.state != iecEstablished || s.stopParse || s.inspectionLost {
+			for _, s := range e.sessions.sessions {
+				if s.state != sessionEstablished || s.stopParse || s.inspectionLost {
 					t.Fatalf("session stopped decoding: %+v", s)
 				}
 			}
@@ -112,7 +112,7 @@ func newIECPerfExchange(tb testing.TB, mode string, sessions int) (*Engine, func
 		tb.Fatal(err)
 	}
 	now := time.Now()
-	e.iec.now = func() time.Time { return now }
+	e.sessions.now = func() time.Time { return now }
 	type exchange struct {
 		packets [4]capture.Packet
 		step    int

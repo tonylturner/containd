@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func (t *iecTable) allocateSessionLocked(client, server netip.AddrPort, ctx rules.EvalContext, mode string, state *flow.State, now time.Time) *iecSession {
+func (t *sessionTable) allocateSessionLocked(client, server netip.AddrPort, ctx rules.EvalContext, mode string, state *flow.State, now time.Time) *trackedSession {
 	class := limits.ClassObserve
 	if mode == "enforce" {
 		class = limits.ClassEnforce
@@ -22,12 +22,12 @@ func (t *iecTable) allocateSessionLocked(client, server netip.AddrPort, ctx rule
 	}
 	// The fixed credit includes held-list slots and abort bookkeeping, so
 	// a terminal failure never needs another allocation reservation.
-	return &iecSession{memory: memory, id: t.newID(), flow: retainedIECState(state),
-		client: client, server: server, ctx: ctx, mode: mode, lastSeen: now,
-		held: make([]*heldPacket, 0, iecMaxHeldPerSession)}
+	return &trackedSession{memory: memory, id: t.newID(), flow: retainedSessionState(state),
+		client: client, server: server, iecSession: iecSession{ctx: ctx, mode: mode}, lastSeen: now,
+		held: make([]*heldPacket, 0, sessionMaxHeldPerSession)}
 }
 
-func (t *iecTable) admissionLimitLocked(mode string) iecResult {
+func (t *sessionTable) admissionLimitLocked(mode string) sessionResult {
 	t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.Mode(mode))
 	res := accepted(reasonIECUntracked)
 	if mode == "enforce" {
@@ -38,8 +38,8 @@ func (t *iecTable) admissionLimitLocked(mode string) iecResult {
 	return res
 }
 
-func (t *iecTable) allocateDirLocked(s *iecSession, dir int, isn uint32) error {
-	stream, err := flow.NewBudgetedByteStream(iecStreamMaxBytes, iecStreamMaxSegments, t.resources, s.mode == "enforce")
+func (t *sessionTable) allocateDirLocked(s *trackedSession, dir int, isn uint32) error {
+	stream, err := flow.NewBudgetedByteStream(sessionStreamMaxBytes, sessionStreamMaxSegments, t.resources, s.mode == "enforce")
 	if err != nil {
 		return err
 	}
@@ -48,11 +48,11 @@ func (t *iecTable) allocateDirLocked(s *iecSession, dir int, isn uint32) error {
 		old.frames = nil
 		s.memory.Refund(old.frameCharge)
 	}
-	s.dirs[dir] = &iecDir{hasISN: true, isn: isn, seq: flow.NewSeqSpace(isn), bytes: stream}
+	s.dirs[dir] = &sessionDir{hasISN: true, isn: isn, seq: flow.NewSeqSpace(isn), bytes: stream}
 	return nil
 }
 
-func (t *iecTable) inspectionLimitLocked(s *iecSession, cur *heldPacket, now time.Time) iecResult {
+func (t *sessionTable) inspectionLimitLocked(s *trackedSession, cur *heldPacket, now time.Time) sessionResult {
 	first := !s.inspectionLost
 	if first {
 		t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.Mode(s.mode))
@@ -68,7 +68,7 @@ func (t *iecTable) inspectionLimitLocked(s *iecSession, cur *heldPacket, now tim
 	return res
 }
 
-func (s *iecSession) clearInspectionBytes() {
+func (s *trackedSession) clearInspectionBytes() {
 	for _, d := range s.dirs {
 		if d != nil {
 			d.bytes.Release()
@@ -81,7 +81,7 @@ func (s *iecSession) clearInspectionBytes() {
 	}
 }
 
-func (s *iecSession) releaseInspection() {
+func (s *trackedSession) releaseInspection() {
 	if s == nil {
 		return
 	}
@@ -95,8 +95,8 @@ func (s *iecSession) releaseInspection() {
 
 // stopInspection is generation retirement, not a capture rebind. It runs
 // after consumers/completions join, including generations never started.
-func (t *iecTable) stopInspection() {
-	t.stopInventory()
+func (t *sessionTable) stopInspection() {
+	t.iecAdapter.stopDelivery(t)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.flushHeldCreditsLocked(0)
@@ -110,7 +110,7 @@ func (t *iecTable) stopInspection() {
 	t.heldTotal, t.tombstones = 0, 0
 }
 
-func (s *iecSession) retainFrames(d *iecDir, frames []dpi.DecodedFrame) bool {
+func (s *trackedSession) retainFrames(d *sessionDir, frames []dpi.DecodedFrame) bool {
 	if len(frames) == 0 {
 		return true
 	}
@@ -118,10 +118,10 @@ func (s *iecSession) retainFrames(d *iecDir, frames []dpi.DecodedFrame) bool {
 	if !s.memory.Reserve(size) {
 		return false
 	}
-	replacement := make([]iecFrame, len(d.frames)+len(frames))
+	replacement := make([]sessionFrame, len(d.frames)+len(frames))
 	copy(replacement, d.frames)
 	for i, f := range frames {
-		replacement[len(d.frames)+i] = iecFrame{start: f.Start, end: f.End}
+		replacement[len(d.frames)+i] = sessionFrame{start: f.Start, end: f.End}
 	}
 	old := d.frameCharge
 	d.frames, d.frameCharge = replacement, size

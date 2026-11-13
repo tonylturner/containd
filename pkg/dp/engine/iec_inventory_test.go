@@ -23,8 +23,8 @@ type inventoryHarness struct {
 
 func newInventoryHarness(t *testing.T, mode string) *inventoryHarness {
 	h := &inventoryHarness{iecHarness: newAPCIHarness(t, mode)}
-	learn := h.e.iec.learnDelivery
-	h.e.iec.learnDelivery = func(id string) {
+	learn := h.e.sessions.learnDelivery
+	h.e.sessions.learnDelivery = func(id string) {
 		h.delivered.Add(1)
 		learn(id)
 	}
@@ -48,7 +48,7 @@ func TestIECInventoryDelivery(t *testing.T) {
 			}
 			h := newInventoryHarness(t, mode)
 			if fate == "deny" || fate == "would-drop" {
-				h.e.iec.policy = h.policy
+				h.e.sessions.policy = h.policy
 				h.policy.allowType = 100 // deny command type 46
 				if fate == "would-drop" {
 					h.policy.mode = "monitor"
@@ -139,10 +139,10 @@ func TestIECInventoryAbortWhileCommandHeld(t *testing.T) {
 		t.Fatal(d)
 	}
 	inventoryCounts(t, h, 1, 0)
-	h.e.iec.onSourceDown()
+	h.e.sessions.onSourceDown()
 	h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
 	inventoryCounts(t, h, 1, 0)
-	if len(h.e.iec.inventoryTokens) != 0 {
+	if len(h.e.sessions.inventoryTokens) != 0 {
 		t.Fatal("aborted ledger retained tokens")
 	}
 }
@@ -189,14 +189,14 @@ func TestIECInventoryBoundsAndAgeOut(t *testing.T) {
 			if snap.Pairs[0].AttemptedCommands != attempts || h.delivered.Load() != 0 {
 				t.Fatalf("bounded learner evidence changed: %+v", snap)
 			}
-			for _, s := range h.e.iec.sessions {
+			for _, s := range h.e.sessions.sessions {
 				if len(s.inventory.commands) != pending || len(s.inventory.tokens) != pending {
 					t.Fatalf("want %d pending commands/tokens; got %d/%d", pending, len(s.inventory.commands), len(s.inventory.tokens))
 				}
 			}
-			h.clock = h.clock.Add(iecPendingTimeout + time.Nanosecond)
-			h.e.iec.expire()
-			if len(h.e.iec.inventoryTokens) != 0 {
+			h.clock = h.clock.Add(sessionPendingTimeout + time.Nanosecond)
+			h.e.sessions.expire()
+			if len(h.e.sessions.inventoryTokens) != 0 {
 				t.Fatal("pending delivery did not age out")
 			}
 		})
@@ -209,12 +209,12 @@ func TestIECInventorySessionEnds(t *testing.T) {
 			h := newInventoryHarness(t, "enforce")
 			h.handshake()
 			p, _ := h.send(true, apdu(46, 6, 1, 101, 2))
-			old := h.e.iec
-			var s *iecSession
+			old := h.e.sessions
+			var s *trackedSession
 			for _, candidate := range old.sessions {
 				s = candidate
 			}
-			var acts iecActions
+			var acts sessionActions
 			old.mu.Lock()
 			switch end {
 			case "close":
@@ -222,7 +222,7 @@ func TestIECInventorySessionEnds(t *testing.T) {
 			case "abort":
 				acts = old.abortLocked(s, abortPolicy, "", nil, h.clock)
 			case "delete":
-				acts = old.deleteLocked(iecKey{s.client, s.server}, s)
+				acts = old.deleteLocked(sessionKey{s.client, s.server}, s)
 			}
 			old.mu.Unlock()
 			old.finish(acts)
@@ -231,7 +231,7 @@ func TestIECInventorySessionEnds(t *testing.T) {
 				h.policy.matched = false
 				h.e.LoadRules(iecSnapshot("enforce"))
 			case "idle":
-				h.clock = h.clock.Add(iecIdleTTL + time.Second)
+				h.clock = h.clock.Add(sessionIdleTTL + time.Second)
 				old.expire()
 			case "stop":
 				stop := make(chan struct{})
@@ -269,10 +269,10 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 			h := newInventoryHarness(t, "enforce")
 			h.handshake()
 			input := &pausedInventory{Inventory: h.e.Inventory(), entered: make(chan struct{}), release: make(chan struct{})}
-			h.e.iec.inventory = input
+			h.e.sessions.inventory = input
 			var early atomic.Bool
-			learn := h.e.iec.learnDelivery
-			h.e.iec.learnDelivery = func(id string) {
+			learn := h.e.sessions.learnDelivery
+			h.e.sessions.learnDelivery = func(id string) {
 				if !input.observed.Load() {
 					early.Store(true)
 				}
@@ -283,17 +283,17 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 			wg.Go(func() { h.e.handlePacket(p) })
 			<-input.entered
 			if fate != "accept" {
-				h.e.iec.mu.Lock()
-				var acts iecActions
-				for _, s := range h.e.iec.sessions {
+				h.e.sessions.mu.Lock()
+				var acts sessionActions
+				for _, s := range h.e.sessions.sessions {
 					if fate == "abort" {
-						acts.merge(h.e.iec.abortLocked(s, abortPolicy, "", nil, h.clock))
+						acts.merge(h.e.sessions.abortLocked(s, abortPolicy, "", nil, h.clock))
 					} else {
-						acts.merge(h.e.iec.closeLocked(s, h.clock))
+						acts.merge(h.e.sessions.closeLocked(s, h.clock))
 					}
 				}
-				h.e.iec.mu.Unlock()
-				h.e.iec.finish(acts)
+				h.e.sessions.mu.Unlock()
+				h.e.sessions.finish(acts)
 			}
 			for i := 0; i < 8; i++ {
 				wg.Go(func() { h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil) })
