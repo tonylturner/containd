@@ -15,6 +15,8 @@ on:
     paths:
       - .github/workflows/published-trivy.yml
       - scripts/verify-published-images.sh
+      - scripts/csaf/**
+      - security/csaf/triage.json
 
 permissions:
   contents: read

@@ -14,12 +14,12 @@ Checks the published :latest management and engine images on GHCR:
                    image's stable release tag and that tag's commit.
   sbom             Signed CycloneDX SBOM attestation under the same identity.
   vulnerabilities  Trivy scan of every platform image, failing on HIGH or
-                   CRITICAL findings not listed in .trivyignore.
+                   CRITICAL findings without justified vendor triage.
 
 The signature and sbom checks also require both images to come from the same
 release, whose version tag resolves to the :latest digest.
 
-Requires docker (with buildx), git and jq. Cosign and Trivy run from their
+Requires docker (with buildx), Python 3, git and jq. Cosign and Trivy run from their
 published container images. GITHUB_REPOSITORY selects the repository
 (default tonylturner/containd).
 EOF
@@ -141,13 +141,19 @@ verify_release_images() {
 }
 
 scan_images() {
-    local volume image digest platforms platform status=0
+    local volume image digest platforms platform tag product ignorefile status=0
     volume="containd-trivy-cache-$$"
     docker volume create "$volume" >/dev/null
     # shellcheck disable=SC2064 # Expand the volume name now.
     trap "docker volume rm --force '$volume' >/dev/null" EXIT
     for image in "${images[@]}"; do
         digest="$(resolve_digest "$image:latest")"
+        tag="$(signing_tag "$image" "$digest")"
+        product="${image##*/}"
+        mkdir -p "$repo_root/build/csaf"
+        ignorefile="$repo_root/build/csaf/$product-$$.yaml"
+        python3 "$repo_root/scripts/csaf/ignore.py" --product "$product" \
+            --version "${tag#v}" --output "$ignorefile"
         platforms="$(manifest "$image@$digest" | jq -er '
             [.manifests[]?.platform | select(.os != "unknown")
              | "\(.os)/\(.architecture)\(if .variant then "/\(.variant)" else "" end)"]
@@ -156,10 +162,10 @@ scan_images() {
             printf '\n==> %s:latest (%s) %s\n' "$image" "$digest" "$platform"
             docker run --rm \
                 -v "$volume:/cache" \
-                -v "$repo_root/.trivyignore:/trivyignore:ro" \
+                -v "$ignorefile:/trivyignore.yaml:ro" \
                 "$trivy_image" \
                 image --cache-dir /cache --image-src remote --platform "$platform" \
-                --exit-code 1 --severity HIGH,CRITICAL --ignorefile /trivyignore \
+                --exit-code 1 --severity HIGH,CRITICAL --ignorefile /trivyignore.yaml \
                 --format table --no-progress \
                 "$image@$digest" || status=1
         done

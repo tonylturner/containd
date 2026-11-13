@@ -10,7 +10,7 @@
     "notes": [
       {
         "category": "summary",
-        "text": "containd v0.1.16 switched the container base image from distroless to debian:bookworm-slim to support a real Linux shell with tcpdump for lab and training use. This change inherits 39 known HIGH/CRITICAL CVEs from upstream Debian 12 packages for which no fixes are currently available in bookworm. These vulnerabilities exist in third-party OS packages (nginx, clamav/python, ncurses, systemd, zlib, sqlite, nghttp2, openldap, libexpat) and are not in containd's own code.",
+        "text": "containd v0.1.16 switched the container base image from distroless to debian:bookworm-slim to support a real Linux shell with tcpdump for lab and training use. At initial publication, this change inherited 39 reported HIGH/CRITICAL findings from upstream Debian 12 packages without available bookworm fixes. Management image 0.1.17 replaced this package set with Wolfi. These vulnerabilities exist in third-party OS packages (nginx, clamav/python, ncurses, systemd, zlib, sqlite, nghttp2, openldap, libexpat) and are not in containd's own code.",
         "title": "Summary"
       }
     ],
@@ -35,9 +35,9 @@
     ],
     "title": "Inherited Debian 12 CVEs in v0.1.16 container image due to base image change",
     "tracking": {
-      "current_release_date": "2026-04-09T00:00:00Z",
+      "current_release_date": "2026-11-05T00:00:00Z",
       "generator": {
-        "date": "2026-04-09T00:00:00Z",
+        "date": "2026-11-05T00:00:00Z",
         "engine": {
           "name": "manual"
         }
@@ -54,25 +54,44 @@
           "date": "2026-04-09T00:00:00Z",
           "number": "2",
           "summary": "Resolved: v0.1.17 migrates to Wolfi base image, eliminating inherited Debian CVEs"
+        },
+        {
+          "date": "2026-11-05T00:00:00Z",
+          "number": "3",
+          "summary": "Distinguish affected management image 0.1.16 from fixed management image 0.1.17; clarify engine scope from release source history."
         }
       ],
       "status": "final",
-      "version": "2"
+      "version": "3"
     }
   },
   "product_tree": {
     "branches": [
       {
         "category": "vendor",
-        "name": "containd",
+        "name": "containd project",
         "branches": [
           {
             "category": "product_name",
-            "name": "containd management appliance",
-            "product": {
-              "name": "containd",
-              "product_id": "containd"
-            }
+            "name": "containd",
+            "branches": [
+              {
+                "category": "product_version",
+                "name": "0.1.16",
+                "product": {
+                  "name": "containd 0.1.16",
+                  "product_id": "containd-0.1.16"
+                }
+              },
+              {
+                "category": "product_version",
+                "name": "0.1.17",
+                "product": {
+                  "name": "containd 0.1.17",
+                  "product_id": "containd-0.1.17"
+                }
+              }
+            ]
           }
         ]
       }
@@ -92,16 +111,21 @@
         },
         {
           "category": "general",
-          "text": "These CVEs are in OS-level packages, not in containd's own code. Operators deploying containd in production environments should: (1) monitor upstream Debian security updates and rebuild images when fixes become available, (2) restrict network access to the containd container to trusted management networks, (3) consider using v0.1.15 with the distroless base image if the Linux shell feature is not required. The project is tracking evaluation of more secure base image alternatives in GitHub issue #16.",
+          "text": "These historical findings concern third-party OS packages in the management 0.1.16 image, not containd source code. Upgrade to management 0.1.17 or later, and restrict access to trusted management networks. The package-set replacement resolves this advisory; it is not a claim that Wolfi or any later release has no vulnerabilities. Consult each release VEX and current scans for that release.",
           "title": "Mitigations"
+        },
+        {
+          "category": "general",
+          "title": "Version and image scope",
+          "text": "The management runtime changed to debian:bookworm-slim in 0.1.16 and to Wolfi in 0.1.17. The engine image existed in both releases but retained its distroless Debian 12 runtime with staged nftables until its separate Wolfi migration in 0.1.18. This advisory covers the management 0.1.16 package set only; it makes no affected or fixed assertion about the engine or earlier distroless images. The tagged Dockerfiles establish runtime base and staged nftables provenance, not the exact vulnerable package versions shipped by the engine; no affected engine package set is established here."
         }
       ],
       "product_status": {
-        "first_affected": [
-          "containd"
+        "known_affected": [
+          "containd-0.1.16"
         ],
         "fixed": [
-          "containd"
+          "containd-0.1.17"
         ]
       },
       "references": [
@@ -126,12 +150,18 @@
           "category": "vendor_fix",
           "details": "Upgrade to v0.1.17 or later. The Debian-slim base image was replaced with Wolfi, eliminating the inherited Debian 12 CVEs.",
           "product_ids": [
-            "containd"
+            "containd-0.1.16"
           ],
           "url": "https://github.com/tonylturner/containd/releases/tag/v0.1.17"
         }
       ],
-      "title": "Inherited Debian 12 CVEs in container base image"
+      "title": "Inherited Debian 12 CVEs in container base image",
+      "ids": [
+        {
+          "system_name": "containd advisory",
+          "text": "containd-2026-001"
+        }
+      ]
     }
   ]
 }

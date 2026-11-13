@@ -58,6 +58,13 @@ jobs:
           created="$(git log -1 --format=%cI "$GITHUB_SHA")"
           echo "created=$created" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Report advisory coverage for security fixes
+        run: python3 scripts/csaf/gate.py
+
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: linux/amd64,linux/arm64
@@ -208,15 +215,41 @@ jobs:
             exit 1
           fi
 
-      - name: Package CSAF provider metadata and published advisories
+      - name: Scan every released platform without suppressions
+        shell: bash
+        env:
+          MGMT_DIGEST: ${{ steps.build-mgmt.outputs.digest }}
+          ENGINE_DIGEST: ${{ steps.build-engine.outputs.digest }}
         run: |
           set -euo pipefail
-          mkdir -p release-csaf
-          cp ui/public/.well-known/csaf/provider-metadata.json release-csaf/provider-metadata.json
-          if ls security/csaf/advisories/*.json >/dev/null 2>&1; then
-            cp security/csaf/advisories/*.json release-csaf/
-          fi
-          tar -czf csaf-documents.tgz -C release-csaf .
+          mkdir -p release-scans
+          for product in containd containd-engine; do
+            if [[ "$product" == containd ]]; then
+              image="$IMAGE_MGMT@$MGMT_DIGEST"
+            else
+              image="$IMAGE_ENGINE@$ENGINE_DIGEST"
+            fi
+            for arch in amd64 arm64; do
+              docker run --rm -v "$PWD/release-scans:/scans" \
+                ghcr.io/aquasecurity/trivy:0.62.1 image \
+                --image-src remote --platform "linux/$arch" --scanners vuln \
+                --ignorefile /dev/null --format json --no-progress \
+                --output "/scans/trivy-$product-$arch.json" "$image"
+            done
+          done
+
+      - name: Generate release VEX and CSAF directory
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          CREATED: ${{ steps.meta.outputs.created }}
+        run: |
+          set -euo pipefail
+          python3 scripts/csaf/generate.py --version "$VERSION" --created "$CREATED" \
+            --images release-images.txt --scans release-scans --output release-vex \
+            --summary "$GITHUB_STEP_SUMMARY"
+          python3 scripts/csaf/build_site.py --vex release-vex --output release-csaf
+          bash scripts/csaf/validate.sh release-csaf
+          tar -czf csaf-documents.tgz -C release-csaf/.well-known/csaf .
 
       - name: Upload SBOMs as release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -227,6 +260,7 @@ jobs:
             sbom-engine.cdx.json
             release-images.txt
             csaf-documents.tgz
+            release-scans/*.json
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
