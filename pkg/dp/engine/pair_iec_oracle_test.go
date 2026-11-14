@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -27,6 +28,7 @@ type iecStageOracle struct {
 }
 
 func TestDS34IEC104(t *testing.T) {
+	t.Run("settled-variants", testIECSettledVariants)
 	t.Run("mismatch-and-stages", testDS34IECMismatchStages)
 	t.Run("inline-solicited", func(t *testing.T) { testDS34SolicitedRuntime(t, runtimePairCases()[2]) })
 	t.Run("stage-table", func(t *testing.T) {
@@ -38,8 +40,6 @@ func TestDS34IEC104(t *testing.T) {
 				case 100:
 					q.Objects[0].Qualifier = 20
 				case 101:
-					q.Objects[0].Qualifier = 1
-				case 105:
 					q.Objects[0].Qualifier = 1
 				}
 				b := newPairing("iec104", pairResources(), false, nil)
@@ -100,14 +100,7 @@ func TestDS34IEC104(t *testing.T) {
 		if expectations.Version != 1 {
 			t.Fatal("unknown expectation version")
 		}
-		outcomes, pending := expectations.index(t)
-		for _, group := range expectations.Pending {
-			if len(group.IDs) == 0 {
-				t.Run("pending-"+group.Decision, func(t *testing.T) {
-					t.Errorf("PENDING %s: no peer sequence witnesses this procedure", group.Decision)
-				})
-			}
-		}
+		outcomes := expectations.index(t)
 		seen := map[string]bool{}
 		for _, seq := range oracle.Sequences {
 			if seen[seq.ID] {
@@ -116,10 +109,6 @@ func TestDS34IEC104(t *testing.T) {
 			seen[seq.ID] = true
 			t.Run(seq.ID, func(t *testing.T) {
 				why := replayIECSequence(t, seq, observed)
-				if decision, ok := pending[seq.ID]; ok {
-					t.Errorf("PENDING %s: %s (current table outcome %s)", seq.ID, decision, why)
-					return
-				}
 				want, ok := outcomes[seq.ID]
 				if !ok {
 					t.Fatal("missing oracle expectation", seq.ID)
@@ -134,13 +123,8 @@ func TestDS34IEC104(t *testing.T) {
 				t.Errorf("expectation has no oracle sequence: %s", id)
 			}
 		}
-		for id := range pending {
-			if !seen[id] {
-				t.Errorf("pending id has no oracle sequence: %s", id)
-			}
-		}
 		for _, row := range iecProcedures {
-			if row.Clause == "" || !row.StandardOnly && !observed[row.Type] {
+			if row.Clause == "" || !observed[row.Type] {
 				t.Errorf("type %d lacks required stage evidence", row.Type)
 			}
 		}
@@ -163,15 +147,11 @@ type iecOracleExpectation struct {
 type iecOracleExpectations struct {
 	Version  int                    `json:"version"`
 	Outcomes []iecOracleExpectation `json:"outcomes"`
-	Pending  []struct {
-		Decision string   `json:"decision"`
-		IDs      []string `json:"ids"`
-	} `json:"pending"`
 }
 
-func (e iecOracleExpectations) index(t *testing.T) (map[string]pairReason, map[string]string) {
+func (e iecOracleExpectations) index(t *testing.T) map[string]pairReason {
 	t.Helper()
-	outcomes, pending := map[string]pairReason{}, map[string]string{}
+	outcomes := map[string]pairReason{}
 	for _, x := range e.Outcomes {
 		if x.ID == "" || outcomes[x.ID] != "" {
 			t.Fatal("empty or duplicate expected id", x.ID)
@@ -193,18 +173,7 @@ func (e iecOracleExpectations) index(t *testing.T) (map[string]pairReason, map[s
 			t.Fatal("invalid expected outcome", x.ID, x.Outcome)
 		}
 	}
-	for _, group := range e.Pending {
-		if group.Decision == "" {
-			t.Fatal("missing pending decision")
-		}
-		for _, id := range group.IDs {
-			if id == "" || pending[id] != "" || outcomes[id] != "" {
-				t.Fatal("empty or duplicate pending id", id)
-			}
-			pending[id] = group.Decision
-		}
-	}
-	return outcomes, pending
+	return outcomes
 }
 func strictIECJSON(t *testing.T, path string, out any) {
 	t.Helper()
@@ -212,14 +181,21 @@ func strictIECJSON(t *testing.T, path string, out any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(out); err != nil {
+	if err := decodeIECJSON(bytes.NewReader(data), out); err != nil {
 		t.Fatal(path, err)
 	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		t.Fatal(path, "trailing JSON", err)
+}
+
+func decodeIECJSON(reader io.Reader, out any) error {
+	dec := json.NewDecoder(reader)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
 	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return errors.New("trailing JSON")
+	}
+	return nil
 }
 func readIECOracle(t *testing.T, path string) iecStageOracle {
 	t.Helper()

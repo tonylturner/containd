@@ -81,9 +81,10 @@ func PairingShape(u *Unit) (PairShape, error) {
 			return s, ErrInvalidShape
 		}
 	}
+	errorReply := s.Cause >= 44 && s.Cause <= 47
 	switch {
 	case d.class == ClassControl:
-		if s.Cause != 6 && s.Cause != 7 && s.Cause != 10 {
+		if s.Cause != 6 && s.Cause != 7 && s.Cause != 10 && !errorReply {
 			return s, ErrUnsupportedShape
 		}
 	case d.class == ClassMonitor:
@@ -96,20 +97,20 @@ func PairingShape(u *Unit) (PairShape, error) {
 		}
 	case s.TypeID == 100:
 		q := s.Objects[0].Qualifier
-		if (s.Cause != 6 && s.Cause != 7 && s.Cause != 10) || q < 20 || q > 36 || s.Objects[0].IOA != 0 {
+		if (s.Cause != 6 && s.Cause != 7 && s.Cause != 10 && !errorReply) || q < 20 || q > 36 || s.Objects[0].IOA != 0 {
 			return s, ErrUnsupportedShape
 		}
 	case s.TypeID == 101:
 		q := s.Objects[0].Qualifier & 63
-		if (s.Cause != 6 && s.Cause != 7 && s.Cause != 10) || q < 1 || q > 5 || s.Objects[0].IOA != 0 {
+		if (s.Cause != 6 && s.Cause != 7 && s.Cause != 10 && !errorReply) || q < 1 || q > 5 || s.Objects[0].IOA != 0 {
 			return s, ErrUnsupportedShape
 		}
 	case s.TypeID == 102:
-		if s.Cause != 5 {
+		if s.Cause != 5 && s.Cause != 7 && !errorReply {
 			return s, ErrUnsupportedShape
 		}
 	case s.TypeID == 103, s.TypeID == 105, s.TypeID == 107:
-		if (s.Cause != 6 && s.Cause != 7) || s.Objects[0].IOA != 0 {
+		if (s.Cause != 6 && s.Cause != 7 && !errorReply) || s.Objects[0].IOA != 0 {
 			return s, ErrUnsupportedShape
 		}
 		if s.TypeID == 105 && (s.Objects[0].Qualifier < 1 || s.Objects[0].Qualifier > 2) {
@@ -118,7 +119,7 @@ func PairingShape(u *Unit) (PairShape, error) {
 	default:
 		return s, ErrUnsupportedShape
 	}
-	if s.Negative && s.Cause != 7 && s.Cause != 10 {
+	if s.Negative && s.Cause != 7 && s.Cause != 10 && !errorReply {
 		return s, ErrInvalidShape
 	}
 	return s, nil

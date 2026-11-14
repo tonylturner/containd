@@ -138,74 +138,210 @@
     {
       "id": "c104-startup-autonomous",
       "outcome": "accept"
-    }
-  ],
-  "pending": [
-    {
-      "decision": "reset-process-105",
-      "ids": []
     },
     {
-      "decision": "group-gi-qoi-21-36",
-      "ids": [
-        "j60870-case-079",
-        "j60870-case-080",
-        "j60870-case-081",
-        "j60870-case-082",
-        "j60870-case-083",
-        "j60870-case-084",
-        "j60870-case-085",
-        "j60870-case-086",
-        "j60870-case-087",
-        "j60870-case-088",
-        "j60870-case-089",
-        "j60870-case-090",
-        "j60870-case-091",
-        "j60870-case-092",
-        "j60870-case-093",
-        "j60870-case-094"
-      ]
+      "id": "j60870-case-079",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
     },
     {
-      "decision": "counter-interrogation-101",
-      "ids": [
-        "c104-case-100",
-        "c104-case-101",
-        "c104-case-102",
-        "c104-case-103",
-        "c104-case-104",
-        "c104-case-105",
-        "c104-case-106",
-        "c104-case-107",
-        "c104-case-108",
-        "c104-case-109",
-        "c104-case-110",
-        "c104-case-111",
-        "c104-case-112",
-        "c104-case-113",
-        "c104-case-114",
-        "c104-case-115"
-      ]
+      "id": "j60870-case-080",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
     },
     {
-      "decision": "c104-stage-variants",
-      "ids": [
-        "c104-case-005",
-        "c104-case-011",
-        "c104-case-017",
-        "c104-case-023",
-        "c104-case-029",
-        "c104-case-035",
-        "c104-case-043",
-        "c104-case-049",
-        "c104-case-055",
-        "c104-case-061",
-        "c104-case-067",
-        "c104-case-073",
-        "c104-case-116",
-        "c104-case-117",
-        "c104-case-118"
-      ]
+      "id": "j60870-case-081",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-082",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-083",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-084",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-085",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-086",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-087",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-088",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-089",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-090",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-091",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-092",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-093",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "j60870-case-094",
+      "outcome": "reset",
+      "reason": "pairing_mismatch"
+    },
+    {
+      "id": "c104-case-100",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-101",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-102",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-103",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-104",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-105",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-106",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-107",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-108",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-109",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-110",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-111",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-112",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-113",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-114",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-115",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-005",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-011",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-017",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-023",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-029",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-035",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-043",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-049",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-055",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-061",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-067",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-073",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-116",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-117",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-118",
+      "outcome": "accept"
     }
   ]
 }

@@ -28,6 +28,11 @@ func (t *sessionTable) prepareUnitsLocked(s *trackedSession, dir int, frames []d
 		}
 		class, why := s.pairing.inspect(f, dpiDir(dir), now)
 		permit, nonAdmit, policyWhy := t.unitPolicyLocked(s, dir, f, class, why == pairOK, compiled, now, res)
+		if why == pairUnsupported {
+			// An unknown class cannot match an enforcing ALLOW. Preserve the
+			// typed unsupported cause, not that secondary policy mismatch.
+			policyWhy = why
+		}
 		if policyWhy != pairOK {
 			stampPairing(f.Events, class, policyWhy)
 			if failure == pairOK {

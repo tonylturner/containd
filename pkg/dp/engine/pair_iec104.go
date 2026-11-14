@@ -11,10 +11,10 @@ import (
 )
 
 type iecPairKey struct {
-	Dir                     dpi.StreamDir
-	CA                      uint16
-	IOA                     uint32
-	Type, Originator, Stage uint8
+	Dir                            dpi.StreamDir
+	CA                             uint16
+	IOA                            uint32
+	Type, Originator, Stage, Cause uint8
 }
 type iecPairAdapter struct{}
 
@@ -24,7 +24,7 @@ func (iecPairAdapter) Classify(f dpi.DecodedFrame, dir dpi.StreamDir) (rules.Mes
 		return rules.ClassUnknown, iecPairKey{}, iec104.PairShape{}, pairUnsupported
 	}
 	s, err := iec104.PairingShape(u)
-	k := iecPairKey{Dir: dpi.ClientToServer, CA: s.CA, Type: s.TypeID, Originator: s.Originator, Stage: s.Cause}
+	k := iecPairKey{Dir: dpi.ClientToServer, CA: s.CA, Type: s.TypeID, Originator: s.Originator, Stage: s.Cause, Cause: s.Cause}
 	if len(s.Objects) > 0 {
 		k.IOA = s.Objects[0].IOA
 	}
@@ -52,7 +52,7 @@ func (iecPairAdapter) Classify(f dpi.DecodedFrame, dir dpi.StreamDir) (rules.Mes
 		return rules.ClassSolicited, k, s, pairOK
 	}
 	row, known := iecProcedureFor(s.TypeID)
-	if known && (s.Cause == row.ConfirmCause || s.Cause == 10 && row.Termination) {
+	if known && (s.Cause == row.ConfirmCause || s.Cause == 10 && row.Termination || iecErrorCause(s.Cause) && row.Variants&iecNegativeError != 0) {
 		k.Stage = 0
 		if s.Objects[0].Select {
 			k.Stage = 1
@@ -66,7 +66,8 @@ func (iecPairAdapter) Matches(q, r iecPairKey) bool {
 		return false
 	}
 	if q.Type == r.Type {
-		return q.IOA == r.IOA && q.Stage == r.Stage
+		row, _ := iecProcedureFor(q.Type)
+		return q.IOA == r.IOA && (q.Stage == r.Stage || q.Stage == 0 && r.Cause == 10 && row.Variants&iecTerminationSelectEcho != 0)
 	}
 	switch q.Type {
 	case 100:
@@ -99,18 +100,41 @@ func (iecPairAdapter) Advance(q iec104.PairShape, p pairProgress, r iec104.PairS
 	if !ok || q.CA != r.CA || q.Originator != r.Originator || q.Test != r.Test || r.Format != "I" {
 		return p, false, pairMismatch
 	}
-	if q.TypeID == 102 {
+	if p.Closed {
+		// A negative confirmation ends data authority immediately. Retain only
+		// this bounded, exact request echo for one terminal error indication.
+		if row.Variants&iecNegativeError != 0 && iecErrorCause(r.Cause) && q.TypeID == r.TypeID && slices.Equal(q.Objects, r.Objects) {
+			return p, true, pairOK
+		}
+		return p, false, pairUnpaired
+	}
+	if r.TypeID == q.TypeID && r.Negative && r.Cause == row.ConfirmCause && slices.Equal(q.Objects, r.Objects) {
+		p.Closed = true
+		return p, false, pairOK
+	}
+	if row.Variants&iecOptionalReadConfirm != 0 {
+		if p.Phase == 0 && r.TypeID == q.TypeID && r.Cause == row.ConfirmCause && slices.Equal(q.Objects, r.Objects) {
+			p.Phase = 1
+			return p, false, pairOK
+		}
 		if r.Cause != 5 || !iecMonitorType(r.TypeID) || len(r.Objects) != 1 || q.Objects[0].IOA != r.Objects[0].IOA {
 			return p, false, pairMismatch
 		}
 		return p, true, pairOK
 	}
 	if r.TypeID == q.TypeID {
-		if !slices.Equal(q.Objects, r.Objects) {
+		objects := r.Objects
+		if p.Phase == 1 && r.Cause == 10 && row.Variants&iecTerminationSelectEcho != 0 {
+			objects = slices.Clone(objects)
+			for i := range objects {
+				objects[i].Select = q.Objects[0].Select
+			}
+		}
+		if !slices.Equal(q.Objects, objects) {
 			return p, false, pairMismatch
 		}
 		if p.Phase == 0 && r.Cause == row.ConfirmCause {
-			if r.Negative || q.Objects[0].Select || !row.Termination {
+			if q.Objects[0].Select || !row.Termination {
 				return p, true, pairOK
 			}
 			p.Phase = 1
@@ -125,11 +149,13 @@ func (iecPairAdapter) Advance(q iec104.PairShape, p pairProgress, r iec104.PairS
 		if q.TypeID == 100 && iecMonitorType(r.TypeID) && r.Cause == q.Objects[0].Qualifier {
 			return p, false, pairOK
 		}
-		if q.TypeID == 101 && (r.TypeID == 15 || r.TypeID == 37) && r.Cause == 36+(q.Objects[0].Qualifier&63) {
+		if q.TypeID == 101 && (r.TypeID == 15 || r.TypeID == 37) && slices.Contains(iecCounterCauses[(q.Objects[0].Qualifier&63)-1], r.Cause) {
 			return p, false, pairOK
 		}
 	}
 	return p, false, pairMismatch
 }
+
+func iecErrorCause(cause uint8) bool { return cause >= 44 && cause <= 47 }
 
 func (iecPairAdapter) Unit(s iec104.PairShape) dpi.ParsedUnit { return &iec104.Unit{PairShape: s} }

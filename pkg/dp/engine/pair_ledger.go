@@ -35,6 +35,7 @@ type protocolPairKey interface{ comparable }
 type pairProgress struct {
 	Phase, ExpectedSequence uint8
 	Fragments               uint16
+	Closed                  bool // terminal coverage only; cannot authorize response data
 }
 type requestPermit struct {
 	Epoch    rulesEpoch
@@ -157,6 +158,10 @@ func (b *pairLedger[K, S]) apply(f dpi.DecodedFrame, dir dpi.StreamDir, permit r
 		// Reuse is ambiguous even when a peer changes FC while retaining TID.
 		for i := len(b.grants) - 1; i >= 0; i-- {
 			if b.adapter.Conflicts(b.grants[i].Key, k) {
+				if b.grants[i].State.Closed {
+					b.remove(i)
+					continue
+				}
 				b.mark(b.grants[i].Key, pairAmbiguous)
 				b.remove(i)
 				b.mark(k, pairAmbiguous)
