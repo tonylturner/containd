@@ -189,3 +189,50 @@ func testDS34HeldShares(t *testing.T) {
 		t.Fatal("leases leaked")
 	}
 }
+
+func TestSessionCoverageAmortizedRetention(t *testing.T) {
+	budget := limits.NewBudget(4 << 20)
+	table := &sessionTable{resources: limits.NewResources(budget, nil)}
+	s := &trackedSession{iecSession: iecSession{mode: "enforce"}}
+	d := &sessionDir{}
+	var previous *sessionFrame
+	growths := 0
+	for i := int64(0); i < 1000; i++ {
+		if err := table.retainFramesLocked(s, d, []dpi.DecodedFrame{{Start: i, End: i + 1, Pending: true}}); err != nil {
+			t.Fatal(i, err)
+		}
+		if &d.frames[0] != previous {
+			growths++
+			previous = &d.frames[0]
+		}
+		if got := budget.Status().InUse; got != int64(cap(d.frames))*128 || d.frameLease.Size() != got {
+			t.Fatalf("retained capacity is not charged exactly: %d, capacity %d", got, cap(d.frames))
+		}
+	}
+	if growths > 11 {
+		t.Fatalf("1000 appends copied the retained list %d times", growths)
+	}
+	before := budget.Status().InUse
+	// Two completions in one batch cannot claim the same pending provenance.
+	bad := []dpi.DecodedFrame{
+		{Start: 1000, End: 1001, Unit: &dnp3.Unit{}, Coverage: []dpi.CoverageRange{{Start: 0, End: 1001}}},
+		{Start: 1001, End: 1002, Unit: &dnp3.Unit{}, Coverage: []dpi.CoverageRange{{Start: 0, End: 1}, {Start: 1001, End: 1002}}},
+	}
+	if err := table.retainFramesLocked(s, d, bad); err == nil {
+		t.Fatal("batch reused carrying provenance")
+	}
+	if len(d.frames) != 1000 || &d.frames[0] != previous || budget.Status().InUse != before || d.frames[0].covered {
+		t.Fatal("failed batch published coverage, storage or credit")
+	}
+	good := bad[:1]
+	if err := table.retainFramesLocked(s, d, good); err != nil {
+		t.Fatal(err)
+	}
+	if !d.covered(0, 1001) || &d.frames[0] != previous {
+		t.Fatal("completion lost provenance or copied available storage")
+	}
+	d.frameLease.Release()
+	if budget.Status().InUse != 0 {
+		t.Fatal("metadata or validation scratch credit leaked")
+	}
+}
