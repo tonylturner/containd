@@ -107,6 +107,7 @@ func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (cap
 		return capture.Decision{}, false
 	}
 	e.recordPacketStats(pkt, state)
+	noteCorrelationInspection(state, pkt, !res.stateLimit && res.failure == "")
 	if res.stateLimit {
 		e.recordLearnPacketLoss(pkt)
 	}
@@ -156,12 +157,12 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 	if !okSrc || !okDst {
 		return t.nonIPv4Locked(state)
 	}
-	s, dir := t.lookupLocked(src, dst)
+	s, dir := t.lookupPacketLocked(src, dst, state)
 	defer func() {
 		if !handled {
 			return
 		}
-		owner, _ := t.lookupLocked(src, dst)
+		owner, _ := t.lookupPacketLocked(src, dst, state)
 		if owner == nil {
 			return
 		}

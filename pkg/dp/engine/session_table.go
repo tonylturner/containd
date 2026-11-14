@@ -229,6 +229,32 @@ func (t *sessionTable) lookupLocked(src, dst netip.AddrPort) (*trackedSession, i
 	return nil, 0
 }
 
+// Verified transport binding can join two different wire tuples (for example
+// a pre-SNAT opener and its on-wire reply). Histories remain in this one table;
+// the shared connection key locates the survivor, never unions its grants.
+func (t *sessionTable) lookupPacketLocked(src, dst netip.AddrPort, state *flow.State) (*trackedSession, int) {
+	if s, dir := t.lookupLocked(src, dst); s != nil {
+		return s, dir
+	}
+	c := state.Connection.Load()
+	if c == nil || c.Key == "" {
+		return nil, 0
+	}
+	for _, s := range t.sessions {
+		if s.flow == nil {
+			continue
+		}
+		owned := s.flow.Connection.Load()
+		if owned != nil && owned.Key == c.Key {
+			if c.Direction(state.Key) == flow.DirReverse {
+				return s, sessionDirSrv
+			}
+			return s, sessionDirClient
+		}
+	}
+	return nil, 0
+}
+
 // setPolicy installs the snapshot's protocol policy. Live sessions whose
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.

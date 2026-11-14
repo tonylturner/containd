@@ -287,7 +287,11 @@ func TestTransportCoverageLossFollowsWorkerGeneration(t *testing.T) {
 			pkt := transportWire(natEvidence().Original, time.Now(), modbusADU(1, 3, 10, 2))
 			r.admit(e, pkt)
 			processTransportAdmission(t, e, r)
-			oldID := transportModbusEvents(e)[0].TransportConnectionID
+			initial := transportModbusEvents(e)
+			if len(initial) != 1 {
+				t.Fatalf("decoded initial generation events = %d, want 1", len(initial))
+			}
+			oldID := initial[0].TransportConnectionID
 			reader.mu.Lock()
 			reader.evidence.ID++
 			reader.evidence.Start++
