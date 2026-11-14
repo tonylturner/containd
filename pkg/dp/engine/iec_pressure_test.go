@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func assertNoIECHolds(t *testing.T, e *Engine) {
@@ -70,6 +71,45 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 			assertNoIECHolds(t, h.e)
 		})
 	}
+}
+
+func TestIECPressureProtocolIsolation(t *testing.T) {
+	for _, p := range runtimePairCases()[:2] {
+		t.Run(p.protocol, func(t *testing.T) {
+			e := runtimePairEngine(t, rules.Snapshot{Default: rules.ActionDeny,
+				Firewall: []rules.Entry{runtimePairRule(p, "enforce")}}, true)
+			inlineHandshake(t, e, 41000, p.port)
+			if d := e.HandlePacket(runtimePairPacket(p, false, 100, p.request[:3])); d.Action != capture.Hold {
+				t.Fatal(d)
+			}
+			got := e.IEC104Diagnostics()
+			if got.Limits.Sessions != sessionMaxSessions || got.ActiveSessions != 0 || got.TrackedSessions != 0 ||
+				got.HeldBytes != 0 || got.HeldPackets != 0 || got.OldestPendingSeconds != 0 {
+				t.Fatalf("generic live session leaked into IEC diagnostics: %+v", got)
+			}
+			if got := e.sessions.LimitOccupancy(); got.Entries != 1 || got.Limit != sessionMaxSessions+deniedTCPCapacity {
+				t.Fatalf("aggregate occupancy lost generic live session: %+v", got)
+			}
+		})
+	}
+	t.Run("denied-tuples", func(t *testing.T) {
+		h := newIECHarness(t, "enforce")
+		h.handshake()
+		h.send(true, iframe(46, 1)[:4])
+		before := h.e.IEC104Diagnostics()
+		for port := 1; port <= deniedTCPCapacity; port++ {
+			retainSessionTuple(h.e.sessions, uint16(port), h.clock)
+		}
+		after := h.e.IEC104Diagnostics()
+		if after.Limits.Sessions != sessionMaxSessions || after.TrackedSessions != 1 || after.ActiveSessions != 1 ||
+			after.HeldBytes != before.HeldBytes || after.HeldPackets != before.HeldPackets ||
+			after.OldestPendingSeconds != before.OldestPendingSeconds {
+			t.Fatalf("denied tuples inflated IEC pressure: before=%+v after=%+v", before, after)
+		}
+		if got := h.e.sessions.LimitOccupancy(); got.Entries != deniedTCPCapacity+1 || got.Limit != sessionMaxSessions+deniedTCPCapacity {
+			t.Fatalf("aggregate occupancy lost denied tuples: %+v", got)
+		}
+	})
 }
 
 func TestIECPressureEveryAbortClearsGauges(t *testing.T) {

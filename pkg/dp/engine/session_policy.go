@@ -49,7 +49,22 @@ func (t *sessionTable) genericUnitPolicyLocked(s *trackedSession, dir int, f dpi
 	for _, ev := range f.Events {
 		j.strict = j.strict || t.parsing == ics.Strict && hasInspectionFindings(ev) && j.scope != nil
 	}
-	objects, err := project.UnitObjects(f.Unit, class, dpiDir(dir))
+	var objects []rules.ICSContext
+	var err error
+	if s.mode == "monitor" {
+		// Decode-and-decide covers every decoded message, including procedures
+		// unsupported by the pairing table. This projection is observational:
+		// observePairingLocked independently requires typed request authority.
+		state := &flow.State{Key: s.flow.ServiceKey()}
+		if (state.Key.Dir == flow.DirReverse) != (dir == sessionDirSrv) {
+			state.Key = state.Key.Reversed()
+		}
+		for _, ev := range f.Events {
+			objects = append(objects, project.Objects(state, ev, nil)...)
+		}
+	} else {
+		objects, err = project.UnitObjects(f.Unit, class, dpiDir(dir))
+	}
 	if err == nil {
 		for i := range objects {
 			ctx := s.ctx
@@ -109,7 +124,9 @@ func (e *Engine) recordSessionMessages(state *flow.State, pkt *dpi.ParsedPacket,
 					decision = decisionDeny
 				}
 				e.recordConformanceDecision(state, pkt, ev, j.scope, mode, decision, reasonNonconformant)
-			} else if j.denied {
+			} else if j.denied && !e.detached {
+				// Live non-admission can report ordinary transport denial.
+				// Detached replay has no such authority, only would-decisions.
 				reason := reasonDefault
 				if j.matched != nil {
 					reason = reasonRule
