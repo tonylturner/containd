@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generic Modbus, DNP3 and CIP inline inspection now receives both tracked
   directions in enforce and monitor modes, including NAT and published
   services. Existing enforcing response denials and strict parsing vetoes
-  now apply to replies; monitor rules remain observational. Unmatched generic
-  replies retain their existing message default-deny suppression.
+  now apply to replies; monitor rules remain observational. CIP retains its
+  message default-deny suppression; Modbus/DNP3 use request pairing below.
 
 ### Added
 
@@ -78,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source defects exclude 0.1.30–0.1.32 and 0.1.34. The update policy lists
   supported paths and requires a fresh matrix before each release.
 
+### Changed
+
+- Separate DNP3 Secure Operations Confirm/link session rules and explicit
+  unsolicited permission. Learner suggestions retain autonomous/session
+  message classes and recertify or withhold older proofs. Rule and ruleset
+  previews show retained pairing outcomes/reasons, not delivery. Remove
+  unproven IEC 104 delivery evidence; learner delivery is unknown or blocked.
+
 ### Removed
 
 - The `containd_dpi_decoder_packets_total` metric. Nothing ever incremented it,
@@ -101,6 +109,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fast typing in Current password no longer lands in New password.
 
 ### Security
+
+- Pair enforcing Modbus, DNP3 and IEC 104 replies with compatible explicitly
+  allowed requests on the same TCP session. Unpaired, late, ambiguous or
+  unsupported replies reset the session; autonomous data and session controls
+  require explicit message-class rules. Boot replay applies this hard cutover,
+  with install/preview warnings; slow peers must meet reply and unit-hold deadlines.
 
 - Fail closed for Modbus, DNP3, IEC 104 and CIP enforce rules when DPI or the
   protocol decoder is off, or an IP/CIDR exclusion prevents inspection.
