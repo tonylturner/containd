@@ -904,10 +904,7 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 			return res.aborting(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		}
 		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true, sessionProtocol(s.flow)) {
-			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeEnforce)
-			r := res.aborting("state_limit", t.abortLocked(s, abortBound, "", cur, now))
-			r.stateLimit = true
-			return r
+			return t.inspectionLimitLocked(s, cur, now)
 		}
 	}
 	if why := t.commitUnitsLocked(s, dir, cur, now); why != pairOK {

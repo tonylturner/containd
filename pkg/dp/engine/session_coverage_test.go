@@ -98,6 +98,7 @@ func TestDS34Gate(t *testing.T) {
 }
 
 func TestDS34Settlement(t *testing.T) {
+	t.Run("inflight-rejection", testDS34InflightSettlement)
 	h := newIECHarness(t, "enforce")
 	table := h.e.sessions
 	for _, err := range []error{capture.ErrUnknownToken, errors.New("uncertain send")} {

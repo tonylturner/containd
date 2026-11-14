@@ -77,15 +77,24 @@ func TestIECInventoryDelivery(t *testing.T) {
 			}
 			h.e.hooks.onVerdict(p.Token, v, err)
 			// Duplicate completions cannot credit twice, including after failure.
-			h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
-			want := uint64(0)
-			if fate == "accept" {
-				want = 1
+			h.e.hooks.onVerdict(p.Token, v, nil)
+			// The gate returns Repeat, not Accept. Even an allowed command
+			// creates attempted inventory and an active grant, not delivery
+			// evidence; a mismatched Accept completion aborts that authority.
+			if fate == "accept" || fate == "repeat" {
 				if !d.Notify {
-					t.Fatal("immediate command accept needs a completion")
+					t.Fatal("immediate command needs a completion")
+				}
+				state, _ := h.sessionState()
+				wantState := sessionEstablished
+				if fate == "accept" {
+					wantState = sessionAborted
+				}
+				if state != wantState {
+					t.Fatalf("completion state=%v want %v", state, wantState)
 				}
 			}
-			inventoryCounts(t, h, 1, want)
+			inventoryCounts(t, h, 1, 0)
 			if (d.Action == capture.Drop) != (fate == "deny") {
 				t.Fatalf("decision changed: %+v", d)
 			}
@@ -123,13 +132,16 @@ func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
 		t.Fatalf("held tails were not released: %+v", release)
 	}
 	for _, p := range packets[:len(packets)-1] {
-		h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
+		h.e.hooks.onVerdict(p.Token, capture.VerdictRepeat, nil)
 	}
-	inventoryCounts(t, h, 2, 1) // second command did not overlap the retransmitted head
-	h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
-	inventoryCounts(t, h, 2, 2)
+	inventoryCounts(t, h, 2, 0)
+	h.e.hooks.onVerdict(p.Token, capture.VerdictRepeat, nil)
+	inventoryCounts(t, h, 2, 0)
 	h.e.handlePacket(h.pkt(true, capture.TCPFlagACK, seq, h.sSeq, payload[:len(payload)-1]))
-	inventoryCounts(t, h, 2, 2) // completed retransmission is not a new APDU
+	inventoryCounts(t, h, 2, 0) // completed retransmission is not a new APDU
+	if state, _ := h.sessionState(); state != sessionEstablished || len(h.e.sessions.inventoryTokens) != 0 {
+		t.Fatal("successful Repeat lost the live session or retained inventory completions")
+	}
 }
 
 func TestIECInventoryAbortWhileCommandHeld(t *testing.T) {
@@ -267,7 +279,7 @@ func (p *pausedInventory) ObserveIEC104(o inventory.IEC104Observation) {
 }
 
 func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
-	for _, fate := range []string{"accept", "abort", "close"} {
+	for _, fate := range []string{"repeat", "wrong-accept", "abort", "close"} {
 		t.Run(fate, func(t *testing.T) {
 			h := newInventoryHarness(t, "enforce")
 			h.handshake()
@@ -285,7 +297,7 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Go(func() { h.e.handlePacket(p) })
 			<-input.entered
-			if fate != "accept" {
+			if fate == "abort" || fate == "close" {
 				h.e.sessions.mu.Lock()
 				var acts sessionActions
 				for _, s := range h.e.sessions.sessions {
@@ -298,11 +310,15 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 				h.e.sessions.mu.Unlock()
 				h.e.sessions.finish(acts)
 			}
+			verdict := capture.VerdictRepeat
+			if fate == "wrong-accept" {
+				verdict = capture.VerdictAccept
+			}
 			for i := 0; i < 8; i++ {
-				wg.Go(func() { h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil) })
+				wg.Go(func() { h.e.hooks.onVerdict(p.Token, verdict, nil) })
 			}
 			// A completion must return while observation is paused.
-			h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
+			h.e.hooks.onVerdict(p.Token, verdict, nil)
 			if h.delivered.Load() != 0 {
 				t.Fatal("outcome preceded observation")
 			}
@@ -311,11 +327,11 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 			if early.Load() {
 				t.Fatal("learner delivery preceded observation")
 			}
-			want := uint64(0)
-			if fate == "accept" {
-				want = 1
+			inventoryCounts(t, h, 1, 0)
+			state, _ := h.sessionState()
+			if fate == "repeat" && state != sessionEstablished || fate == "wrong-accept" && state != sessionAborted {
+				t.Fatalf("completion lost terminal semantics: %v", state)
 			}
-			inventoryCounts(t, h, 1, want)
 		})
 	}
 }
@@ -344,7 +360,7 @@ func TestIECInventoryStartupCapture(t *testing.T) {
 				p.Timestamp = h.clock
 				p.Token = h.token()
 				d := h.e.handlePacket(p)
-				v := capture.VerdictAccept
+				v := capture.VerdictRepeat
 				if d.Action == capture.Drop {
 					v = capture.VerdictDrop
 				}
@@ -371,12 +387,8 @@ func TestIECInventoryStartupCapture(t *testing.T) {
 			if points != 13 || attempted != 4 {
 				t.Fatalf("vacuous capture replay: %+v", s)
 			}
-			want := uint64(0)
-			if mode == "enforce" {
-				want = 4
-			}
-			if h.delivered.Load() != want {
-				t.Fatalf("learner deliveries %d, want %d", h.delivered.Load(), want)
+			if h.delivered.Load() != 0 {
+				t.Fatalf("kernel continuation claimed %d learner deliveries", h.delivered.Load())
 			}
 			t.Logf("%s: 3 pairs, 3 CAs, %d points, %d attempted / %d learner deliveries", mode, points, attempted, h.delivered.Load())
 		})
