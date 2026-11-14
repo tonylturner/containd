@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Unmodified upstream SampleServer; keep sources/licences in this local image.
+FROM alpine:3.23
+RUN apk add --no-cache curl openjdk17-jdk python3 tcpdump iproute2
+WORKDIR /sources
+RUN curl -fsSL https://codeload.github.com/gythialy/j60870/tar.gz/dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221 -o j60870.tar.gz \
+ && echo '4ba53694e619ab37a89e08205d0575e20abd901cd2c1b8fcc79f278bb79f31db  j60870.tar.gz' | sha256sum -c - \
+ && tar -xzf j60870.tar.gz \
+ && find j60870-*/src/main/java j60870-*/cli-app/src/main/java -name '*.java' > java-sources \
+ && javac --release 11 -d /opt/j60870 @java-sources
+CMD ["java", "-cp", "/opt/j60870", "org.openmuc.j60870.app.SampleServer", "-a", "0.0.0.0"]
