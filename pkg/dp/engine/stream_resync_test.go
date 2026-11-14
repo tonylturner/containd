@@ -45,6 +45,7 @@ func misframeCases() []misframeCase {
 // as the inline capture does and completes its verdict.
 func (f *fcFlow) fromServer(off uint32, flags capture.TCPFlags) capture.Decision {
 	pkt := connSegment(true, f.client, f.port, resyncServerISN+off, flags, nil)
+	pkt.TCP.Ack = f.isn
 	pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
 	d := f.e.HandlePacket(pkt)
 	v := capture.VerdictAccept

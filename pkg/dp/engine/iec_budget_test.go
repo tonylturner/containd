@@ -57,11 +57,14 @@ func TestIECFrameBudgetRefusalPrecedesPublication(t *testing.T) {
 
 func TestIECAckBudgetRefusalIsTerminal(t *testing.T) {
 	h := newIECHarness(t, "enforce")
-	r := limits.NewResources(limits.NewBudget(16384), h.e.ledger)
+	const capacity = 65536 // includes the bounded pairing ledger
+	r := limits.NewResources(limits.NewBudget(capacity), h.e.ledger)
 	h.e.sessions.resources = r
 	h.handshake()
-	h.send(true, iframe(46, 1))
-	blocker, ok := r.Budget.Reserve(limits.ClassEnforce, limits.CategoryHeld, 16384-r.Budget.Status().InUse-7)
+	if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
+		t.Fatalf("initial command = %+v", d)
+	}
+	blocker, ok := r.Budget.Reserve(limits.ClassEnforce, limits.CategoryHeld, capacity-r.Budget.Status().InUse-7)
 	if !ok {
 		t.Fatal("blocker")
 	}

@@ -22,7 +22,7 @@ func (t *sessionTable) retainFramesLocked(s *trackedSession, d *sessionDir, fram
 	if s.mode == "enforce" {
 		class = limits.ClassEnforce
 	}
-	lease, ok := t.resources.Budget.Reserve(class, limits.CategoryPairing, int64(len(d.frames)+len(frames))*32)
+	lease, ok := t.resources.Budget.Reserve(class, limits.CategoryPairing, int64(len(d.frames)+len(frames))*128)
 	if !ok {
 		return flow.ErrInspectionLimit
 	}

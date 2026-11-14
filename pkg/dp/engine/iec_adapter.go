@@ -27,11 +27,13 @@ const (
 // session owner's single lock protects it and each session's protocol state.
 // It owns no TCP tracker, sequence space, held credits or settlement lock.
 type iecAdapter struct {
-	policy     iecPolicy
-	newPolicy  func(*rules.Snapshot) iecPolicy
-	safeRead   func(map[string]any) bool
-	globalMode string
-	hasIEC     bool
+	policy      iecPolicy
+	newPolicy   func(*rules.Snapshot) iecPolicy
+	safeRead    func(map[string]any) bool
+	globalMode  string
+	hasIEC      bool
+	hasSessions bool
+	gatedPolicy *rules.Evaluator
 	// parsing is resolved for each packet; changes do not retire sessions.
 	parsing         ics.Parsing
 	inventory       iecInventoryInput
@@ -108,6 +110,12 @@ func (a *iecAdapter) streamErrorEvent(s *trackedSession, dir int, off int64, err
 
 // envelopeLocked evaluates the envelope of a session tuple.
 func (a *iecAdapter) envelopeLocked(ctx rules.EvalContext) (bool, string) {
+	switch ctx.Port {
+	case "502":
+		return a.gatedPolicy.ProtocolEnvelope(ctx, "modbus", a.globalMode)
+	case "20000":
+		return a.gatedPolicy.ProtocolEnvelope(ctx, "dnp3", a.globalMode)
+	}
 	if a.policy == nil || !a.hasIEC {
 		return false, ""
 	}
@@ -187,10 +195,16 @@ func dirLetter(dir int) byte {
 // The adapter callbacks below are invoked only under sessionTable.mu. They
 // preserve protocol observation ordering without owning transport state.
 func (a *iecAdapter) packetLocked(t *sessionTable, s *trackedSession, cur *heldPacket, acts *sessionActions) {
+	if sessionProtocol(s.flow) != iecProtocol {
+		return
+	}
 	t.inventoryPacketLocked(s, cur, acts)
 }
 
 func (a *iecAdapter) expireLocked(t *sessionTable, s *trackedSession, acts *sessionActions, now time.Time) {
+	if sessionProtocol(s.flow) != iecProtocol {
+		return
+	}
 	s.expireAPCILocked(acts, now)
 	t.expireInventoryLocked(s, acts, now)
 }
@@ -208,6 +222,9 @@ func (a *iecAdapter) verdictLocked(t *sessionTable, tok capture.Token, v capture
 }
 
 func (a *iecAdapter) frameLocked(t *sessionTable, s *trackedSession, dir int, f dpi.DecodedFrame, cur *heldPacket, acts *sessionActions, now time.Time) {
+	if sessionProtocol(s.flow) != iecProtocol {
+		return
+	}
 	s.observeAPCILocked(dir, f, acts, now)
 	t.observeInventoryLocked(s, dir, f, cur, acts, now)
 }
@@ -221,6 +238,15 @@ func (a *iecAdapter) installLocked(snap *rules.Snapshot) (active, otherICS bool)
 	a.hasIEC, active = hasEnforceIEC(snap, a.globalMode)
 	otherICS = hasEnforceICS(snap, a.globalMode)
 	a.policy = a.newPolicy(snap)
+	a.gatedPolicy = rules.NewEvaluator(snap)
+	a.hasSessions = a.hasIEC
+	if snap != nil {
+		for _, entry := range snap.Firewall {
+			if entry.ICS.Protocol == "modbus" || entry.ICS.Protocol == "dnp3" {
+				a.hasSessions = true
+			}
+		}
+	}
 	return active, otherICS
 }
 
@@ -230,5 +256,5 @@ func (a *iecAdapter) notifyLocked(tok capture.Token) bool {
 }
 
 func (a *iecAdapter) acceptsSYN(state *flow.State) bool {
-	return state.ServiceKey().Dir == flow.DirForward && servicePort(state, nil) == iec104Port
+	return state.ServiceKey().Dir == flow.DirForward && sessionProtocol(state) != ""
 }

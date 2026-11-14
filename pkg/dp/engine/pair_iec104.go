@@ -131,3 +131,5 @@ func (iecPairAdapter) Advance(q iec104.PairShape, p pairProgress, r iec104.PairS
 	}
 	return p, false, pairMismatch
 }
+
+func (iecPairAdapter) Unit(s iec104.PairShape) dpi.ParsedUnit { return &iec104.Unit{PairShape: s} }

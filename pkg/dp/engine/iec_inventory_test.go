@@ -98,7 +98,9 @@ func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
 	h.handshake()
 	// Two commands plus a partial next APDU keep even decoded commands held.
 	cmd := apdu(46, 6, 1, 101, 2)
-	payload := append(append(append([]byte{}, cmd...), cmd...), 0x68)
+	second := append([]byte(nil), cmd...)
+	second[12] = 102 // distinct outstanding command; TCP duplicates below stay identical
+	payload := append(append(append([]byte{}, cmd...), second...), 0x68)
 	seq := h.cSeq
 	var packets []capture.Packet
 	for _, r := range [][2]int{{9, len(payload)}, {9, len(payload)}, {0, 9}} {
@@ -172,6 +174,7 @@ func TestIECInventoryBoundsAndAgeOut(t *testing.T) {
 			cmd := apdu(46, 6, 1, 101, 2)
 			if bound == "commands" {
 				for i := 0; i <= iecInventoryCap; i++ {
+					cmd[12], cmd[13] = byte(i+1), byte((i+1)>>8)
 					h.send(true, cmd)
 				}
 			} else {

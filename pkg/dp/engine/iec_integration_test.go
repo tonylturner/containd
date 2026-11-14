@@ -36,6 +36,9 @@ func euSnapshot() rules.Snapshot {
 		return e
 	}
 	return rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{
+		scope(rules.Entry{ID: "session-request", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce", MessageClass: "session", Direction: "request"}}),
+		scope(rules.Entry{ID: "session-response", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce", MessageClass: "session", Direction: "response"}}),
+		scope(rules.Entry{ID: "autonomous-response", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce", MessageClass: "autonomous", Direction: "response"}}),
 		scope(rules.Entry{ID: "cc-rtu-iec104-session", Action: rules.ActionAllow,
 			ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: true, Mode: "enforce"}}),
 		scope(rules.Entry{ID: "cc-rtu-breaker-command", Action: rules.ActionAllow,

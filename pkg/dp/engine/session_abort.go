@@ -281,18 +281,22 @@ func (t *sessionTable) settle(res []capture.Resolution) []error {
 // its generation went down: the kernel dropped it, so it leaves the ledger.
 func (t *sessionTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
+	s, expected := t.tokenOwnerLocked(tok)
 	if residencySettled(err) {
 		t.releaseHeldCreditLocked(tok)
 	}
 	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
+	if s != nil && s.mode == "enforce" && (s.state == sessionEstablished || s.state == sessionSynSent) && (err != nil || v != expected) {
+		acts.merge(t.abortLocked(s, abortTransport, "", nil, now))
+	}
 	t.iecAdapter.verdictLocked(t, tok, v, err, &acts)
 	if s := t.held[tok]; s != nil {
 		t.unholdLocked(s, tok)
 	}
 	t.mu.Unlock()
-	t.finish(acts)
+	t.apply(acts)
 }
 
 func (t *sessionTable) unholdLocked(s *trackedSession, tok capture.Token) {

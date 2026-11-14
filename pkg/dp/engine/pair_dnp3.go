@@ -191,3 +191,5 @@ func dnp3Echoes(q, r []dnp3.ObjectHeader, status bool) bool {
 	}
 	return true
 }
+
+func (dnp3PairAdapter) Unit(s dnp3.PairShape) dpi.ParsedUnit { return &dnp3.Unit{PairShape: s} }

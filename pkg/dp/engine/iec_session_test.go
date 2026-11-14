@@ -24,6 +24,7 @@ func TestIECAllowedAPDUPassesAndSplitAPDUIsHeld(t *testing.T) {
 		t.Fatalf("allowed command = %+v", d)
 	}
 	cmd := iframe(46, 1)
+	cmd[12] = 2 // a distinct outstanding procedure, not an ambiguous key reuse
 	first, d := h.send(true, cmd[:5])
 	if d.Action != capture.Hold {
 		t.Fatalf("partial APDU = %+v, want Hold", d)

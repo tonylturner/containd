@@ -33,7 +33,7 @@ func DecisionOrder(entries []Entry) []int {
 // matches reports whether every predicate of the entry holds for ctx.
 func (ce *compiledEntry) matches(ctx EvalContext) bool {
 	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx) && matchProtoCompiled(ce, ctx) &&
-		matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce, ctx) && ce.matchVia(ctx)
+		matchIdentities(ce.Entry, ctx) && MatchMessageClass(ce.ICS, ctx.ICS, ce.Action, ce.monitor) && matchICSCompiled(ce, ctx) && matchSchedule(ce, ctx) && ce.matchVia(ctx)
 }
 
 // AnyMatch returns the first entry, in snapshot order and whatever its

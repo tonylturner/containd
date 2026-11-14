@@ -19,9 +19,14 @@ func (t *sessionTable) allocateSessionLocked(client, server netip.AddrPort, ctx 
 	if !memory.Reserve(int(limits.IECSessionMetadataBytes)) {
 		return nil
 	}
+	tokenLease, ok := t.resources.Budget.Reserve(class, limits.CategoryPairing, pairSessionCap*48)
+	if !ok {
+		memory.Release()
+		return nil
+	}
 	// The fixed credit includes held-list slots and abort bookkeeping, so
 	// a terminal failure never needs another allocation reservation.
-	return &trackedSession{memory: memory, id: t.newID(), flow: retainedSessionState(state),
+	return &trackedSession{memory: memory, tokenLease: tokenLease, id: t.newID(), flow: retainedSessionState(state),
 		pairing: newPairing(sessionProtocol(state), t.resources, mode == "monitor", &t.pairingTotal),
 		client:  client, server: server, iecSession: iecSession{ctx: ctx, mode: mode}, lastSeen: now,
 		held: make([]*heldPacket, 0, sessionMaxHeldPerSession)}
@@ -45,6 +50,9 @@ func (t *sessionTable) allocateDirLocked(s *trackedSession, dir int, isn uint32)
 	}
 	if old := s.dirs[dir]; old != nil {
 		old.bytes.Release()
+		for i := range old.frames {
+			old.frames[i].releaseOperation()
+		}
 		old.frames = nil
 		if old.frameLease != nil {
 			old.frameLease.Release()
@@ -77,6 +85,9 @@ func (s *trackedSession) clearInspectionBytes() {
 	for _, d := range s.dirs {
 		if d != nil {
 			d.bytes.Release()
+			for i := range d.frames {
+				d.frames[i].releaseOperation()
+			}
 			d.frames = nil
 			if d.frameLease != nil {
 				d.frameLease.Release()
@@ -93,6 +104,10 @@ func (s *trackedSession) releaseInspection() {
 	s.clearInspectionBytes()
 	if s.memory != nil {
 		s.memory.Release()
+	}
+	if s.tokenLease != nil {
+		s.tokenLease.Release()
+		s.tokenLease = nil
 	}
 	s.next.releaseInspection()
 	s.next = nil

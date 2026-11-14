@@ -52,6 +52,10 @@ var iecConformanceCases = []iecConformanceCase{
 }
 
 func iecScoped(mode string, entries ...rules.Entry) rules.Snapshot {
+	entries = append([]rules.Entry{
+		{ID: "session-in", Action: rules.ActionAllow, ICS: rules.ICSPredicate{MessageClass: "session", Direction: "request"}},
+		{ID: "session-out", Action: rules.ActionAllow, ICS: rules.ICSPredicate{MessageClass: "session", Direction: "response"}},
+	}, entries...)
 	for i := range entries {
 		entries[i].Sources, entries[i].Destinations = []string{"10.60.60.10/32"}, []string{"10.30.30.30/32"}
 		entries[i].Protocols = []rules.Protocol{{Name: "tcp", Port: "2404"}}
@@ -134,7 +138,8 @@ func TestIECConformanceMatrix(t *testing.T) {
 						_, d := h.send(tc.fromClient, tc.payload)
 						matched := policy == "broad" || tc.typedRule != ""
 						allowed := policy == "broad"
-						wantDrop := mode == "enforce" && (parsing == ics.Strict || !allowed)
+						unsupported := tc.name != "reserved bits"
+						wantDrop := mode == "enforce" && (parsing == ics.Strict || !allowed || unsupported)
 						if (d.Action == capture.Drop) != wantDrop {
 							t.Fatalf("decision=%+v want drop %v", d, wantDrop)
 						}
@@ -241,15 +246,17 @@ func TestIECTolerantAllowMatchesDecodedFields(t *testing.T) {
 func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 	h := newIECConformanceHarness(t, "enforce", ics.Tolerant, iecBroadPolicy("enforce"))
 	for i := 0; i < 3; i++ {
-		if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
+		payload := append([]byte(nil), iecReservedGI...)
+		payload[10] = byte(i + 1) // independent outstanding interrogations
+		if _, d := h.send(true, payload); d.Action != h.passingDisposition() {
 			t.Fatalf("send %d = %+v", i, d)
 		}
 	}
 	if got := findingEvents(h.e, "alert"); len(got) != 1 {
 		t.Fatalf("alerts after repeats = %d, want 1", len(got))
 	}
-	if _, d := h.send(true, iecProfileTwoCommands); d.Action != h.passingDisposition() {
-		t.Fatalf("profile APDU = %+v", d)
+	if _, d := h.send(true, iecProfileTwoCommands); d.Action != capture.Drop {
+		t.Fatalf("unsupported profile APDU = %+v", d)
 	}
 	alerts := findingEvents(h.e, "alert")
 	if len(alerts) != 2 {

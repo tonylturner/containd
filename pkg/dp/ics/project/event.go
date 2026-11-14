@@ -20,6 +20,7 @@ import (
 func Objects(state *flow.State, ev dpi.Event, safeRead func(map[string]any) bool) []rules.ICSContext {
 	if strings.EqualFold(ev.Proto, eventfields.ProtoIEC104) {
 		object := iecObject(ev, safeRead)
+		object.MessageClass = MessageClass(ev)
 		if incomplete, _ := eventfields.Bool(ev.Attributes, eventfields.KeyCoverageIncomplete); incomplete {
 			object.ObjectUnknown = true
 		}
@@ -27,7 +28,7 @@ func Objects(state *flow.State, ev dpi.Event, safeRead func(map[string]any) bool
 	}
 	a := ev.Attributes
 	write, hasWrite := eventfields.Bool(a, eventfields.KeyIsWrite)
-	base := rules.ICSContext{Protocol: strings.ToLower(ev.Proto), Direction: messageDirection(state), ReadOnly: hasWrite && !write, WriteOnly: hasWrite && write}
+	base := rules.ICSContext{MessageClass: MessageClass(ev), Protocol: strings.ToLower(ev.Proto), Direction: messageDirection(state), ReadOnly: hasWrite && !write, WriteOnly: hasWrite && write}
 	if fc, ok := eventfields.Uint8(a, eventfields.KeyFunctionCode); ok {
 		base.FunctionCode, base.HasFunctionCode = fc, true
 	}
@@ -108,7 +109,7 @@ func Objects(state *flow.State, ev dpi.Event, safeRead func(map[string]any) bool
 		}
 	}
 	if incomplete, _ := eventfields.Bool(a, eventfields.KeyCoverageIncomplete); incomplete {
-		coverage := rules.ICSContext{Protocol: base.Protocol, Direction: base.Direction, ObjectUnknown: true}
+		coverage := rules.ICSContext{MessageClass: base.MessageClass, Protocol: base.Protocol, Direction: base.Direction, ObjectUnknown: true}
 		if base.Protocol == eventfields.ProtoDNP3 {
 			coverage.Master, coverage.Outstation = base.Master, base.Outstation
 			coverage.FunctionCode, coverage.HasFunctionCode = base.FunctionCode, base.HasFunctionCode

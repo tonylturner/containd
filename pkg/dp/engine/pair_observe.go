@@ -7,6 +7,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/project"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -23,47 +24,60 @@ func sessionProtocol(s *flow.State) string {
 	}
 }
 
-// observePairingLocked accounts for observed compatible exchanges. It never
-// changes a packet verdict, and its grants cannot authorize another session.
+// Observe uses the same typed units and ledger as enforcement, but never holds
+// tokens or changes delivery. Only allowed observed requests mint authority;
+// response-rule defaults do not erase the request's structural pairing outcome.
 func (t *sessionTable) observePairingLocked(s *trackedSession, dir int, f dpi.DecodedFrame, now time.Time) {
 	if s.mode != "monitor" || s.pairing == nil || f.Pending {
 		return
 	}
 	class, reason := s.pairing.inspect(f, dpiDir(dir), now)
-	evaluator := rules.NewEvaluator(t.snap)
-	var contexts []rules.EvalContext
-	allowed := true
-	for _, ev := range f.Events {
-		for _, obj := range icsContextsFromDPIEvent(s.flow, ev, t.safeRead) {
+	compiled := t.ruleOwner.current.Load()
+	permit := requestPermit{}
+	allowed := compiled != nil
+	objects, err := project.UnitObjects(f.Unit, class, dpiDir(dir))
+	if err != nil || len(objects) == 0 {
+		reason = pairUnsupported
+		allowed = false
+	}
+	if compiled != nil {
+		permit.Epoch = compiled.epoch
+		for i := range objects {
 			ctx := s.ctx
-			ctx.ICS = &obj
-			ctx.ICS.MessageClass = class
-			contexts = append(contexts, ctx)
-			entry := evaluator.AnyMatch(ctx)
-			if entry == nil || entry.Action != rules.ActionAllow {
+			ctx.Now, ctx.ICS = now, &objects[i]
+			entry := compiled.evaluator.AnyMatch(ctx)
+			if entry == nil || entry.Action != rules.ActionAllow || entry.ICS.Protocol != objects[i].Protocol ||
+				(class == rules.ClassAutonomous || class == rules.ClassSession) && entry.ICS.MessageClass != string(class) {
 				allowed = false
 			}
+			permit.Contexts = append(permit.Contexts, ctx)
 		}
 	}
-	if allowed && reason == pairOK {
-		reason = s.pairing.apply(f, dpiDir(dir), requestPermit{Contexts: contexts}, now)
-	}
-	if !allowed && class == rules.ClassAutonomous {
-		reason = autonomousRequired
-	}
-	if !allowed && class == rules.ClassSession {
-		reason = sessionRequired
-	}
-	for i := range f.Events {
-		if f.Events[i].Attributes == nil {
-			f.Events[i].Attributes = map[string]any{}
+	if reason == pairOK {
+		switch {
+		case class == rules.ClassAutonomous && !allowed:
+			reason = autonomousRequired
+		case class == rules.ClassSession && !allowed:
+			reason = sessionRequired
+		case class == rules.ClassRequest && !allowed: // non-admission creates no grant
+			reason = pairUnpaired
+		default:
+			reason = s.pairing.transact([]pairOperation{{frame: f, dir: dpiDir(dir), permit: permit}}, now)
 		}
-		f.Events[i].Attributes["message_class"] = string(class)
-		f.Events[i].Attributes["pairing_outcome"] = pairOutcome(reason)
-		f.Events[i].Attributes["pairing_reason"] = string(reason)
 	}
+	stampPairing(f.Events, class, reason)
 }
 
+func stampPairing(events []dpi.Event, class rules.MessageClass, reason pairReason) {
+	for i := range events {
+		if events[i].Attributes == nil {
+			events[i].Attributes = map[string]any{}
+		}
+		events[i].Attributes["message_class"] = string(class)
+		events[i].Attributes["pairing_outcome"] = pairOutcome(reason)
+		events[i].Attributes["pairing_reason"] = string(reason)
+	}
+}
 func pairOutcome(reason pairReason) string {
 	switch reason {
 	case pairOK:

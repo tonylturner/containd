@@ -64,10 +64,13 @@ type pairAdapter[K protocolPairKey, S any] interface {
 	Grants(S) bool
 	Charge(S) int64
 	Copy(S) S
+	Unit(S) dpi.ParsedUnit
 }
 type sessionPairing interface {
 	inspect(dpi.DecodedFrame, dpi.StreamDir, time.Time) (rules.MessageClass, pairReason)
 	apply(dpi.DecodedFrame, dpi.StreamDir, requestPermit, time.Time) pairReason
+	retain(dpi.DecodedFrame, dpi.StreamDir) (dpi.DecodedFrame, *limits.Lease, pairReason)
+	transact([]pairOperation, time.Time) pairReason
 	expire(time.Time)
 	reauthorize(*compiledRules, rules.EvalContext, time.Time) pairReason
 	close()
@@ -80,6 +83,7 @@ type pairLedger[K protocolPairKey, S any] struct {
 	grants      []*pairGrant[K, S]
 	markers     []pairMarker[K]
 	markerLease *limits.Lease
+	journal     *pairJournal[K, S]
 }
 
 func newPairing(proto string, r limits.Resources, observe bool, total *int) sessionPairing {
@@ -206,7 +210,11 @@ func (b *pairLedger[K, S]) add(k K, s S, permit requestPermit, now time.Time) pa
 		}
 		b.mark(b.grants[oldest].Key, pairExpired)
 		b.remove(oldest)
-		b.resources.Ledger.Record(limits.TableInspection, limits.ReasonEvicted, limits.Mode(b.mode()))
+		if b.journal != nil {
+			b.journal.evicted++
+		} else {
+			b.resources.Ledger.Record(limits.TableInspection, limits.ReasonEvicted, limits.Mode(b.mode()))
+		}
 	}
 	g := &pairGrant[K, S]{Key: k, Request: b.adapter.Copy(s), Permit: requestPermit{Epoch: permit.Epoch, Contexts: pairCopyContexts(permit.Contexts)},
 		Observe: b.observe, Created: now, Expires: now.Add(b.adapter.Lifetime(s)), lease: lease}
@@ -214,6 +222,9 @@ func (b *pairLedger[K, S]) add(k K, s S, permit requestPermit, now time.Time) pa
 		g.State.ExpectedSequence = q.Sequence
 	}
 	b.grants = append(b.grants, g)
+	if b.journal != nil {
+		b.journal.created = append(b.journal.created, g)
+	}
 	if b.total != nil {
 		*b.total++
 	}
@@ -255,9 +266,10 @@ func (b *pairLedger[K, S]) autonomous(k K, s S, now time.Time) pairReason {
 	return pairOK
 }
 func (b *pairLedger[K, S]) remove(i int) {
-	b.grants[i].lease.Release()
-	if b.grants[i].contextLease != nil {
-		b.grants[i].contextLease.Release()
+	if b.journal != nil {
+		b.journal.removed = append(b.journal.removed, b.grants[i])
+	} else {
+		releasePairGrant(b.grants[i])
 	}
 	copy(b.grants[i:], b.grants[i+1:])
 	b.grants[len(b.grants)-1] = nil

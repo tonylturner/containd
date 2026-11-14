@@ -107,6 +107,11 @@ func newIECPerfExchange(tb testing.TB, mode string, sessions int) (*Engine, func
 	if mode == "monitor" {
 		snap.Firewall = append(snap.Firewall, rules.Entry{ID: "l4", Action: rules.ActionAllow,
 			Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}}})
+	} else {
+		snap.Firewall = append([]rules.Entry{
+			{ID: "session-in", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode, MessageClass: "session", Direction: "request"}},
+			{ID: "session-out", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode, MessageClass: "session", Direction: "response"}},
+		}, snap.Firewall...)
 	}
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		tb.Fatal(err)

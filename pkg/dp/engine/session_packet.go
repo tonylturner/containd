@@ -40,6 +40,7 @@ type sessionResult struct {
 	acts       sessionActions
 	stateLimit bool
 	failure    pairReason
+	ruleHits   []sessionRuleHit
 }
 
 func accepted(reason string) sessionResult {
@@ -88,10 +89,10 @@ func dirName(dir int) string {
 // are the engine's, so they are settled here, after the table decided.
 func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
 	t := e.sessions
-	if t == nil || !isIECFlow(state) && !e.sessionOwnsState(pkt, state) {
+	if t == nil || sessionProtocol(state) == "" && !e.sessionOwnsState(pkt, state) {
 		return capture.Decision{}, false
 	}
-	res, ok := t.packet(pkt, state, e.ICSParsing(iecProtocol))
+	res, ok := t.packet(pkt, state, e.ICSParsing(sessionProtocol(state)))
 	if !ok {
 		t.finish(res.acts)
 		if envelopeMarked(pkt) {
@@ -112,6 +113,9 @@ func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (cap
 	parsed := dpi.ParsedPacket{Payload: pkt.Payload, Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 	if len(res.inspect) > 0 {
 		e.RecordDPIEvents(state, &parsed, res.inspect)
+	}
+	for _, hit := range res.ruleHits {
+		e.recordRuleHit(hit.evaluator, hit.context, hit.entry, state)
 	}
 	for _, f := range res.findings {
 		e.recordConformanceAlert(state, &parsed, f.ev, iecConformanceAction(res.decision, f.decision))
@@ -138,12 +142,12 @@ func iecConformanceAction(packet capture.Decision, decision string) string {
 	}
 }
 
-func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Parsing) (sessionResult, bool) {
+func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Parsing) (result sessionResult, handled bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.pressureOffline = false
 	t.parsing = parsing
-	if !t.hasIEC {
+	if !t.hasSessions {
 		return sessionResult{}, false
 	}
 	now := t.now()
@@ -153,6 +157,23 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 		return t.nonIPv4Locked(state)
 	}
 	s, dir := t.lookupLocked(src, dst)
+	defer func() {
+		if !handled {
+			return
+		}
+		owner, _ := t.lookupLocked(src, dst)
+		if owner == nil {
+			return
+		}
+		v := capture.Verdict(0)
+		switch result.decision.Action {
+		case capture.Accept, capture.Repeat:
+			v = capture.VerdictRepeat
+		case capture.Drop:
+			v = capture.VerdictDrop
+		}
+		t.rememberTokenLocked(owner, pkt.Token, v)
+	}()
 	if s != nil {
 		if evidence := state.InlinePolicy.Load(); evidence != nil && s.flow != nil {
 			copy := *evidence
@@ -556,7 +577,7 @@ func (t *sessionTable) ackLocked(s *trackedSession, dir int, ack uint32) error {
 		}
 	}
 	i := 0
-	for i < len(d.frames) && d.frames[i].end <= floor {
+	for i < len(d.frames) && d.frames[i].end <= floor && d.frames[i].operation == nil {
 		i++
 	}
 	if i == len(d.frames) {
@@ -705,7 +726,7 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 				}
 			}
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
-			r.inspect, r.findings, r.stateLimit = res.inspect, res.findings, res.stateLimit
+			r.inspect, r.findings, r.stateLimit, r.ruleHits = res.inspect, res.findings, res.stateLimit, res.ruleHits
 			if r.stateLimit {
 				r.decision.Reason = "state_limit"
 			}
@@ -733,7 +754,7 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 		Timestamp: pkt.Timestamp,
 		Payload:   fresh, Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 		TCPSeq: d.seq.Seq(start), TCPSeqValid: true,
-		Offset: start, HasOffset: true, Session: s.id, Dir: dpiDir(dir),
+		Offset: start, HasOffset: true, Session: s.id, Dir: dpiDir(dir), Role: dpiDir(dir),
 		FailClosed: s.mode == "enforce",
 	})
 	var limitErr *dpi.StreamError
@@ -777,9 +798,19 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 	if streamErr && len(ir.Events) > 0 {
 		judged = append(judged, ir.Events[len(ir.Events)-1]) // the error's malformed event
 	}
-	j := t.iecAdapter.judgeLocked(t, s, judged, now)
+	j := iecJudgement{}
+	if sessionProtocol(s.flow) == iecProtocol {
+		j = t.iecAdapter.judgeLocked(t, s, judged, now)
+	}
 	res.acts.events = append(res.acts.events, j.events...)
 	res.findings = append(res.findings, j.findings...)
+	if s.mode == "enforce" && !j.denied {
+		if why := t.prepareUnitsLocked(s, dir, ir.Frames, now, res); why != pairOK {
+			res.failure = why
+			res.stateLimit = why == stateLimit
+			return true, "", streamErr
+		}
+	}
 	if streamErr {
 		t.stopParseLocked(s)
 	}
@@ -822,6 +853,11 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 			return r
 		}
 	}
+	if why := t.commitUnitsLocked(s, dir, cur, now); why != pairOK {
+		r := droppedWith(string(why), t.abortLocked(s, abortDeny, "", cur, now))
+		r.inspect, r.findings, r.ruleHits = res.inspect, res.findings, res.ruleHits
+		return r
+	}
 	kept := s.held[:0]
 	finReleased := false
 	for _, h := range s.held {
@@ -834,6 +870,7 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 				finReleased = finReleased || (h.fin && h.end == d.bytes.Next())
 			}
 			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(h.mark, d.nonAdmitting(h.off, h.end))})
+			t.rememberTokenLocked(s, h.tok, capture.VerdictRepeat)
 			continue
 		}
 		kept = append(kept, h)

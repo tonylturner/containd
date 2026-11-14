@@ -71,6 +71,9 @@ type trackedSession struct {
 	stopParse      bool // monitor envelope: parsing stopped after a stream error
 	reset          *connReset
 	next           *trackedSession // new incarnation whose handshake is pending
+	tokens         [pairSessionCap]sessionToken
+	tokenNext      int
+	tokenLease     *limits.Lease
 }
 
 // sessionDir is one direction of a session (client→server or server→client).
@@ -88,9 +91,11 @@ type sessionDir struct {
 }
 
 type sessionFrame struct {
-	start, end int64
-	covered    bool
-	nonAdmit   bool
+	operation                    *pairOperation
+	operationLease, contextLease *limits.Lease
+	start, end                   int64
+	covered                      bool
+	nonAdmit                     bool
 }
 
 type heldPacket struct {

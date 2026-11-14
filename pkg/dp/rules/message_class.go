@@ -16,7 +16,6 @@ const (
 // MatchMessageClass tests only the class constraint, not the other predicates
 // or request pairing. monitor is the effective mode, including inheritance.
 // Transport-only rules and CIP retain their ordinary matching semantics.
-// This pure helper is not yet part of live evaluation.
 func MatchMessageClass(p ICSPredicate, c *ICSContext, action Action, monitor bool) bool {
 	if p.MessageClass != "" {
 		if p.MessageClass != string(ClassAutonomous) && p.MessageClass != string(ClassSession) {

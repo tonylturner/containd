@@ -79,15 +79,15 @@ func TestPreviewRuleZones(t *testing.T) {
 func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 	unsupported := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(2), "ca": uint16(1),
 		"class": "unknown", "error": "type 2 is not in the supported IEC 104 type set", "conformance": []string{"iec104.unsupported_type"}}
-	reserved := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1),
+	reserved := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "cause": uint8(6), "ca": uint16(1),
 		"class": "system", "conformance": []string{"iec104.reserved_bits"}}
 	profile := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(46), "ca": uint16(1), "class": "control",
 		"error": "profile: type 46 needs SQ=0 and one object", "conformance": []string{"iec104.profile_sq"}}
 	evs := []events.Event{
-		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1)}),
-		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(1), "ca": uint16(1)}),
-		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(46), "ca": uint16(1)}),
-		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(46), "ca": uint16(1)}),
+		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "cause": uint8(6), "ca": uint16(1)}),
+		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(1), "cause": uint8(5), "ca": uint16(1)}),
+		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(46), "cause": uint8(6), "ca": uint16(1)}),
+		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(46), "cause": uint8(7), "ca": uint16(1)}),
 		iecEvent(0, "unsupported", true, unsupported),
 		iecEvent(0, "request", true, reserved),
 		iecEvent(0, "malformed", true, profile),
@@ -119,8 +119,9 @@ func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 							want++
 						}
 					}
-					// A strict ALLOW naming only the unsupported type matches nothing.
-					nothing := parsing == ics.Strict && reflect.DeepEqual(predicate.TypeIDs, []int{2})
+					// Unknown classes cannot satisfy an enforcing ALLOW; strict
+					// findings also preempt ordinary candidate attribution.
+					nothing := reflect.DeepEqual(predicate.TypeIDs, []int{2}) && (parsing == ics.Strict || action == rules.ActionAllow)
 					got := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 					if got.MatchCount != want || (want == 0) != nothing {
 						t.Fatalf("preview=%d runtime=%d", got.MatchCount, want)
@@ -203,7 +204,7 @@ func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
 							attrs["error"] = "type 100 is not in the supported IEC 104 type set"
 							attrs["conformance"] = []string{"iec104.unsupported_type"}
 						}
-						if parsing == ics.Tolerant {
+						if parsing == ics.Tolerant && action == rules.ActionDeny {
 							want = 1
 						}
 					}

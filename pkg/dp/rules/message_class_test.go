@@ -38,25 +38,20 @@ func TestDS34ClassSchemaMatcher(t *testing.T) {
 	}
 }
 
-func TestDS34ClassSchemaLiveMatcherUnchanged(t *testing.T) {
-	if EvaluatorVersion != "ics-4" {
-		t.Fatal("evaluator version changed before class integration")
-	}
-	for _, protocol := range []string{"dnp3", ProtocolIEC104} {
+func TestDS34LiveMessageClasses(t *testing.T) {
+	for _, protocol := range []string{"modbus", "dnp3", ProtocolIEC104} {
 		for _, class := range []MessageClass{ClassUnknown, ClassRequest, ClassSolicited, ClassAutonomous, ClassSession} {
-			ctx := EvalContext{ICS: &ICSContext{Protocol: protocol, MessageClass: class, IEC104: &IEC104Context{}}}
-			for _, selector := range []string{"", "autonomous", "session"} {
-				entry := Entry{ID: "allow", Action: ActionAllow, ICS: ICSPredicate{Protocol: protocol, Mode: "enforce", MessageClass: selector}}
-				if !PreviewMatch(entry, ctx) {
-					t.Fatalf("class restricted live predicate: %s/%s/%s", protocol, class, selector)
-				}
-				e := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{entry}})
-				action, winner := e.EvaluateMessage(ctx, false)
-				if protocol == ProtocolIEC104 {
-					action, winner = e.EvaluateIEC104Enforcing(ctx)
-				}
-				if action != ActionAllow || winner == nil || winner.ID != entry.ID {
-					t.Fatalf("class restricted live decision: %s/%s/%s = %s", protocol, class, selector, action)
+			for _, mode := range []string{"monitor", "enforce", ""} {
+				for _, global := range []string{"monitor", "enforce"} {
+					for _, selector := range []string{"", "autonomous", "session"} {
+						ctx := EvalContext{ICS: &ICSContext{Protocol: protocol, MessageClass: class, IEC104: &IEC104Context{}}}
+						entry := Entry{ID: "allow", Action: ActionAllow, ICS: ICSPredicate{Protocol: protocol, Mode: mode, MessageClass: selector}}
+						evaluator := NewEvaluator(&Snapshot{DPIMode: global, Firewall: []Entry{entry}})
+						want := MatchMessageClass(entry.ICS, ctx.ICS, entry.Action, MonitorICS(entry, global))
+						if got := evaluator.AnyMatch(ctx) != nil; got != want {
+							t.Fatalf("%s/%s/%s/%s/%s got %v want %v", protocol, class, mode, global, selector, got, want)
+						}
+					}
 				}
 			}
 		}

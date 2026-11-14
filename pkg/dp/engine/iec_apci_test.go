@@ -21,8 +21,12 @@ import (
 
 type apciAllowPolicy struct{ *fakePolicy }
 
-func (apciAllowPolicy) EvaluateIEC104(rules.EvalContext) (rules.Action, *rules.Entry) {
-	return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow}
+func (p apciAllowPolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry) {
+	class := ""
+	if ctx.ICS.MessageClass == rules.ClassSession || ctx.ICS.MessageClass == rules.ClassAutonomous {
+		class = string(ctx.ICS.MessageClass)
+	}
+	return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: p.mode, MessageClass: class}}
 }
 
 func newAPCIHarness(t *testing.T, mode string) *iecHarness {
@@ -73,7 +77,7 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 				emit(evs)
 			}
 			h.handshake()
-			for _, payload := range [][]byte{
+			for i, payload := range [][]byte{
 				apciI(0, 0), // before STARTDT con
 				startdtCon,
 				apciI(2, 0), // gap
@@ -83,6 +87,9 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 				apciI(3, 0), // after STOPDT con
 				apciU(0x43),
 			} {
+				if len(payload) > 6 {
+					payload[10] = byte(i + 1)
+				} // distinct outstanding GI procedures
 				if _, d := h.send(true, payload); d.Action != h.passingDisposition() {
 					t.Fatalf("observation changed decision: %+v", d)
 				}
@@ -119,7 +126,9 @@ func TestIECAPCIOrderedDeduplicatedFrames(t *testing.T) {
 			h.handshake()
 			h.send(true, startdtAct)
 			h.send(false, startdtCon)
-			payload := append(apciI(0, 0), apciI(1, 0)...)
+			second := apciI(1, 0)
+			second[10] = 2
+			payload := append(apciI(0, 0), second...)
 			seq := h.cSeq
 			// Tail first, a duplicate tail, then head: a single contiguous
 			// delivery containing two APDUs, not three packet observations.

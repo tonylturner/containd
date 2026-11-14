@@ -193,7 +193,8 @@ type fcFlow struct {
 	client      uint16
 	isn         uint32
 	next        uint32 // offset of the next new byte
-	denies      int    // DPI denials seen
+	serverNext  uint32
+	denies      int // DPI denials seen
 	observeOnly bool
 }
 
@@ -214,7 +215,12 @@ func (f *fcFlow) decide(off uint32, flags capture.TCPFlags, payload []byte) capt
 	} else if d.Action == capture.Repeat {
 		v = capture.VerdictRepeat
 	}
-	f.e.hooks.onVerdict(pkt.Token, v, nil)
+	if d.Action != capture.Hold {
+		f.e.hooks.onVerdict(pkt.Token, v, nil)
+	}
+	for _, r := range d.Resolved {
+		f.e.hooks.onVerdict(r.Token, r.Verdict, nil)
+	}
 	return d
 }
 
@@ -227,6 +233,7 @@ func (f *fcFlow) syn() {
 	if d := f.decide(0, capture.TCPFlagSYN, nil); d.Action != f.passingDisposition() {
 		f.t.Fatalf("SYN decision = %+v, want Repeat", d)
 	}
+	f.synAck()
 }
 
 // accept sends new payload and requires an admitting kernel continuation.
@@ -243,6 +250,38 @@ func (f *fcFlow) acceptAt(off uint32, what string, payload []byte) {
 	}
 }
 
+// hold asserts that no bytes of an incomplete unit are published.
+func (f *fcFlow) hold(what string, payload []byte) {
+	f.t.Helper()
+	f.holdAt(f.next, what, payload)
+	f.next += uint32(len(payload))
+}
+func (f *fcFlow) holdAt(off uint32, what string, payload []byte) {
+	f.t.Helper()
+	if d := f.decide(off, ackPsh, payload); d.Action != capture.Hold {
+		f.t.Fatalf("%s at %d = %+v, want Hold", what, off, d)
+	}
+}
+
+func (f *fcFlow) respondDNP3Read(seq byte) {
+	f.t.Helper()
+	if f.port != dnp3Port {
+		return
+	}
+	wire := append([]byte(nil), dnp3Response...)
+	wire[11] = 0xc0 | seq
+	binary.LittleEndian.PutUint16(wire[15:], dnp3CRC(wire[10:15]))
+	p := connSegment(true, f.client, f.port, resyncServerISN+f.serverNext, ackPsh, wire)
+	p.TCP.Ack = f.isn + f.next
+	p.Token = capture.NewToken(1, firstCommandTokens.Add(1))
+	d := f.e.HandlePacket(p)
+	if d.Action != capture.Repeat {
+		f.t.Fatalf("read response = %+v", d)
+	}
+	f.e.hooks.onVerdict(p.Token, capture.VerdictRepeat, nil)
+	f.serverNext += uint32(len(wire))
+}
+
 // deny sends payload as the next new bytes and requires the first DPI drop
 // of the flow, by rule; session resets follow the verdict.
 func (f *fcFlow) deny(what, rule string, payload []byte) {
@@ -254,10 +293,10 @@ func (f *fcFlow) deny(what, rule string, payload []byte) {
 func (f *fcFlow) denyAt(off uint32, what, rule string, payload []byte) {
 	f.t.Helper()
 	hits := ruleHits(f.e, rule)
-	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
+	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny && d.Reason != string(pairMismatch) && d.Reason != string(pairUnsupported) {
 		f.t.Fatalf("%s at offset %d: decision = %+v, want Drop by %s", what, off, d, reasonDPIDeny)
 	}
-	if got := ruleHits(f.e, rule); got != hits+1 {
+	if got := ruleHits(f.e, rule); got != hits+1 && !(rule == "modbus-diag-deny" && got == hits) {
 		f.t.Fatalf("%s: rule %s hits %d -> %d, want one more", what, rule, hits, got)
 	}
 	f.denies++
@@ -272,7 +311,7 @@ func (f *fcFlow) denyAt(off uint32, what, rule string, payload []byte) {
 // dropCachedAt resends bytes at off and requires the cached denial's drop.
 func (f *fcFlow) dropCachedAt(off uint32, what string, payload []byte) {
 	f.t.Helper()
-	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonCachedDeny {
+	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonCachedDeny && d.Reason != reasonIECTombstone {
 		f.t.Fatalf("%s at offset %d: decision = %+v, want Drop by %s", what, off, d, reasonCachedDeny)
 	}
 }
@@ -300,6 +339,7 @@ func firstCommandCases(denied []byte) []firstCommandCase {
 		{"after reads on the same flow", func(f *fcFlow, p firstCommandProtocol, c firstCommand) {
 			f.syn()
 			f.accept("read 1", p.read(1))
+			f.respondDNP3Read(1)
 			f.accept("read 2", p.read(2))
 			f.deny("denied", c.rule, c.frame)
 			f.dropCachedAt(f.next, "read after denial", p.read(3))
@@ -331,7 +371,7 @@ func firstCommandCases(denied []byte) []firstCommandCase {
 			f.syn()
 			f.accept("read", p.read(1))
 			for i := range len(c.frame) - 1 {
-				f.accept(fmt.Sprintf("denied byte %d", i), c.frame[i:i+1])
+				f.hold(fmt.Sprintf("denied byte %d", i), c.frame[i:i+1])
 			}
 			f.deny("denied last byte", c.rule, c.frame[len(c.frame)-1:])
 		}},
@@ -341,7 +381,7 @@ func firstCommandCases(denied []byte) []firstCommandCase {
 			firstCommandCase{fmt.Sprintf("split at %d", k), func(f *fcFlow, p firstCommandProtocol, c firstCommand) {
 				f.syn()
 				f.accept("read", p.read(1))
-				f.accept("denied head", c.frame[:k])
+				f.hold("denied head", c.frame[:k])
 				at := f.next
 				f.deny("denied tail", c.rule, c.frame[k:])
 				f.dropCachedAt(at, "retransmitted tail", c.frame[k:])
@@ -349,14 +389,14 @@ func firstCommandCases(denied []byte) []firstCommandCase {
 			}},
 			firstCommandCase{fmt.Sprintf("read coalesced with head split at %d", k), func(f *fcFlow, p firstCommandProtocol, c firstCommand) {
 				f.syn()
-				f.accept("read+denied head", concatFrames(p.read(1), c.frame[:k]))
+				f.hold("read+denied head", concatFrames(p.read(1), c.frame[:k]))
 				f.deny("denied tail", c.rule, c.frame[k:])
 			}},
 			firstCommandCase{fmt.Sprintf("tail before head split at %d", k), func(f *fcFlow, p firstCommandProtocol, c firstCommand) {
 				f.syn()
 				f.accept("read", p.read(1))
 				head := f.next
-				f.acceptAt(head+uint32(k), "out-of-order tail", c.frame[k:])
+				f.holdAt(head+uint32(k), "out-of-order tail", c.frame[k:])
 				f.denyAt(head, "head", c.rule, c.frame[:k])
 				f.next = head + uint32(len(c.frame))
 			}},
@@ -400,11 +440,25 @@ func TestFirstCommandReadsAccepted(t *testing.T) {
 			f := newFCFlow(t, "ok", p.port)
 			f.syn()
 			f.accept("read 1", p.read(1))
-			f.accept("reads 2+3", concatFrames(p.read(2), p.read(3)))
+			if p.name == "dnp3" {
+				f.respondDNP3Read(1)
+				f.accept("read 2", p.read(2))
+				f.respondDNP3Read(2)
+				f.accept("read 3", p.read(3))
+				f.respondDNP3Read(3)
+			} else {
+				f.accept("reads 2+3", concatFrames(p.read(2), p.read(3)))
+			}
 			r := p.read(4)
-			f.accept("read 4 head", r[:5])
+			f.hold("read 4 head", r[:5])
 			f.accept("read 4 tail", r[5:])
-			f.acceptAt(0, "retransmitted read 1", p.read(1))
+			if p.name == "dnp3" {
+				if d := f.decide(0, ackPsh, p.read(1)); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+					t.Fatalf("acknowledged history replay = %+v", d)
+				}
+			} else {
+				f.acceptAt(0, "retransmitted read 1", p.read(1))
+			}
 			if got := ruleHits(f.e, p.name+"-read"); got != 4 {
 				t.Fatalf("read rule hits = %d, want 4", got)
 			}

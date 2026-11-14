@@ -92,5 +92,6 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 	if err != nil {
 		return RulesetPreview{}, err
 	}
-	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime, Warnings: comp.RuleWarnings(&snap)}, nil
+	warnings := append(comp.RuleWarnings(&snap), pairingCutoverWarnings(&snap)...)
+	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime, Warnings: warnings}, nil
 }

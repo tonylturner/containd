@@ -101,7 +101,7 @@ func TestOrderedConditionalTransportAndMessage(t *testing.T) {
 }
 
 func TestCapturedGenericReplyDecisions(t *testing.T) {
-	ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Direction: "response"}}
+	ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Direction: "response", MessageClass: ClassSolicited}}
 	for _, def := range []Action{ActionAllow, ActionDeny} {
 		for _, action := range []Action{ActionAllow, ActionDeny, ActionReset} {
 			for _, isICS := range []bool{false, true} {

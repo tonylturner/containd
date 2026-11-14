@@ -74,3 +74,5 @@ func (modbusPairAdapter) Advance(q modbus.PairShape, p pairProgress, r modbus.Pa
 	}
 	return p, true, pairOK
 }
+
+func (modbusPairAdapter) Unit(s modbus.PairShape) dpi.ParsedUnit { return &modbus.Unit{PairShape: s} }

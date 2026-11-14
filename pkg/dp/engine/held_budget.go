@@ -13,6 +13,8 @@ import (
 type heldCredit struct {
 	lease    *limits.Lease
 	protocol string
+	session  *trackedSession
+	verdict  capture.Verdict
 }
 
 func heldProtocolShare(protocol string) int {

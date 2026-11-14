@@ -133,6 +133,7 @@ func (e *Engine) installAndPublishRules(ctx context.Context, snap *rules.Snapsho
 		warnings = e.compiler.RuleWarnings(snap)
 		e.sessions.health.clear(faultAddresses)
 	}
+	warnings = append(warnings, pairingCutoverWarnings(snap)...)
 	appliedAt := time.Now().UTC()
 	e.ruleSnap.Install(snap, appliedAt)
 	if e.compiler != nil {

@@ -77,8 +77,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			}
 			applied := e.RulesetStatus().Warnings
 			// modbus-guests: no address is bound to its identity, and the
-			// modbus ALLOW shadows it.
-			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
+			// modbus ALLOW shadows it. Both IEC and Modbus ALLOWs also
+			// report the installed pairing cutover.
+			if len(preview.Warnings) != 4 || !reflect.DeepEqual(preview.Warnings, applied) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
 			for _, re := range []string{

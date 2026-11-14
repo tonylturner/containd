@@ -176,7 +176,7 @@ func (e *Engine) sessionOwnsConnection(pkt capture.Packet, incoming *flow.Connec
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.hasIEC {
+	if !t.hasSessions {
 		return false
 	}
 	state := wireServiceState(pkt)
@@ -195,12 +195,12 @@ func (e *Engine) sessionOwnsState(pkt capture.Packet, state *flow.State) bool {
 }
 
 func (t *sessionTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
-	if !t.hasIEC {
+	if !t.hasSessions {
 		return false
 	}
 	src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
-	if !isIECFlow(state) {
+	if sessionProtocol(state) == "" {
 		if srcOK && dstOK {
 			session, _ := t.lookupLocked(src, dst)
 			return session != nil
