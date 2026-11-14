@@ -13,7 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func TestDS34ConsumersCLI(t *testing.T) {
+func TestPairingConsumersCLI(t *testing.T) {
 	for _, class := range []string{"autonomous", "session"} {
 		rule, err := parseFirewallICSRuleArgs([]string{"r", "ALLOW", "dnp3", "--message-class", class, "--direction", "response"})
 		if err != nil || rule.ICS.MessageClass != class {

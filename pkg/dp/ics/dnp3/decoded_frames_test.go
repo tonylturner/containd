@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 )
 
-func TestDS34DecodedFrames(t *testing.T) {
+func TestPairingDecodedFrames(t *testing.T) {
 	t.Run("procedure-shapes", func(t *testing.T) {
 		crob := []byte{12, 1, 0x17, 1, 7, 0x81, 2, 1, 0, 0, 0, 2, 0, 0, 0, 0}
 		cases := []struct {

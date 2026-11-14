@@ -9,7 +9,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func TestDS34ConsumersDNP3SecureOperationsSelectors(t *testing.T) {
+func TestPairingConsumersDNP3SecureOperationsSelectors(t *testing.T) {
 	rules := DNP3SecureOperations()
 	if len(rules) != 6 {
 		t.Fatalf("got %d rules, want 6", len(rules))
@@ -36,7 +36,7 @@ func TestDS34ConsumersDNP3SecureOperationsSelectors(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersDNP3UnsolicitedAllowance(t *testing.T) {
+func TestPairingConsumersDNP3UnsolicitedAllowance(t *testing.T) {
 	allowances := 0
 	for _, rule := range DNP3SecureOperations() {
 		if rule.ICS.MessageClass != "autonomous" || rule.Action != config.ActionAllow {

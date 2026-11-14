@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDS34PreviewUnknownFacts(t *testing.T) {
+func TestPairingPreviewUnknownFacts(t *testing.T) {
 	events := []dpevents.Event{iecEvent(1, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": 46, "ca": 1, "ioa": 2001})}
 	rule := `{"id":"cmd","action":"ALLOW","ics":{"protocol":"iec104","mode":"enforce","typeIds":[46]}}`
 	if got := previewRule(t, events, rule); got.MatchCount != 0 {

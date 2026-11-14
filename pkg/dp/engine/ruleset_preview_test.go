@@ -17,7 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-func TestDS34ConsumersRulesetPreviewEqualsApply(t *testing.T) {
+func TestPairingConsumersRulesetPreviewEqualsApply(t *testing.T) {
 	reservation := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"),
 		Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
 	engineAPI := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}

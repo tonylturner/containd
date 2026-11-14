@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ConsumersPairingPreview(t *testing.T) {
+func TestPairingConsumersPairingPreview(t *testing.T) {
 	e := &Engine{eventStore: events.NewStore(100).Writer("")}
 	entry := rules.Entry{ID: "responses", Action: rules.ActionAllow,
 		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor", Direction: "response", TypeIDs: []int{46}}}
@@ -44,7 +44,7 @@ func TestDS34ConsumersPairingPreview(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersEmptyRetentionWarnings(t *testing.T) {
+func TestPairingConsumersEmptyRetentionWarnings(t *testing.T) {
 	e := &Engine{eventStore: events.NewStore(10).Writer("")}
 	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce"})
 	entry := rules.Entry{ID: "old", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{130}}}

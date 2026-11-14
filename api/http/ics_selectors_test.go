@@ -16,7 +16,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ConsumersICSSelectorCreateCommitReload(t *testing.T) {
+func TestPairingConsumersICSSelectorCreateCommitReload(t *testing.T) {
 	resetTestRateLimiters()
 	path := filepath.Join(t.TempDir(), "config.db")
 	store, err := config.NewSQLiteStore(path)

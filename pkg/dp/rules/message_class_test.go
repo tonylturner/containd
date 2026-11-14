@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestDS34ClassSchemaMatcher(t *testing.T) {
+func TestPairingClassSchemaMatcher(t *testing.T) {
 	for _, class := range []MessageClass{"", ClassUnknown, ClassRequest, ClassSolicited, ClassAutonomous, ClassSession} {
 		for _, selector := range []string{"", "autonomous", "session", "invalid"} {
 			for _, action := range []Action{ActionAllow, ActionDeny, ActionReset} {
@@ -38,7 +38,7 @@ func TestDS34ClassSchemaMatcher(t *testing.T) {
 	}
 }
 
-func TestDS34LiveMessageClasses(t *testing.T) {
+func TestPairingLiveMessageClasses(t *testing.T) {
 	for _, protocol := range []string{"modbus", "dnp3", ProtocolIEC104} {
 		for _, class := range []MessageClass{ClassUnknown, ClassRequest, ClassSolicited, ClassAutonomous, ClassSession} {
 			for _, mode := range []string{"monitor", "enforce", ""} {

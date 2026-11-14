@@ -24,7 +24,7 @@ func check(t *testing.T, err error) {
 func meta() evidence.Dataset {
 	return evidence.Dataset{Source: evidence.SourcePCAP, CaptureSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DecoderVersion: "ics-1", ProfileFingerprint: "profile", SnapshotFingerprint: "snapshot"}
 }
-func TestDS34ConsumersStageUpgrade(t *testing.T) {
+func TestPairingConsumersStageUpgrade(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending", true: "completed"}[complete], func(t *testing.T) {
 			ctx := context.Background()

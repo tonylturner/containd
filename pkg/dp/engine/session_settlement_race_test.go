@@ -40,7 +40,7 @@ func (s *inflightSettler) Settle(rs ...capture.Resolution) []error {
 	return errs
 }
 
-func testDS34InflightSettlement(t *testing.T) {
+func testPairingInflightSettlement(t *testing.T) {
 	for _, fate := range []string{"submitted", "send-error", "source-flush"} {
 		t.Run(fate, func(t *testing.T) {
 			h := newAPCIHarness(t, "enforce")

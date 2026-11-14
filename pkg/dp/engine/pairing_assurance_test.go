@@ -11,7 +11,7 @@ import (
 // No receiver-delivery claim is made from these decisions: the live harness
 // captures both receiver interfaces. Here the invariant is packet atomicity
 // and residency until the actual submission callback, including one-byte I/O.
-func TestDS34Assurance(t *testing.T) {
+func TestPairingAssurance(t *testing.T) {
 	for _, p := range runtimePairCases() {
 		for _, reply := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/one-byte/reply=%t", p.protocol, reply), func(t *testing.T) {

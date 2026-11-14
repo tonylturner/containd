@@ -15,10 +15,10 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// TestDS34Upgrade exercises persisted selector-free policy through the same
+// TestPairingUpgrade exercises persisted selector-free policy through the same
 // compiler and installer used by replay. The live harness separately restarts
 // management against its unchanged database; this test does not model boot I/O.
-func TestDS34Upgrade(t *testing.T) {
+func TestPairingUpgrade(t *testing.T) {
 	for _, p := range runtimePairCases() {
 		for _, mode := range []string{"enforce", "monitor"} {
 			for _, def := range []config.Action{config.ActionAllow, config.ActionDeny} {

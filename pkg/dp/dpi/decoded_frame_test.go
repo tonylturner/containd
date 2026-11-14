@@ -11,7 +11,7 @@ type classSchemaUnit string
 
 func (u classSchemaUnit) Protocol() string { return string(u) }
 
-func TestDS34ClassSchemaDecodedFrame(t *testing.T) {
+func TestPairingClassSchemaDecodedFrame(t *testing.T) {
 	tests := []struct {
 		name  string
 		frame DecodedFrame

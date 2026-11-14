@@ -252,7 +252,7 @@ class CaptureTests(unittest.TestCase):
 
     def test_committed_oracles_regenerate_byte_exactly(self):
         root = Path(__file__).resolve().parent
-        with tempfile.TemporaryDirectory(prefix="ds34peer-oracle-") as temp:
+        with tempfile.TemporaryDirectory(prefix="pairingpeer-oracle-") as temp:
             target = Path(temp)
             for stack in ("lib60870", "j60870", "c104"):
                 for suffix in ("master.log", "tcp.tsv"):

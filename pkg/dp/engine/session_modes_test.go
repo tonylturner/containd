@@ -11,8 +11,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34Modes(t *testing.T) {
-	t.Run("explicit-classes", testDS34ExplicitClasses)
+func TestPairingModes(t *testing.T) {
+	t.Run("explicit-classes", testPairingExplicitClasses)
 	for _, p := range runtimePairCases() {
 		t.Run(p.protocol, func(t *testing.T) {
 			for _, global := range []string{"enforce", "monitor"} {
@@ -116,7 +116,7 @@ func TestDS34Modes(t *testing.T) {
 	}
 }
 
-func testDS34ExplicitClasses(t *testing.T) {
+func testPairingExplicitClasses(t *testing.T) {
 	for _, p := range runtimePairCases()[1:] {
 		for _, class := range []string{"autonomous", "session"} {
 			for _, def := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {

@@ -6,7 +6,7 @@ OUT=${1:?usage: run.sh ABSOLUTE_EMPTY_OUTPUT_DIRECTORY}
 [[ "$OUT" == /* ]] || { echo "output path must be absolute" >&2; exit 2; }
 mkdir -p "$OUT"
 [[ -z "$(ls -A "$OUT")" ]] || { echo "output directory must be empty" >&2; exit 2; }
-COMPOSE_PROJECT_NAME="ds34peer-$(date +%s)-$$"
+COMPOSE_PROJECT_NAME="pairingpeer-$(date +%s)-$$"
 export COMPOSE_PROJECT_NAME
 IMAGE="$COMPOSE_PROJECT_NAME:local"
 NETWORK="$COMPOSE_PROJECT_NAME-net"
@@ -55,10 +55,10 @@ for index in range(256):
 else:
     raise SystemExit("no free private subnet")
 PY
-docker build --label ds34peer=true --label "com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
+docker build --label pairingpeer=true --label "com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
     -t "$IMAGE" "$HERE"
 IMAGE_CREATED=1
-docker network create --internal --label ds34peer=true \
+docker network create --internal --label pairingpeer=true \
     --label "com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
     --subnet "$(cat "$OUT/subnet")" "$NETWORK"
 NETWORK_CREATED=1
@@ -71,7 +71,7 @@ for stack in lib60870 j60870 c104; do
     else
         command=(python3 /opt/c104_points.py)
     fi
-    docker run -d --name "$name" --network "$NETWORK" --label ds34peer=true \
+    docker run -d --name "$name" --network "$NETWORK" --label pairingpeer=true \
         --label "com.docker.compose.project=$COMPOSE_PROJECT_NAME" \
         "$IMAGE" "${command[@]}"
     CONTAINERS+=("$name")

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestDS34ClassSchema(t *testing.T) {
+func TestPairingClassSchema(t *testing.T) {
 	t.Run("roundtripClonePatch", func(t *testing.T) {
 		for _, protocol := range []string{"dnp3", "iec104"} {
 			for _, class := range []string{"autonomous", "session"} {

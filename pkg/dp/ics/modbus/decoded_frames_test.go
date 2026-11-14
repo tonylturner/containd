@@ -17,7 +17,7 @@ func shapeADU(fc byte, p ...byte) []byte {
 	binary.BigEndian.PutUint16(b[4:6], uint16(len(b)-6))
 	return b
 }
-func TestDS34DecodedFrames(t *testing.T) {
+func TestPairingDecodedFrames(t *testing.T) {
 	cases := []struct {
 		fc                byte
 		request, response []byte

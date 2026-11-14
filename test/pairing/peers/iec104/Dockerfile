@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Upstream controlled stations are compiled unchanged, not copied into this tree.
 FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
-LABEL ds34peer=true
+LABEL pairingpeer=true
 RUN apk add --no-cache build-base linux-headers curl openjdk17-jdk python3 python3-dev cmake tcpdump tshark
 WORKDIR /sources
 RUN curl -fsSL https://codeload.github.com/mz-automation/lib60870/tar.gz/refs/tags/v2.4.1 -o lib60870.tar.gz \

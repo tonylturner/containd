@@ -37,19 +37,19 @@ No host Java, compiler, TShark, root privileges, live UI or firewall needed.
 Run from the repository root, choosing two **empty absolute** output directories:
 
 ```sh
-bash test/ds34/peers/iec104/run.sh /tmp/iec104-peer-first
-bash test/ds34/peers/iec104/run.sh /tmp/iec104-peer-second
+bash test/pairing/peers/iec104/run.sh /tmp/iec104-peer-first
+bash test/pairing/peers/iec104/run.sh /tmp/iec104-peer-second
 cmp /tmp/iec104-peer-first/stages.tsv /tmp/iec104-peer-second/stages.tsv
 cmp /tmp/iec104-peer-first/oracle.json /tmp/iec104-peer-second/oracle.json
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
-  -s test/ds34/peers/iec104 -p 'test_*.py'
-shellcheck -x test/ds34/peers/iec104/run.sh
+  -s test/pairing/peers/iec104 -p 'test_*.py'
+shellcheck -x test/pairing/peers/iec104/run.sh
 ```
 
 Each invocation builds pinned upstream in a disposable image, creates a unique
-`ds34peer-*` project identity, checks a private /24 against existing Docker
+`pairingpeer-*` project identity, checks a private /24 against existing Docker
 networks, and creates an internal network. All owned images, containers and
-networks carry `ds34peer=true` and the project label. No ports are published.
+networks carry `pairingpeer=true` and the project label. No ports are published.
 Master and controlled station are different real processes in the same
 container, communicating over TCP/2404 on Linux loopback. The private network
 has no egress during measurement. Exit traps remove only that invocation's
@@ -73,7 +73,7 @@ To regenerate the derived tables and oracle from the committed captures without
 Docker or new measurements:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 test/ds34/peers/iec104/analyze.py test/ds34/peers/iec104
+PYTHONDONTWRITEBYTECODE=1 python3 test/pairing/peers/iec104/analyze.py test/pairing/peers/iec104
 ```
 
 ## Oracle and evidence format

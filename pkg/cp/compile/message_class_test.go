@@ -10,7 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ClassSchemaCompile(t *testing.T) {
+func TestPairingClassSchemaCompile(t *testing.T) {
 	for _, class := range []string{"", "autonomous", "session"} {
 		in := config.ICSPredicate{Protocol: "dnp3", Direction: "response", MessageClass: class, Masters: []uint16{1}}
 		out := ICSPredicate(in)

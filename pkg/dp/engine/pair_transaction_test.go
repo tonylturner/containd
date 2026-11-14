@@ -9,7 +9,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
-func TestDS34LedgerTransaction(t *testing.T) {
+func TestPairingLedgerTransaction(t *testing.T) {
 	now := time.Unix(1000, 0)
 	for _, occupied := range []bool{false, true} {
 		t.Run(map[bool]string{false: "empty", true: "occupied"}[occupied], func(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34SharedPolicyTelemetry(t *testing.T) {
+func TestPairingSharedPolicyTelemetry(t *testing.T) {
 	for _, p := range firstCommandProtocols() {
 		for _, mode := range []string{"enforce", "monitor"} {
 			for _, strict := range []bool{false, true} {

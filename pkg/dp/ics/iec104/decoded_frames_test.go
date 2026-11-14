@@ -10,7 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 )
 
-func TestDS34DecodedFrames(t *testing.T) {
+func TestPairingDecodedFrames(t *testing.T) {
 	for typ, d := range descriptors {
 		var element []byte
 		switch d.elem {

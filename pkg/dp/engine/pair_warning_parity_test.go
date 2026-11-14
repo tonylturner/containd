@@ -12,7 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34CutoverWarningPreviewParity(t *testing.T) {
+func TestPairingCutoverWarningPreviewParity(t *testing.T) {
 	e, err := New(Config{DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)

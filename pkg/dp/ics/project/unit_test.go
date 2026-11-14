@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestDS34UnitProjection(t *testing.T) {
+func TestPairingUnitProjection(t *testing.T) {
 	t.Run("modbus", func(t *testing.T) {
 		u := &modbus.Unit{PairShape: modbus.PairShape{TransactionID: 1, UnitID: 2, FunctionCode: 3, Quantity: 2, Spans: []modbus.Span{{First: 10, Last: 11}}}}
 		got, err := UnitObjects(u, rules.ClassRequest, dpi.ClientToServer)

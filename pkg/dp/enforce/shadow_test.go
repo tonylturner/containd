@@ -46,7 +46,7 @@ func TestShadowWarnings(t *testing.T) {
 	}
 }
 
-func TestDS34ShadowMessageClasses(t *testing.T) {
+func TestPairingShadowMessageClasses(t *testing.T) {
 	for _, protocol := range []string{"dnp3", "iec104"} {
 		for _, class := range []string{"autonomous", "session"} {
 			for _, inherited := range []bool{false, true} {

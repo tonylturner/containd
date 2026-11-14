@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
 
-func TestDS34ConsumersPreviewRuleHandler(t *testing.T) {
+func TestPairingConsumersPreviewRuleHandler(t *testing.T) {
 	dp := newCountingDP(t)
 	dp.Events().Append(events.Event{Proto: "iec104", Kind: "request", Transport: "tcp",
 		SrcIP: "10.1.0.2", DstIP: "10.2.0.2", SrcPort: 40000, DstPort: 2404,

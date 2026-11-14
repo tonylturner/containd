@@ -20,7 +20,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ConsumersClientRulesetPreview(t *testing.T) {
+func TestPairingConsumersClientRulesetPreview(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Firewall.Rules = []config.Rule{{ID: "session", Action: config.ActionAllow, ICS: config.ICSPredicate{Protocol: "iec104", MessageClass: "session", Direction: "request"}}}
 	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}

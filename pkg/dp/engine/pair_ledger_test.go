@@ -67,8 +67,8 @@ func pairMBReply(q modbus.PairShape) modbus.PairShape {
 	return q
 }
 
-func TestDS34Ledger(t *testing.T) {
-	t.Run("collateral-release", testDS34CollateralRelease)
+func TestPairingLedger(t *testing.T) {
+	t.Run("collateral-release", testPairingCollateralRelease)
 	now := time.Unix(1000, 0)
 	t.Run("release-not-classification", func(t *testing.T) {
 		b := newPairing("modbus", pairResources(), false, nil)
@@ -152,9 +152,9 @@ func TestDS34Ledger(t *testing.T) {
 	})
 }
 
-func TestDS34Modbus(t *testing.T) {
-	t.Run("keys-and-pipeline", testDS34ModbusKeys)
-	t.Run("inline-solicited", func(t *testing.T) { testDS34SolicitedRuntime(t, runtimePairCases()[0]) })
+func TestPairingModbus(t *testing.T) {
+	t.Run("keys-and-pipeline", testPairingModbusKeys)
+	t.Run("inline-solicited", func(t *testing.T) { testPairingSolicitedRuntime(t, runtimePairCases()[0]) })
 	now := time.Unix(1000, 0)
 	for _, fc := range []uint8{1, 2, 3, 4, 5, 6, 15, 16, 22, 23} {
 		t.Run(string(rune('A'+fc)), func(t *testing.T) {
@@ -216,10 +216,10 @@ func TestDS34Modbus(t *testing.T) {
 	}
 }
 
-func TestDS34DNP3(t *testing.T) {
-	t.Run("inline-stations", testDS34DNP3Stations)
-	t.Run("response-families", testDS34DNP3Families)
-	t.Run("inline-solicited", func(t *testing.T) { testDS34SolicitedRuntime(t, runtimePairCases()[1]) })
+func TestPairingDNP3(t *testing.T) {
+	t.Run("inline-stations", testPairingDNP3Stations)
+	t.Run("response-families", testPairingDNP3Families)
+	t.Run("inline-solicited", func(t *testing.T) { testPairingSolicitedRuntime(t, runtimePairCases()[1]) })
 	now := time.Unix(1000, 0)
 	q := dnp3.PairShape{Link: dnp3.LinkProvenance{Source: 1, Destination: 2, Master: true}, FunctionCode: 1, Sequence: 15, FIR: true, FIN: true,
 		Objects: []dnp3.ObjectHeader{{Group: 60, Variation: 2, HasCount: true, HasVariation: true, HasQualifier: true, Qualifier: 6, Addressing: "all"}}}
@@ -289,8 +289,8 @@ func TestDS34DNP3(t *testing.T) {
 	})
 }
 
-func TestDS34Budget(t *testing.T) {
-	t.Run("non-borrowing-held-shares", testDS34HeldShares)
+func TestPairingBudget(t *testing.T) {
+	t.Run("non-borrowing-held-shares", testPairingHeldShares)
 	t.Run("pairing-refusal-and-churn", func(t *testing.T) {
 		now := time.Unix(1, 0)
 		for _, observe := range []bool{false, true} {

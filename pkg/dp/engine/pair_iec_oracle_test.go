@@ -27,10 +27,10 @@ type iecStageOracle struct {
 	} `json:"sequences"`
 }
 
-func TestDS34IEC104(t *testing.T) {
+func TestPairingIEC104(t *testing.T) {
 	t.Run("settled-variants", testIECSettledVariants)
-	t.Run("mismatch-and-stages", testDS34IECMismatchStages)
-	t.Run("inline-solicited", func(t *testing.T) { testDS34SolicitedRuntime(t, runtimePairCases()[2]) })
+	t.Run("mismatch-and-stages", testPairingIECMismatchStages)
+	t.Run("inline-solicited", func(t *testing.T) { testPairingSolicitedRuntime(t, runtimePairCases()[2]) })
 	t.Run("stage-table", func(t *testing.T) {
 		now := time.Unix(1, 0)
 		for _, row := range iecProcedures {
@@ -94,7 +94,7 @@ func TestDS34IEC104(t *testing.T) {
 			}
 		}
 		clear(observed)
-		oracle := readIECOracle(t, "../../../test/ds34/peers/iec104/oracle.json")
+		oracle := readIECOracle(t, "../../../test/pairing/peers/iec104/oracle.json")
 		var expectations iecOracleExpectations
 		strictIECJSON(t, "testdata/iec-stage-expectations.json", &expectations)
 		if expectations.Version != 1 {

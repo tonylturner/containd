@@ -145,7 +145,7 @@ func TestDatasetWatchJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersDeliveryEvidence(t *testing.T) {
+func TestPairingConsumersDeliveryEvidence(t *testing.T) {
 	for _, value := range []string{"unknown", "blocked", "delivered"} {
 		o := observation()
 		o.Outcome.Delivery = value

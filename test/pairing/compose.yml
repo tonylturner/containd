@@ -1,6 +1,6 @@
 services:
   engine:
-    image: ${DS34_IMAGE:?}
+    image: ${PAIRING_IMAGE:?}
     cap_add: [NET_ADMIN, NET_RAW, NET_BIND_SERVICE, SYS_PTRACE]
     sysctls:
       net.ipv4.ip_forward: "1"
@@ -15,38 +15,38 @@ services:
       CONTAIND_CONFIG_DB: /data/config.db
       CONTAIND_USERS_DB: /data/users.db
       CONTAIND_AUDIT_DB: /data/audit.db
-      CONTAIND_MGMT_RESERVATION: '${DS34_RESERVATION:?}'
-    volumes: [data:/data, '${DS34_RESULTS:?}:/results']
+      CONTAIND_MGMT_RESERVATION: '${PAIRING_RESERVATION:?}'
+    volumes: [data:/data, '${PAIRING_RESULTS:?}:/results']
     networks:
       lan:
         interface_name: lan1
-        ipv4_address: ${DS34_LAN:?}.2
+        ipv4_address: ${PAIRING_LAN:?}.2
       wan:
         interface_name: wan
-        ipv4_address: ${DS34_WAN:?}.2
+        ipv4_address: ${PAIRING_WAN:?}.2
   master:
-    image: ${DS34_IMAGE:?}
+    image: ${PAIRING_IMAGE:?}
     entrypoint: [sleep, infinity]
     cap_add: [NET_ADMIN, NET_RAW]
-    volumes: ['${DS34_RESULTS:?}:/results', '../../test:/fixtures:ro']
+    volumes: ['${PAIRING_RESULTS:?}:/results', '../../test:/fixtures:ro']
     networks:
       lan:
-        ipv4_address: ${DS34_LAN:?}.10
+        ipv4_address: ${PAIRING_LAN:?}.10
   outstation:
-    image: ${DS34_IMAGE:?}
-    entrypoint: [python3, /fixtures/ds34/peers/tcp/peer.py, server]
+    image: ${PAIRING_IMAGE:?}
+    entrypoint: [python3, /fixtures/pairing/peers/tcp/peer.py, server]
     cap_add: [NET_ADMIN, NET_RAW]
-    volumes: ['${DS34_RESULTS:?}:/results', '../../test:/fixtures:ro']
+    volumes: ['${PAIRING_RESULTS:?}:/results', '../../test:/fixtures:ro']
     networks:
       wan:
-        ipv4_address: ${DS34_WAN:?}.10
+        ipv4_address: ${PAIRING_WAN:?}.10
   upstream:
-    image: ${DS34_PEER_IMAGE:?}
+    image: ${PAIRING_PEER_IMAGE:?}
     cap_add: [NET_ADMIN, NET_RAW]
-    volumes: ['${DS34_RESULTS:?}:/results']
+    volumes: ['${PAIRING_RESULTS:?}:/results']
     networks:
       wan:
-        ipv4_address: ${DS34_WAN:?}.11
+        ipv4_address: ${PAIRING_WAN:?}.11
 volumes:
   data:
 networks:
@@ -55,10 +55,10 @@ networks:
       com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
-        - subnet: ${DS34_LAN:?}.0/24
+        - subnet: ${PAIRING_LAN:?}.0/24
   wan:
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
-        - subnet: ${DS34_WAN:?}.0/24
+        - subnet: ${PAIRING_WAN:?}.0/24

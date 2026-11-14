@@ -14,15 +14,15 @@ import time
 from evidence import check_pcaps, check_verdicts
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-OUT = pathlib.Path(os.environ["DS34_RESULTS"])
-LAN, WAN = os.environ["DS34_LAN"], os.environ["DS34_WAN"]
+OUT = pathlib.Path(os.environ["PAIRING_RESULTS"])
+LAN, WAN = os.environ["PAIRING_LAN"], os.environ["PAIRING_WAN"]
 PROJECT = os.environ["COMPOSE_PROJECT_NAME"]
 BASE = "http://127.0.0.1:18080/api/v1"
 PORTS = {"modbus": 502, "dnp3": 20000, "iec104": 2404}
 
 
 def compose(*args, **kwargs):
-    return subprocess.run(["docker", "compose", "-p", PROJECT, "-f", str(ROOT / "test/ds34/compose.yml"), *args],
+    return subprocess.run(["docker", "compose", "-p", PROJECT, "-f", str(ROOT / "test/pairing/compose.yml"), *args],
                           check=True, **kwargs)
 
 
@@ -172,7 +172,7 @@ def execute_case(api, original, cases, failures, proto, variant):
     cases.append(case)
     save("cases.json", cases)
     try:
-        result = call("master", "python3", "/fixtures/ds34/peers/tcp/peer.py", "client", json.dumps(case))
+        result = call("master", "python3", "/fixtures/pairing/peers/tcp/peer.py", "client", json.dumps(case))
         (OUT / f"case-{case['id']}.log").write_bytes(result)
     except subprocess.CalledProcessError as exc:
         (OUT / f"case-{case['id']}.log").write_bytes(exc.stdout + exc.stderr)
@@ -183,7 +183,7 @@ def execute_case(api, original, cases, failures, proto, variant):
 def run(mode):
     ready()
     save("manifest.json", {"project": PROJECT, "source": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-                           "image": os.environ["DS34_IMAGE"], "peerImage": os.environ["DS34_PEER_IMAGE"],
+                           "image": os.environ["PAIRING_IMAGE"], "peerImage": os.environ["PAIRING_PEER_IMAGE"],
                            "lan": LAN, "wan": WAN, "nft": call("engine", "nft", "--version").decode().strip()})
     api = API()
     original = api.request("/config")

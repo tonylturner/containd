@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 )
 
-func testDS34ModbusKeys(t *testing.T) {
+func testPairingModbusKeys(t *testing.T) {
 	now := time.Unix(1000, 0)
 	b := newPairing("modbus", pairResources(), false, nil)
 	defer b.close()
@@ -55,7 +55,7 @@ func testDS34ModbusKeys(t *testing.T) {
 	}
 }
 
-func testDS34DNP3Families(t *testing.T) {
+func testPairingDNP3Families(t *testing.T) {
 	now := time.Unix(1000, 0)
 	header := func(group, variation uint8) dnp3.ObjectHeader {
 		return dnp3.ObjectHeader{Group: group, Variation: variation, HasCount: true,
@@ -157,7 +157,7 @@ func testDS34DNP3Families(t *testing.T) {
 	}
 }
 
-func testDS34IECMismatchStages(t *testing.T) {
+func testPairingIECMismatchStages(t *testing.T) {
 	now := time.Unix(1000, 0)
 	base := iec104.PairShape{Format: "I", TypeID: 59, Cause: 6, CA: 1,
 		Objects: []iec104.Object{{IOA: 101, ValueBits: 2, Time: [7]byte{0, 0, 1, 2, 3, 4, 26}}}}

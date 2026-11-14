@@ -25,7 +25,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-func TestDS34ConsumersRulesetPreviewHandler(t *testing.T) {
+func TestPairingConsumersRulesetPreviewHandler(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, DPIEnabled: true, EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
 	cfg.Firewall.Rules = []config.Rule{
@@ -91,7 +91,7 @@ func TestRulesetPreviewSettingsMapping(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
+func TestPairingConsumersRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 	for _, runningEnabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("running-enforcement=%v", runningEnabled), func(t *testing.T) {
 			dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: runningEnabled}})

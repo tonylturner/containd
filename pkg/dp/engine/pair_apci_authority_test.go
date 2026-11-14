@@ -11,7 +11,7 @@ import (
 
 // Reserved APCI flags are observations in tolerant parsing, not a different
 // GI procedure. Strict policy still vetoes their decoder findings separately.
-func TestDS34IECAPCIObservationalAuthority(t *testing.T) {
+func TestPairingIECAPCIObservationalAuthority(t *testing.T) {
 	for _, reserved := range []bool{false, true} {
 		name := "clean"
 		if reserved {

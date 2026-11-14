@@ -12,7 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
-func TestDS34ReconnectLifecycle(t *testing.T) {
+func TestPairingReconnectLifecycle(t *testing.T) {
 	t.Run("half-close-keeps-opposite-reply-only", func(t *testing.T) {
 		f := newResetFlow(t, 502)
 		f.syn()

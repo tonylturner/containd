@@ -19,7 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ConsumersClientPreviewRule(t *testing.T) {
+func TestPairingConsumersClientPreviewRule(t *testing.T) {
 	entry := rules.Entry{ID: "candidate", SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", MessageClass: "autonomous", Direction: "response", TypeIDs: []int{1}}}
 	request := engine.PreviewRuleRequest{Entry: entry, ForwardMatches: map[string]rules.ForwardMatch{"candidate": {Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp", ListenPort: 1502}}}

@@ -15,7 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-func TestDS34ConsumersEvidenceOutcomeJoinNeverFabricatesDelivery(t *testing.T) {
+func TestPairingConsumersEvidenceOutcomeJoinNeverFabricatesDelivery(t *testing.T) {
 	for _, tc := range []struct {
 		kind, outcome, delivery string
 	}{

@@ -12,7 +12,7 @@ import (
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
-func TestDS34ConsumersRuleAPI(t *testing.T) {
+func TestPairingConsumersRuleAPI(t *testing.T) {
 	result := dpengine.PreviewRuleResponse{MatchCount: 2, Pairing: &dpengine.PairingPreview{
 		Unpaired: 1, Unknown: 1, Reasons: []string{"autonomous_rule_required", "pairing_unknown"}}}
 	eng := &previewMockEngine{result: result}
@@ -27,7 +27,7 @@ func TestDS34ConsumersRuleAPI(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersRulesetAPI(t *testing.T) {
+func TestPairingConsumersRulesetAPI(t *testing.T) {
 	pairing := &dpengine.PairingPreview{
 		Paired: 1, Unpaired: 2, Expired: 3, Ambiguous: 4, Unsupported: 5, Unknown: 6,
 		Reasons: []string{"paired", "unpaired", "pairing_expired", "pairing_ambiguous", "pairing_unsupported", "pairing_unknown"},

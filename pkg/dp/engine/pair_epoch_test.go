@@ -15,7 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34EpochLifecycle(t *testing.T) {
+func TestPairingEpochLifecycle(t *testing.T) {
 	t.Run("publisher", func(t *testing.T) {
 		var owner ruleSnapshots
 		snap := &rules.Snapshot{Version: "unchanged"}

@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestDS34ClassSchemaProjection(t *testing.T) {
+func TestPairingClassSchemaProjection(t *testing.T) {
 	tests := []struct {
 		name, proto, kind string
 		attrs             map[string]any

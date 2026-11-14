@@ -18,7 +18,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
 
-func TestDS34ConsumersLearnerClasses(t *testing.T) {
+func TestPairingConsumersLearnerClasses(t *testing.T) {
 	for _, tc := range []struct {
 		name, protocol, class, direction string
 		port                             uint16
@@ -95,7 +95,7 @@ func TestDS34ConsumersLearnerClasses(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersUnknownSolicitedEvidence(t *testing.T) {
+func TestPairingConsumersUnknownSolicitedEvidence(t *testing.T) {
 	ds := metadata()
 	ds.ID = "replies"
 	state := requestState()
@@ -119,7 +119,7 @@ func TestDS34ConsumersUnknownSolicitedEvidence(t *testing.T) {
 	}
 }
 
-func TestDS34ConsumersSolicitedCertificationWithheld(t *testing.T) {
+func TestPairingConsumersSolicitedCertificationWithheld(t *testing.T) {
 	for _, outcome := range []string{"", "unknown", "unsupported"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx := context.Background()

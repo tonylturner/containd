@@ -13,8 +13,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 )
 
-func TestDS34Gate(t *testing.T) {
-	t.Run("inline-direction-splits", testDS34RuntimeSplits)
+func TestPairingGate(t *testing.T) {
+	t.Run("inline-direction-splits", testPairingRuntimeSplits)
 	for _, dir := range []int{sessionDirClient, sessionDirSrv} {
 		t.Run(dirName(dir), func(t *testing.T) {
 			h := newIECHarness(t, "enforce")
@@ -98,8 +98,8 @@ func TestDS34Gate(t *testing.T) {
 	})
 }
 
-func TestDS34Settlement(t *testing.T) {
-	t.Run("inflight-rejection", testDS34InflightSettlement)
+func TestPairingSettlement(t *testing.T) {
+	t.Run("inflight-rejection", testPairingInflightSettlement)
 	h := newIECHarness(t, "enforce")
 	table := h.e.sessions
 	for _, err := range []error{capture.ErrUnknownToken, errors.New("uncertain send")} {
@@ -138,7 +138,7 @@ func TestDS34Settlement(t *testing.T) {
 	}
 }
 
-func TestDS34TransportRetirement(t *testing.T) {
+func TestPairingTransportRetirement(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.handshake()
 	table := h.e.sessions
@@ -164,7 +164,7 @@ func TestDS34TransportRetirement(t *testing.T) {
 	table.apply(acts)
 }
 
-func testDS34HeldShares(t *testing.T) {
+func testPairingHeldShares(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	table := h.e.sessions
 	table.mu.Lock()

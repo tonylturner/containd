@@ -66,7 +66,7 @@ func runtimePairOwner(t *testing.T, e *Engine, p runtimePairCase) *trackedSessio
 	return s
 }
 
-func testDS34SolicitedRuntime(t *testing.T, p runtimePairCase) {
+func testPairingSolicitedRuntime(t *testing.T, p runtimePairCase) {
 	for _, def := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
 		cases := []string{"allowed", "missing", "denied", "incomplete", "monitor-only"}
 		if p.protocol != iecProtocol {
@@ -148,7 +148,7 @@ func testDS34SolicitedRuntime(t *testing.T, p runtimePairCase) {
 	}
 }
 
-func testDS34RuntimeSplits(t *testing.T) {
+func testPairingRuntimeSplits(t *testing.T) {
 	for _, p := range runtimePairCases() {
 		for _, reply := range []bool{false, true} {
 			wire, seq := p.request, uint32(100)
@@ -190,7 +190,7 @@ func testDS34RuntimeSplits(t *testing.T) {
 	}
 }
 
-func testDS34CollateralRelease(t *testing.T) {
+func testPairingCollateralRelease(t *testing.T) {
 	for _, p := range runtimePairCases() {
 		for _, fate := range []string{"partial-tail", "forbidden-sibling"} {
 			t.Run(p.protocol+"/"+fate, func(t *testing.T) {
@@ -228,7 +228,7 @@ func testDS34CollateralRelease(t *testing.T) {
 	}
 }
 
-func testDS34DNP3Stations(t *testing.T) {
+func testPairingDNP3Stations(t *testing.T) {
 	p := runtimePairCases()[1]
 	snap := rules.Snapshot{Default: rules.ActionDeny, DPIMode: "enforce", Firewall: []rules.Entry{runtimePairRule(p, "enforce")}}
 	t.Run("interleaved-stations-one-connection", func(t *testing.T) {
