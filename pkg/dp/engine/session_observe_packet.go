@@ -83,7 +83,7 @@ func (t *sessionTable) observePickupLocked(client, server netip.AddrPort, ctx ru
 	if state.ServiceKey().Dir == flow.DirReverse {
 		dir = sessionDirSrv
 	}
-	t.sessions[sessionKey{client, server}] = s
+	t.publishSessionLocked(sessionKey{client, server}, s)
 	return t.livePacketLocked(s, dir, pkt, state, now)
 }
 

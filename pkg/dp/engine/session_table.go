@@ -62,6 +62,7 @@ type trackedSession struct {
 	id               string
 	flow             *flow.State // immutable service key captured at creation; client/server stay in packet space
 	inline           bool        // admission source, independent of the policy's envelope mode
+	connectionKey    string      // published index key; not transport authority
 	client           netip.AddrPort
 	server           netip.AddrPort
 	state            sessionState
@@ -76,7 +77,7 @@ type trackedSession struct {
 	retireAfterReset bool
 	nonAdmit         bool            // an aborted ordinary non-admission repeats to kernel policy
 	next             *trackedSession // new incarnation whose handshake is pending
-	tokens           [pairSessionCap]sessionToken
+	tokens           [pairSessionCap]capture.Token
 	tokenNext        int
 	tokenLease       *limits.Lease
 	denialOrder      *list.Element // generic denial FIFO, owned by the session table
@@ -146,6 +147,8 @@ type sessionTable struct {
 	ruleOwner      *ruleSnapshots
 	snap           *rules.Snapshot
 	sessions       map[sessionKey]*trackedSession
+	tokenOwners    map[capture.Token]sessionToken
+	byConnection   map[string]*trackedSession
 	tombstones     int
 	denials        list.List // Modbus/DNP3 tombstones, not a second tuple registry
 	heldTotal      int
@@ -248,17 +251,11 @@ func (t *sessionTable) lookupPacketLocked(src, dst netip.AddrPort, state *flow.S
 	if c == nil || c.Key == "" {
 		return nil, 0
 	}
-	for _, s := range t.sessions {
-		if s.flow == nil {
-			continue
+	if s := t.byConnection[c.Key]; s != nil {
+		if c.Direction(state.Key) == flow.DirReverse {
+			return s, sessionDirSrv
 		}
-		owned := s.flow.Connection.Load()
-		if owned != nil && owned.Key == c.Key {
-			if c.Direction(state.Key) == flow.DirReverse {
-				return s, sessionDirSrv
-			}
-			return s, sessionDirClient
-		}
+		return s, sessionDirClient
 	}
 	return nil, 0
 }
@@ -387,6 +384,7 @@ func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionAc
 		t.removeDenialLocked(s)
 	}
 	delete(t.sessions, key)
+	t.unindexSessionLocked(s)
 	s.releaseInspection()
 	return acts
 }

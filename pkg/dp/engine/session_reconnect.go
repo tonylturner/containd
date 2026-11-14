@@ -81,7 +81,7 @@ func (t *sessionTable) replacementLocked(s *trackedSession, dir int, pkt capture
 	t.dpi.EndStream(s.id)
 	res.acts.merge(t.iecAdapter.endLocked(t, s))
 	res.acts.retired = true
-	t.sessions[sessionKey{client: s.client, server: s.server}] = n
+	t.publishSessionLocked(sessionKey{client: s.client, server: s.server}, n)
 	s.releaseInspection()
 	return res, true
 }

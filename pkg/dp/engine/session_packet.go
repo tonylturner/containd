@@ -360,7 +360,7 @@ func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.Add
 		prev.next.releaseInspection()
 		prev.next = n // the tombstone retires once the handshake validates
 	default:
-		t.sessions[key] = n
+		t.publishSessionLocked(key, n)
 		prev.releaseInspection()
 	}
 	res := accepted(reasonIECAccept)
@@ -383,7 +383,7 @@ func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.
 		return t.admissionLimitLocked("enforce")
 	}
 	s.inline = pkt.Token.Inline()
-	t.sessions[sessionKey{client: client, server: server}] = s
+	t.publishSessionLocked(sessionKey{client: client, server: server}, s)
 	dir := sessionDirSrv
 	if fromClient {
 		dir = sessionDirClient

@@ -133,6 +133,8 @@ func (t *sessionTable) stopInspection() {
 		s.releaseInspection()
 	}
 	clear(t.sessions)
+	clear(t.tokenOwners)
+	clear(t.byConnection)
 	clear(t.held)
 	clear(t.aborts)
 	t.heldTotal, t.tombstones = 0, 0

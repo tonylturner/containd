@@ -7,7 +7,7 @@ import "github.com/tonylturner/containd/pkg/dp/capture"
 // no successful completion. Held credits keep their association until residency
 // is proven settled, independently of this rolling history.
 type sessionToken struct {
-	token   capture.Token
+	session *trackedSession
 	verdict capture.Verdict
 }
 
@@ -18,26 +18,23 @@ func (t *sessionTable) rememberTokenLocked(s *trackedSession, tok capture.Token,
 	if c := t.settlements[tok]; c != nil {
 		c.session, c.verdict = s, v
 	}
-	for i := range s.tokens {
-		if s.tokens[i].token == tok {
-			s.tokens[i].verdict = v
-			return
-		}
+	if owner := t.tokenOwners[tok]; owner.session == s {
+		t.tokenOwners[tok] = sessionToken{s, v}
+		return
 	}
-	s.tokens[s.tokenNext] = sessionToken{tok, v}
+	old := s.tokens[s.tokenNext]
+	if t.tokenOwners[old].session == s {
+		delete(t.tokenOwners, old)
+	}
+	s.tokens[s.tokenNext] = tok
 	s.tokenNext = (s.tokenNext + 1) % len(s.tokens)
+	t.tokenOwners[tok] = sessionToken{s, v}
 }
 
 func (t *sessionTable) tokenOwnerLocked(tok capture.Token) (*trackedSession, capture.Verdict) {
 	if c := t.settlements[tok]; c != nil && c.session != nil {
 		return c.session, c.verdict
 	}
-	for _, s := range t.sessions {
-		for _, w := range s.tokens {
-			if w.token == tok {
-				return s, w.verdict
-			}
-		}
-	}
-	return nil, 0
+	owner := t.tokenOwners[tok]
+	return owner.session, owner.verdict
 }
