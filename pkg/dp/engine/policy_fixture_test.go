@@ -31,3 +31,12 @@ func policyQueue(client, server net.IP, clientPort, serverPort uint16, reply boo
 	return &capture.QueueMetadata{IngressDevice: in, EgressDevice: out,
 		Conntrack: &capture.QueueConntrack{Original: original, Reply: reverse, DirectionKnown: true, IsReply: reply, HasMark: true, HasStatus: true}}
 }
+
+// Replayed NFQUEUE captures carry the same receive-time direction metadata as
+// live capture; packet wire fields remain unchanged.
+func capturedIECQueue(pkt capture.Packet) *capture.QueueMetadata {
+	if pkt.SrcPort == iec104Port {
+		return policyQueue(pkt.DstIP, pkt.SrcIP, pkt.DstPort, pkt.SrcPort, true)
+	}
+	return policyQueue(pkt.SrcIP, pkt.DstIP, pkt.SrcPort, pkt.DstPort, false)
+}

@@ -68,7 +68,7 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	if pkt.Token.Inline() {
 		return
 	}
-	iecOwned := e.sessionOwnsConnection(pkt, incoming)
+	iecOwned := e.rawSessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	e.flowMu.Unlock()
@@ -139,7 +139,7 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
 	enforcing := e.flowEnforcing(pkt)
 	e.sweepBeforeAdmission(now, enforcing)
-	iecOwned := !pkt.Token.Inline() && e.sessionOwnsConnection(pkt, incoming)
+	iecOwned := !pkt.Token.Inline() && e.rawSessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	if len(retired) != 0 {

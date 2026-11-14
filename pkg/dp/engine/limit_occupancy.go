@@ -10,7 +10,7 @@ import (
 func (t *sessionTable) LimitOccupancy() limits.Occupancy {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return limits.Occupancy{Limit: sessionMaxSessions, Entries: int64(len(t.sessions))}
+	return limits.Occupancy{Limit: sessionMaxSessions + deniedTCPCapacity, Entries: int64(len(t.sessions))}
 }
 func (t *sessionTable) reconnectLimitOccupancy() limits.Occupancy {
 	t.mu.Lock()

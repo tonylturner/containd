@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -141,12 +142,12 @@ func TestResetRuleDropsInspectedMessage(t *testing.T) {
 	read := clientToServer("modbus-read", "502", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}})
 	reset := rules.Entry{ID: "reset-502", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, Action: rules.ActionReset}
 	e, up := newEnforceEngine(t, rules.ActionAllow, read, reset)
-	handshake(e, 41000, 502)
-	if d := e.handlePacket(connSegment(false, 41000, 502, 100, ackPsh, modbusADU(1, 3, 0, 1))); d.Action != capture.Accept {
+	inlineHandshake(t, e, 41000, 502)
+	if d := sendInline(e, connSegment(false, 41000, 502, 100, ackPsh, modbusADU(1, 3, 0, 1))); d.Action != capture.Repeat || d.Mark&markabi.NonAdmitMark != 0 {
 		t.Fatalf("read decision = %+v; ALLOW takes precedence over RESET", d)
 	}
-	if d := e.handlePacket(connSegment(false, 41000, 502, 112, ackPsh, modbusADU(2, 6, 1, 3))); d.Action != capture.Drop {
-		t.Fatalf("write decision = %+v, want drop", d)
+	if d := sendInline(e, connSegment(false, 41000, 502, 112, ackPsh, modbusADU(2, 6, 1, 3))); d.Action != capture.Repeat || d.Mark&markabi.NonAdmitMark == 0 {
+		t.Fatalf("write decision = %+v, want non-admitting kernel continuation", d)
 	}
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("DPI blocks = %v, want none", got)

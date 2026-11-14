@@ -86,10 +86,12 @@ func TestDenyResetReconnect(t *testing.T) {
 			// An independent session is already open to the very same service.
 			other := *f.fcFlow
 			other.client++
+			other.next = 0
 			other.syn()
 			other.accept("concurrent read", p.read(1))
+			other.respondDNP3Read(1)
 			at := f.next
-			pkt := f.segment(false, f.isn+at, 9000, ackPsh, p.denied[0].frame)
+			pkt := f.segment(false, f.isn+at, resyncServerISN, ackPsh, p.denied[0].frame)
 			pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
 			if d := f.e.HandlePacket(pkt); d.Action != capture.Drop {
 				t.Fatalf("denied command = %+v", d)
@@ -100,7 +102,7 @@ func TestDenyResetReconnect(t *testing.T) {
 			}
 			f.e.hooks.onVerdict(pkt.Token, capture.VerdictDrop, nil)
 			client, server := f.endpoints()
-			want := []session.Reset{{Src: client, Dst: server, Seq: pkt.TCP.Seq}, {Src: server, Dst: client, Seq: 9000}}
+			want := []session.Reset{{Src: client, Dst: server, Seq: pkt.TCP.Seq}, {Src: server, Dst: client, Seq: resyncServerISN}}
 			if got := f.waitResets(2); !reflect.DeepEqual(got, want) {
 				t.Fatalf("resets %+v, want %+v", got, want)
 			}
@@ -134,6 +136,7 @@ func TestDenyResetReconnect(t *testing.T) {
 			other.isn, other.next = 600000, 0
 			other.syn()
 			other.accept("independent session", p.read(2))
+			other.respondDNP3Read(2)
 			staleSYN := f.segment(false, f.isn, 0, capture.TCPFlagSYN, nil)
 			if d := f.handle(staleSYN); d.Action != capture.Drop {
 				t.Fatalf("old-incarnation SYN = %+v", d)
@@ -317,7 +320,10 @@ func TestDenyResetUnavailable(t *testing.T) {
 				deny.ID, deny.Action, deny.ICS.FunctionCode = "commands-denied", rules.ActionDeny, nil
 				snap.Firewall = append(snap.Firewall, deny)
 				f.e.LoadRules(snap)
-				pkt := f.segment(false, 7000, 9000, ackPsh, p.denied[0].frame)
+				pkt := f.segment(false, 7000, resyncServerISN, ackPsh, p.denied[0].frame)
+				if p.port != 44818 && mode != "IPv6" {
+					f.syn() // reset availability changes only after a proven handshake
+				}
 				switch mode {
 				case "IPv6":
 					pkt.SrcIP, pkt.DstIP = net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
@@ -331,8 +337,22 @@ func TestDenyResetUnavailable(t *testing.T) {
 				syn.Payload, syn.TCP.Flags = nil, capture.TCPFlagSYN
 				syn.TCP.Seq--
 				markHandshake(&syn)
-				if d := f.handle(syn); d.Action != capture.Repeat {
-					t.Fatalf("SYN = %+v", d)
+				if p.port != 44818 && mode == "IPv6" {
+					for _, packet := range []capture.Packet{syn, pkt} {
+						if d := f.handle(packet); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+							t.Fatalf("unsupported IPv6 must fail closed: %+v", d)
+						}
+					}
+					drainResetWorker(t, f.e)
+					if len(f.inj.Resets()) != 0 || len(f.deletes) != 0 || len(f.up.calls) != 0 {
+						t.Fatal("IPv6 caused unsupported reset or block")
+					}
+					return
+				}
+				if p.port == 44818 {
+					if d := f.handle(syn); d.Action != capture.Repeat {
+						t.Fatalf("SYN=%+v", d)
+					}
 				}
 				if d := f.handle(pkt); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
 					t.Fatalf("denial = %+v", d)

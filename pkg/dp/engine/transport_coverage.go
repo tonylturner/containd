@@ -350,6 +350,7 @@ func (e *Engine) stopDecodeCoverage(marker *transportCoverage, connection *flow.
 	if clean {
 		for _, st := range states {
 			e.dpiMgr.DiscardFlow(st)
+			e.endObservedSession(st, false)
 		}
 	}
 	if t := e.sessions; clean && t != nil && len(states) != 0 && isIECPort(pkt) {

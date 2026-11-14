@@ -86,7 +86,7 @@ func (t *sessionTable) genericUnitPolicyLocked(s *trackedSession, dir int, f dpi
 				res.policyReason = reasonDPIDeny
 			}
 			why = pairMismatch
-		case action != rules.ActionAllow || class == rules.ClassRequest && !explicit:
+		case action != rules.ActionAllow || s.mode == "enforce" && class == rules.ClassRequest && !explicit:
 			j.nonAdmit = true
 		}
 		permit.Contexts = append(permit.Contexts, ctx)

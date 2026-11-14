@@ -65,7 +65,7 @@ func (t *sessionTable) pressure() IEC104Pressure {
 	out := IEC104Pressure{InjectorFailures: pressureTotals.injector.Load(), Limits: IEC104PressureLimits{
 		HeldPackets: sessionMaxHeldGlobal, HeldPacketsPerSession: sessionMaxHeldPerSession,
 		HeldBytesPerSession: sessionMaxHeldBytes, PendingSeconds: sessionPendingTimeout.Seconds(),
-		Sessions: sessionMaxSessions, ResetWorkerJobs: blockWorkerQueue,
+		Sessions: sessionMaxSessions + deniedTCPCapacity, ResetWorkerJobs: blockWorkerQueue,
 	}, Aborts: make(map[string]uint64, len(iecAbortReasons)),
 		ResetWorkerRejections: pressureTotals.worker.Load(), VerdictFailures: pressureTotals.verdict.Load()}
 	for _, reason := range iecAbortReasons {

@@ -102,7 +102,7 @@ func TestIECRSTClosesOnlyAtReceivePoint(t *testing.T) {
 			if _, d := h.send(true, iframe(46, 2)); d.Action != h.passingDisposition() {
 				t.Fatalf("command after the RST = %+v, want Accept", d)
 			}
-			if _, d := h.send(true, iframe(45, 3)); d.Action != capture.Drop || d.Reason != reasonIECAbort {
+			if _, d := h.send(true, iframe(45, 3)); d.Action != capture.Drop || d.Reason != string(pairMismatch) {
 				t.Fatalf("denied command after the RST = %+v, want Drop by %s", d, reasonIECAbort)
 			}
 		})
@@ -174,46 +174,40 @@ func TestIECReconnectSamePortAfterLostConnection(t *testing.T) {
 	if _, d := h.send(true, iframe(46, 3)); d.Action != h.passingDisposition() {
 		t.Fatalf("command on the next incarnation = %+v, want Accept", d)
 	}
-	if _, d := h.send(true, iframe(45, 4)); d.Action != capture.Drop || d.Reason != reasonIECAbort {
+	if _, d := h.send(true, iframe(45, 4)); d.Action != capture.Drop || d.Reason != string(pairMismatch) {
 		t.Fatalf("denied command on the next incarnation = %+v, want Drop by %s", d, reasonIECAbort)
 	}
 }
 
-// TestIECHandshakeSYNReopensEstablished sends the SYN of a new handshake
-// into an established incarnation, as after connection tracking forgot
-// the connection. An enforce incarnation aborts, resetting both endpoints,
-// and the client's retransmitted SYN opens the next incarnation; a learn
-// incarnation closes and the SYN opens the next one at once.
+// A new SYN is a proposal; only a matching peer SYN-ACK replaces history.
 func TestIECHandshakeSYNReopensEstablished(t *testing.T) {
-	t.Run("enforce", func(t *testing.T) {
-		h := newIECHarness(t, "enforce")
-		h.handshake()
-		h.send(true, iframe(46, 1))
-		syn := h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)
-		if d := h.e.handlePacket(syn); d.Action != capture.Drop || d.Reason != reasonIECAbort {
-			t.Fatalf("handshake SYN into the incarnation = %+v, want Drop by %s", d, reasonIECAbort)
-		}
-		h.e.hooks.onVerdict(syn.Token, capture.VerdictDrop, nil)
-		h.waitResets(2)
-		if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
-			t.Fatalf("retransmitted SYN = %+v, want Accept", d)
-		}
-		if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
-			t.Fatalf("SYN-ACK = %+v, want Accept", d)
-		}
-		h.cSeq, h.sSeq = 778, 9001
-		if _, d := h.send(true, iframe(46, 2)); d.Action != h.passingDisposition() {
-			t.Fatalf("command on the next incarnation = %+v, want Accept", d)
-		}
-	})
-	t.Run("monitor", func(t *testing.T) {
-		h := newIECHarness(t, "monitor")
-		h.handshake()
-		if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
-			t.Fatalf("handshake SYN into the learn incarnation = %+v, want Accept", d)
-		}
-		if st, _ := h.sessionState(); st != sessionSynSent {
-			t.Fatalf("session state %d, want the next incarnation opened", st)
-		}
-	})
+	for _, mode := range []string{"enforce", "monitor"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newIECHarness(t, mode)
+			h.handshake()
+			h.send(true, iframe(46, 1))
+			client, _ := addrPort(h.client, h.cport)
+			server, _ := addrPort(h.server, iec104Port)
+			old := h.e.sessions.sessions[sessionKey{client, server}]
+			if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
+				t.Fatalf("proposal=%+v", d)
+			}
+			if current := h.e.sessions.sessions[sessionKey{client, server}]; current != old || current.state != sessionEstablished || current.next == nil {
+				t.Fatal("SYN retired old history or failed to retain proposal")
+			}
+			if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
+				t.Fatalf("peer proof=%+v", d)
+			}
+			if current := h.e.sessions.sessions[sessionKey{client, server}]; current == old || current.state != sessionEstablished || current.id == old.id {
+				t.Fatal("peer proof failed to replace history")
+			}
+			h.cSeq, h.sSeq = 778, 9001
+			if _, d := h.send(true, iframe(46, 2)); d.Action != h.passingDisposition() {
+				t.Fatalf("new command=%+v", d)
+			}
+			if len(h.inj.Resets()) != 0 {
+				t.Fatal("replacement reset a valid connection")
+			}
+		})
+	}
 }

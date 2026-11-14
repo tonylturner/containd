@@ -36,7 +36,7 @@ func TestIECPressureCombinedRegistry(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("%s: status %d", name, w.Code)
 			}
-			if !strings.Contains(w.Body.String(), "containd_dp_iec104_sessions_limit 4096\n") {
+			if !strings.Contains(w.Body.String(), "containd_dp_iec104_sessions_limit 20480\n") {
 				t.Fatalf("%s: live IEC104 metrics missing", name)
 			}
 		}

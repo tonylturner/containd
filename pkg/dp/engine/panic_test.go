@@ -39,6 +39,15 @@ func TestCaptureHandlerRecoversPanics(t *testing.T) {
 	if d := e.HandlePacket(pkt); d.Action != capture.Drop {
 		t.Fatalf("panic on an envelope-marked packet = %+v, want Drop", d)
 	}
+	// Steering disagreement is rejected before decoding. Another unmarked
+	// flow still exercises a second actual panic and recovery.
+	if len(logged) != 1 {
+		t.Fatalf("steering mismatch reached decoder: %v", logged)
+	}
+	pkt.HasMark, pkt.Mark, pkt.SrcPort = false, 0, 40002
+	if d := e.HandlePacket(pkt); d.Action != capture.Accept {
+		t.Fatalf("second panic=%+v", d)
+	}
 	if len(logged) != 2 || !strings.Contains(logged[0], "decoder bug") {
 		t.Fatalf("logged = %v", logged)
 	}

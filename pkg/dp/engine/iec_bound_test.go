@@ -124,7 +124,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 			wantState := sessionClosed
 			if tc.aborted {
 				p, d := h.send(true, iframe(45, 1))
-				if d.Action != capture.Drop || d.Reason != reasonIECAbort {
+				if d.Action != capture.Drop || d.Reason != string(pairMismatch) {
 					t.Fatalf("abort = %+v", d)
 				}
 				h.e.hooks.onVerdict(p.Token, capture.VerdictDrop, nil)

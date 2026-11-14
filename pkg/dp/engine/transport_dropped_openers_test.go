@@ -51,12 +51,14 @@ func TestReviewRound3DroppedOpenersReleaseAdmissionCapacity(t *testing.T) {
 	r.admit(e, syn)
 	processTransportAdmission(t, e, r)
 	req := transportWire(ev.Original, time.Now(), modbusADU(1, 3, 10, 2))
+	req.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 501}
 	r.admit(e, req)
 	processTransportAdmission(t, e, r)
 	rep := transportWire(ev.Reply, time.Now(), modbusReadReply(1))
 	r.admit(e, rep)
 	processTransportAdmission(t, e, r)
 	bogus := transportWire(ev.Reply, time.Now(), modbusReadReply(99))
+	bogus.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 13}
 	r.admit(e, bogus)
 	processTransportAdmission(t, e, r)
 	stats := e.AnomalyDetector().PairingStats()

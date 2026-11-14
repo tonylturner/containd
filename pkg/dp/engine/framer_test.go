@@ -19,7 +19,7 @@ func TestHandlePacketCompetingICSPorts(t *testing.T) {
 	}{
 		{502, 2404, true, "iec104", false},
 		{502, 2404, false, "modbus", true},
-		{2404, 502, false, "modbus", true},
+		{2404, 502, false, "modbus", false},
 		{41000, 502, false, "modbus", false},
 	} {
 		t.Run(fmt.Sprintf("%d-%d/%s", tc.client, tc.server, tc.protocol), func(t *testing.T) {

@@ -110,11 +110,16 @@ func TestTransportCoverageStaleBinding(t *testing.T) {
 
 type coverageEndDecoder struct {
 	*modbus.Decoder
-	ended map[string]int
+	ended map[streamEndKey]int
 }
 
-func (d *coverageEndDecoder) StreamEnded(session string, _ dpi.StreamDir) {
-	d.ended[session]++
+type streamEndKey struct {
+	session string
+	dir     dpi.StreamDir
+}
+
+func (d *coverageEndDecoder) StreamEnded(session string, dir dpi.StreamDir) {
+	d.ended[streamEndKey{session, dir}]++
 }
 
 func TestTransportCoverageStopsBothDirections(t *testing.T) {
@@ -128,8 +133,9 @@ func TestTransportCoverageStopsBothDirections(t *testing.T) {
 					reader.err = conntrack.ErrNotFound
 				}
 				e, r, _ := newTransportTest(t, reader)
-				decoder := &coverageEndDecoder{Decoder: modbus.NewDecoder(), ended: make(map[string]int)}
+				decoder := &coverageEndDecoder{Decoder: modbus.NewDecoder(), ended: make(map[streamEndKey]int)}
 				e.dpiMgr = dpi.NewManager(decoder)
+				e.sessions.dpi = e.dpiMgr
 				r.authority.check(context.Background())
 				at := time.Now()
 				request := transportWire(ev.Original, at, modbusADU(1, 3, 10, 2))
@@ -158,8 +164,15 @@ func TestTransportCoverageStopsBothDirections(t *testing.T) {
 					if st == nil || !e.decodingStopped(st) {
 						t.Fatal("loss did not stop both directional states")
 					}
-					if decoder.ended[st.Key.Hash()] != 1 {
-						t.Fatalf("loss did not discard directional stream %s: %v", st.Key.Hash(), decoder.ended)
+					src, _ := addrPort(request.SrcIP, request.SrcPort)
+					dst, _ := addrPort(request.DstIP, request.DstPort)
+					owner, _ := e.sessions.lookupLocked(src, dst)
+					dir := dpi.ClientToServer
+					if tuple == ev.Reply {
+						dir = dpi.ServerToClient
+					}
+					if owner == nil || decoder.ended[streamEndKey{owner.id, dir}] != 1 {
+						t.Fatalf("loss did not discard directional session stream: %v", decoder.ended)
 					}
 				}
 				request.Timestamp, request.Payload = at.Add(3*time.Millisecond), modbusADU(2, 3, 10, 2)

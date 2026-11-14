@@ -79,7 +79,7 @@ func TestStateLimitsCurrentOwnersAndReconfigure(t *testing.T) {
 	for _, st := range s.Tables {
 		got[st.Table] = st
 	}
-	if len(got) != 12 || got[limits.TableFlows].Entries != 2 || got[limits.TableFlows].Limit != limits.DefaultMaxFlows || got[limits.TableIECReconnect].Entries != 1 || got[limits.TableVerdictCache].Entries != 1 || got[limits.TableIECSessions].Limit != 4096 || got[limits.TableConformance].Limit != 65536 || got[limits.TablePickupReset].Limit != 4096 || got[limits.TableSignatureWindows].Limit != 4096 || got[limits.TableInventoryPoints].Limit != limits.MaxInventoryPoints {
+	if len(got) != 12 || got[limits.TableFlows].Entries != 2 || got[limits.TableFlows].Limit != limits.DefaultMaxFlows || got[limits.TableIECReconnect].Entries != 1 || got[limits.TableVerdictCache].Entries != 1 || got[limits.TableIECSessions].Limit != sessionMaxSessions+deniedTCPCapacity || got[limits.TableConformance].Limit != 65536 || got[limits.TablePickupReset].Limit != 4096 || got[limits.TableSignatureWindows].Limit != 4096 || got[limits.TableInventoryPoints].Limit != limits.MaxInventoryPoints {
 		t.Fatalf("owners %+v", s)
 	}
 	oldBudget := e.budget

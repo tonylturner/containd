@@ -42,6 +42,10 @@ type sessionResult struct {
 	failure      pairReason
 	messages     []sessionMessageDecision
 	policyReason string
+	streamErr    error
+	streamScope  *rules.Entry
+	packetPanic  error
+	trigger      string
 }
 
 func accepted(reason string) sessionResult {
@@ -95,10 +99,13 @@ func dirName(dir int) string {
 // take the flow path unchanged. The packet is judged in the IEC104 parsing
 // mode in force now; conformance alerts and the connection's alert identity
 // are the engine's, so they are settled here, after the table decided.
-func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
+func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State, stopped bool) (capture.Decision, bool) {
 	t := e.sessions
 	if t == nil || sessionProtocol(state) == "" && !e.sessionOwnsState(pkt, state) {
 		return capture.Decision{}, false
+	}
+	if e.bypassObservedSession(pkt, state, stopped) {
+		return acceptDecision, true
 	}
 	res, ok := t.packet(pkt, state, e.ICSParsing(sessionProtocol(state)))
 	if !ok {
@@ -115,6 +122,9 @@ func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (cap
 		return capture.Decision{}, false
 	}
 	e.recordPacketStats(pkt, state)
+	if res.packetPanic != nil {
+		e.reportPacketPanic(res.packetPanic)
+	}
 	noteCorrelationInspection(state, pkt, !res.stateLimit && res.failure == "")
 	if res.stateLimit {
 		e.recordLearnPacketLoss(pkt)
@@ -124,6 +134,9 @@ func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (cap
 		e.RecordDPIEvents(state, &parsed, res.inspect)
 	}
 	e.recordSessionMessages(state, &parsed, res)
+	if res.streamErr != nil && res.streamScope != nil {
+		e.recordFailClosedDecision(state, &parsed, res.streamScope, failClosedReason(res.streamErr), sessionProtocol(state), res.streamErr)
+	}
 	for _, f := range res.findings {
 		e.recordConformanceAlert(state, &parsed, f.ev, iecConformanceAction(res.decision, f.decision))
 	}
@@ -164,6 +177,12 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 		return t.nonIPv4Locked(state)
 	}
 	s, dir := t.lookupPacketLocked(src, dst, state)
+	var retired sessionActions
+	defer func() { result.acts.merge(retired) }()
+	if s != nil && s.state == sessionAborted && s.denialExpired(now) {
+		retired.merge(t.deleteLocked(sessionKey{s.client, s.server}, s))
+		s, dir = t.lookupPacketLocked(src, dst, state)
+	}
 	for s != nil && s.resetIO != nil && replacementHandshake(s, dir, pkt) {
 		done := s.resetIO
 		t.mu.Unlock()
@@ -276,6 +295,9 @@ func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPo
 		if !matched {
 			return sessionResult{}, false
 		}
+		if !pkt.Token.Inline() && sessionProtocol(state) != iecProtocol {
+			mode = "monitor"
+		}
 		if !opens(mode, pkt) {
 			if len(pkt.Payload) > 0 {
 				return dropped(reasonIECInvalid), true
@@ -293,6 +315,12 @@ func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPo
 	if !matched {
 		return sessionResult{}, false
 	}
+	if !pkt.Token.Inline() && sessionProtocol(state) != iecProtocol {
+		mode = "monitor"
+	}
+	if mode == "monitor" && sessionProtocol(state) != iecProtocol && len(pkt.Payload) > 0 {
+		return t.observePickupLocked(client, server, ctx, pkt, state, now), true
+	}
 	if mode != "enforce" || pkt.TCP.Flags&capture.TCPFlagRST != 0 && len(pkt.Payload) == 0 {
 		// Monitor: observed, never parsed mid-stream. A bare RST closes.
 		return accepted(reasonIECAccept), true
@@ -304,7 +332,7 @@ func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPo
 // or closed session of the same tuple, if any.
 func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.AddrPort, ctx rules.EvalContext, mode string, pkt capture.Packet, state *flow.State, now time.Time) sessionResult {
 	// The bound counts tuple keys; a retained tuple reuses its existing key.
-	if prev == nil && len(t.sessions) >= sessionMaxSessions {
+	if prev == nil && t.fullLocked() {
 		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.Mode(mode))
 		if mode == "enforce" {
 			t.countAbort(abortBound)
@@ -349,7 +377,7 @@ func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.Add
 // inside an enforce envelope and resets that session once. The
 // tombstone then drops its later packets.
 func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, state *flow.State, now time.Time) sessionResult {
-	if len(t.sessions) >= sessionMaxSessions {
+	if t.fullLocked() {
 		t.ledger.Record(limits.TableIECSessions, limits.ReasonRefused, limits.ModeEnforce)
 		// Unobserved enforce traffic must not bypass the shared table bound.
 		t.countAbort(abortBound)
@@ -374,7 +402,9 @@ func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.
 	if hasSender {
 		s.reset.targets[dir] = resetTarget{valid: true, r: toSender}
 	}
-	return droppedWith(reasonIECAbort, acts)
+	res := droppedWith(reasonIECAbort, acts)
+	t.streamFailureLocked(s, &res, &dpi.StreamError{Kind: dpi.StreamMidStream, Proto: sessionProtocol(state)})
+	return res
 }
 
 // tombstonePacketLocked drops every packet of an aborted incarnation and
@@ -442,7 +472,7 @@ func (t *sessionTable) closedPacketLocked(s *trackedSession, dir int, pkt captur
 // connection.
 func reopensLocked(s *trackedSession, dir int, pkt capture.Packet) bool {
 	return s.state == sessionEstablished && dir == sessionDirClient && isSYN(pkt.TCP.Flags) &&
-		pkt.TCP.Seq != s.dirs[sessionDirClient].isn && len(pkt.Payload) == 0 && handshakeMarked(pkt)
+		(s.dirs[sessionDirClient] == nil || pkt.TCP.Seq != s.dirs[sessionDirClient].isn) && len(pkt.Payload) == 0 && handshakeMarked(pkt)
 }
 
 // reopenLocked ends an established incarnation whose tuple a new
@@ -503,7 +533,10 @@ func (t *sessionTable) livePacketLocked(s *trackedSession, dir int, pkt capture.
 		}
 		return t.handshakeLocked(s, dir, pkt, now)
 	}
-	if s.dirs[sessionDirSrv] == nil {
+	if res := t.resumeObservationLocked(s, dir, pkt, now); res != nil {
+		return *res
+	}
+	if s.dirs[sessionDirSrv] == nil && (enforce || sessionProtocol(s.flow) == iecProtocol) {
 		if refuses(s, dir, pkt) {
 			res := accepted(reasonIECClosed)
 			res.acts.merge(t.closeLocked(s, now))
@@ -514,7 +547,7 @@ func (t *sessionTable) livePacketLocked(s *trackedSession, dir int, pkt capture.
 		}
 		return accepted(reasonIECAccept)
 	}
-	if !s.stopParse && f&capture.TCPFlagACK != 0 {
+	if !s.stopParse && s.dirs[1-dir] != nil && f&capture.TCPFlagACK != 0 {
 		if err := t.ackLocked(s, 1-dir, pkt.TCP.Ack); err != nil {
 			return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
 		}
@@ -629,7 +662,7 @@ func (t *sessionTable) finLocked(s *trackedSession, dir int, pkt capture.Packet,
 func (t *sessionTable) finForwardedLocked(s *trackedSession, dir int, res *sessionResult) {
 	d := s.dirs[dir]
 	d.fin, d.finFwd = true, true
-	if s.dirs[1-dir].fin {
+	if s.dirs[1-dir] != nil && s.dirs[1-dir].fin {
 		res.decision.Resolved = append(res.decision.Resolved, t.dropHeldLocked(s, -1)...)
 		res.acts.merge(t.closeLocked(s, t.now()))
 	}
@@ -703,6 +736,7 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 		if enforce {
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
 			r.inspect = res.inspect
+			t.streamFailureLocked(s, &r, err)
 			return r
 		}
 		t.stopParseLocked(s)
@@ -753,13 +787,14 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 // stream that cannot be enforced (no framing decoder, or a framing error).
 func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, start int64, fresh []byte, res *sessionResult, now time.Time) (denied bool, trigger string, failed bool) {
 	d := s.dirs[dir]
-	ir := t.dpi.Inspect(state, &dpi.ParsedPacket{
+	ir, fault := t.inspectSession(state, &dpi.ParsedPacket{
 		Timestamp: pkt.Timestamp,
 		Payload:   fresh, Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 		TCPSeq: d.seq.Seq(start), TCPSeqValid: true,
 		Offset: start, HasOffset: true, Session: s.id, Dir: dpiDir(dir), Role: dpiDir(dir),
 		FailClosed: s.mode == "enforce",
 	})
+	res.packetPanic = fault
 	var limitErr *dpi.StreamError
 	if errors.As(ir.Err, &limitErr) && limitErr.Kind == dpi.StreamStateLimit {
 		res.stateLimit = !s.inspectionLost
@@ -812,6 +847,9 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 	var fe *dpi.FrameError
 	var se *dpi.StreamError
 	streamErr := errors.As(ir.Err, &fe) || errors.As(ir.Err, &se)
+	if streamErr {
+		t.streamFailureLocked(s, res, ir.Err)
+	}
 	if streamErr && len(ir.Events) > 0 {
 		judged = append(judged, ir.Events[len(ir.Events)-1]) // the error's malformed event
 	}
@@ -827,7 +865,7 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 		if why := t.prepareUnitsLocked(s, dir, ir.Frames, now, res); why != pairOK {
 			res.failure = why
 			res.stateLimit = why == stateLimit
-			return true, "", streamErr
+			return true, res.trigger, streamErr
 		}
 	}
 	if streamErr {

@@ -721,7 +721,7 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 		e.observePacket(pkt, state)
 	}
 	if e.dpiMasterEnabled() {
-		if d, ok := e.handleSessionPacket(pkt, state); ok {
+		if d, ok := e.handleSessionPacket(pkt, state, stopped); ok {
 			return d
 		}
 	}

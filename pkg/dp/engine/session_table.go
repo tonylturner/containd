@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"container/list"
 	"context"
 	"net"
 	"net/netip"
@@ -77,6 +78,7 @@ type trackedSession struct {
 	tokens           [pairSessionCap]sessionToken
 	tokenNext        int
 	tokenLease       *limits.Lease
+	denialOrder      *list.Element // generic denial FIFO, owned by the session table
 }
 
 // sessionDir is one direction of a session (client→server or server→client).
@@ -144,6 +146,7 @@ type sessionTable struct {
 	snap         *rules.Snapshot
 	sessions     map[sessionKey]*trackedSession
 	tombstones   int
+	denials      list.List // Modbus/DNP3 tombstones, not a second tuple registry
 	heldTotal    int
 	pairingTotal int
 	held         map[capture.Token]*trackedSession
@@ -335,7 +338,7 @@ func (t *sessionTable) expire() {
 	for key, s := range t.sessions {
 		switch s.state {
 		case sessionAborted:
-			if now.Sub(s.endedAt) > sessionTombstoneTTL {
+			if s.denialExpired(now) {
 				acts.merge(t.deleteLocked(key, s))
 			}
 		case sessionClosed:
@@ -376,6 +379,7 @@ func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionAc
 	acts.retired = true
 	if s.state == sessionAborted {
 		t.tombstones--
+		t.removeDenialLocked(s)
 	}
 	delete(t.sessions, key)
 	s.releaseInspection()
@@ -384,20 +388,30 @@ func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionAc
 
 // evictTombstoneLocked removes the oldest tombstone when the bound is hit.
 // A packet of the evicted session is then "not observed from SYN".
-func (t *sessionTable) evictTombstoneLocked() {
-	if t.tombstones <= sessionMaxTombstones {
-		return
+func (t *sessionTable) evictTombstoneLocked() sessionActions {
+	var acts sessionActions
+	for t.denials.Len() > deniedTCPCapacity {
+		old := t.denials.Front().Value.(*trackedSession)
+		// Retirement revokes queued work even if already-started I/O pins
+		// the tuple until completion.
+		t.removeDenialLocked(old)
+		acts.merge(t.deleteLocked(sessionKey{old.client, old.server}, old))
+		deniedTCPEvictions.Inc()
+	}
+	if t.tombstones-t.denials.Len() <= sessionMaxTombstones {
+		return acts
 	}
 	var oldKey sessionKey
 	var old *trackedSession
 	for k, s := range t.sessions {
-		if s.state == sessionAborted && (old == nil || s.endedAt.Before(old.endedAt)) {
+		if s.state == sessionAborted && !s.genericDenial() && (old == nil || s.endedAt.Before(old.endedAt)) {
 			oldKey, old = k, s
 		}
 	}
 	if old != nil {
-		t.deleteLocked(oldKey, old)
+		acts.merge(t.deleteLocked(oldKey, old))
 	}
+	return acts
 }
 
 // run drives the timers until stop is closed.

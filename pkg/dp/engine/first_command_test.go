@@ -230,6 +230,7 @@ func (f *fcFlow) passingDisposition() capture.Disposition {
 
 func (f *fcFlow) syn() {
 	f.t.Helper()
+	f.serverNext = 0
 	if d := f.decide(0, capture.TCPFlagSYN, nil); d.Action != f.passingDisposition() {
 		f.t.Fatalf("SYN decision = %+v, want Repeat", d)
 	}

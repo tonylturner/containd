@@ -30,12 +30,13 @@ type liveObserver struct {
 }
 
 type observationContext struct {
-	states   [2]*flow.State
-	legacy   *dpi.Manager
-	selected bool
-	iecOwned bool
-	snapshot *rules.Snapshot
-	refused  bool // Open is attempted only once, including at capacity.
+	states        [2]*flow.State
+	legacy        *dpi.Manager
+	selected      bool
+	iecOwned      bool
+	ownedProtocol string
+	snapshot      *rules.Snapshot
+	refused       bool // Open is attempted only once, including at capacity.
 	// The table can retain legacy connection evidence across tuple reuse.
 	// Passive incarnation retirement must remember the latest generation
 	// independently, without rewriting that legacy evidence.
@@ -98,6 +99,11 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 	}
 	if !c.selected && !(protocol == identify.IEC104 && c.iecOwned) {
 		return false
+	}
+	// The shared gate's service orientation outranks a competing client
+	// source port. Discovery must not decode the same selected stream again.
+	if c.ownedProtocol != "" {
+		return string(protocol) == c.ownedProtocol
 	}
 	for _, st := range c.states {
 		if st == nil {
@@ -180,6 +186,10 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
 	iecOwned := e.sessionOwnsState(pkt, st)
+	ownedProtocol := ""
+	if iecOwned {
+		ownedProtocol = sessionProtocol(st)
+	}
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {
@@ -213,6 +223,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	}
 	dir := uint8(connection.Direction(st.Key))
 	ctx.states[dir], ctx.selected, ctx.iecOwned, ctx.snapshot = st, selected, iecOwned, snapshot
+	ctx.ownedProtocol = ownedProtocol
 	var output observe.Output
 	if !enabled {
 		output = live.observer.Finish(key)

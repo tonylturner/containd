@@ -262,9 +262,9 @@ func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 	if len(alerts) != 2 {
 		t.Fatalf("alerts after a new code = %d, want 2", len(alerts))
 	}
-	// The client closes with a RST at its forwarded end; the next SYN on the
-	// tuple opens a new incarnation whose findings alert again.
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != h.passingDisposition() {
+	// A RST cannot resurrect the aborted incarnation. A validated new
+	// handshake creates the next connection's independent alert identity.
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 		t.Fatalf("RST = %+v", d)
 	}
 	h.clientISN, h.serverISN = testClientISN-1000, testServerISN+1000

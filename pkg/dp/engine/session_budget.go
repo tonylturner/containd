@@ -16,7 +16,11 @@ func (t *sessionTable) allocateSessionLocked(client, server netip.AddrPort, ctx 
 		class = limits.ClassEnforce
 	}
 	memory := flow.NewInspectionMemory(t.resources, class, limits.CategoryStream)
-	if !memory.Reserve(int(limits.IECSessionMetadataBytes)) {
+	metadata := int(limits.IECSessionMetadataBytes)
+	if sessionProtocol(state) != iecProtocol {
+		metadata += 64 // reserved FIFO element before a possible denial
+	}
+	if !memory.Reserve(metadata) {
 		return nil
 	}
 	tokenLease, ok := t.resources.Budget.Reserve(class, limits.CategoryPairing, pairSessionCap*48)
@@ -128,4 +132,5 @@ func (t *sessionTable) stopInspection() {
 	clear(t.held)
 	clear(t.aborts)
 	t.heldTotal, t.tombstones = 0, 0
+	t.denials.Init()
 }

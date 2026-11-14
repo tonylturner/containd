@@ -4,13 +4,17 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // DNP3 link frames between master 1 (the client) and outstation 10 (the
@@ -26,7 +30,7 @@ var (
 
 const dnp3Port = 20000
 
-// newEnforceEngine returns an AF_PACKET-style engine in enforce mode, with
+// newEnforceEngine returns an engine in enforce mode, with
 // IDS on so that every flow, replies included, is inspected.
 func newEnforceEngine(t *testing.T, def rules.Action, entries ...rules.Entry) (*Engine, *blockRecorder) {
 	t.Helper()
@@ -94,21 +98,62 @@ func replyVerdict(e *Engine, clientPort, serverPort uint16) bool {
 	return ok
 }
 
+func sendInline(e *Engine, pkt capture.Packet) capture.Decision {
+	pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
+	d := e.HandlePacket(pkt)
+	if d.Action != capture.Hold {
+		v := capture.VerdictRepeat
+		if d.Action == capture.Drop {
+			v = capture.VerdictDrop
+		}
+		e.hooks.onVerdict(pkt.Token, v, nil)
+	}
+	for _, r := range d.Resolved {
+		e.hooks.onVerdict(r.Token, r.Verdict, nil)
+	}
+	return d
+}
+
+func inlineHandshake(t *testing.T, e *Engine, clientPort, serverPort uint16) {
+	t.Helper()
+	e.sessions.injector = &session.Fake{}
+	e.sessions.health.clear(faultInjector)
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
+	syn := connSegment(false, clientPort, serverPort, 100, capture.TCPFlagSYN, nil)
+	ack := connSegment(true, clientPort, serverPort, 500, capture.TCPFlagSYN|capture.TCPFlagACK, nil)
+	ack.TCP.Ack = 100
+	for _, pkt := range []capture.Packet{syn, ack} {
+		if d := sendInline(e, pkt); d.Action != capture.Repeat {
+			t.Fatalf("handshake=%+v", d)
+		}
+	}
+}
+
+func decodedProtocolEvents(e *Engine, proto string) int {
+	n := 0
+	for _, ev := range e.Events().List(0) {
+		if ev.Proto == proto && (ev.Kind == "request" || ev.Kind == "response" || ev.Kind == "exception") {
+			n++
+		}
+	}
+	return n
+}
+
 func handshake(e *Engine, clientPort, serverPort uint16) {
 	e.handlePacket(connSegment(false, clientPort, serverPort, 100, capture.TCPFlagSYN, nil))
 	e.handlePacket(connSegment(true, clientPort, serverPort, 500, capture.TCPFlagSYN|capture.TCPFlagACK, nil))
 }
 
-// TestDNP3ReplyNotEnforcedUnderDefaultDeny is the AF_PACKET re-poll case:
+// TestDNP3ReplyNotEnforcedUnderDefaultDeny is the inline paired re-poll case:
 // the master's FC1 read is allowed, the outstation's FC129 reply matches
 // no rule, and the default DENY must not block the master's next polls.
 func TestDNP3ReplyNotEnforcedUnderDefaultDeny(t *testing.T) {
 	e, up := newEnforceEngine(t, rules.ActionDeny,
 		clientToServer("dnp3-read", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}}))
 
-	handshake(e, 41000, dnp3Port)
-	e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Read))
-	e.handlePacket(connSegment(true, 41000, dnp3Port, 500, ackPsh, dnp3Response))
+	inlineHandshake(t, e, 41000, dnp3Port)
+	sendInline(e, connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Read))
+	sendInline(e, connSegment(true, 41000, dnp3Port, 500, ackPsh, dnp3Response))
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks after the read and its reply = %v, want none", got)
 	}
@@ -117,15 +162,15 @@ func TestDNP3ReplyNotEnforcedUnderDefaultDeny(t *testing.T) {
 	}
 
 	// A second poll on the same connection, then on a new one.
-	e.handlePacket(connSegment(false, 41000, dnp3Port, 118, ackPsh, dnp3Read))
-	e.handlePacket(connSegment(true, 41000, dnp3Port, 517, ackPsh, dnp3Response))
-	handshake(e, 41001, dnp3Port)
-	e.handlePacket(connSegment(false, 41001, dnp3Port, 100, ackPsh, dnp3Read))
-	e.handlePacket(connSegment(true, 41001, dnp3Port, 500, ackPsh, dnp3Response))
+	sendInline(e, connSegment(false, 41000, dnp3Port, 118, ackPsh, dnp3Read))
+	sendInline(e, connSegment(true, 41000, dnp3Port, 517, ackPsh, dnp3Response))
+	inlineHandshake(t, e, 41001, dnp3Port)
+	sendInline(e, connSegment(false, 41001, dnp3Port, 100, ackPsh, dnp3Read))
+	sendInline(e, connSegment(true, 41001, dnp3Port, 500, ackPsh, dnp3Response))
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("blocks after the re-polls = %v, want none", got)
 	}
-	if got := protoEvents(e, "dnp3"); got != 6 {
+	if got := decodedProtocolEvents(e, "dnp3"); got != 6 {
 		t.Fatalf("dnp3 events = %d, want 6", got)
 	}
 	if got := ruleHits(e, "dnp3-read"); got != 3 {
@@ -133,29 +178,42 @@ func TestDNP3ReplyNotEnforcedUnderDefaultDeny(t *testing.T) {
 	}
 }
 
-// TestDNP3UnsolicitedNotEnforced: an outstation's FC130 unsolicited
-// response matches no rule and gets no verdict.
+// An outstation's FC130 unsolicited response needs an explicit autonomous rule,
+// regardless of the ordinary default; it never borrows solicited authority.
 func TestDNP3UnsolicitedNotEnforced(t *testing.T) {
-	e, up := newEnforceEngine(t, rules.ActionDeny,
-		clientToServer("dnp3-read", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}}))
-
-	handshake(e, 41000, dnp3Port)
-	e.handlePacket(connSegment(true, 41000, dnp3Port, 500, ackPsh, dnp3Unsolicited))
-	if got := protoEvents(e, "dnp3"); got != 1 {
-		t.Fatalf("dnp3 events = %d, want 1", got)
-	}
-	if got := up.blockedAfter(e); len(got) != 0 {
-		t.Fatalf("blocks = %v, want none", got)
-	}
-	if replyVerdict(e, 41000, dnp3Port) {
-		t.Fatal("the unsolicited response produced a verdict")
+	for _, def := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
+		for _, explicit := range []bool{false, true} {
+			t.Run(string(def)+fmt.Sprint(explicit), func(t *testing.T) {
+				entries := []rules.Entry{clientToServer("read", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}})}
+				if explicit {
+					entries = append(entries, clientToServer("autonomous", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", MessageClass: "autonomous", Direction: "response"}))
+				}
+				e, up := newEnforceEngine(t, def, entries...)
+				inlineHandshake(t, e, 41000, dnp3Port)
+				d := sendInline(e, connSegment(true, 41000, dnp3Port, 500, ackPsh, dnp3Unsolicited))
+				want := capture.Drop
+				if explicit {
+					want = capture.Repeat
+				}
+				if d.Action != want || !explicit && d.Reason != string(autonomousRequired) {
+					t.Fatalf("autonomous decision=%+v, explicit=%t", d, explicit)
+				}
+				if got := decodedProtocolEvents(e, "dnp3"); got != 1 {
+					t.Fatalf("decoded events=%d, want1", got)
+				}
+				if got := up.blockedAfter(e); len(got) != 0 {
+					t.Fatalf("blocks=%v", got)
+				}
+				if replyVerdict(e, 41000, dnp3Port) {
+					t.Fatal("reply wrote legacy verdict cache")
+				}
+			})
+		}
 	}
 }
 
 // TestExplicitResponseRuleEnforcesReply: a deny rule that names the
-// response direction still enforces on a matching reply, without blocking the
-// request tuple. A Modbus reply is a response even though its decoder
-// kind is "request".
+// response direction still denies the matching reply and retires the session.
 func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -174,15 +232,16 @@ func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			port := strconv.Itoa(int(tc.port))
-			e, up := newEnforceEngine(t, rules.ActionAllow, clientToServer("deny-reply", port, rules.ActionDeny, tc.ics))
-			handshake(e, 41000, tc.port)
+			allow := clientToServer("request", port, rules.ActionAllow, rules.ICSPredicate{Protocol: tc.ics.Protocol, Direction: "request"})
+			e, up := newEnforceEngine(t, rules.ActionAllow, clientToServer("deny-reply", port, rules.ActionDeny, tc.ics), allow)
+			inlineHandshake(t, e, 41000, tc.port)
 			if tc.request != nil {
-				e.handlePacket(connSegment(false, 41000, tc.port, 100, ackPsh, tc.request))
+				sendInline(e, connSegment(false, 41000, tc.port, 100, ackPsh, tc.request))
 				if got := up.blockedAfter(e); len(got) != 0 {
 					t.Fatalf("the request was blocked by a response rule: %v", got)
 				}
 			}
-			if d := e.handlePacket(connSegment(true, 41000, tc.port, 500, ackPsh, tc.reply)); d.Action != capture.Drop {
+			if d := sendInline(e, connSegment(true, 41000, tc.port, 500, ackPsh, tc.reply)); d.Action != capture.Drop {
 				t.Fatalf("denied reply = %+v", d)
 			}
 			if got := up.blockedAfter(e); len(got) != 0 {
@@ -191,8 +250,8 @@ func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
 			if got := ruleHits(e, "deny-reply"); got != 1 {
 				t.Fatalf("deny-reply rule hits = %d, want 1", got)
 			}
-			if !replyVerdict(e, 41000, tc.port) {
-				t.Fatal("no verdict cached for the denied reply")
+			if d := sendInline(e, connSegment(false, 41000, tc.port, 112, ackPsh, modbusADU(11, 3, 0, 2))); d.Action != capture.Drop {
+				t.Fatalf("denied session reopened by later payload: %+v", d)
 			}
 		})
 	}
@@ -205,11 +264,11 @@ func TestModbusExceptionReplyNotEnforced(t *testing.T) {
 	e, up := newEnforceEngine(t, rules.ActionDeny,
 		clientToServer("read", "502", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, Direction: "request"}))
 
-	handshake(e, 41000, 502)
-	e.handlePacket(connSegment(false, 41000, 502, 100, ackPsh, modbusADU(10, 3, 0, 2)))
+	inlineHandshake(t, e, 41000, 502)
+	sendInline(e, connSegment(false, 41000, 502, 100, ackPsh, modbusADU(10, 3, 0, 2)))
 	// Exception 0x83, code 2 (illegal data address).
-	e.handlePacket(connSegment(true, 41000, 502, 500, ackPsh, []byte{0, 10, 0, 0, 0, 3, 1, 0x83, 2}))
-	if got := protoEvents(e, "modbus"); got != 2 {
+	sendInline(e, connSegment(true, 41000, 502, 500, ackPsh, []byte{0, 10, 0, 0, 0, 3, 1, 0x83, 2}))
+	if got := decodedProtocolEvents(e, "modbus"); got != 2 {
 		t.Fatalf("modbus events = %d, want 2", got)
 	}
 	if got := up.blockedAfter(e); len(got) != 0 {
@@ -230,9 +289,9 @@ func TestRequestStillGetsDefault(t *testing.T) {
 	e, up := newEnforceEngine(t, rules.ActionDeny,
 		clientToServer("dnp3-read", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}}))
 
-	handshake(e, 41000, dnp3Port)
+	inlineHandshake(t, e, 41000, dnp3Port)
 	// The master sends an outstation's frame: FC130 from the opener.
-	if d := e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Unsolicited)); d.Action != capture.Drop {
+	if d := sendInline(e, connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Unsolicited)); d.Action != capture.Drop {
 		t.Fatalf("default deny = %+v", d)
 	}
 	if got := up.blockedAfter(e); len(got) != 0 {

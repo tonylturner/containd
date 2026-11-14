@@ -82,6 +82,9 @@ func (t *sessionTable) unitPolicyLocked(s *trackedSession, dir int, f dpi.Decode
 		j := t.iecAdapter.judgeLocked(t, s, f.Events, now)
 		res.acts.events = append(res.acts.events, j.events...)
 		res.findings = append(res.findings, j.findings...)
+		if res.trigger == "" {
+			res.trigger = j.trigger
+		}
 		return permit, false, pairUnsupported
 	}
 	nonAdmit := false
@@ -118,6 +121,9 @@ func (t *sessionTable) unitPolicyLocked(s *trackedSession, dir int, f dpi.Decode
 	}
 	res.acts.events = append(res.acts.events, j.events...)
 	res.findings = append(res.findings, j.findings...)
+	if res.trigger == "" {
+		res.trigger = j.trigger
+	}
 	return permit, nonAdmit, why
 }
 

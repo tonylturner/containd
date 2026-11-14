@@ -21,6 +21,8 @@ func (f *fcFlow) establishedSyn(off uint32) capture.Decision {
 	v := capture.VerdictAccept
 	if d.Action == capture.Drop {
 		v = capture.VerdictDrop
+	} else if d.Action == capture.Repeat {
+		v = capture.VerdictRepeat
 	}
 	f.e.hooks.onVerdict(pkt.Token, v, nil)
 	return d
@@ -41,7 +43,10 @@ func TestEstablishedSYNDoesNotReanchorPickup(t *testing.T) {
 			f := newModeFlow(t, "enforce", p.port)
 			f.syn()
 			f.accept("read before the sweep", p.read(1))
-			f.e.sweepFlows(time.Now().Add(time.Hour))
+			now := time.Now().Add(time.Hour)
+			installRetentionClock(f.e, now)
+			f.e.sweepFlows(now)
+			f.e.sessions.expire()
 			if d := f.establishedSyn(f.next); d.Action != capture.Repeat {
 				t.Fatalf("SYN of a forgotten flow = %+v, want Repeat", d)
 			}
@@ -50,7 +55,7 @@ func TestEstablishedSYNDoesNotReanchorPickup(t *testing.T) {
 		t.Run(p.name+"/after the pickup", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", p.port)
 			f.pickedUp("read on the picked-up stream", f.decide(f.next, ackPsh, p.read(1)), rule, 0)
-			if d := f.establishedSyn(f.next); d.Action != capture.Drop || d.Reason != reasonCachedDeny {
+			if d := f.establishedSyn(f.next); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 				t.Fatalf("SYN after the pickup = %+v, want Drop by %s", d, reasonCachedDeny)
 			}
 			f.dropCachedAt(f.next, "read after the SYN", p.read(1))

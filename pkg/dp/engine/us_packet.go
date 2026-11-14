@@ -276,6 +276,7 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 // endFlowStream ends one directional legacy stream at its flow's end and
 // records any events the decoders emit.
 func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
+	e.endObservedSession(state, true)
 	evs, _ := e.dpiMgr.OnFlowEnd(state)
 	e.recordFlowEndEvents(state, pkt, evs)
 	reverse := e.peerFlow(state)

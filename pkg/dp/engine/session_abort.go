@@ -89,9 +89,7 @@ func (t *sessionTable) abortLocked(s *trackedSession, reason *iecAbortReason, tr
 			txn.errs = append(txn.errs, errNotInline.Error())
 		}
 	}
-	s.state, s.endedAt = sessionAborted, now
-	t.tombstones++
-	t.evictTombstoneLocked()
+	acts.merge(t.retainDenialLocked(s, now))
 	s.reset = resetTargets(s)
 	s.next.releaseInspection()
 	s.next = nil
@@ -222,6 +220,9 @@ func (t *sessionTable) sendReset(s *trackedSession, target int, r session.Reset)
 	ev := s.sessionEvent(outcome, extra, now)
 	t.mu.Unlock()
 	t.emit([]iecTelemetry{ev})
+	if err != nil && t.onError != nil {
+		t.onError(err)
+	}
 }
 
 // challengeLocked answers a challenge ACK from a reset target of an aborted

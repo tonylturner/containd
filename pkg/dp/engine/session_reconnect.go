@@ -76,6 +76,7 @@ func (t *sessionTable) replacementLocked(s *trackedSession, dir int, pkt capture
 	res.decision.Resolved = t.dropHeldLocked(s, -1)
 	if s.state == sessionAborted {
 		t.tombstones--
+		t.removeDenialLocked(s)
 	}
 	t.dpi.EndStream(s.id)
 	res.acts.merge(t.iecAdapter.endLocked(t, s))
