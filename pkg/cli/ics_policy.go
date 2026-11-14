@@ -27,7 +27,7 @@ func addFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: add firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <monitor|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>] [--command-states <states>] [--command-qualifiers <QU>]")
+		return config.Rule{}, fmt.Errorf("usage: add firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--message-class <autonomous|session>] [--mode <monitor|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>] [--command-states <states>] [--command-qualifiers <QU>]")
 	}
 
 	rule := config.Rule{
@@ -50,7 +50,7 @@ func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 
 func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, error) {
 	switch args[index] {
-	case "--masters", "--outstations", "--groups", "--variations", "--instances", "--attributes", "--tags", "--cot", "--originators", "--negative", "--test", "--select-execute", "--command-states", "--command-qualifiers":
+	case "--message-class", "--masters", "--outstations", "--groups", "--variations", "--instances", "--attributes", "--tags", "--cot", "--originators", "--negative", "--test", "--select-execute", "--command-states", "--command-qualifiers":
 		value, next, err := firewallICSRuleValue(args, index, args[index])
 		if err != nil {
 			return index, err
@@ -329,7 +329,7 @@ func showFirewallICSRulesAPI(api *API) Command {
 }
 
 func renderFirewallICSRules(out io.Writer, rules []config.Rule, globalMode string) {
-	t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "OBJECT_CLASSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE", "MASTERS", "OUTSTATIONS", "GROUPS", "VARIATIONS", "INSTANCES", "ATTRIBUTES", "TAGS", "COT", "ORIGINATORS", "NEGATIVE", "TEST", "SELECT_EXECUTE", "COMMAND_STATES", "COMMAND_QUALIFIERS")
+	t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "OBJECT_CLASSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE", "MASTERS", "OUTSTATIONS", "GROUPS", "VARIATIONS", "INSTANCES", "ATTRIBUTES", "TAGS", "COT", "ORIGINATORS", "NEGATIVE", "TEST", "SELECT_EXECUTE", "COMMAND_STATES", "COMMAND_QUALIFIERS", "MESSAGE_CLASS")
 	for _, r := range rules {
 		fcs := make([]string, 0, len(r.ICS.FunctionCode))
 		for _, fc := range r.ICS.FunctionCode {
@@ -392,7 +392,7 @@ func renderFirewallICSRules(out io.Writer, rules []config.Rule, globalMode strin
 			selectorCSV(r.ICS.Instances), selectorCSV(r.ICS.Attributes), joinCSV(r.ICS.Tags),
 			selectorCSV(r.ICS.COT), selectorCSV(r.ICS.Originators),
 			optionalBool(r.ICS.Negative), optionalBool(r.ICS.Test), firstNonEmpty(r.ICS.SelectExecute, "—"),
-			selectorCSV(r.ICS.CommandStates), selectorCSV(r.ICS.CommandQualifiers),
+			selectorCSV(r.ICS.CommandStates), selectorCSV(r.ICS.CommandQualifiers), firstNonEmpty(r.ICS.MessageClass, "ordinary"),
 		)
 	}
 	t.render(out)
