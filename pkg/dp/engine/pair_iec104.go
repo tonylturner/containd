@@ -52,7 +52,7 @@ func (iecPairAdapter) Classify(f dpi.DecodedFrame, dir dpi.StreamDir) (rules.Mes
 		return rules.ClassSolicited, k, s, pairOK
 	}
 	row, known := iecProcedureFor(s.TypeID)
-	if known && (s.Cause == row.ConfirmCause || s.Cause == 10 && row.Termination || iecErrorCause(s.Cause) && row.Variants&iecNegativeError != 0) {
+	if known && (s.Cause == row.ConfirmCause || s.Cause == 10 && row.Termination || iecErrorCause(s.Cause) && (row.Variants&iecNegativeError != 0 || row.DirectErrorPN != 0)) {
 		k.Stage = 0
 		if s.Objects[0].Select {
 			k.Stage = 1
@@ -101,12 +101,23 @@ func (iecPairAdapter) Advance(q iec104.PairShape, p pairProgress, r iec104.PairS
 		return p, false, pairMismatch
 	}
 	if p.Closed {
+		if p.Phase == iecDirectErrorPhase {
+			return p, false, pairMismatch
+		}
 		// A negative confirmation ends data authority immediately. Retain only
 		// this bounded, exact request echo for one terminal error indication.
 		if row.Variants&iecNegativeError != 0 && iecErrorCause(r.Cause) && q.TypeID == r.TypeID && slices.Equal(q.Objects, r.Objects) {
 			return p, true, pairOK
 		}
 		return p, false, pairUnpaired
+	}
+	polarity := iecReplyPositive
+	if r.Negative {
+		polarity = iecReplyNegative
+	}
+	if p.Phase == 0 && row.DirectErrorPN&polarity != 0 && iecErrorCause(r.Cause) && q.TypeID == r.TypeID && slices.Equal(q.Objects, r.Objects) {
+		p.Closed, p.Phase = true, iecDirectErrorPhase
+		return p, false, pairOK
 	}
 	if r.TypeID == q.TypeID && r.Negative && r.Cause == row.ConfirmCause && slices.Equal(q.Objects, r.Objects) {
 		p.Closed = true

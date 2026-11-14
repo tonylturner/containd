@@ -13,7 +13,22 @@ type iecProcedure struct {
 	DataCauseLow, DataCauseHigh uint8
 	Clause                      string
 	Variants                    iecStageVariants
+	DirectErrorPN               iecReplyPolarity
 }
+
+// Direct error mirrors are terminal at the request stage. The polarity mask
+// keeps peer-specific acceptance in table data, independent of later errors
+// following a negative activation confirmation.
+type iecReplyPolarity uint8
+
+const (
+	iecReplyPositive iecReplyPolarity = 1 << iota
+	iecReplyNegative
+)
+
+// A closed direct mirror retains only mismatch history until replacement or
+// expiry; unlike negative ACT_CON it cannot authorize a subsequent error echo.
+const iecDirectErrorPhase uint8 = 2
 
 type iecStageVariants uint8
 
@@ -28,25 +43,25 @@ const (
 var iecCounterCauses = [...][]uint8{{37, 38}, {37, 39}, {37, 40}, {37, 41}, {37}}
 
 var iecProcedures = [...]iecProcedure{
-	{45, 6, 7, true, 0, 0, "101 7.3.2.1; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{46, 6, 7, true, 0, 0, "101 7.3.2.2; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{47, 6, 7, true, 0, 0, "101 7.3.2.3; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{48, 6, 7, true, 0, 0, "101 7.3.2.4; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{49, 6, 7, true, 0, 0, "101 7.3.2.5; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{50, 6, 7, true, 0, 0, "101 7.3.2.6; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{51, 6, 7, true, 0, 0, "101 7.3.2.7; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho},
-	{58, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{59, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{60, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{61, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{62, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{63, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{64, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho},
-	{100, 6, 7, true, 20, 36, "101 7.3.4.1; 7.2.3; 104 8.1", iecNegativeError},
-	{101, 6, 7, true, 37, 41, "101 7.3.4.2; 7.2.3; 104 8.1", iecNegativeError},
-	{102, 5, 7, false, 5, 5, "101 7.3.4.3; 7.2.3; 104 8.1", iecNegativeError | iecOptionalReadConfirm},
-	{103, 6, 7, false, 0, 0, "101 7.3.4.4; 7.2.3; 104 8.1", iecNegativeError},
-	{107, 6, 7, false, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError},
+	{45, 6, 7, true, 0, 0, "101 7.3.2.1; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{46, 6, 7, true, 0, 0, "101 7.3.2.2; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{47, 6, 7, true, 0, 0, "101 7.3.2.3; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{48, 6, 7, true, 0, 0, "101 7.3.2.4; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{49, 6, 7, true, 0, 0, "101 7.3.2.5; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{50, 6, 7, true, 0, 0, "101 7.3.2.6; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{51, 6, 7, true, 0, 0, "101 7.3.2.7; 7.2.3; 104 8.1", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{58, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{59, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{60, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{61, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{62, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{63, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{64, 6, 7, true, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError | iecTerminationSelectEcho, iecReplyNegative},
+	{100, 6, 7, true, 20, 36, "101 7.3.4.1; 7.2.3; 104 8.1", iecNegativeError, iecReplyNegative},
+	{101, 6, 7, true, 37, 41, "101 7.3.4.2; 7.2.3; 104 8.1", iecNegativeError, iecReplyNegative},
+	{102, 5, 7, false, 5, 5, "101 7.3.4.3; 7.2.3; 104 8.1", iecNegativeError | iecOptionalReadConfirm, iecReplyNegative},
+	{103, 6, 7, false, 0, 0, "101 7.3.4.4; 7.2.3; 104 8.1", iecNegativeError, iecReplyNegative},
+	{107, 6, 7, false, 0, 0, "104 8.1; 101 7.2.3", iecNegativeError, iecReplyNegative},
 }
 
 // The monitored Type IDs supported by the producer. Interrogation and Read

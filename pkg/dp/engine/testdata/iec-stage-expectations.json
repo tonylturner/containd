@@ -342,6 +342,735 @@
     {
       "id": "c104-case-118",
       "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-008",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-009",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-010",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-011",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-012",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-013",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-014",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-015",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-016",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-017",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-018",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-019",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-020",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-021",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-022",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-023",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-024",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-025",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-032",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-033",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-034",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-035",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-036",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-037",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-038",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-039",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-040",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-041",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-042",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-043",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-044",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-045",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-046",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-047",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-048",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-049",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-050",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-051",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-052",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-053",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-054",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-055",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-056",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-057",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-058",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-059",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-060",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-061",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-062",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-063",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-064",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-065",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-066",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-067",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-068",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-069",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-070",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-071",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-072",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-073",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-074",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-075",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-076",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-077",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-096",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-097",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-098",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-099",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-100",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-101",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-102",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-103",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-104",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-105",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-106",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-107",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-108",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-109",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-110",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-111",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-112",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-113",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-114",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-115",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-116",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-117",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-118",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-119",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-120",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-122",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "j60870-case-123",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "j60870-case-124",
+      "outcome": "accept"
+    },
+    {
+      "id": "j60870-case-126",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "j60870-case-127",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "j60870-case-128",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-002",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-003",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-006",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-007",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-008",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-009",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-012",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-013",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-014",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-015",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-018",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-019",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-020",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-021",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-024",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-025",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-026",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-027",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-030",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-031",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-032",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-033",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-036",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-037",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-039",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-040",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-041",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-044",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-045",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-046",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-047",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-050",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-051",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-052",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-053",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-056",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-057",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-058",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-059",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-062",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-063",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-064",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-065",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-068",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-069",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-070",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-071",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-074",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-075",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-077",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-079",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-080",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-081",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-082",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-083",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-084",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-085",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-086",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-087",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-088",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-089",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-090",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-091",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-092",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-093",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-094",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-095",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-096",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-097",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-098",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-099",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-119",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-120",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-122",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-123",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-126",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-127",
+      "outcome": "reset",
+      "reason": "pairing_unsupported"
+    },
+    {
+      "id": "c104-case-129",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-130",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-131",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-132",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-133",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-134",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-135",
+      "outcome": "accept"
+    },
+    {
+      "id": "c104-case-136",
+      "outcome": "accept"
     }
   ]
 }

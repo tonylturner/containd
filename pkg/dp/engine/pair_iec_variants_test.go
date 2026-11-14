@@ -109,7 +109,7 @@ func testIECSettledVariants(t *testing.T) {
 				case "valid":
 					want = pairOK
 				case "no-negative":
-					want = pairMismatch
+					want = pairOK
 				case "ca":
 					r.CA++
 				case "ioa":
@@ -133,10 +133,18 @@ func testIECSettledVariants(t *testing.T) {
 					if why := b.apply(pairIE(q), dpi.ClientToServer, requestPermit{}, now); why != pairOK || total != 1 {
 						t.Fatal("closed witness prevented a fresh request", why, total)
 					}
-					want = pairMismatch
+					want = pairOK
 				}
 				if _, why := b.inspect(pairIE(r), dpi.ServerToClient, at); why != want {
 					t.Fatal(why, "want", want)
+				}
+				if field == "no-negative" || field == "new-request" {
+					if why := b.apply(pairIE(r), dpi.ServerToClient, requestPermit{}, at); why != pairOK || total != 1 {
+						t.Fatal("direct mirror did not retain bounded closed history", why, total)
+					}
+					if _, why := b.inspect(pairIE(r), dpi.ServerToClient, at); why != pairMismatch {
+						t.Fatal("direct mirror authorized a second reply", why)
+					}
 				}
 				if field == "valid" {
 					if why := b.apply(pairIE(r), dpi.ServerToClient, requestPermit{}, at); why != pairOK || total != 0 {
