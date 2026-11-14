@@ -54,7 +54,9 @@ func TestIECResetGoldenStaleACK(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.handshake()
 	h.send(true, iframe(46, 1))
-	h.send(true, iframe(46, 1)) // 32 bytes forwarded; the server ACKs none
+	second := iframe(46, 1)
+	second[12] = 2
+	h.send(true, second) // 32 bytes forwarded; distinct outstanding IOA
 	stale := h.pkt(false, capture.TCPFlagACK, h.sSeq, h.clientISN+1, nil)
 	if d := h.e.handlePacket(stale); d.Action != h.passingDisposition() {
 		t.Fatalf("stale pure ACK = %+v", d)

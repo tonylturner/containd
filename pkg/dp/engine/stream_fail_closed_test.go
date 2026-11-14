@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"encoding/binary"
 	"net"
 	"strings"
 	"sync"
@@ -129,7 +130,11 @@ func streamErrorCases() []streamErrorCase {
 		}},
 		{"conflicting overlap of held bytes", func(f *fcFlow, p firstCommandProtocol) capture.Decision {
 			head := p.read(2)[:8]
-			f.accept("read 2 head", head)
+			if f.observeOnly {
+				f.accept("read 2 head", head)
+			} else {
+				f.hold("read 2 head", head)
+			}
 			conflict := append([]byte(nil), head...)
 			conflict[7] ^= 0xFF
 			return f.decide(f.next-8, ackPsh, conflict)
@@ -190,8 +195,13 @@ func TestFailClosedIdenticalRetransmissionsPass(t *testing.T) {
 			r1, r2 := p.read(1), p.read(2)
 			f.accept("read 1", r1)
 			f.acceptAt(0, "retransmitted read 1", r1)
-			f.accept("read 2 head", r2[:5])
-			f.acceptAt(f.next-5, "retransmitted read 2 head", r2[:5])
+			if p.port == dnp3Port {
+				// A second outstanding DNP3 request needs an independent station.
+				r2[4] = 11
+				binary.LittleEndian.PutUint16(r2[8:10], dnp3CRC(r2[:8]))
+			}
+			f.hold("read 2 head", r2[:5])
+			f.holdAt(f.next-5, "retransmitted read 2 head", r2[:5])
 			f.acceptAt(f.next-5, "read 2 head retransmitted with its tail", r2)
 			f.next += uint32(len(r2) - 5)
 			f.acceptAt(0, "both reads retransmitted", concatFrames(r1, r2))
@@ -241,6 +251,8 @@ func TestFailClosedOnDecoderPanic(t *testing.T) {
 				logged = append(logged, err.Error())
 			}
 			f.e.dpiMgr = dpi.NewManager(panicDecoder{})
+			f.e.sessions.dpi = f.e.dpiMgr
+			f.syn()
 			d := f.decide(0, ackPsh, modbusADU(1, 3, 0, 2))
 			if mode == "enforce" {
 				f.failedClosed("decoder panic", d, "modbus-read", failClosedPanic, 0)
@@ -258,7 +270,7 @@ func TestFailClosedOnDecoderPanic(t *testing.T) {
 			if len(logged) != 1 || !strings.Contains(logged[0], "decoder bug") {
 				t.Fatalf("logged = %v, want the panic reported once", logged)
 			}
-			h := f.e.iec.health
+			h := f.e.sessions.health
 			h.mu.Lock()
 			_, faulted := h.faults[faultWorker]
 			h.mu.Unlock()

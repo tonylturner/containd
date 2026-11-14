@@ -20,10 +20,11 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestClientRulesetPreview(t *testing.T) {
+func TestPairingConsumersClientRulesetPreview(t *testing.T) {
 	cfg := config.DefaultConfig()
+	cfg.Firewall.Rules = []config.Rule{{ID: "session", Action: config.ActionAllow, ICS: config.ICSPredicate{Protocol: "iec104", MessageClass: "session", Direction: "request"}}}
 	cfg.DataPlane = config.DataPlaneConfig{EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
-	want := engine.RulesetPreview{Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"},
+	want := engine.RulesetPreview{Pairing: &engine.PairingPreview{Paired: 1, Expired: 1, Reasons: []string{"paired", "pairing_expired"}}, Ruleset: "candidate rules", Runtime: engine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"},
 		Warnings: []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow, Message: "matches nothing"}}}
 	// Management has bound HTTP elsewhere until a restart; a separate
 	// engine process cannot know that, so the request carries it.

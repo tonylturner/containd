@@ -53,21 +53,21 @@ func TestDetachedConstructorSafety(t *testing.T) {
 	e := d.engine
 	if e.capture != nil || e.captureFactory != nil || e.compiler != nil || e.applier != nil ||
 		e.updater != nil || e.transport != nil || e.observation != nil || e.gate != nil ||
-		e.learnWatch.Load() != nil || e.learnLoss != nil || e.iec.injector != nil ||
-		e.iec.jobs != nil || e.iec.settler != nil || e.hooks != nil || e.localIPv4 != nil ||
+		e.learnWatch.Load() != nil || e.learnLoss != nil || e.sessions.injector != nil ||
+		e.sessions.jobs != nil || e.sessions.settler != nil || e.hooks != nil || e.localIPv4 != nil ||
 		e.nflogGroup != 0 || e.nfqueueGroup != 0 || !e.inspectAll {
 		t.Fatal("detached constructor acquired live capabilities")
 	}
 	if _, err := e.clearMarks(context.Background(), 0, 0, 0); !errors.Is(err, errDetachedAuthority) {
 		t.Fatal("conntrack clear-mark not refused")
 	}
-	if err := e.iec.ctDelete(context.Background(), conntrack.DeleteRequest{}); !errors.Is(err, errDetachedAuthority) {
+	if err := e.sessions.ctDelete(context.Background(), conntrack.DeleteRequest{}); !errors.Is(err, errDetachedAuthority) {
 		t.Fatal("conntrack delete not refused")
 	}
 	// Install sentinels only after proving no worker/conntrack transport exists.
-	e.iec.jobs = newWorker(1)
-	e.iec.jobs.submitted = func() { t.Error("detached inspection submitted reset/abort work") }
-	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error {
+	e.sessions.jobs = newWorker(1)
+	e.sessions.jobs.submitted = func() { t.Error("detached inspection submitted reset/abort work") }
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error {
 		t.Error("detached inspection called conntrack")
 		return nil
 	}
@@ -92,7 +92,7 @@ func TestDetachedConstructorSafety(t *testing.T) {
 			t.Fatalf("effectful detached event: %+v", ev)
 		}
 	}
-	if len(e.iec.jobs.jobs) != 0 || !e.iec.health.status().Healthy {
+	if len(e.sessions.jobs.jobs) != 0 || !e.sessions.health.status().Healthy {
 		t.Fatal("detached inspection queued I/O or declared enforce health faults")
 	}
 }
@@ -227,12 +227,12 @@ func TestDetachedRunExpiryAndClose(t *testing.T) {
 	d.HandlePacket(capture.Packet{Timestamp: time.Now(), Proto: 6, Transport: "tcp",
 		SrcIP: net.ParseIP("192.0.2.10"), DstIP: net.ParseIP("192.0.2.20"), SrcPort: 41000, DstPort: 2404,
 		TCP: capture.TCPMeta{Valid: true, Seq: 100, Flags: capture.TCPFlagSYN}})
-	d.engine.iec.mu.Lock()
-	if len(d.engine.iec.sessions) == 0 {
+	d.engine.sessions.mu.Lock()
+	if len(d.engine.sessions.sessions) == 0 {
 		t.Fatal("SYN did not create monitor session")
 	}
-	d.engine.iec.now = func() time.Time { return time.Now().Add(2 * iecIdleTTL) }
-	d.engine.iec.mu.Unlock()
+	d.engine.sessions.now = func() time.Time { return time.Now().Add(2 * sessionIdleTTL) }
+	d.engine.sessions.mu.Unlock()
 	runDone := make(chan struct{})
 	go func() { d.Run(context.Background()); close(runDone) }()
 	deadline := time.NewTimer(3 * time.Second)
@@ -240,9 +240,9 @@ func TestDetachedRunExpiryAndClose(t *testing.T) {
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
 	for {
-		d.engine.iec.mu.Lock()
-		n := len(d.engine.iec.sessions)
-		d.engine.iec.mu.Unlock()
+		d.engine.sessions.mu.Lock()
+		n := len(d.engine.sessions.sessions)
+		d.engine.sessions.mu.Unlock()
 		if n == 0 {
 			break
 		}

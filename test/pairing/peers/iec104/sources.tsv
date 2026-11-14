@@ -1,0 +1,7 @@
+name	role	version	commit	archive_sha256	licence	source
+lib60870	controlled-station and master	2.4.1	7a388e3e133999e1ca77ba7521d55d074b7cd2bc	d5708b9885c2c068ac9d9bae4696a624bd1d1d6645a1b1a9261c00274bc36c3a	GPL-3.0-or-later OR commercial	https://github.com/mz-automation/lib60870
+j60870	independent Java controlled-station	1.8.0 development snapshot	dcf7e2f3767b95ae32f039cb0d4532ac5ec3e221	4ba53694e619ab37a89e08205d0575e20abd901cd2c1b8fcc79f278bb79f31db	GPL-3.0-or-later	https://github.com/gythialy/j60870
+c104	controlled-station default application handlers	2.2.1	e9a145f0370879c22fa2d12f320f44b872264241	95a324d31430b4b4a7e69226713177e012ed84ef560ba8dfb0d4251fa675fd69	GPL-3.0-or-later	https://github.com/Fraunhofer-FIT-DIEN/iec104-python
+c104-lib60870	c104 transport dependency	commit snapshot	97c5f856e0cf78c938f549f8f9f83f6aba8a3cd5	10586bb7fa55a49f2efde53878b9c576f75cfd8f2fba3afe2f9deb23a569b59e	GPL-3.0-or-later OR commercial	https://github.com/m-unkel/lib60870
+pybind11	c104 build dependency	commit snapshot	a2e59f0e7065404b44dfe92a28aca47ba1378dc4	1da0a5c38950e4f49329e9de10c59b2527840a1b963113f1c53b455971cd6aef	BSD-3-Clause	https://github.com/pybind/pybind11
+mbedtls	c104 build dependency	commit snapshot	22098d41c6620ce07cf8a0134d37302355e1e5ef	fbcc09c39f16b593485141cdc7b88e63b9e656941b1df380359807831f83c9d5	Apache-2.0 OR GPL-2.0-or-later	https://github.com/Mbed-TLS/mbedtls

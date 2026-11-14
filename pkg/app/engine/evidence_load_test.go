@@ -41,7 +41,7 @@ func TestIEC104WatchLoad(t *testing.T) {
 		<-tick.C
 		id := fmt.Sprintf("load/c/%d", i)
 		a.watch.engine.RecordDPIEvents(state, nil, []dpi.Event{iecLoadEvent(id)})
-		a.watch.offer(nil, []dpi.Event{{Proto: "iec104", Kind: "evidence.delivery", Timestamp: time.Now(), Attributes: map[string]any{eventfields.KeyAPDUID: id, "delivery": "delivered"}}})
+		a.watch.offer(nil, []dpi.Event{{Proto: "iec104", Kind: eventfields.KindVerdict, Timestamp: time.Now(), Attributes: map[string]any{eventfields.KeyAPDUID: id, eventfields.KeyOutcome: "accepted"}}})
 	}
 	if _, err := a.watch.stop(ctx, watch.ID); err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestOutcomeQueueDropKeepsConcurrentConnectionsEligible(t *testing.T) {
 		}
 	}
 	w.queue <- evidenceBatch{}
-	w.offer(nil, []dpi.Event{{Kind: "evidence.delivery", Timestamp: at}})
+	w.offer(nil, []dpi.Event{{Kind: eventfields.KindVerdict, Timestamp: at}})
 	<-w.queue
 	worker, cancel := context.WithCancel(ctx)
 	go w.run(worker)

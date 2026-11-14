@@ -41,7 +41,8 @@ func TestPreviewViaUnavailableUsesCandidateForwards(t *testing.T) {
 	// A candidate removing a running forward must warn too.
 	entry.ViaForwards = []string{"running"}
 	got := e.PreviewRule(PreviewRuleRequest{Entry: entry})
-	if len(got.Warnings) != 1 || got.Warnings[0].Predicate != enforce.PredicateForward ||
+	if len(got.Warnings) != 2 || got.Warnings[0].Predicate != enforce.PredicateForward ||
+		got.Warnings[1].Predicate != enforce.PredicateInspection || !strings.Contains(got.Warnings[1].Message, "Solicited replies require") ||
 		!strings.Contains(got.Warnings[0].Message, "no referenced forward") {
 		t.Fatalf("running forward leaked into candidate: %+v", got)
 	}

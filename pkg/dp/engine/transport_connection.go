@@ -68,7 +68,7 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	if pkt.Token.Inline() {
 		return
 	}
-	iecOwned := e.iecOwnsConnection(pkt, incoming)
+	iecOwned := e.rawSessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	e.flowMu.Unlock()
@@ -139,7 +139,7 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
 	enforcing := e.flowEnforcing(pkt)
 	e.sweepBeforeAdmission(now, enforcing)
-	iecOwned := !pkt.Token.Inline() && e.iecOwnsConnection(pkt, incoming)
+	iecOwned := !pkt.Token.Inline() && e.rawSessionOwnsConnection(pkt, incoming)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	if len(retired) != 0 {
@@ -158,25 +158,25 @@ func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming 
 // A retained IEC session owns its tuple even if its current envelope changes.
 // Otherwise ownership is decided from the same opener-oriented envelope as
 // the table's new-session path. Call before taking flowMu.
-func (e *Engine) iecOwnsPacket(pkt capture.Packet) bool {
+func (e *Engine) sessionOwnsPacket(pkt capture.Packet) bool {
 	var connection *flow.Connection
 	e.flowMu.Lock()
 	if retained := e.tupleStateLocked(packetKey(pkt).Tuple()); retained != nil {
 		connection = retained.Connection.Load()
 	}
 	e.flowMu.Unlock()
-	return e.iecOwnsConnection(pkt, connection)
+	return e.sessionOwnsConnection(pkt, connection)
 }
 
 // Avoid constructing a temporary authority slot when no IEC envelope exists.
-func (e *Engine) iecOwnsConnection(pkt capture.Packet, incoming *flow.Connection) bool {
-	t := e.iec
+func (e *Engine) sessionOwnsConnection(pkt capture.Packet, incoming *flow.Connection) bool {
+	t := e.sessions
 	if t == nil {
 		return false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.hasIEC {
+	if !t.hasSessions || pkt.Proto != 6 {
 		return false
 	}
 	state := wireServiceState(pkt)
@@ -184,8 +184,8 @@ func (e *Engine) iecOwnsConnection(pkt capture.Packet, incoming *flow.Connection
 	return t.ownsStateLocked(pkt, &state)
 }
 
-func (e *Engine) iecOwnsState(pkt capture.Packet, state *flow.State) bool {
-	t := e.iec
+func (e *Engine) sessionOwnsState(pkt capture.Packet, state *flow.State) bool {
+	t := e.sessions
 	if t == nil {
 		return false
 	}
@@ -194,13 +194,13 @@ func (e *Engine) iecOwnsState(pkt capture.Packet, state *flow.State) bool {
 	return t.ownsStateLocked(pkt, state)
 }
 
-func (t *iecTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
-	if !t.hasIEC {
+func (t *sessionTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
+	if !t.hasSessions || state.ServiceKey().Proto != 6 {
 		return false
 	}
 	src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
-	if !isIECFlow(state) {
+	if sessionProtocol(state) == "" {
 		if srcOK && dstOK {
 			session, _ := t.lookupLocked(src, dst)
 			return session != nil
@@ -210,7 +210,7 @@ func (t *iecTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
 	if !srcOK || !dstOK {
 		// Non-IPv4 traffic is table-owned only inside an enforce
 		// envelope. This query has no actions or session mutations.
-		_, owned := t.nonIPv4Locked(state)
+		_, owned := t.nonIPv4Locked(pkt, state)
 		return owned
 	}
 	if session, _ := t.lookupLocked(src, dst); session != nil {
@@ -236,7 +236,7 @@ func (e *Engine) newWireConnectionLocked(status string) *flow.Connection {
 	return c
 }
 
-func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
+func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) (retirements sessionActions) {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
 	old := state.Connection.Load()
@@ -287,14 +287,14 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			e.transport.authority.count("ambiguous")
 		}
 	}
-	e.adoptTransportPending(incoming, old)
+	retirements.merge(e.adoptTransportPending(incoming, old))
 	state.Connection.Store(incoming)
 	state.Tags = e.flowTags(state)
 	if incoming.Evidence != nil {
 		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
 			if peer := e.tupleStateLocked(tuple); peer != nil {
 				previous := peer.Connection.Load()
-				e.adoptTransportPending(incoming, previous)
+				retirements.merge(e.adoptTransportPending(incoming, previous))
 				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
 					e.mergeFlowSlotsLocked(state, peer)
 					peer.Connection.Store(incoming)
@@ -303,16 +303,22 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			}
 		}
 	}
+	return retirements
 }
 
-func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) {
+func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) sessionActions {
+	var acts sessionActions
 	if incoming.Evidence != nil && previous != nil && previous.ID == "" && previous.Key != incoming.Key {
+		// Retire the losing authorization history before publishing aliases.
+		// Its ledger is never merged into the surviving connection.
+		acts = e.sessions.retireMergedHistory(incoming, previous)
 		e.adoptObservationLocked(incoming, previous)
 		incoming.MergeHistory(previous)
 		if e.anomalyDetector != nil {
 			e.anomalyDetector.AdoptConnection(previous.Key, incoming)
 		}
 	}
+	return acts
 }
 
 func adoptTransport(previous, incoming *flow.Connection) *flow.Connection {

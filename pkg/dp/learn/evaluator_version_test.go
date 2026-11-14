@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestProofRequiresCurrentOrderedEvaluator(t *testing.T) {
+func TestPairingConsumersEvaluatorVersion(t *testing.T) {
 	v := Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: rules.EvaluatorVersion}
 	if !CompatibleVersions(v) {
 		t.Fatal("current proof rejected")

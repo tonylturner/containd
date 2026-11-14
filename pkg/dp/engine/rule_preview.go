@@ -40,7 +40,8 @@ type PreviewRuleResponse struct {
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 	// ICSCoverage is the candidate's coverage under the running settings
 	// and runtime state; omitted for a rule without an ICS protocol.
-	ICSCoverage *coverage.Rule `json:"icsCoverage,omitempty"`
+	ICSCoverage *coverage.Rule  `json:"icsCoverage,omitempty"`
+	Pairing     *PairingPreview `json:"pairing,omitempty"`
 }
 
 type PreviewTimeRange struct {
@@ -60,7 +61,7 @@ func (e *Engine) PreviewRule(request PreviewRuleRequest) PreviewRuleResponse {
 func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) PreviewRuleResponse {
 	entry := request.Entry
 	const maxSamples = 50
-	result := PreviewRuleResponse{SampleMatches: []events.Event{}}
+	result := PreviewRuleResponse{SampleMatches: []events.Event{}, Pairing: newPairingPreview()}
 	// Use the same retained evidence window as GET /internal/events, including
 	// protected incidents and DENYs, deduplicated before counting.
 	evs := e.Events().ListTelemetry(5000)
@@ -83,7 +84,7 @@ func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) P
 		candidate.ZoneIfaces = snap.ZoneIfaces
 		candidate.LocalIPv4ByDevice = snap.LocalIPv4ByDevice
 	}
-	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
+	result.Warnings = append((&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate), pairingCutoverWarnings(candidate)...)
 	if cov := e.coverageOf(candidate); len(cov) == 1 {
 		result.ICSCoverage = &cov[0]
 	}
@@ -104,27 +105,10 @@ func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) P
 				result.TimeRange.End = ev.Timestamp
 			}
 		}
-		contexts := previewEventContexts(snap, entry, ev, resolve, parsing)
-		matches := len(contexts) > 0
-		for _, ctx := range contexts {
-			// This is an isolated predicate preview, not the enforcing
-			// partition: monitor rules and effects must remain previewable.
-			matched := evaluator.AnyMatch(ctx)
-			if entry.Action == rules.ActionAllow {
-				if matched == nil {
-					matches = false
-					break
-				}
-			} else {
-				matches = matched != nil
-				if matches {
-					break
-				}
-			}
-		}
-		if !matches {
+		if !previewEventMatches(evaluator, snap, entry, ev, resolve, parsing) {
 			continue
 		}
+		result.Pairing.add(ev)
 
 		result.MatchCount++
 		if len(result.SampleMatches) < maxSamples {

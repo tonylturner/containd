@@ -52,6 +52,10 @@ var iecConformanceCases = []iecConformanceCase{
 }
 
 func iecScoped(mode string, entries ...rules.Entry) rules.Snapshot {
+	entries = append([]rules.Entry{
+		{ID: "session-in", Action: rules.ActionAllow, ICS: rules.ICSPredicate{MessageClass: "session", Direction: "request"}},
+		{ID: "session-out", Action: rules.ActionAllow, ICS: rules.ICSPredicate{MessageClass: "session", Direction: "response"}},
+	}, entries...)
 	for i := range entries {
 		entries[i].Sources, entries[i].Destinations = []string{"10.60.60.10/32"}, []string{"10.30.30.30/32"}
 		entries[i].Protocols = []rules.Protocol{{Name: "tcp", Port: "2404"}}
@@ -80,8 +84,8 @@ func newIECConformanceHarness(t *testing.T, mode string, parsing ics.Parsing, sn
 	t.Helper()
 	h := newIECHarness(t, mode)
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
-	h.e.iec.newPolicy = newRulesPolicy
+	h.e.sessions.dpi = h.e.dpiMgr
+	h.e.sessions.newPolicy = newRulesPolicy
 	h.e.LoadRules(snap)
 	h.e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
 	h.handshake()
@@ -134,7 +138,8 @@ func TestIECConformanceMatrix(t *testing.T) {
 						_, d := h.send(tc.fromClient, tc.payload)
 						matched := policy == "broad" || tc.typedRule != ""
 						allowed := policy == "broad"
-						wantDrop := mode == "enforce" && (parsing == ics.Strict || !allowed)
+						unsupported := tc.name != "reserved bits"
+						wantDrop := mode == "enforce" && (parsing == ics.Strict || !allowed || unsupported)
 						if (d.Action == capture.Drop) != wantDrop {
 							t.Fatalf("decision=%+v want drop %v", d, wantDrop)
 						}
@@ -241,23 +246,25 @@ func TestIECTolerantAllowMatchesDecodedFields(t *testing.T) {
 func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 	h := newIECConformanceHarness(t, "enforce", ics.Tolerant, iecBroadPolicy("enforce"))
 	for i := 0; i < 3; i++ {
-		if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
+		payload := append([]byte(nil), iecReservedGI...)
+		payload[10] = byte(i + 1) // independent outstanding interrogations
+		if _, d := h.send(true, payload); d.Action != h.passingDisposition() {
 			t.Fatalf("send %d = %+v", i, d)
 		}
 	}
 	if got := findingEvents(h.e, "alert"); len(got) != 1 {
 		t.Fatalf("alerts after repeats = %d, want 1", len(got))
 	}
-	if _, d := h.send(true, iecProfileTwoCommands); d.Action != h.passingDisposition() {
-		t.Fatalf("profile APDU = %+v", d)
+	if _, d := h.send(true, iecProfileTwoCommands); d.Action != capture.Drop {
+		t.Fatalf("unsupported profile APDU = %+v", d)
 	}
 	alerts := findingEvents(h.e, "alert")
 	if len(alerts) != 2 {
 		t.Fatalf("alerts after a new code = %d, want 2", len(alerts))
 	}
-	// The client closes with a RST at its forwarded end; the next SYN on the
-	// tuple opens a new incarnation whose findings alert again.
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != h.passingDisposition() {
+	// A RST cannot resurrect the aborted incarnation. A validated new
+	// handshake creates the next connection's independent alert identity.
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 		t.Fatalf("RST = %+v", d)
 	}
 	h.clientISN, h.serverISN = testClientISN-1000, testServerISN+1000

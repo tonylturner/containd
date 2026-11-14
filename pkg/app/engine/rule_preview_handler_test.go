@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 )
 
-func TestPreviewRuleHandler(t *testing.T) {
+func TestPairingConsumersPreviewRuleHandler(t *testing.T) {
 	dp := newCountingDP(t)
 	dp.Events().Append(events.Event{Proto: "iec104", Kind: "request", Transport: "tcp",
 		SrcIP: "10.1.0.2", DstIP: "10.2.0.2", SrcPort: 40000, DstPort: 2404,
@@ -25,7 +25,7 @@ func TestPreviewRuleHandler(t *testing.T) {
 		strings.NewReader(`{"entry":{"Action":"ALLOW","ICS":{"Protocol":"iec104","ReadOnly":true}},"forwardMatches":{}}`)))
 	var got engine.PreviewRuleResponse
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil ||
-		got.MatchCount != 1 || got.TotalEvents != 1 || len(got.SampleMatches) != 1 {
+		got.Pairing == nil || got.Pairing.Unknown != 1 || got.MatchCount != 1 || got.TotalEvents != 1 || len(got.SampleMatches) != 1 {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	for _, tc := range []struct {

@@ -147,6 +147,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("move firewall rule", RoleAdmin, moveFirewallRuleAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
 		r.RegisterRole("add firewall ics-rule", RoleAdmin, addFirewallICSRuleAPI(api))
+		r.RegisterRole("preview firewall ics-rule", RoleAdmin, previewFirewallICSRuleAPI(api))
+		r.RegisterRole("preview firewall ruleset", RoleAdmin, previewFirewallRulesetAPI(api))
 		r.RegisterRole("set firewall default", RoleAdmin, setFirewallDefaultAPI(api))
 		r.RegisterRole("set zone consequence", RoleAdmin, setZoneConsequenceAPI(api))
 		r.RegisterRole("set asset hostnames", RoleAdmin, setAssetHostnamesAPI(api))

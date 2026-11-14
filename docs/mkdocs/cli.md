@@ -668,7 +668,10 @@ existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
 For CIP, `--object-classes <classes>` accepts comma-separated class IDs from
 0 through 65535 in decimal or `0x`-prefixed hex (for example `4,0x66`).
 `show firewall ics-rules` includes these values in `OBJECT_CLASSES`.
-For IEC 104 (`protocol` is `iec104`), use:
+Use `--message-class autonomous|session` for DNP3/IEC 104 with an explicit
+`--direction`; autonomous is response-only. An empty set/patch value clears the
+selector. `show firewall ics-rules` includes `MESSAGE_CLASS`; ordinary means
+omitted. For IEC 104 (`protocol` is `iec104`), use:
 
 - `--type-ids <ids>` — comma-separated decimal TypeIDs from 1 through 255.
 - `--classes <classes>` — comma-separated `monitor`, `control`, `system`, or `unknown`.
@@ -700,11 +703,18 @@ Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
 single-point) in server responses for common address 1 and the selected IOAs:
 
 ```text
-add firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+add firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --message-class autonomous --cot 3 --mode enforce
 ```
 
 `show firewall ics-rules` displays these IEC fields alongside the existing
-ICS predicate fields.
+ICS predicate fields. Solicited monitoring data instead requires a compatible
+allowed request; a monitoring TypeID alone does not make traffic autonomous.
+
+`preview firewall ics-rule <id> <action> <protocol> [selectors]` previews an
+isolated rule without staging it. `preview firewall ruleset` reads the candidate
+ruleset without applying it. Both show cutover warnings and retained pairing
+counts/reasons separately from predicate matches; neither predicts admission or
+proves delivery. See [reply pairing](ics-dpi.md#enforce-mode-reply-pairing-and-upgrade-cutover).
 
 ## Focused policy edits
 

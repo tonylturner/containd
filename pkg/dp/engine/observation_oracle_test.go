@@ -40,7 +40,7 @@ func (s *oracleSpy) BlockFlowTemp(context.Context, net.IP, net.IP, string, strin
 type oracleState struct {
 	Cache                                                     map[string]verdict.Verdict
 	Generic                                                   map[flow.MapKey]time.Time
-	IEC                                                       map[string]iecState
+	IEC                                                       map[string]sessionState
 	CacheWrites                                               []string
 	Submissions, Followups, Deletes, Updates, TombstoneWrites int
 	Resets                                                    []session.Reset
@@ -49,7 +49,7 @@ type oracleState struct {
 }
 
 func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
-	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[flow.MapKey]time.Time{}, IEC: map[string]iecState{},
+	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[flow.MapKey]time.Time{}, IEC: map[string]sessionState{},
 		CacheWrites: append([]string(nil), s.cache...), Verdicts: s.verdicts, Submissions: s.submissions, Followups: s.followups, Deletes: s.deletes, Updates: s.updates, TombstoneWrites: s.tombstones, Resets: s.injector.Resets(), Pending: len(e.hooks.after.pending) + len(e.hooks.blocks.jobs)}
 	for k, v := range e.verdictCache.entries {
 		out.Cache[k] = v.verdict
@@ -57,7 +57,7 @@ func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
 	for k, v := range e.deniedTCP {
 		out.Generic[k] = v.expires
 	}
-	for k, v := range e.iec.sessions {
+	for k, v := range e.sessions.sessions {
 		out.IEC[fmt.Sprint(k)] = v.state
 	}
 	return out
@@ -120,7 +120,7 @@ func TestObservationVerdictOracle(t *testing.T) {
 				if tc.deny {
 					action = rules.ActionDeny
 				}
-				snap.Firewall = []rules.Entry{{ID: "oracle-rule", Protocols: []rules.Protocol{{Name: "tcp", Port: port}}, ICS: rules.ICSPredicate{Protocol: proto, Mode: tc.mode}, Action: action}}
+				snap.Firewall = []rules.Entry{{ID: "oracle-rule", Log: true, Protocols: []rules.Protocol{{Name: "tcp", Port: port}}, ICS: rules.ICSPredicate{Protocol: proto, Mode: tc.mode}, Action: action}}
 			}
 			for i := range engines {
 				spy := &oracleSpy{}
@@ -135,16 +135,16 @@ func TestObservationVerdictOracle(t *testing.T) {
 					e.observation.now = func() time.Time { return now }
 				}
 				e.deniedTCPNow = func() time.Time { return now }
-				e.iec.now = func() time.Time { return now }
+				e.sessions.now = func() time.Time { return now }
 				e.verdictCache.now = func() time.Time { return now }
 				e.verdictCache.changed = func(op, key string, v verdict.Verdict) {
 					spy.cache = append(spy.cache, fmt.Sprintf("%s/%s/%+v", op, key, v))
 				}
 				e.hooks.blocks.submitted = func() { spy.submissions++ }
 				e.hooks.after.submitted = func() { spy.followups++ }
-				markAbort := e.iec.markAbort
-				e.iec.markAbort = func(id string) { spy.tombstones++; markAbort(id) }
-				e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { spy.deletes++; return nil }
+				markAbort := e.sessions.markAbort
+				e.sessions.markAbort = func(id string) { spy.tombstones++; markAbort(id) }
+				e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { spy.deletes++; return nil }
 				e.updater = spy
 				e.LoadRules(snap)
 				if tc.strict {
@@ -167,12 +167,27 @@ func TestObservationVerdictOracle(t *testing.T) {
 				trace = append(trace, reset)
 			}
 			drops := 0
+			runPacket := func(e *Engine, pkt capture.Packet) capture.Decision {
+				if tc.port != 502 || !tc.deny {
+					return e.HandlePacket(pkt)
+				}
+				// A real enforce oracle needs inline steering authority, not
+				// an AF_PACKET observation mislabeled as an enforcing verdict.
+				markHandshake(&pkt)
+				reply := pkt.SrcPort == tc.port
+				if reply {
+					pkt.Queue = policyQueue(pkt.DstIP, pkt.SrcIP, pkt.DstPort, pkt.SrcPort, true)
+				} else {
+					pkt.Queue = policyQueue(pkt.SrcIP, pkt.DstIP, pkt.SrcPort, pkt.DstPort, false)
+				}
+				return sendInline(e, pkt)
+			}
 			for n, pkt := range trace {
 				now = now.Add(time.Millisecond)
 				pkt.Timestamp = now
 				var decisions [2]capture.Decision
 				for i, e := range engines {
-					spies[i].measureVerdicts(func() { decisions[i] = e.HandlePacket(pkt) })
+					spies[i].measureVerdicts(func() { decisions[i] = runPacket(e, pkt) })
 				}
 				if decisions[1].Action == capture.Drop {
 					drops++
@@ -223,20 +238,28 @@ func TestObservationVerdictOracle(t *testing.T) {
 			// identity retirement must not change its independent table owner.
 			reopened := observationTrace(tc.port, tc.iec)
 			var retained [2]*flow.State
+			var previous [2]*trackedSession
 			for i, e := range engines {
 				retained[i] = e.tupleStateLocked(packetKey(reopened[0]).Tuple())
+				client, _ := addrPort(reopened[0].SrcIP, reopened[0].SrcPort)
+				server, _ := addrPort(reopened[0].DstIP, reopened[0].DstPort)
+				previous[i], _ = e.sessions.lookupLocked(client, server)
 			}
 			for n, pkt := range reopened {
 				if n%2 == 0 {
 					pkt.TCP.Seq += 1000
+					if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
+						pkt.TCP.Ack += 2000
+					}
 				} else {
 					pkt.TCP.Seq += 2000
+					pkt.TCP.Ack += 1000
 				}
 				now = now.Add(time.Millisecond)
 				pkt.Timestamp = now
 				var a, b capture.Decision
-				spies[0].measureVerdicts(func() { a = engines[0].HandlePacket(pkt) })
-				spies[1].measureVerdicts(func() { b = engines[1].HandlePacket(pkt) })
+				spies[0].measureVerdicts(func() { a = runPacket(engines[0], pkt) })
+				spies[1].measureVerdicts(func() { b = runPacket(engines[1], pkt) })
 				if !reflect.DeepEqual(a, b) || !reflect.DeepEqual(oracleSnapshot(engines[0], spies[0]), oracleSnapshot(engines[1], spies[1])) {
 					t.Fatalf("reopen packet %d changed legacy outputs", n)
 				}
@@ -267,8 +290,26 @@ func TestObservationVerdictOracle(t *testing.T) {
 					ids++
 				}
 			}
-			if ids != 2 {
-				t.Fatalf("tuple reuse must record one identity per incarnation, got %d", ids)
+			wantIDs := 2
+			if tc.port == 502 && tc.deny {
+				// Inline queue metadata here has no new kernel generation
+				// evidence. Do not invent a second discovery identity from
+				// a SYN: the validated gate handshake owns stream replacement.
+				wantIDs = 1
+				for i, e := range engines {
+					client, _ := addrPort(reopened[0].SrcIP, reopened[0].SrcPort)
+					server, _ := addrPort(reopened[0].DstIP, reopened[0].DstPort)
+					current, _ := e.sessions.lookupLocked(client, server)
+					if previous[i] == nil || current == nil || current.id == previous[i].id {
+						t.Fatalf("validated reconnect did not replace gate incarnation: %v -> %v", previous[i], current)
+					}
+					if got := ruleHits(e, "oracle-rule"); got != 2 {
+						t.Fatalf("both incarnations must inspect and deny their request, hits=%d events=%+v", got, e.Events().List(0))
+					}
+				}
+			}
+			if ids != wantIDs {
+				t.Fatalf("discovery identities=%d want %d", ids, wantIDs)
 			}
 			t.Logf("%d packets + drains identical; submissions=%d resets=%d deletes=%d followups=%d updater=%d; one %s identity per incarnation", len(trace)+len(reopened), spies[1].submissions, len(spies[1].injector.Resets()), spies[1].deletes, spies[1].followups, spies[1].updates, tc.binding)
 		})

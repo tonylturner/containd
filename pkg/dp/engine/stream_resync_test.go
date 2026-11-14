@@ -45,6 +45,7 @@ func misframeCases() []misframeCase {
 // as the inline capture does and completes its verdict.
 func (f *fcFlow) fromServer(off uint32, flags capture.TCPFlags) capture.Decision {
 	pkt := connSegment(true, f.client, f.port, resyncServerISN+off, flags, nil)
+	pkt.TCP.Ack = f.isn
 	pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
 	d := f.e.HandlePacket(pkt)
 	v := capture.VerdictAccept
@@ -88,9 +89,13 @@ func TestResyncOutOfWindowCloseKeepsStream(t *testing.T) {
 				f := newModeFlow(t, "enforce", tc.port)
 				f.syn()
 				f.synAck()
-				f.accept("read head", tc.read[:8])
-				if d := c.send(f); d.Action != capture.Repeat {
-					t.Fatalf("out-of-window close = %+v, want Repeat", d)
+				f.hold("read head", tc.read[:8])
+				want := capture.Repeat
+				if c.name == "client FIN ahead" {
+					want = capture.Drop // invalid FIN cannot publish held bytes
+				}
+				if d := c.send(f); d.Action != want {
+					t.Fatalf("out-of-window close = %+v, want %v", d, want)
 				}
 				f.denyAt(8, "segment completing "+tc.name, tc.rule, concatFrames(tc.read[8:], tc.command))
 			})
@@ -114,7 +119,8 @@ func TestResyncInWindowCloseThenNewConnection(t *testing.T) {
 				f.syn()
 				f.synAck()
 				f.accept("read 1", p.read(1))
-				f.accept("read 2 head", p.read(2)[:5])
+				f.respondDNP3Read(1)
+				f.hold("read 2 head", p.read(2)[:5])
 				if d := c.send(f); d.Action != capture.Repeat {
 					t.Fatalf("in-window close = %+v, want Repeat", d)
 				}
@@ -146,7 +152,7 @@ func TestResyncCloseKeepsFailedStream(t *testing.T) {
 			bad := malformedRead(p, 2)
 			f.failedClosed("malformed read", f.decide(f.next, ackPsh, bad), p.name+"-read", failClosedStream, 0)
 			f.next += uint32(len(bad))
-			if d := f.decide(f.next, capture.TCPFlagRST, nil); d.Action != capture.Drop || d.Reason != reasonCachedDeny {
+			if d := f.decide(f.next, capture.TCPFlagRST, nil); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 				t.Fatalf("client RST on the denied flow = %+v, want the cached denial", d)
 			}
 			if d := f.fromServer(0, capture.TCPFlagRST); d.Action != capture.Drop {
@@ -169,11 +175,10 @@ func TestResyncCloseKeepsFailedStream(t *testing.T) {
 func TestResyncSYNOnLiveStream(t *testing.T) {
 	for _, tc := range misframeCases() {
 		crafted := concatFrames(tc.read[8:], tc.command)
-		scope := tc.proto + "-read"
 		t.Run(tc.name+"/enforce SYN into the connection", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
-			f.accept("read head", tc.read[:8])
+			f.hold("read head", tc.read[:8])
 			if d := f.establishedSyn(8); d.Action != capture.Repeat {
 				t.Fatalf("SYN into the connection = %+v, want Repeat", d)
 			}
@@ -183,19 +188,21 @@ func TestResyncSYNOnLiveStream(t *testing.T) {
 		t.Run(tc.name+"/enforce SYN of a new handshake", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
-			f.accept("read head", tc.read[:8])
+			f.hold("read head", tc.read[:8])
 			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Repeat {
 				t.Fatalf("handshake SYN on the live stream = %+v, want Repeat", d)
 			}
 			f.noBlock("handshake SYN")
-			f.pickedUp("crafted segment", f.decide(8, ackPsh, crafted), scope, 0)
+			f.denyAt(8, "command after unproven replacement", tc.rule, crafted)
 		})
 		t.Run(tc.name+"/enforce SYN with data", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
-			f.accept("read head", tc.read[:8])
-			f.failedClosed("SYN carrying the crafted rest", f.decide(8, capture.TCPFlagSYN, crafted), scope, failClosedResync, 0)
-			f.dropCachedAt(8, "crafted segment", crafted)
+			f.hold("read head", tc.read[:8])
+			if d := f.decide(8, capture.TCPFlagSYN, crafted); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
+				t.Fatalf("SYN with payload = %+v", d)
+			}
+			f.denyAt(8, "command after invalid SYN payload", tc.rule, crafted)
 		})
 		t.Run(tc.name+"/learn", func(t *testing.T) {
 			f := newModeFlow(t, "monitor", tc.port)
@@ -210,7 +217,7 @@ func TestResyncSYNOnLiveStream(t *testing.T) {
 		t.Run(tc.name+"/retransmitted SYN", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
-			f.accept("read head", tc.read[:8])
+			f.hold("read head", tc.read[:8])
 			f.syn()
 			f.noBlock("SYN retransmission")
 			f.denyAt(8, "segment completing "+tc.name, tc.rule, crafted)
@@ -239,6 +246,7 @@ func (p *panicOnceFramer) ParseStream(state *flow.State, v dpi.StreamView) (dpi.
 func TestResyncPanicKeepsStreamFailed(t *testing.T) {
 	f := newModeFlow(t, "enforce", 502)
 	f.e.dpiMgr = dpi.NewManager(&panicOnceFramer{StreamDecoder: modbus.NewDecoder()})
+	f.e.sessions.dpi = f.e.dpiMgr
 	f.syn()
 	read := modbusADU(1, 3, 0, 2)
 	f.failedClosed("decoder panic", f.decide(0, ackPsh, read[:8]), "modbus-read", failClosedPanic, 0)
@@ -284,7 +292,10 @@ func TestResyncMidStreamPickupDropped(t *testing.T) {
 		{"flow swept while idle", func(f *fcFlow, p firstCommandProtocol) {
 			f.syn()
 			f.accept("read before the sweep", p.read(1))
-			f.e.sweepFlows(time.Now().Add(time.Hour))
+			now := time.Now().Add(time.Hour)
+			installRetentionClock(f.e, now)
+			f.e.sweepFlows(now)
+			f.e.sessions.expire()
 		}},
 	}
 	for _, p := range firstCommandProtocols() {

@@ -117,6 +117,7 @@ func TestICSMatch(t *testing.T) {
 	ctx := EvalContext{
 		ICS: &ICSContext{
 			Protocol:        "modbus",
+			MessageClass:    ClassRequest,
 			HasFunctionCode: true,
 			FunctionCode:    3,
 			UnitID:          &unit,
@@ -211,6 +212,7 @@ func TestICSAddressRangeEval(t *testing.T) {
 	ctx := EvalContext{
 		ICS: &ICSContext{
 			Protocol:        "modbus",
+			MessageClass:    ClassRequest,
 			HasFunctionCode: true,
 			FunctionCode:    3,
 			UnitID:          &unit,

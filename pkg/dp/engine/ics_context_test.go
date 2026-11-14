@@ -29,7 +29,7 @@ func predicateAttrs(proto string) map[string]any {
 	switch proto {
 	case "dnp3":
 		return map[string]any{
-			"function_code": uint8(1), "is_write": false, "direction": "master", "source_address": uint16(1), "destination_address": uint16(10),
+			"application_uns": false, "function_code": uint8(1), "is_write": false, "direction": "master", "source_address": uint16(1), "destination_address": uint16(10),
 			"objects": []dnp3.ObjectHeader{dnpHeader(30, 1, 100, 101)},
 		}
 	case "cip":

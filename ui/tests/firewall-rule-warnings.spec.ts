@@ -200,6 +200,37 @@ test("no applied warnings shows no applied list", async ({ page }) => {
   await expect(page.getByRole("status", { name: "Applied rule warnings" })).toHaveCount(0);
 });
 
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`pairing and cutover warnings stay visible with ${colorScheme} preference`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+    const warnings = [
+      { ruleId: "plc", predicate: "inspection", action: "ALLOW", message: "Solicited replies require an allowed compatible request; expired replies reset the session." },
+      { ruleId: "plc", predicate: "inspection", action: "ALLOW", message: "Classless ALLOW does not authorize autonomous or session traffic; use explicit messageClass rules and a fresh connection." },
+    ];
+    const errors: string[] = [];
+    page.on("console", msg => { if (msg.type() === "error" && msg.text().includes("same key")) errors.push(msg.text()); });
+    await openFirewall(page, [], { installed: true, warnings });
+    await expect(page.getByRole("status", { name: "Applied rule warnings" }).getByRole("listitem")).toHaveCount(2);
+    await page.route("**/api/v1/dataplane/ruleset", route => route.fulfill({ json: {
+      runtime: { iec104EnvelopeOpen: false, reason: "enforcement disabled" },
+      warnings, pairing: { paired: 0, unpaired: colorScheme === "dark" ? 2 : 0, expired: 0, ambiguous: 0, unsupported: 0, unknown: 0,
+        reasons: colorScheme === "dark" ? ["autonomous_rule_required", "session_rule_required"] : [] },
+    } }));
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const candidate = page.getByRole("status", { name: "Candidate rule warnings" });
+    await expect(candidate.getByRole("listitem")).toHaveCount(2);
+    await expect(candidate).toContainText("fresh connection");
+    const pairing = page.getByRole("region", { name: "Retained pairing outcomes" });
+    await expect(pairing).toContainText("not candidate admission or delivery");
+    if (colorScheme === "dark") await expect(pairing.getByLabel("Pairing reasons")).toContainText("Session controls need an explicit session rule");
+    else await expect(pairing.getByLabel("Pairing reasons")).toHaveCount(0);
+    expect(errors).toEqual([]);
+    await pairing.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`pairing-${colorScheme}.png`), animations: "disabled" });
+  });
+}
+
 test("ruleset preview explains rules that match nothing because of zones or address families", async ({ page }) => {
   const zone = {
     ruleId: "dmz-in", predicate: "zone", zones: ["dmz", "lab"], action: "ALLOW",

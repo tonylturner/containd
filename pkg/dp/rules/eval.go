@@ -12,7 +12,7 @@ import (
 
 // EvaluatorVersion binds retained proofs to predicate semantics. Bump whenever
 // evaluation or its shared decoded-context projection changes acceptance.
-const EvaluatorVersion = "ics-4"
+const EvaluatorVersion = "ics-5"
 
 // EvalContext represents a simplified flow context for rule evaluation.
 type EvalContext struct {
@@ -38,6 +38,7 @@ type EvalContext struct {
 
 // ICSContext represents decoded ICS metadata for rule evaluation.
 type ICSContext struct {
+	MessageClass    MessageClass
 	Protocol        string
 	FunctionCode    uint8
 	HasFunctionCode bool // true only when decoded, including FC 0
@@ -90,6 +91,7 @@ type compiledPort struct {
 // data so that string parsing is done once at load time rather than on
 // every packet.
 type compiledEntry struct {
+	monitor           bool
 	forwardMatches    map[string]ForwardMatch
 	localIPv4ByDevice map[string][]netip.Addr
 	Entry
@@ -156,6 +158,7 @@ func (e *Evaluator) compile() {
 	e.compiled = make([]compiledEntry, len(e.snapshot.Firewall))
 	for i, entry := range e.snapshot.Firewall {
 		e.compiled[i] = compileEntry(entry)
+		e.compiled[i].monitor = MonitorICS(entry, e.snapshot.DPIMode)
 		e.compiled[i].forwardMatches = e.snapshot.ForwardMatches
 		e.compiled[i].localIPv4ByDevice = e.snapshot.LocalIPv4ByDevice
 	}
@@ -174,7 +177,7 @@ func (e *Evaluator) compile() {
 
 // compileEntry pre-parses a single Entry.
 func compileEntry(entry Entry) compiledEntry {
-	ce := compiledEntry{Entry: entry, src: compileNetworks(entry.Sources), dst: compileNetworks(entry.Destinations),
+	ce := compiledEntry{Entry: entry, monitor: MonitorICS(entry, ""), src: compileNetworks(entry.Sources), dst: compileNetworks(entry.Destinations),
 		schedule: compileSchedule(entry)}
 	if entry.ICS.Protocol == ProtocolIEC104 {
 		ce.iec = compileIEC104(entry.ICS)
@@ -370,7 +373,7 @@ func contains(list []string, v string) bool {
 
 // Mode is operational metadata and deliberately does not narrow packets.
 func icsPredicateEmpty(p ICSPredicate) bool {
-	return p.Protocol == "" &&
+	return p.MessageClass == "" && p.Protocol == "" &&
 		len(p.FunctionCode) == 0 &&
 		p.UnitID == nil &&
 		len(p.Addresses) == 0 &&

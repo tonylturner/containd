@@ -45,6 +45,13 @@ type StreamView struct {
 type DecodedFrame struct {
 	Start, End int64
 	Events     []Event
+	// Coverage names the complete logical unit's exact carrying ranges in this
+	// direction. Nil means [Start,End), except Pending authorizes no bytes.
+	Coverage []CoverageRange
+	// Pending is a physical DNP3 data frame with no completed application fragment.
+	Pending bool
+	// Unit is immutable decoder-validated protocol data, never event attributes.
+	Unit ParsedUnit
 }
 
 // StreamResult is a framed decoder's parse of one StreamView.

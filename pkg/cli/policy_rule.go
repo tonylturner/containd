@@ -126,6 +126,7 @@ func parsePolicyRulePatch(args []string, ics bool) (map[string]any, error) {
 }
 
 var policyICSKeys = map[string]string{
+	"--message-class":      "messageClass",
 	"--ics-protocol":       "protocol",
 	"--function-code":      "functionCode",
 	"--object-classes":     "objectClasses",

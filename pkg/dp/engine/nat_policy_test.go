@@ -261,7 +261,7 @@ func TestNATPolicyIdentityTagsExclusionsAndIEC(t *testing.T) {
 		if wire.Dir == flow.DirReverse {
 			wire = wire.Reversed()
 		}
-		s := &iecSession{id: "retired", flow: state, client: wire.Tuple().Source, server: wire.Tuple().Destination}
+		s := &trackedSession{id: "retired", flow: state, client: wire.Tuple().Source, server: wire.Tuple().Destination}
 		// No session remains in the table at emission time.
 		got := table.withSessionTags([]iecTelemetry{s.sessionEvent(outcomeAborted, nil, time.Now())})
 		if !reflect.DeepEqual(got[0].Attributes[events.KeyTags], []string{"backend"}) {
@@ -288,6 +288,7 @@ func TestNATEgressDenialDeletesOriginalAndResetsWire(t *testing.T) {
 			Conntrack: &capture.QueueConntrack{HasMark: true, HasStatus: true, DirectionKnown: true,
 				Original: capture.QueueTuple{Source: c.Evidence.Original.Source, Destination: c.Evidence.Original.Destination},
 				Reply:    capture.QueueTuple{Source: c.Evidence.Reply.Source, Destination: c.Evidence.Reply.Destination}}}
+		pkt.Queue.Conntrack.IsReply = pkt.SrcPort == 502
 		d := f.e.handlePacketConnection(pkt, c, nil)
 		verdict := capture.VerdictAccept
 		if d.Action == capture.Drop {
@@ -303,6 +304,12 @@ func TestNATEgressDenialDeletesOriginalAndResetsWire(t *testing.T) {
 	syn.HasMark, syn.Mark = true, enforce.HandshakeMark
 	if d := deliver(syn); d.Action != capture.Repeat {
 		t.Fatalf("SYN = %+v", d)
+	}
+	peer := transportWire(c.Evidence.Reply, time.Now(), nil)
+	peer.TCP = capture.TCPMeta{Valid: true, Seq: 8999, Ack: 101, Flags: capture.TCPFlagSYN | capture.TCPFlagACK}
+	peer.HasMark, peer.Mark = true, enforce.HandshakeMark
+	if d := deliver(peer); d.Action != capture.Repeat {
+		t.Fatalf("SYN-ACK=%+v", d)
 	}
 	pkt := transportWire(egress, time.Now(), modbusADU(1, 6, 10, 2))
 	pkt.TCP = capture.TCPMeta{Valid: true, Seq: 101, Ack: 9000, Flags: ackPsh}

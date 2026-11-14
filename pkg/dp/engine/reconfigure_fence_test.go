@@ -42,7 +42,7 @@ func TestReconfigureFencesOwnerRetirement(t *testing.T) {
 	defer release()
 	e.dpiMgr = dpi.NewManager(gate)
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.iec.dpi = e.dpiMgr
+	e.sessions.dpi = e.dpiMgr
 	if d := e.HandlePacket(segment(false, 100, capture.TCPFlagSYN, nil)); d.Action != capture.Accept {
 		t.Fatal(d)
 	}

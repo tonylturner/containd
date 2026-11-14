@@ -92,7 +92,7 @@ func TestCIPResponsesHaveOnlyMessageFactsLiveAndPreview(t *testing.T) {
 				} {
 					t.Run(fmt.Sprintf("%s/%s/%s/%+v", tc.name, form, action, p), func(t *testing.T) {
 						contexts := replyPredicateParity(t, "cip", a, rules.Entry{ID: "candidate", Action: action, ICS: p}, false, false)
-						want := rules.ICSContext{Protocol: "cip", FunctionCode: tc.service, HasFunctionCode: true, Direction: "response"}
+						want := rules.ICSContext{MessageClass: rules.ClassUnknown, Protocol: "cip", FunctionCode: tc.service, HasFunctionCode: true, Direction: "response"}
 						if len(contexts) != 1 || !reflect.DeepEqual(*contexts[0].ICS, want) {
 							t.Fatalf("response contexts=%+v, want message facts %+v", contexts, want)
 						}

@@ -21,7 +21,7 @@ func TestOrderedTerminalPairs(t *testing.T) {
 		}
 	}
 	ctx := l4Ctx("198.51.100.1", "10.0.0.8", "tcp", "502")
-	ctx.ICS = &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 3}
+	ctx.ICS = &ICSContext{Protocol: "modbus", MessageClass: ClassRequest, HasFunctionCode: true, FunctionCode: 3}
 	for _, first := range entries {
 		for _, second := range entries {
 			t.Run(first.ID+"/"+second.ID, func(t *testing.T) {
@@ -76,7 +76,7 @@ func TestOrderedConditionalTransportAndMessage(t *testing.T) {
 	ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{conditional, tcpEntry("a-plain-allow", ActionAllow, "502")}})
 	ctx := l4Ctx("198.51.100.1", "10.0.0.8", "tcp", "502")
 	ctx.Now = time.Date(2026, 10, 31, 9, 30, 0, 0, time.UTC)
-	ctx.ICS = &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 3}
+	ctx.ICS = &ICSContext{Protocol: "modbus", MessageClass: ClassRequest, HasFunctionCode: true, FunctionCode: 3}
 	if !ev.TransportScopeMatch(0, ctx) {
 		t.Fatal("identity, schedule or message narrowed inspection")
 	}
@@ -101,7 +101,7 @@ func TestOrderedConditionalTransportAndMessage(t *testing.T) {
 }
 
 func TestCapturedGenericReplyDecisions(t *testing.T) {
-	ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Direction: "response"}}
+	ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Direction: "response", MessageClass: ClassSolicited}}
 	for _, def := range []Action{ActionAllow, ActionDeny} {
 		for _, action := range []Action{ActionAllow, ActionDeny, ActionReset} {
 			for _, isICS := range []bool{false, true} {

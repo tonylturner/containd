@@ -189,7 +189,7 @@ func (w *evidenceWatch) runWithWriter(ctx context.Context, writer *evidenceWatch
 					}
 				}
 				for _, ev := range batch.events {
-					if ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" || ev.Kind == "evidence.delivery" {
+					if ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" {
 						batch.outcomes = append(batch.outcomes, ev)
 					}
 				}
@@ -418,7 +418,7 @@ func (lease *watchLease) drop(state *flow.State, events []dpi.Event) {
 	if state == nil && len(events) > 0 {
 		outcomes := true
 		for _, ev := range events {
-			outcomes = outcomes && (ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" || ev.Kind == "evidence.delivery")
+			outcomes = outcomes && (ev.Kind == "ics.decision" || ev.Kind == "ics.verdict")
 		}
 		if outcomes {
 			lease.addLossLocked(evidence.CollectionLoss{Code: "outcome_loss"})

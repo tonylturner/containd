@@ -50,7 +50,7 @@ func realAccountingIEC(t *testing.T) *iecHarness {
 	t.Helper()
 	h := newIECHarness(t, "monitor")
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
+	h.e.sessions.dpi = h.e.dpiMgr
 	h.handshake()
 	assertAccounting(t, h.e, "iec104", 3, 0, 0, 0, 0, 0)
 	return h
@@ -100,7 +100,7 @@ func TestAccountingIECSplitAndRetransmit(t *testing.T) {
 func TestAccountingIECHeldResolutionIsNotAnArrival(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
-	h.e.iec.dpi = h.e.dpiMgr
+	h.e.sessions.dpi = h.e.dpiMgr
 	h.handshake()
 	payload := apdu(3, 3, 1, 1001, 2)
 	p, d := h.send(false, payload[:5])

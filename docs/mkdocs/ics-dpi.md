@@ -71,17 +71,126 @@ Disabled DPI/decoders, exclusions and capture loss limit observations. Enforce
 mode alone does not prove protection either:
 see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 
-Generic Modbus, DNP3 and CIP inline scopes also inspect replies in enforce mode,
-using the connection's original client and post-DNAT backend even with NAT.
-`ics.direction` restricts message matching, not which direction reaches inspection.
-Existing response-matching enforcing `DENY` and `RESET` rules therefore apply
-inline, and strict parsing or stream failures in enforcing scopes can veto
-reply packets. Monitor response matches remain would-decisions only.
-An unmatched generic reply still skips the ordinary message default deny;
-explicit matching rules and kernel transport admission still apply. This is
-not request/reply authorization pairing or atomic whole-message buffering:
-earlier segments of a split generic message can already have been forwarded
-before a later segment reveals a denial.
+### Enforce-mode reply pairing and upgrade cutover
+
+Inline enforcing **Modbus, DNP3 and IEC 104** sessions buffer complete units
+and authorize solicited replies only against a compatible, explicitly allowed
+request on the same observed TCP session. Both directions are inspected, using
+the original client and post-DNAT backend even with NAT. `ics.direction`
+restricts matching, not steering. Monitor verdicts are unchanged; observed
+pairing never authorizes enforce traffic. CIP retains its existing transport-reply
+default-deny suppression and is outside this pairing gate.
+
+Requests need an explicit matching enforcing ICS `ALLOW`. A default or plain
+transport `ALLOW` cannot mint a request grant: such requests are non-admitted
+and the session resets. Valid Modbus/DNP3 pairs still obey the first winning
+explicit DENY/RESET and strict parsing checks. IEC 104 additionally requires an
+explicit response-rule ALLOW; pairing alone is not a response rule.
+
+This is a **hard cutover at boot replay**, not only at the next commit. Existing
+rules are not automatically broadened or migrated. Applied status and rule/ruleset
+previews warn about request pairing, missing explicit request permits and
+classless autonomous/session allowances, even with no retained events. Review
+these warnings, add deliberate permissions and establish fresh connections.
+Connections picked up midstream after restart cannot recover old grants and are
+reset; reconnect so the firewall observes a fresh handshake and requests.
+
+Use **Message class** in either rule editor, or `ics.messageClass` in the API:
+
+| Selector | Enforcing ALLOW meaning |
+| --- | --- |
+| Omitted (Ordinary) | Ordinary requests and solicited replies; replies still need pairing |
+| `autonomous` | Explicit DNP3 FC130+UNS or IEC monitoring COT1/2/3 and type70/COT4 permission; response direction required |
+| `session` | Explicit DNP3 Confirm/link controls or IEC S/U controls; no request grants |
+
+The explicit classes require protocol `dnp3` or `iec104` and direction
+`request` or `response`. Station, CA and point selectors remain optional where
+applicable. Session rules cannot select application objects (groups, points,
+ASDU types, CA, IOA, COT or flags); DNP3 may select FC0 to limit to Confirm.
+Autonomous DNP3 may select only FC130. Neither class accepts write-only or
+command state/qualifier/select-execute restrictions. An omitted selector is not
+a blanket class permission in enforce mode. Session controls and autonomous
+data cannot borrow an ordinary request grant. Enabling unsolicited reporting
+with DNP3 FC20 does not by itself permit unsolicited data.
+
+#### Reply deadlines and session resets
+
+| Protocol / procedure | Request lifetime |
+| --- | --- |
+| Modbus | 30 s |
+| DNP3 solicited response, including all fragments | One 30 s lifetime; fragments do not refresh it |
+| IEC commands, Read, clock sync and timed test | 15 s |
+| IEC general and counter interrogation | 30 s |
+
+There are at most 64 outstanding requests per session. A new allowed request at
+capacity evicts the oldest (`pairing_expired`); it is not refused merely for
+reaching 64. Global outstanding ceilings are separate: 16,384 enforce grants
+and 12,288 observe grants, also subject to the shared inspection byte budget.
+Observe grants cannot consume enforce authority. Unpaired, late, ambiguous,
+mismatched or unsupported replies reset
+the affected session, rather than becoming ordinary ALLOWs. Slow devices,
+serial gateways and queued pollers can therefore lose a whole TCP session when
+a delayed reply exceeds its deadline or its request was evicted. Reconnect and
+issue fresh requests; avoid excess pipelining and verify worst-case device
+latency before enabling enforce. Retrying the old reply cannot restore authority.
+
+Grants begin at the gate's allowed release decision, not at verdict completion,
+network delivery or device execution. A policy publication reauthorizes retained
+request contexts once and retires disallowed grants. Schedule/identity changes
+without a new policy epoch do not revoke a compatible grant within its bounded
+lifetime. This is request-time compatibility, not continuous authorization or
+anti-replay protection. Session teardown, inspection loss, profile/mode changes,
+source outage and restart retire associated authority.
+
+#### Supported enforcing procedures and transport envelope
+
+| Protocol | Supported pairing procedures |
+| --- | --- |
+| Modbus | FC1–4 reads, FC5/6 exact single-write echoes, FC15/16 multiple-write echoes, FC22 mask write, FC23 read/write and matching exceptions. TID, unit, FC and response shape must agree. FC8 diagnostics, FC43 MEI and unit0/broadcast are unsupported. |
+| DNP3 | Class/specific-group Read; Write status/echo; Select/Operate/direct-operate echoes/status; restart/delay/time and Enable/Disable-Unsolicited families. No-response FC6/8/10 create no grants. FC129 solicited fragments must retain stations, sequence, object coverage and FIR/FIN progression. Confirm and link controls need session rules; FC130+UNS needs autonomous permission. Confirmed-user-data link procedures are unsupported in enforce. |
+| IEC 104 | Commands 45–51/58–64 COT6→7 with optional10; GI100, counter interrogation101, Read102, clock sync103 and timed test107. Reset-process105 is unsupported in enforce even though decoded. S/U controls need session rules; autonomous monitoring needs autonomous permission. |
+
+IEC group interrogation QOI21–36 requires data with that group's own cause;
+general COT20 data does not satisfy a group request. Counter interrogation group5
+accepts COT37; groups1–4 accept COT37 or their matching COT38–41. Read102 may
+receive COT7 before COT5 data. Command termination may echo the select bit;
+a fresh request replaces a confirmed command awaiting only optional termination.
+Select and execute remain separate requests. Clock-sync replies with COT6 reset.
+An exact direct negative mirror (COT44–47, P/N=1) terminates a supported request
+without granting data authority; later replies cannot borrow it. Direct errors
+with P/N=0 while awaiting initial confirmation remain mismatches. A single exact
+error echo after a negative ACT_CON is separately tolerated under the original
+request's coverage and deadline; negative confirmation closes data authority.
+
+The gated unit is a Modbus ADU, IEC APDU or DNP3 **application fragment**, not
+a whole multi-fragment response. Earlier allowed DNP3 fragments may reach the
+peer before a later fragment is denied. Every payload byte on a packet needs
+complete allowed-unit coverage: a forbidden or incomplete coalesced tail holds
+the packet, including its otherwise allowed prefix. TCP retransmissions do not
+create another grant or advance a reply twice.
+
+**Every byte of a gated unit—Modbus ADU, DNP3 application fragment or IEC APDU—must
+reach the firewall within the 1 s hold.** This is separate from the longer reply
+lifetime. Split writes, Nagle/delayed ACK, small windows, slow readers or
+ACK-dependent device behavior can prevent a complete unit arriving before the
+hold expires and reset the session.
+`TCP_NODELAY` does not guarantee arrival within 1 s. This is not a TCP proxy and
+it does not synthesize ACKs. Test real peers, gateways and fragmentation patterns
+before enforcing; decoded support alone does not establish transport compatibility.
+
+The following times were measured in **one isolated Linux TCP/NFQUEUE test
+setup**, not latency or compatibility guarantees. Reset times are arrival at
+master / outstation, measured from the first captured carrying byte.
+
+| Profile | Measured outcome |
+| --- | --- |
+| Enforce DNP3, one-byte writes, 5 ms spacing, `TCP_NODELAY` | Outside envelope: sender flight stalls before the whole unit reaches the gate. Reset at 1.0404 / 1.0403 s; zero request bytes at outstation. |
+| Enforce DNP3, 2048-byte application fragment (2411 link bytes), minimum advertised window 1152 bytes, receive buffer 2304 bytes | Outside envelope: receiver window stalls before the whole fragment reaches the gate. Reset at 1.0453 / 1.0451 s; zero response bytes at master. |
+| Enforce IEC 104, one-byte writes, 5 ms spacing, `TCP_NODELAY` | Outside envelope: sender flight cannot complete the held unit. Reset at 1.0947 / 1.0945 s; zero request bytes at outstation. |
+| Enforce IEC 104, unmodified pinned j60870, one-byte writes without inter-write sleeps | Inside measured envelope: STARTDT and complete 16-byte positive ACT_CON; response at 60.8 ms. |
+
+Matched monitor controls delivered complete requests and responses for all
+three outside-envelope profiles without whole-unit holding.
 
 ### Shadow evidence and applied-policy counters
 
@@ -226,8 +335,8 @@ without migration. Stage settings in **Firewall → Deep Packet Inspection →
 Industrial protocols → Configure**, or POST the full candidate dataplane
 document to `/api/v1/dataplane`, then commit to apply.
 
-The **Unrecognized messages** control offers **Inspect supported messages
-(tolerant)** and **Treat unrecognized messages as violations (strict)**. Strict
+The **Unrecognized messages** control offers **Decode tolerantly (runtime safety
+still applies)** and **Treat unrecognized messages as violations (strict)**. Strict
 violations are blocked in Enforce mode; Monitor reports what would be dropped
 without blocking. These labels do not change the stored `tolerant`/`strict`
 values or enable blocking by themselves.
@@ -245,7 +354,8 @@ previous queue and interface values as current.
 Rule editors separate **Basic matching** from uncommon station, object,
 direction and message selectors under **Advanced protocol fields**. This section opens
 automatically when any of its selectors has a saved restriction, including an
-explicit zero or false value. IEC 104 message types, station address (CA) and
+explicit zero or false value, or a message class requiring direction. Message
+class is directly visible for DNP3 and IEC 104. IEC 104 message types, station address (CA) and
 point addresses (IOA) remain directly visible. Closing the disclosure never
 clears its values. Reasons for limited or unavailable coverage are shown inline,
 including the exact reported fault text.
@@ -269,8 +379,10 @@ bounded, an `ALLOW` with an address range does not match it, but a `DENY` or
 Some framed content is not inspected at all and is reported separately in the
 event's `undecoded` codes (`<proto>.<reason>`), not as a conformance violation.
 Policy handles these findings like conformance findings: tolerant parsing
-leaves delivery to normal rule and default-action evaluation; the finding itself
-does not cause a drop. Strict parsing in an enforce scope drops and resets the
+leaves decoded observations available to policy, but never overrides the
+session gate: unsupported procedures and profile-invalid units reset enforcing
+Modbus, DNP3 and IEC 104 sessions even with a broad ALLOW.
+Strict parsing in an enforce scope drops and resets the
 message, while strict monitor scope records a would-drop decision without
 affecting delivery. Either finding type raises a medium-severity IDS alert
 (`ics-conformance` or `ics-undecoded`), deduplicated per connection and code. If
@@ -280,13 +392,14 @@ suggestions.
 
 | Effective rule mode | Tolerant parsing | Strict parsing |
 | --- | --- | --- |
-| Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
+| Enforce scope | Evaluate decoded fields subject to pairing and runtime safety; unsupported/profile-invalid gated units reset | Drop the packet and reset the session; decision reason `nonconformant` |
 | Monitor scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
 
 Strict nonconformance in an enforcing scope preempts rule decisions and is attributed to that scope. Tolerant is not a policy bypass:
 under an allowlist, an unreadable field cannot satisfy an ALLOW that names that
 field, so the message falls to the default action. A broader ALLOW using only
-readable fields can still match.
+readable fields can still match for observation, but cannot override runtime
+safety checks or authorize an unsupported enforcing procedure.
 TCP resets are best effort and connection-scoped; UDP denials drop only the
 datagram, without a session reset.
 
@@ -307,13 +420,11 @@ queue unavailability, buffer or out-of-order overflow, a missing decoder, and
 IEC 104 hold timeout. These faults reset the session, not a host/service block;
 tolerant does not scan for a new frame boundary or recover that session.
 
-IEC 104 malformed/profile-violating content with a known APDU length reaches
-the rules with decoded fields and an alert in tolerant mode; strict drops and
-resets it. Reserved APCI control bits with a readable length are conformance
-findings. An unsupported Type ID is still a decoded type byte: tolerant rules
-decide it, with an `iec104.unsupported_type` finding. Changing parsing applies
-to new decisions after the config push, not by resetting existing sessions
-solely because their parsing mode changed.
+IEC 104 malformed/profile-violating content with a known APDU length retains
+decoded observations and alerts in tolerant mode, but cannot be authorized in an
+enforcing session. Reserved APCI bits and unsupported types remain conformance
+findings. Tolerant decoding is not a recovery or compatibility mode. Changing
+parsing/profile settings can retire session authority; establish fresh connections.
 
 ## Transport identity and NAT
 
@@ -606,6 +717,14 @@ the first 512 payload bytes (IEC 104: the APDU). An attribute is present only
 when the decoder found its value. The tables list what each ICS decoder emits;
 the value in brackets is the event's `proto`.
 
+Runtime-classified Modbus/DNP3/IEC events may carry `message_class`
+(`request`, `solicited`, `autonomous`, `session`, `unknown`), `pairing_outcome`
+(`paired`, `unpaired`, `expired`, `ambiguous`, `unsupported`, `unknown`) and
+`pairing_reason`. Reasons include `unpaired`, `pairing_expired`,
+`pairing_ambiguous`, `pairing_mismatch`, `pairing_unsupported`, `pairing_unknown`,
+`autonomous_rule_required`, `session_rule_required`, `message_timeout` and
+`state_limit`. These are runtime observations, not delivery evidence.
+
 `coverage_incomplete: true` marks a DNP3 fragment or CIP operation whose
 contained objects or operations were not fully inspected. The attribute is
 omitted on fully covered messages; it is separate from `conformance` and
@@ -623,8 +742,10 @@ application responses. Events for a completed transport fragment ride on its
 finishing link frame; `link_ranges` identifies the constituent physical link
 frames, while `raw_hex` remains the finishing physical frame rather than a
 synthesized application payload. Application fragments are decoded
-independently: earlier TCP packets are not held back and whole-response
-prevention is not atomic. Point records preserve indices only when present
+independently. DNP3 enforcement holds every carrying packet until its
+application fragment is complete and authorized. Earlier authorized
+application fragments may already have arrived; whole responses are not
+atomic. Point records preserve indices only when present
 (absence is not index zero); group 12 variation 1 CROBs expose their encoded
 control, operation, trip/close, queue/clear, count, on/off times and status.
 The fragment event carries `coverage_incomplete: true` when the object walk
@@ -1160,9 +1281,10 @@ P/N, T and S/E selectors require their ASDU values; S/U frames do not carry them
 
 Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
 45–51; 58–64; 70, 100, 101, 102, 103, 105, and 107. Other types decode as
-unsupported with a conformance finding: tolerant evaluates the decoded fields,
-including the Type ID, against the rules; strict drops and resets in enforce
-scope. Unsupported does not mean implicitly allowed.
+unsupported with a conformance finding. Tolerant retains decoded fields for
+observation; unsupported/profile-invalid units reset enforcing sessions under
+either parsing setting. Descriptor support is not pairing-procedure support;
+see [the enforcing procedure table](#supported-enforcing-procedures-and-transport-envelope).
 
 IEC 104 conformance codes: `iec104.apci_length`, `iec104.body_length`,
 `iec104.element`, `iec104.ioa_range`, `iec104.profile_sq`,
@@ -1182,10 +1304,9 @@ open no fail-closed envelope. Inside an enforce envelope, object decisions use
 only enforcing IEC 104 rules in configured order. The first matching terminal
 decides; an object with no match is denied. Matching monitor rules additionally
 record shadow evidence without changing this decision. A broad TCP/2404 allow rule
-or a generic allow default cannot bypass it. In tolerant mode, malformed or
-profile-violating content with a known length can match an `ALLOW` on fields
-that were decoded; absent fields never satisfy a predicate. Strict rejects
-nonconformance before ALLOW matching. Broadcast objects cannot match an
+or a generic allow default cannot bypass it. Malformed or profile-invalid
+units cannot be admitted under either parsing setting, even with a readable
+length and matching decoded fields. Strict rejects nonconformance before ALLOW matching. Broadcast objects cannot match an
 `ALLOW`. ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
 ## Learning
@@ -1211,6 +1332,11 @@ collection. Observation is not authorization, even when the traffic was delivere
    evidence checksum and evaluator/generator versions. A rule's **Preview live recent
    evidence** is a separate isolated impact check against recent retained events;
    it does not recertify the frozen suggestion or simulate the whole policy.
+   Rule and ruleset previews show `pairing` counts and bounded distinct reason
+   codes from runtime stamps on predicate-selected retained events. Ruleset
+   previews count each selected event once, independent of rule overlap.
+   Unstamped or inconsistent historical evidence is unknown. Preview never
+   reconstructs request witnesses, predicts candidate admission or proves delivery.
 4. IEC 104 requires an explicit authenticated administrator **Review** before
    selection. Wire-coordinate PCAP suggestions also require acknowledgement that
    the captured pre-NAT addresses and service match the intended deployment.
@@ -1262,13 +1388,21 @@ nonconformant or authority-less parents cannot yield actionable suggestions.
 - **DNP3:** supported master/outstation, function, group/variation and bounded
   point relations are certified together as needed. All-objects, count-only,
   wildcard variation, indexless controls and unexpressible values are withheld.
-- **IEC 104:** supported commands only, always admin-reviewed and staged as
-  monitor. Single, double and regulating-step commands (45/46/47/58/59/60)
-  bind each observed state and QU qualifier alongside IOA and select/execute;
-  even a partial observation can certify without admitting unobserved tuples.
-  Setpoint values/QL, bitstrings and select-before-operate sequences remain
-  withheld. Monitoring ASDUs, APCI/startup behavior and broadcast CAs
-  do not become command ALLOWs. Use deliberate policy/templates for startup.
+- **IEC 104:** supported command and monitoring relations, always admin-reviewed
+  and staged as monitor. Single, double and regulating-step commands
+  (45/46/47/58/59/60) bind observed state, QU, IOA and select/execute.
+  Setpoint values/QL, bitstrings, select-before-operate sequences and broadcast
+  CAs remain withheld. Monitoring relations bind type, CA, COT, originator,
+  flags and IOA; session controls use explicit directional session rules.
+- Observed autonomous/session traffic emits `messageClass: autonomous|session`,
+  retaining endpoint/service and applicable protocol targets, not blanket
+  autonomous permission. Solicited responses never become learned rules.
+  Unknown or unsupported solicited evidence cannot certify live pairing; manual
+  candidates remain possible without a request or delivery guarantee.
+  Current proofs use evaluator `ics-5` and generator `exact-10`. Older `ics-4`
+  staged proofs are recertified against current evidence or withheld, never
+  silently accepted. A resolved historical retry may reconcile identical saved
+  candidates only; it cannot introduce missing rules.
 - **CIP:** observations are retained, but no actionable CIP rules are offered.
   Content identified on nonstandard service ports remains observation-only.
 
@@ -1321,12 +1455,15 @@ needed. The removed profile/bulk workflow (`GET /learn/profiles`,
 `DELETE /learn`, and the old generate/apply bodies) is not supported. See [API Reference](api-reference.md#learner-evidence-and-staging)
 and [CLI](cli.md#learner-evidence) for the replacement requests and commands.
 
-IEC 104 tracking shares a **4,096-entry session table** across monitor and enforce
-envelopes, including retained closed sessions and abort tombstones. At capacity,
+Modbus, DNP3 and IEC 104 share a **4,096-slot live-session pool** across monitor
+and enforce envelopes, including retained closed sessions and IEC abort
+tombstones. Generic denied-tuple tombstones have a separate 16,384-entry,
+10-second bound. Aggregate state-limit occupancy uses the historical
+`iec_sessions` table label with a maximum of 20,480. At capacity,
 new monitor-mode connections are accepted **without stream inspection**. Pressure is counted as
 `iec_sessions/refused/monitor` and emits the coalesced `dataplane.state_limit`
 pressure-entry event (`table: iec_sessions`, `reason: refused`, `mode: monitor`,
-`limit: 4096`), not a per-SYN `ics.session` event. Events coalesce at most once
+`limit: 20480`), not a per-SYN `ics.session` event. Events coalesce at most once
 per table per 60 seconds. Enforce refusals count in the effective enforce mode.
 Midstream traffic stays untracked. Existing sessions continue inspection unless
 their own retained-allocation growth is refused. New SYNs can be tracked when
@@ -1571,11 +1708,16 @@ enforcing. See
 The Modbus read-only template allows FC 1–4 and denies listed write functions,
 including FC 21 (Write File Record); use default deny to exclude all other
 functions. The `dnp3-secure-operations` template is **not read-only**: it allows
-FC 0 (Confirm), 1 (Read), 20/21 (Enable/Disable Unsolicited), 23 (Delay
+ordinary FC1 (Read), 20/21 (Enable/Disable Unsolicited), 23 (Delay
 Measure) and 24 (Record Current Time), allows FC 2 (Write) only for groups 50
 (time) and 80 (internal indications), and denies FC 13/14 (Restart), 18 (Stop
 Application) and 19 (Save Configuration). Review these allowances before
-applying it.
+applying it. Confirm FC0 and link controls are separate directional
+`tpl-dnp3-session-request` and `tpl-dnp3-session-response` rules. The template also
+includes `tpl-dnp3-unsolicited`, an explicit response-direction autonomous rule.
+It does not require a preceding Enable Unsolicited request; narrow or remove it
+if unsolicited reporting is not intended. Reapplying templates does not
+retroactively migrate saved policy.
 
 ## IEC 104 Holdback Diagnostics
 
@@ -1590,6 +1732,7 @@ Limits are 256 held-packet settlement owners globally, 32 queued packets and
 replacement handshakes reuse their slot. Capture shutdown makes active sessions
 zero, but retained tuple slots can
 remain until expiry or rebuild. The shared reset/block worker has 256 queue slots.
+The 256 global slots reserve non-borrowing shares: Modbus 80, DNP3 80, IEC 96.
 The global settlement-owner bound includes packets released from the visible
 hold queue but still awaiting verdict submission. Shared budget credits can
 therefore outlive an empty queue.
@@ -1599,7 +1742,9 @@ can refuse a hold earlier. Each held packet charges its payload length plus a
 fixed 256-byte header allowance and a 512-byte token metadata charge before it
 joins the queue. This conservative convention does not measure captured headers
 or kernel skb residency. A generation-bearing token owns that credit until
-verdict completion, settlement rejection or source flush. Repeated notifications
+successful terminal submission, confirmed flush or queue close. An uncertain
+failed send or unknown-token rejection does not prove disappearance and retains
+credit until completion or source-down flush. Repeated notifications
 cannot refund twice. Shutdown and reconfiguration release remaining ownership
 after capture retirement. A refusal aborts before publishing successful inspection
 results or forwarding an earlier held prefix.
@@ -1649,8 +1794,10 @@ their SYN within IEC 104 envelopes. Untracked, midstream and uninspected traffic
 does not populate it. Retransmissions are not new attempts. Inventory counts
 attempted commands and observed points, not delivery or physical execution.
 Inventory summaries never generate ALLOW rules or enforcement decisions.
-The separate delivery ledger still reports provable userspace delivery to learner
-evidence during an explicit live watch; inventory counters are not its input.
+Live watches retain engine decisions and confirmed blocked outcomes, but neither
+NFQUEUE kernel continuation nor passive capture proves delivery. Learner delivery
+is `unknown` or `blocked`; no supported capture mode emits `delivered`.
+Inventory counters are not delivery evidence.
 Engine unavailability displays an explicit unavailable state, not an empty
 inventory or zero counters; **Refresh** retries.
 

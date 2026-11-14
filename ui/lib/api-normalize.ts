@@ -91,6 +91,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   }
   const record = value as Record<string, unknown>;
   const normalized: ICSPredicate = {
+    messageClass: record.messageClass === "autonomous" || record.messageClass === "session" ? record.messageClass : undefined,
     protocol:
       typeof record.protocol === "string" && record.protocol.trim() !== ""
         ? record.protocol.trim()
@@ -137,6 +138,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if ((normalized.ioa?.length ?? 0) === 0) delete normalized.ioa;
   if (!normalized.direction) delete normalized.direction;
   if (!normalized.mode) delete normalized.mode;
+  if (!normalized.messageClass) delete normalized.messageClass;
   if (normalized.unitId == null) delete normalized.unitId;
   if (!normalized.protocol) delete normalized.protocol;
 

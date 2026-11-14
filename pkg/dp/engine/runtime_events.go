@@ -281,6 +281,11 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, 
 		metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()
 	}
 
+	e.recordRuleHit(ev, ctx, matched, state)
+	return v, matched
+}
+
+func (e *Engine) recordRuleHit(ev *rules.Evaluator, ctx rules.EvalContext, matched *rules.Entry, state *flow.State) {
 	if matched != nil && matched.Log && e.eventStore != nil {
 		attrs := map[string]any{
 			"ruleId": matched.ID,
@@ -329,7 +334,6 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, 
 		}
 		e.eventStore.Append(logEvent)
 	}
-	return v, matched
 }
 
 // effectiveMode returns the mode that should govern verdict application

@@ -51,6 +51,7 @@ func TestTransportAuthorityWindowDoesNotDisableDetection(t *testing.T) {
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 	e.handleTransportPacket(syn, r.resolve(ctx, syn, false), nil)
 	req := transportWire(ev.Original, now.Add(time.Millisecond), modbusADU(1, 3, 10, 2))
+	req.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 101}
 	e.handleTransportPacket(req, r.resolve(ctx, req, false), nil)
 	rep := transportWire(ev.Reply, now.Add(2*time.Millisecond), modbusReadReply(1))
 	e.handleTransportPacket(rep, r.resolve(ctx, rep, false), nil)
@@ -60,6 +61,7 @@ func TestTransportAuthorityWindowDoesNotDisableDetection(t *testing.T) {
 	// Apply (or a failed read) invalidates authority until the next good read.
 	r.authority.invalidate()
 	req2 := transportWire(ev.Original, now.Add(3*time.Millisecond), modbusADU(2, 3, 10, 2))
+	req2.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 113}
 	c := r.resolve(ctx, req2, false)
 	if c.Status != "zone_unverified" || c.PublicID() == "" {
 		t.Fatalf("cache hit during periodic check: status=%s id=%q", c.Status, c.PublicID())
@@ -71,9 +73,11 @@ func TestTransportAuthorityWindowDoesNotDisableDetection(t *testing.T) {
 		t.Fatal("fixture did not re-verify")
 	}
 	rep2 := transportWire(ev.Reply, now.Add(4*time.Millisecond), modbusReadReply(2))
+	rep2.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 13}
 	e.handleTransportPacket(rep2, r.resolve(ctx, rep2, false), nil)
 	// A genuinely unmatched reply ten seconds later, long after the check.
 	bogus := transportWire(ev.Reply, now.Add(10*time.Second), modbusReadReply(99))
+	bogus.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 26}
 	e.handleTransportPacket(bogus, r.resolve(ctx, bogus, false), nil)
 	stats := e.AnomalyDetector().PairingStats()
 	var statuses []string
@@ -100,7 +104,9 @@ func TestTransportWorkerKeepsEvidenceDuringZoneRead(t *testing.T) {
 	syn := transportWire(ev.Original, time.Now(), nil)
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 	r.admit(e, syn)
-	r.admit(e, transportWire(ev.Original, time.Now(), modbusADU(1, 3, 10, 2)))
+	req := transportWire(ev.Original, time.Now(), modbusADU(1, 3, 10, 2))
+	req.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 101}
+	r.admit(e, req)
 	waitTransport(t, func() bool { return len(transportModbusEvents(e)) == 1 })
 	z.block.Store(true)
 	r.authority.requestCheck()

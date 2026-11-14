@@ -43,7 +43,7 @@ func TestStateLimitsInitialization(t *testing.T) {
 		if in.MaxInspectionBytes != 0 {
 			want.MaxInspectionBytes = in.MaxInspectionBytes
 		}
-		if e.verdictCache.ledger != shared || e.conformance.ledger != shared || e.iec.pickups.ledger != shared {
+		if e.verdictCache.ledger != shared || e.conformance.ledger != shared || e.sessions.pickups.ledger != shared {
 			t.Fatal("observational engine owners lost process ledger")
 		}
 		if e.stateLimits != want || e.StateLimits().Budget.Limit != want.MaxInspectionBytes {
@@ -70,16 +70,16 @@ func TestStateLimitsCurrentOwnersAndReconfigure(t *testing.T) {
 	t.Cleanup(e.Close)
 	e.trackFlow(segment(false, 100, 0, nil), time.Now())
 	e.verdictCache.Put("one", verdict.Verdict{})
-	e.iec.mu.Lock()
-	e.iec.reconnect["one"] = time.Now()
-	e.iec.mu.Unlock()
+	e.sessions.mu.Lock()
+	e.sessions.reconnect["one"] = time.Now()
+	e.sessions.mu.Unlock()
 	ledger.Record(limits.TableFlows, limits.ReasonRefused, limits.ModeEnforce)
 	s := e.StateLimits()
 	got := make(map[limits.Table]limits.TableStatus)
 	for _, st := range s.Tables {
 		got[st.Table] = st
 	}
-	if len(got) != 12 || got[limits.TableFlows].Entries != 2 || got[limits.TableFlows].Limit != limits.DefaultMaxFlows || got[limits.TableIECReconnect].Entries != 1 || got[limits.TableVerdictCache].Entries != 1 || got[limits.TableIECSessions].Limit != 4096 || got[limits.TableConformance].Limit != 65536 || got[limits.TablePickupReset].Limit != 4096 || got[limits.TableSignatureWindows].Limit != 4096 || got[limits.TableInventoryPoints].Limit != limits.MaxInventoryPoints {
+	if len(got) != 12 || got[limits.TableFlows].Entries != 2 || got[limits.TableFlows].Limit != limits.DefaultMaxFlows || got[limits.TableIECReconnect].Entries != 1 || got[limits.TableVerdictCache].Entries != 1 || got[limits.TableIECSessions].Limit != sessionMaxSessions+deniedTCPCapacity || got[limits.TableConformance].Limit != 65536 || got[limits.TablePickupReset].Limit != 4096 || got[limits.TableSignatureWindows].Limit != 4096 || got[limits.TableInventoryPoints].Limit != limits.MaxInventoryPoints {
 		t.Fatalf("owners %+v", s)
 	}
 	oldBudget := e.budget

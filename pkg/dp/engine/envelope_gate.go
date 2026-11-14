@@ -211,7 +211,7 @@ func (g *envelopeGate) switchLocked(force bool) {
 // the engine's gate. Called by New and after Reconfigure swaps in a fresh
 // configuration.
 func (e *Engine) bindGate() {
-	health := e.iec.health
+	health := e.sessions.health
 	e.hooks.gate, e.hooks.group = e.gate, e.nfqueueGroup
 	fault := func(reason string) { health.fault(faultSteering, reason) }
 	ok := func() { health.clear(faultSteering) }

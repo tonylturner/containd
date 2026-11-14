@@ -350,9 +350,10 @@ func (e *Engine) stopDecodeCoverage(marker *transportCoverage, connection *flow.
 	if clean {
 		for _, st := range states {
 			e.dpiMgr.DiscardFlow(st)
+			e.endObservedSession(st, false)
 		}
 	}
-	if t := e.iec; clean && t != nil && len(states) != 0 && isIECPort(pkt) {
+	if t := e.sessions; clean && t != nil && len(states) != 0 && isIECPort(pkt) {
 		t.mu.Lock()
 		src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
 		dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)

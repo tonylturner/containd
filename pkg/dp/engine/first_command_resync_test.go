@@ -33,7 +33,7 @@ func TestFirstCommandAfterConflictingOverlap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFCFlow(t, "ok", tc.port)
 			f.syn()
-			f.accept("read head", tc.read[:8])
+			f.hold("read head", tc.read[:8])
 			conflict := append([]byte(nil), tc.read[:8]...)
 			conflict[4] ^= 0xFF
 			// The overlap is not new data for the server; its verdict is

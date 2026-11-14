@@ -32,7 +32,7 @@ func TestCLICompletionFirewallEdits(t *testing.T) {
 	cfg := &config.Config{Firewall: config.FirewallConfig{Rules: []config.Rule{{ID: "plant-safe"}, {ID: "plant"}, {ID: "ops"}}}, Zones: []config.Zone{{Name: "lan"}, {Name: "plant"}}}
 	cfg.Firewall.NAT.PortForwards = []config.PortForward{{ID: "publish"}}
 	common := strings.Fields("--action --description --tag --src-zone --source-zones --dst-zone --dest-zones --sources --destinations --protocols --identities --via-forwards --log --rate-limit --schedule --schedule-days --schedule-start --schedule-end --schedule-timezone")
-	ics := strings.Fields("--ics-protocol --function-code --object-classes --unit-id --addresses --read-only --write-only --mode --type-ids --classes --ca --ioa --direction --masters --outstations --groups --variations --instances --attributes --tags --cot --originators --negative --test --select-execute --command-states --command-qualifiers")
+	ics := strings.Fields("--ics-protocol --function-code --object-classes --unit-id --addresses --read-only --write-only --mode --type-ids --classes --ca --ioa --direction --message-class --masters --outstations --groups --variations --instances --attributes --tags --cot --originators --negative --test --select-execute --command-states --command-qualifiers")
 	for _, command := range []string{"set firewall rule", "set firewall ics-rule"} {
 		t.Run(command, func(t *testing.T) {
 			flags := slices.Clone(common)

@@ -6,7 +6,6 @@ package iec104
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
@@ -106,6 +105,19 @@ func checkRole(h asduHeader, direction string) error {
 // after the 6-octet header). SQ=0: every object has its own IOA. SQ=1: one
 // base IOA, then consecutive IOAs. The body must hold exactly count objects.
 func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, error) {
+	objects, err := decodeTypedObjects(h, d, body)
+	if err != nil {
+		return nil, err
+	}
+	attrs := make([]map[string]any, len(objects))
+	for i, o := range objects {
+		attrs[i] = o.attrs(d)
+		attrs[i][eventfields.KeyObjectIndex] = uint8(i)
+	}
+	return attrs, nil
+}
+
+func decodeTypedObjects(h asduHeader, d descriptor, body []byte) ([]Object, error) {
 	size := d.objectSize()
 	want := int(h.count) * (ioaLen + size)
 	if h.sq {
@@ -114,7 +126,7 @@ func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, e
 	if len(body) != want {
 		return nil, findingError(FindingBodyLength, "ASDU body is %d octets, want %d for %d objects of type %d", len(body), want, h.count, h.typeID)
 	}
-	objects := make([]map[string]any, 0, h.count)
+	objects := make([]Object, 0, h.count)
 	var base uint32
 	pos := 0
 	for i := 0; i < int(h.count); i++ {
@@ -133,11 +145,8 @@ func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, e
 		default:
 			ioa = base + uint32(i)
 		}
-		obj := map[string]any{
-			eventfields.KeyIOA:         ioa,
-			eventfields.KeyObjectIndex: uint8(i),
-		}
-		if err := decodeElement(d, body[pos:pos+size], obj); err != nil {
+		obj := Object{IOA: ioa}
+		if err := decodeTypedElement(d, body[pos:pos+size], &obj); err != nil {
 			return nil, &conformanceError{code: err.code, msg: fmt.Sprintf("object %d (IOA %d): %s", i, ioa, err.msg)}
 		}
 		pos += size
@@ -150,112 +159,12 @@ func readIOA(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
 }
 
-// decodeElement decodes one information element (and its CP56Time2a for
-// timed types) into obj. Element layouts are IEC 60870-5-101 7.2.6.
-func decodeElement(d descriptor, b []byte, obj map[string]any) *conformanceError {
-	n := elementSize[d.elem]
-	if err := decodeValue(d.elem, b[:n], obj); err != nil {
-		return err
-	}
-	if d.timed {
-		return decodeCP56(b[n:n+cp56Len], obj)
-	}
-	return nil
-}
-
-// elementError is a FindingElement error.
+// elementError and timeError preserve the public conformance vocabulary.
 func elementError(format string, args ...any) *conformanceError {
 	return &conformanceError{code: FindingElement, msg: fmt.Sprintf(format, args...)}
 }
-
-// timeError is a FindingTime error.
 func timeError(format string, args ...any) *conformanceError {
 	return &conformanceError{code: FindingTime, msg: fmt.Sprintf(format, args...)}
-}
-
-func decodeValue(kind elementKind, b []byte, obj map[string]any) *conformanceError {
-	switch kind {
-	case elemSIQ: // SIQ: SPI bit 0, quality (BL, SB, NT, IV) bits 4-7
-		obj[eventfields.KeyValue] = b[0] & 0x01
-		obj[eventfields.KeyQuality] = b[0] & 0xF0
-	case elemDIQ: // DIQ: DPI bits 0-1, quality (BL, SB, NT, IV) bits 4-7
-		obj[eventfields.KeyValue] = b[0] & 0x03
-		obj[eventfields.KeyQuality] = b[0] & 0xF0
-	case elemVTI: // VTI: signed 7-bit position and transient bit, then QDS
-		value := int16(b[0] & 0x7F)
-		if value&0x40 != 0 {
-			value -= 0x80
-		}
-		obj[eventfields.KeyValue] = int8(value)
-		obj[keyTransient] = b[0]&0x80 != 0
-		obj[eventfields.KeyQuality] = b[1]
-	case elemBSIQDS: // BSI + QDS
-		obj[eventfields.KeyValue] = binary.LittleEndian.Uint32(b[0:4])
-		obj[eventfields.KeyQuality] = b[4]
-	case elemNVAQDS, elemSVAQDS: // normalized or scaled value (int16) + QDS
-		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
-		obj[eventfields.KeyQuality] = b[2]
-	case elemNVA: // normalized value (int16), no quality descriptor
-		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
-	case elemBCR: // signed counter value, sequence number and counter flags
-		flags := b[4]
-		obj[eventfields.KeyValue] = int32(binary.LittleEndian.Uint32(b[0:4]))
-		obj[eventfields.KeyQualifier] = flags & 0x1F
-		obj[eventfields.KeyQuality] = flags & 0xE0
-	case elemFloatQDS: // R32-IEEE STD 754 + QDS
-		shortFloat(b[0:4], obj)
-		obj[eventfields.KeyQuality] = b[4]
-	case elemSCO: // SCS bit 0, bit 1 reserved 0, QU bits 2-6, S/E bit 7
-		if b[0]&0x02 != 0 {
-			return elementError("SCO reserved bit 1 set")
-		}
-		commandQualifier(b[0], b[0]&0x01, obj)
-	case elemDCO, elemRCO: // DCS/RCS bits 0-1 (1 or 2), QU bits 2-6, S/E bit 7
-		state := b[0] & 0x03
-		if state == 0 || state == 3 {
-			return elementError("command state %d is not a command (only 1 and 2)", state)
-		}
-		commandQualifier(b[0], state, obj)
-	case elemNVAQOS, elemSVAQOS: // NVA or SVA (int16) + QOS
-		obj[eventfields.KeyValue] = int16(binary.LittleEndian.Uint16(b[0:2]))
-		setpointQualifier(b[2], obj)
-	case elemFloatQOS: // R32 + QOS
-		shortFloat(b[0:4], obj)
-		setpointQualifier(b[4], obj)
-	case elemBSI: // BSI, no select bit and no qualifier
-		obj[eventfields.KeyValue] = binary.LittleEndian.Uint32(b[0:4])
-	case elemCOI, elemQOI, elemQCC, elemQRP:
-		obj[eventfields.KeyQualifier] = b[0]
-	case elemNone, elemTSC:
-		// Read carries no element; the test sequence counter is not exposed.
-	}
-	return nil
-}
-
-// commandQualifier records a single, double or regulating step command:
-// QU (bits 2-6) and S/E (bit 7, 1 = select).
-func commandQualifier(octet, state uint8, obj map[string]any) {
-	obj[eventfields.KeyValue] = state
-	obj[eventfields.KeyQualifier] = (octet >> 2) & 0x1F
-	obj[eventfields.KeySelect] = octet&0x80 != 0
-}
-
-// setpointQualifier records QOS: QL (bits 0-6) and S/E (bit 7, 1 = select).
-func setpointQualifier(qos uint8, obj map[string]any) {
-	obj[eventfields.KeyQualifier] = qos & 0x7F
-	obj[eventfields.KeySelect] = qos&0x80 != 0
-}
-
-// shortFloat records R32-IEEE STD 754 as value. The standard allows NaN and
-// infinities, but JSON cannot carry them: such an object keeps its kind and
-// other attributes, omits value and sets value_invalid.
-func shortFloat(b []byte, obj map[string]any) {
-	f := math.Float32frombits(binary.LittleEndian.Uint32(b))
-	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
-		obj[eventfields.KeyValueInvalid] = true
-		return
-	}
-	obj[eventfields.KeyValue] = f
 }
 
 // decodeCP56 decodes CP56Time2a (IEC 60870-5-101 7.2.6.18): milliseconds
@@ -267,6 +176,14 @@ func shortFloat(b []byte, obj map[string]any) {
 // or any date that cannot exist is malformed. source_time is ISO 8601
 // without a zone; the profile, not the decoder, says the RTU runs UTC.
 func decodeCP56(b []byte, obj map[string]any) *conformanceError {
+	if err := validateCP56(b); err != nil {
+		return err
+	}
+	cp56Attrs(b, obj)
+	return nil
+}
+
+func validateCP56(b []byte) *conformanceError {
 	ms := int(binary.LittleEndian.Uint16(b[0:2]))
 	minute := int(b[2] & 0x3F)
 	hour := int(b[3] & 0x1F)
@@ -287,11 +204,16 @@ func decodeCP56(b []byte, obj map[string]any) *conformanceError {
 	case day < 1 || day > daysIn(month, 2000+year):
 		return timeError("CP56Time2a day %d in %04d-%02d", day, 2000+year, month)
 	}
+	return nil
+}
+
+func cp56Attrs(b []byte, obj map[string]any) {
+	ms := int(binary.LittleEndian.Uint16(b))
+	minute, hour, day, month, year := int(b[2]&63), int(b[3]&31), int(b[4]&31), int(b[5]&15), int(b[6]&127)
 	obj[eventfields.KeySourceTime] = fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02d.%03d",
 		2000+year, month, day, hour, minute, ms/1000, ms%1000)
 	obj[eventfields.KeyTimeValid] = b[2]&0x80 == 0
 	obj[eventfields.KeyTimeSummer] = b[3]&0x80 != 0
-	return nil
 }
 
 func daysIn(month, year int) int {

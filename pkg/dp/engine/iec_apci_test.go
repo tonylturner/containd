@@ -21,16 +21,20 @@ import (
 
 type apciAllowPolicy struct{ *fakePolicy }
 
-func (apciAllowPolicy) EvaluateIEC104(rules.EvalContext) (rules.Action, *rules.Entry) {
-	return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow}
+func (p apciAllowPolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry) {
+	class := ""
+	if ctx.ICS.MessageClass == rules.ClassSession || ctx.ICS.MessageClass == rules.ClassAutonomous {
+		class = string(ctx.ICS.MessageClass)
+	}
+	return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: p.mode, MessageClass: class}}
 }
 
 func newAPCIHarness(t *testing.T, mode string) *iecHarness {
 	t.Helper()
 	h := newIECHarness(t, mode)
 	h.e.dpiMgr = dpi.NewManager(iec104.NewDecoder())
-	h.e.iec.dpi = h.e.dpiMgr
-	h.e.iec.newPolicy = func(*rules.Snapshot) iecPolicy { return apciAllowPolicy{h.policy} }
+	h.e.sessions.dpi = h.e.dpiMgr
+	h.e.sessions.newPolicy = func(*rules.Snapshot) iecPolicy { return apciAllowPolicy{h.policy} }
 	h.e.LoadRules(iecSnapshot(mode))
 	return h
 }
@@ -64,16 +68,16 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAPCIHarness(t, mode)
-			emit := h.e.iec.emit
-			h.e.iec.emit = func(evs []iecTelemetry) {
-				if !h.e.iec.mu.TryLock() {
+			emit := h.e.sessions.emit
+			h.e.sessions.emit = func(evs []iecTelemetry) {
+				if !h.e.sessions.mu.TryLock() {
 					t.Fatal("event consumer called under the session lock")
 				}
-				h.e.iec.mu.Unlock()
+				h.e.sessions.mu.Unlock()
 				emit(evs)
 			}
 			h.handshake()
-			for _, payload := range [][]byte{
+			for i, payload := range [][]byte{
 				apciI(0, 0), // before STARTDT con
 				startdtCon,
 				apciI(2, 0), // gap
@@ -83,12 +87,15 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 				apciI(3, 0), // after STOPDT con
 				apciU(0x43),
 			} {
+				if len(payload) > 6 {
+					payload[10] = byte(i + 1)
+				} // distinct outstanding GI procedures
 				if _, d := h.send(true, payload); d.Action != h.passingDisposition() {
 					t.Fatalf("observation changed decision: %+v", d)
 				}
 			}
 			h.clock = h.clock.Add(anomaly.IEC104T1)
-			h.e.iec.expire() // no packets required
+			h.e.sessions.expire() // no packets required
 			got := apciAlerts(h)
 			want := []string{
 				anomaly.IEC104DataWhileStopped, anomaly.IEC104SendSequence,
@@ -119,7 +126,9 @@ func TestIECAPCIOrderedDeduplicatedFrames(t *testing.T) {
 			h.handshake()
 			h.send(true, startdtAct)
 			h.send(false, startdtCon)
-			payload := append(apciI(0, 0), apciI(1, 0)...)
+			second := apciI(1, 0)
+			second[10] = 2
+			payload := append(apciI(0, 0), second...)
 			seq := h.cSeq
 			// Tail first, a duplicate tail, then head: a single contiguous
 			// delivery containing two APDUs, not three packet observations.
@@ -160,7 +169,7 @@ func TestIECAPCIMalformedControlsDoNotAdvanceState(t *testing.T) {
 		h.send(true, b)
 	}
 	h.clock = h.clock.Add(2 * anomaly.IEC104T1)
-	h.e.iec.expire()
+	h.e.sessions.expire()
 	if got := apciAlerts(h); len(got) != 0 {
 		t.Fatalf("malformed APCI advanced analyzer: %+v", got)
 	}
@@ -177,7 +186,7 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 			h := newAPCIHarness(t, "monitor")
 			h.handshake()
 			h.send(true, apciU(0x43))
-			old := h.e.iec
+			old := h.e.sessions
 			old.mu.Lock()
 			client, _ := addrPort(h.client, h.cport)
 			server, _ := addrPort(h.server, iec104Port)
@@ -191,7 +200,7 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 			case "abort":
 				old.abortLocked(s, abortPolicy, "", nil, h.clock)
 			case "delete":
-				old.deleteLocked(iecKey{client: s.client, server: s.server}, s)
+				old.deleteLocked(sessionKey{client: s.client, server: s.server}, s)
 			case "parse":
 				old.stopParseLocked(s)
 			}
@@ -203,7 +212,7 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 			case "reconfigure":
 				fresh := newAPCIHarness(t, "monitor")
 				h.e.Reconfigure(fresh.e)
-				if len(h.e.iec.sessions) != 0 {
+				if len(h.e.sessions.sessions) != 0 {
 					t.Fatal("reconfigure retained old sessions")
 				}
 			}
@@ -211,7 +220,7 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 				t.Fatal("observation ended without freeing analyzer")
 			}
 			h.clock = h.clock.Add(2 * anomaly.IEC104T1)
-			h.e.iec.expire()
+			h.e.sessions.expire()
 			if got := apciAlerts(h); len(got) != 0 {
 				t.Fatalf("ended timer emitted: %+v", got)
 			}
@@ -226,9 +235,9 @@ func TestIECAPCIReconnectFreshState(t *testing.T) {
 	h.send(true, apciI(0, 0))
 	client, _ := addrPort(h.client, h.cport)
 	server, _ := addrPort(h.server, iec104Port)
-	h.e.iec.mu.Lock()
-	oldID := h.e.iec.sessions[iecKey{client: client, server: server}].id
-	h.e.iec.mu.Unlock()
+	h.e.sessions.mu.Lock()
+	oldID := h.e.sessions.sessions[sessionKey{client: client, server: server}].id
+	h.e.sessions.mu.Unlock()
 	h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, h.sSeq, nil))
 	h.clientISN, h.serverISN = 100, 200
 	h.cSeq, h.sSeq = 101, 201
@@ -280,12 +289,13 @@ func TestIECAPCICleanCaptures(t *testing.T) {
 					}
 					p := capture.DecodeIPPacket(frame[14:])
 					markHandshake(&p) // as nft queues the capture's handshake
+					p.Queue = capturedIECQueue(p)
 					if p.Transport != "tcp" || !isIECPort(p) {
 						continue
 					}
 					h.clock = time.Unix(int64(binary.LittleEndian.Uint32(hdr)), int64(binary.LittleEndian.Uint32(hdr[4:8]))*1000)
 					p.Timestamp, p.Token = h.clock, h.token()
-					h.e.iec.expire()
+					h.e.sessions.expire()
 					if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 						t.Fatalf("packet %d: %+v", packets, d)
 					}
@@ -298,7 +308,7 @@ func TestIECAPCICleanCaptures(t *testing.T) {
 					}
 				}
 				h.clock = h.clock.Add(2 * anomaly.IEC104T1)
-				h.e.iec.expire()
+				h.e.sessions.expire()
 				decoded := 0
 				for _, ev := range h.e.Events().List(0) {
 					if ev.Proto == iecProtocol && ev.Attributes["apdu_id"] != nil {

@@ -15,11 +15,11 @@ func TestHeldCreditSettlementTriggers(t *testing.T) {
 	for _, trigger := range []string{"verdict", "rejection", "flush", "rejection_then_flush"} {
 		t.Run(trigger, func(t *testing.T) {
 			h := newIECHarness(t, "enforce")
-			table := h.e.iec
+			table := h.e.sessions
 			tok := capture.NewToken(7, 42)
 			other := capture.NewToken(8, 42)
 			table.mu.Lock()
-			ok := table.holdCreditLocked(tok, 13, true) && table.holdCreditLocked(other, 3, true)
+			ok := table.holdCreditLocked(tok, 13, true, "iec104") && table.holdCreditLocked(other, 3, true, "iec104")
 			table.mu.Unlock()
 			if !ok {
 				t.Fatal("admission")
@@ -89,35 +89,39 @@ func (rejectingHeldSettler) Settle(res ...capture.Resolution) []error {
 
 func TestHeldCreditExplicitSettleRejection(t *testing.T) {
 	h := newIECHarness(t, "enforce")
-	table := h.e.iec
+	table := h.e.sessions
 	tok := capture.NewToken(1, 42)
 	table.mu.Lock()
-	ok := table.holdCreditLocked(tok, 1, true)
+	ok := table.holdCreditLocked(tok, 1, true, "iec104")
 	table.mu.Unlock()
 	if !ok {
 		t.Fatal("admission")
 	}
 	table.settler = func() capture.Settler { return rejectingHeldSettler{} }
-	table.apply(iecActions{drops: []capture.Resolution{{Token: tok, Verdict: capture.VerdictDrop}}})
+	table.apply(sessionActions{drops: []capture.Resolution{{Token: tok, Verdict: capture.VerdictDrop}}})
+	if h.e.budget.Status().InUse == 0 {
+		t.Fatal("unknown-token rejection refunded uncertain residency")
+	}
+	table.onSourceDown(1)
 	if h.e.budget.Status().InUse != 0 {
-		t.Fatal("explicit settlement rejection leaked")
+		t.Fatal("source-down did not refund residency")
 	}
 	h.e.Close()
 }
 
 func TestHeldCreditAdmissionBound(t *testing.T) {
 	h := newIECHarness(t, "enforce")
-	table := h.e.iec
+	table := h.e.sessions
 	table.resources = limits.NewResources(limits.NewBudget(1024), nil)
 	table.mu.Lock()
 	defer table.mu.Unlock()
-	if table.holdCreditLocked(capture.NewToken(1, 1), 1, false) {
+	if table.holdCreditLocked(capture.NewToken(1, 1), 1, false, "iec104") {
 		t.Fatal("monitor consumed enforcement headroom")
 	}
-	if !table.holdCreditLocked(capture.NewToken(1, 2), 1, true) {
+	if !table.holdCreditLocked(capture.NewToken(1, 2), 1, true, "iec104") {
 		t.Fatal("enforce admission")
 	}
-	if table.holdCreditLocked(capture.NewToken(1, 3), 1, true) {
+	if table.holdCreditLocked(capture.NewToken(1, 3), 1, true, "iec104") {
 		t.Fatal("exceeded budget")
 	}
 	table.flushHeldCreditsLocked(1)
@@ -133,7 +137,7 @@ func TestHeldCreditRefusalDropsReleasedPrefixBeforePublication(t *testing.T) {
 	if d.Action != capture.Hold {
 		t.Fatal(d)
 	}
-	table := h.e.iec
+	table := h.e.sessions
 	table.mu.Lock()
 	client, _ := addrPort(h.client, h.cport)
 	server, _ := addrPort(h.server, iec104Port)
@@ -142,9 +146,9 @@ func TestHeldCreditRefusalDropsReleasedPrefixBeforePublication(t *testing.T) {
 	table.resources = limits.NewResources(limits.NewBudget(1), h.e.ledger)
 	next := h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, make([]byte, 16))
 	cur := table.current(s, 0, next, h.clock)
-	res := table.releaseLocked(s, 0, next, cur, iecResult{
+	res := table.releaseLocked(s, 0, next, cur, sessionResult{
 		inspect: []dpi.Event{{Kind: "request"}},
-		acts:    iecActions{events: []iecTelemetry{{Event: events.Event{Kind: "ics.decision"}}}},
+		acts:    sessionActions{events: []iecTelemetry{{Event: events.Event{Kind: "ics.decision"}}}},
 	}, h.clock)
 	table.mu.Unlock()
 	if !res.stateLimit || res.decision.Action != capture.Drop || len(res.inspect) != 0 {
@@ -179,9 +183,9 @@ func TestHeldCreditCaptureErrorWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok := capture.NewToken(2, 3)
-	e.iec.mu.Lock()
-	ok := e.iec.holdCreditLocked(tok, 10, true)
-	e.iec.mu.Unlock()
+	e.sessions.mu.Lock()
+	ok := e.sessions.holdCreditLocked(tok, 10, true, "iec104")
+	e.sessions.mu.Unlock()
 	if !ok {
 		t.Fatal("admission")
 	}

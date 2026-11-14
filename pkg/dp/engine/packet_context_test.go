@@ -85,9 +85,9 @@ func TestContinuationS4Routing(t *testing.T) {
 		{"plain deny", []rules.Entry{plain(rules.ActionDeny), scope}, rules.ActionAllow, capture.Repeat, true},
 		{"plain reset", []rules.Entry{plain(rules.ActionReset), scope}, rules.ActionAllow, capture.Repeat, true},
 		{"default deny", []rules.Entry{scope}, rules.ActionDeny, capture.Repeat, true},
-		{"earlier plain allow", []rules.Entry{plain(rules.ActionAllow), icsDeny}, rules.ActionDeny, capture.Repeat, false},
+		{"earlier plain allow", []rules.Entry{plain(rules.ActionAllow), icsDeny}, rules.ActionDeny, capture.Repeat, true},
 		{"ICS deny", []rules.Entry{icsDeny, plain(rules.ActionAllow)}, rules.ActionAllow, capture.Drop, false},
-		{"default allow", []rules.Entry{scope}, rules.ActionAllow, capture.Repeat, false},
+		{"default allow", []rules.Entry{scope}, rules.ActionAllow, capture.Repeat, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFCFlow(t, "ok", 502)
@@ -109,8 +109,9 @@ func TestContinuationCapturedReplyRouting(t *testing.T) {
 		rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{99}, Mode: "enforce"})
 	plain := clientToServer("plain", "20000", rules.ActionDeny, rules.ICSPredicate{})
 	icsDeny := scope
-	icsDeny.ID, icsDeny.Action, icsDeny.ICS.FunctionCode = "response-denied", rules.ActionDeny, []uint8{130}
+	icsDeny.ID, icsDeny.Action, icsDeny.ICS.FunctionCode = "response-denied", rules.ActionDeny, []uint8{129}
 	icsDeny.ICS.Direction = "response"
+	read := clientToServer("request", "20000", rules.ActionAllow, rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}, Direction: "request"})
 	for _, tc := range []struct {
 		name     string
 		entries  []rules.Entry
@@ -123,13 +124,15 @@ func TestContinuationCapturedReplyRouting(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newModeFlow(t, "enforce", dnp3Port)
-			f.e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, Firewall: tc.entries})
+			entries := append([]rules.Entry{read}, tc.entries...)
+			f.e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, Firewall: entries})
 			f.syn()
 			f.synAck()
-			pkt := connSegment(true, f.client, f.port, resyncServerISN, ackPsh, dnp3Unsolicited)
+			f.accept("allowed soliciting request", dnp3Read)
+			pkt := connSegment(true, f.client, f.port, resyncServerISN, ackPsh, dnp3Response)
 			pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
 			d := f.e.HandlePacket(pkt)
-			if protoEvents(f.e, "dnp3") != 1 {
+			if decodedProtocolEvents(f.e, "dnp3") != 2 {
 				t.Fatalf("captured reply messages: decision=%+v events=%+v", d, f.e.Events().List(0))
 			}
 			if d.Action != tc.want || d.Action == capture.Repeat && (d.Mark&markabi.NonAdmitMark != 0) != tc.nonAdmit {

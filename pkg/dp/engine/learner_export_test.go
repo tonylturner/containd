@@ -51,12 +51,13 @@ func NewLearnerOverflowEngine(t *testing.T, variant string) (*Engine, func(bool)
 		pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 		r.admit(e, pkt)
 		processTransportAdmission(t, e, r)
+		peer := transportWire(ct.Reply, at.Add(time.Microsecond), nil)
+		peer.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN | capture.TCPFlagACK, Seq: 200, Ack: 101}
+		r.admit(e, peer)
+		processTransportAdmission(t, e, r)
 		payload := modbusADU(1, 3, 10, 2)
 		if variant == "DNAT response" {
-			pkt = transportWire(ct.Reply, at.Add(time.Microsecond), nil)
-			pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN | capture.TCPFlagACK, Seq: 200}
-			r.admit(e, pkt)
-			processTransportAdmission(t, e, r)
+			pkt = peer
 			// FC6 echoes a complete address/value parent. Response directions are
 			// deliberately not command suggestions; the regression checks loss
 			// authority independently of this unsupported-operation withholding.

@@ -4,6 +4,7 @@ import type { RulePreview, RuleWarning } from "../../lib/api";
 import { ICSCoverageSection } from "../ics/ics-coverage";
 import { RulePreviewEvents } from "./firewall-rule-samples";
 import { TechnicalDetails } from "../../components/TechnicalDetails";
+import { PairingPreviewSummary } from "./firewall-pairing-preview";
 
 function warningKind(w: RuleWarning): string {
   if (w.shadowedBy) return "shadowed";
@@ -16,6 +17,8 @@ function warningKind(w: RuleWarning): string {
       return "no shared address family";
     case "forward":
       return "port forward";
+    case "inspection":
+      return "inspection";
     default:
       return "warning";
   }
@@ -69,7 +72,7 @@ export function RuleWarningList({
       </p>
       <ul className="mt-1 space-y-0.5">
         {warnings.map((w) => (
-          <li key={`${w.ruleId}:${w.predicate ?? ""}:${w.shadowedBy ?? ""}`}>
+          <li key={`${w.ruleId}:${w.predicate ?? ""}:${w.shadowedBy ?? ""}:${w.message}`}>
             <span className="mr-1.5 rounded-xs border border-amber/30 px-1 font-mono text-[9px] uppercase tracking-wider">
               {warningKind(w)}
             </span>
@@ -94,6 +97,7 @@ export function RuleImpactSummary({ preview }: { preview: RulePreview }) {
       {preview.unavailable && <TechnicalDetails>{preview.unavailable}</TechnicalDetails>}
       {!preview.unavailable && <RulePreviewEvents preview={preview} />}
       <ICSCoverageSection coverage={preview.icsCoverage} />
+      <PairingPreviewSummary pairing={preview.pairing} />
       <RuleWarningList warnings={preview.warnings} />
     </div>
   );

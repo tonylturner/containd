@@ -231,6 +231,14 @@ any conditional rule keep the established fast path. This includes ICS
 connections steered to the engine: once a conditional ICS `ALLOW` no longer
 admits a connection, its replies and server packets stop too.
 
+For Modbus, DNP3 and IEC 104, the session gate also requires explicit request
+permissions and compatible bounded replies. Grants are reauthorized on policy
+publication, not continuously on every reply: schedule/identity changes without
+a new epoch do not revoke an otherwise compatible grant during its bounded
+lifetime. This does not bypass kernel transport admission. Autonomous/session
+traffic needs explicit message classes; see
+[reply pairing and cutover](ics-dpi.md#enforce-mode-reply-pairing-and-upgrade-cutover).
+
 ### Rules that match nothing
 
 A rule matches nothing when no bound address satisfies its identities, when

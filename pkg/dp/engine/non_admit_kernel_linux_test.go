@@ -56,7 +56,7 @@ func TestKernelNonAdmitRetransmission(t *testing.T) {
 	ctx, e, srv := nonAdmitKernelLab(t)
 	// Resets are best effort. With the injector unavailable, real TCP
 	// retransmissions must still carry the non-admitting continuation.
-	e.iec.health.fault(faultInjector, "test: reset injector unavailable")
+	e.sessions.health.fault(faultInjector, "test: reset injector unavailable")
 	for i, value := range []uint16{0, 0xff00, 0x1234} {
 		t.Run(fmt.Sprintf("%04x", value), func(t *testing.T) {
 			c := dialFirstCommand(ctx, t, fmt.Sprintf("198.18.50.%d", 10+i))

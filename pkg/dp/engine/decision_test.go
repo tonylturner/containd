@@ -122,8 +122,9 @@ func TestUpdaterFailureKeepsDrop(t *testing.T) {
 	if err := e.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Not inline: no reset and no block, even with a failing updater.
-	if got := e.handlePacket(modbusWritePacket(capture.Token{})); got.Action != capture.Drop {
+	// A failing updater must not influence the inline protocol verdict.
+	inlineHandshake(t, e, 41000, 502)
+	if got := sendInline(e, segment(false, 100, ackPsh, modbusADU(1, 6, 1, 3))); got.Action != capture.Drop {
 		t.Fatalf("decision = %+v, want Drop despite updater failure", got)
 	}
 	drainResetWorker(t, e)

@@ -133,10 +133,10 @@ func TestStreamResyncKernelDeniedRetransmission(t *testing.T) {
 	restartFirstCommandEngine(ctx, t, e, failingUpdater{})
 	inj := &session.Fake{}
 	inj.SetError(errors.New("reset send failure"))
-	if err := e.iec.injector.Close(); err != nil {
+	if err := e.sessions.injector.Close(); err != nil {
 		t.Fatal(err)
 	}
-	e.iec.injector = inj
+	e.sessions.injector = inj
 
 	c := dialFirstCommand(ctx, t, "198.18.50.42")
 	other := dialFirstCommand(ctx, t, "198.18.50.43")

@@ -50,9 +50,44 @@ func covers(a, d rules.Entry) bool {
 	if p := a.ICS.Protocol; p != "" && !strings.EqualFold(p, d.ICS.Protocol) {
 		return false
 	}
+	if !messageClassesCover(a, d) {
+		return false
+	}
+	return TransportScopeCovers(a, d)
+}
+
+// TransportScopeCovers reports L3/L4 scope containment only. Identity, schedule
+// and application predicates must be checked separately by callers.
+func TransportScopeCovers(a, d rules.Entry) bool {
 	return zonesCover(a.ViaForwards, d.ViaForwards) && zonesCover(a.SourceZones, d.SourceZones) && zonesCover(a.DestZones, d.DestZones) &&
 		prefixesCover(a.Sources, d.Sources) && prefixesCover(a.Destinations, d.Destinations) &&
 		protocolsCover(a.Protocols, d.Protocols)
+}
+
+// Application ALLOWs with an omitted selector cover ordinary messages, not
+// autonomous traffic or session controls. DENY/RESET with no selector still
+// cover every class. Use the matcher vocabulary, including unknown, rather
+// than assuming that absence of a selector makes an ICS terminal universal.
+func messageClassesCover(a, d rules.Entry) bool {
+	// Only these application protocols have autonomous/session classes.
+	// Modbus has requests and solicited replies only; unsupported units are
+	// rejected independently. Transport and CIP retain their coverage rules.
+	switch strings.ToLower(a.ICS.Protocol) {
+	case "dnp3", "iec104":
+	default:
+		return true
+	}
+	for _, class := range []rules.MessageClass{
+		rules.ClassUnknown, rules.ClassRequest, rules.ClassSolicited,
+		rules.ClassAutonomous, rules.ClassSession,
+	} {
+		ctx := &rules.ICSContext{MessageClass: class}
+		if rules.MatchMessageClass(d.ICS, ctx, d.Action, false) &&
+			!rules.MatchMessageClass(a.ICS, ctx, a.Action, false) {
+			return false
+		}
+	}
+	return true
 }
 
 // zonesCover: an empty list matches every zone.
@@ -152,7 +187,7 @@ func protocolCovers(a, d rules.Protocol) bool {
 
 // icsEmpty reports an ICS predicate with no field set.
 func icsEmpty(p rules.ICSPredicate) bool {
-	return p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil && len(p.Addresses) == 0 &&
+	return p.MessageClass == "" && p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil && len(p.Addresses) == 0 &&
 		len(p.ObjectClasses) == 0 && !p.ReadOnly && !p.WriteOnly && p.Direction == "" && p.Mode == "" &&
 		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
 		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil && p.SelectExecute == "" &&

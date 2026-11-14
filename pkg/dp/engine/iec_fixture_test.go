@@ -16,6 +16,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -74,7 +75,16 @@ func (stubIEC) ParseStream(_ *flow.State, v dpi.StreamView) (dpi.StreamResult, e
 				attrs["class"] = "control"
 			}
 		}
-		res.Frames = append(res.Frames, dpi.DecodedFrame{Start: start, End: start + int64(n), Events: []dpi.Event{{Proto: "iec104", Kind: kind, Attributes: attrs}}})
+		unit := &iec104.Unit{PairShape: iec104.PairShape{Format: "I"}}
+		if kind == "apci" {
+			unit.Format = "U"
+			unit.UFunction = map[byte]string{7: "startdt_act", 11: "startdt_con", 19: "stopdt_act", 35: "stopdt_con", 67: "testfr_act", 131: "testfr_con"}[b[2]]
+		} else {
+			unit.TypeID, unit.CA, unit.Cause = b[6], uint16(b[10])|uint16(b[11])<<8, b[8]&63
+			unit.Objects = []iec104.Object{{IOA: uint32(b[12]) | uint32(b[13])<<8 | uint32(b[14])<<16, ValueBits: uint32(b[15] & 3), Select: b[15]&128 != 0}}
+			attrs["cause"], attrs["ioa"] = unit.Cause, unit.Objects[0].IOA
+		}
+		res.Frames = append(res.Frames, dpi.DecodedFrame{Start: start, End: start + int64(n), Unit: unit, Events: []dpi.Event{{Proto: "iec104", Kind: kind, Attributes: attrs}}})
 		pos += n
 	}
 	res.Consumed = pos
@@ -83,7 +93,11 @@ func (stubIEC) ParseStream(_ *flow.State, v dpi.StreamView) (dpi.StreamResult, e
 
 // iframe builds an I-frame APDU of one object with typeID and CA.
 func iframe(typeID byte, ca uint16) []byte {
-	return []byte{0x68, 0x0e, 0, 0, 0, 0, typeID, 1, 6, 0, byte(ca), byte(ca >> 8), 1, 0, 0, 0}
+	cause := byte(6)
+	if typeID < 45 {
+		cause = 3
+	}
+	return []byte{0x68, 0x0e, 0, 0, 0, 0, typeID, 1, cause, 0, byte(ca), byte(ca >> 8), 1, 0, 0, 1}
 }
 
 var startdtCon = []byte{0x68, 0x04, 0x0B, 0, 0, 0}
@@ -104,7 +118,11 @@ func (p *fakePolicy) IEC104Envelope(rules.EvalContext, string) (bool, string) {
 func (p *fakePolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry) {
 	c := ctx.ICS.IEC104
 	if c.APCIType != "I" || c.Class == "monitor" || (c.TypeID != nil && *c.TypeID == p.allowType) {
-		return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow}
+		class := ""
+		if ctx.ICS.MessageClass == rules.ClassAutonomous || ctx.ICS.MessageClass == rules.ClassSession {
+			class = string(ctx.ICS.MessageClass)
+		}
+		return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: p.mode, MessageClass: class}}
 	}
 	if p.denyRule != nil && !rules.MonitorICS(*p.denyRule, p.mode) {
 		return rules.ActionDeny, p.denyRule
@@ -161,11 +179,11 @@ func newIECHarnessWithDPI(t *testing.T, mode string, dpiEnabled bool) *iecHarnes
 	}
 	e.dpiMgr = dpi.NewManager(stubIEC{})
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.iec.dpi = e.dpiMgr
-	e.iec.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
-	e.iec.settler = func() capture.Settler { return h.settler }
-	e.iec.now = func() time.Time { return h.clock }
-	e.iec.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
+	e.sessions.dpi = e.dpiMgr
+	e.sessions.newPolicy = func(*rules.Snapshot) iecPolicy { return h.policy }
+	e.sessions.settler = func() capture.Settler { return h.settler }
+	e.sessions.now = func() time.Time { return h.clock }
+	e.sessions.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
 		h.deletes <- req
 		return nil
 	}

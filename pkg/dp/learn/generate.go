@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-9"
+const GeneratorVersion = "exact-10"
 
 // Frozen proofs include every positive reference. Keep repeated relations below
 // the store's per-suggestion byte ceiling instead of constructing oversized rows.
@@ -217,9 +217,10 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 		reasons = append(reasons, evidence.WithheldNonstandardPort)
 	}
 	s := o.Service
+	class := observationClass(o)
 	// Monitoring and system ASDUs are not command relations. Classify them
 	// before applying command direction, selector, value or qualifier checks.
-	if s.Protocol == "iec104" && o.IEC104 != nil && o.IEC104.TypeID != nil && iec104.ClassOf(*o.IEC104.TypeID) != "control" {
+	if class != rules.ClassAutonomous && class != rules.ClassSession && s.Protocol == "iec104" && o.IEC104 != nil && o.IEC104.TypeID != nil && iec104.ClassOf(*o.IEC104.TypeID) != "control" {
 		return nil, append(reasons, evidence.WithheldIECNonCommand)
 	}
 	client, e1 := netip.ParseAddr(s.ClientIP)
@@ -227,114 +228,140 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 	if e1 != nil || e2 != nil || client.Zone() != "" || server.Zone() != "" || client.Is4() != server.Is4() {
 		return nil, append(reasons, evidence.WithheldCoordinates)
 	}
-	if s.Transport != "tcp" && s.Transport != "udp" || s.ServerPort == 0 || s.Direction != "request" {
+	if s.Transport != "tcp" && s.Transport != "udp" || s.ServerPort == 0 || (s.Direction != "request" && class != rules.ClassAutonomous && class != rules.ClassSession) {
 		reasons = append(reasons, evidence.WithheldUnsupported)
 	}
 	base := config.Rule{Sources: []string{netip.PrefixFrom(client.Unmap(), client.Unmap().BitLen()).String()}, Destinations: []string{netip.PrefixFrom(server.Unmap(), server.Unmap().BitLen()).String()}, Protocols: []config.Protocol{{Name: s.Transport, Port: strconv.Itoa(int(s.ServerPort))}}, Action: config.ActionAllow, ICS: config.ICSPredicate{Protocol: s.Protocol, Mode: "monitor", Direction: s.Direction}}
-	var bundle []config.Rule
-	switch s.Protocol {
-	case "modbus":
-		m := o.Modbus
-		if m == nil || m.UnitID == nil || m.FunctionCode == nil {
-			return nil, append(reasons, evidence.WithheldMissingSelector)
-		}
-		fc := *m.FunctionCode
-		if fc == 23 {
-			reasons = append(reasons, evidence.WithheldModbusFC23)
-		}
-		if fc == 8 || fc == 43 {
-			reasons = append(reasons, evidence.WithheldModbusSubtype)
-		}
-		switch fc {
-		case 1, 2, 3, 4, 5, 6, 15, 16, 22:
-			if len(m.Spans) != 1 {
-				reasons = append(reasons, evidence.WithheldMissingSelector)
-			}
-		case 7, 11, 12, 17:
-			if len(m.Spans) != 0 {
-				reasons = append(reasons, evidence.WithheldUnsupported)
-			}
-		default:
+	if class == rules.ClassAutonomous || class == rules.ClassSession {
+		base.ICS.MessageClass = string(class)
+		if s.Transport != "tcp" {
 			reasons = append(reasons, evidence.WithheldUnsupported)
 		}
-		base.ICS.UnitID = m.UnitID
-		base.ICS.FunctionCode = []uint8{fc}
-		base.ICS.Addresses = addressSpecs(m.Spans)
-		bundle = append(bundle, base)
-	case "dnp3":
-		d := o.DNP3
-		if d == nil || d.Master == nil || d.Outstation == nil || d.FunctionCode == nil || len(d.Objects) == 0 {
-			return nil, append(reasons, evidence.WithheldMissingSelector)
-		}
-		base.ICS.Masters = []uint16{*d.Master}
-		base.ICS.Outstations = []uint16{*d.Outstation}
-		base.ICS.FunctionCode = []uint8{*d.FunctionCode}
-		for _, obj := range d.Objects {
-			reasons = append(reasons, dnpRequirements(obj)...)
-			if obj.Group == nil || obj.Variation == nil {
-				reasons = append(reasons, evidence.WithheldMissingSelector)
-				continue
-			}
-			r := base
-			r.ICS.Groups = []int{int(*obj.Group)}
-			r.ICS.Variations = []int{int(*obj.Variation)}
-			r.ICS.Addresses = addressSpecs(obj.Spans)
-			bundle = append(bundle, r)
-		}
-	case "iec104":
-		d := o.IEC104
-		if d == nil || d.TypeID == nil || d.CA == nil || d.COT == nil || d.Originator == nil || d.Negative == nil || d.Test == nil {
-			return nil, append(reasons, evidence.WithheldMissingSelector)
-		}
-		if !client.Is4() || s.Transport != "tcp" {
+		if s.Protocol == "iec104" && !client.Is4() {
 			reasons = append(reasons, evidence.WithheldCoordinates)
 		}
-		if d.APCIType != "I" {
-			reasons = append(reasons, evidence.WithheldIECNonCommand)
+	}
+	var bundle []config.Rule
+	if class == rules.ClassSession {
+		if s.Protocol != "iec104" && s.Protocol != "dnp3" || s.Direction != "request" && s.Direction != "response" {
+			reasons = append(reasons, evidence.WithheldUnsupported)
 		}
-		if *d.CA == 65535 {
-			reasons = append(reasons, evidence.WithheldIECBroadcast)
+		if o.DNP3 != nil {
+			base.ICS.Masters, base.ICS.Outstations = optionalStation(o.DNP3.Master), optionalStation(o.DNP3.Outstation)
+			if o.DNP3.FunctionCode != nil {
+				base.ICS.FunctionCode = []uint8{*o.DNP3.FunctionCode}
+			}
 		}
-		if len(d.Objects) == 0 || uint32(len(d.Objects)) != o.ObjectCount {
-			reasons = append(reasons, evidence.WithheldIncomplete)
-		}
-		base.ICS.TypeIDs = []int{int(*d.TypeID)}
-		base.ICS.CA = []uint16{*d.CA}
-		base.ICS.COT = []int{int(*d.COT)}
-		base.ICS.Originators = []int{int(*d.Originator)}
-		base.ICS.Negative = d.Negative
-		base.ICS.Test = d.Test
-		for i, obj := range d.Objects {
-			for _, requirement := range iecTable {
-				if !requirement.bound(*d.TypeID, obj) && len(requirement.domain(*d.TypeID)) == 0 {
-					reasons = append(reasons, requirement.reason)
+		bundle = append(bundle, base)
+	} else {
+		switch s.Protocol {
+		case "modbus":
+			m := o.Modbus
+			if m == nil || m.UnitID == nil || m.FunctionCode == nil {
+				return nil, append(reasons, evidence.WithheldMissingSelector)
+			}
+			fc := *m.FunctionCode
+			if fc == 23 {
+				reasons = append(reasons, evidence.WithheldModbusFC23)
+			}
+			if fc == 8 || fc == 43 {
+				reasons = append(reasons, evidence.WithheldModbusSubtype)
+			}
+			switch fc {
+			case 1, 2, 3, 4, 5, 6, 15, 16, 22:
+				if len(m.Spans) != 1 {
+					reasons = append(reasons, evidence.WithheldMissingSelector)
 				}
+			case 7, 11, 12, 17:
+				if len(m.Spans) != 0 {
+					reasons = append(reasons, evidence.WithheldUnsupported)
+				}
+			default:
+				reasons = append(reasons, evidence.WithheldUnsupported)
 			}
-			if obj.IOA == nil || obj.Select == nil || obj.Index != uint32(i) {
-				reasons = append(reasons, evidence.WithheldMissingSelector)
-				continue
+			base.ICS.UnitID = m.UnitID
+			base.ICS.FunctionCode = []uint8{fc}
+			base.ICS.Addresses = addressSpecs(m.Spans)
+			bundle = append(bundle, base)
+		case "dnp3":
+			d := o.DNP3
+			if d == nil || d.Master == nil || d.Outstation == nil || d.FunctionCode == nil || len(d.Objects) == 0 {
+				return nil, append(reasons, evidence.WithheldMissingSelector)
 			}
-			r := base
-			r.ICS.IOA = []config.IOARange{{Start: *obj.IOA, End: *obj.IOA}}
-			if len(rules.IEC104CommandStates(*d.TypeID)) > 0 {
-				if obj.CommandState == nil || obj.Qualifier == nil {
+			base.ICS.Masters = []uint16{*d.Master}
+			base.ICS.Outstations = []uint16{*d.Outstation}
+			base.ICS.FunctionCode = []uint8{*d.FunctionCode}
+			for _, obj := range d.Objects {
+				reasons = append(reasons, dnpRequirements(obj)...)
+				if obj.Group == nil || obj.Variation == nil {
 					reasons = append(reasons, evidence.WithheldMissingSelector)
 					continue
 				}
-				r.ICS.CommandStates = []int{int(*obj.CommandState)}
-				r.ICS.CommandQualifiers = []int{int(*obj.Qualifier)}
+				r := base
+				r.ICS.Groups = []int{int(*obj.Group)}
+				r.ICS.Variations = []int{int(*obj.Variation)}
+				r.ICS.Addresses = addressSpecs(obj.Spans)
+				bundle = append(bundle, r)
 			}
-			r.ICS.SelectExecute = "execute"
-			if *obj.Select {
-				r.ICS.SelectExecute = "select"
-				reasons = append(reasons, evidence.WithheldIECSBO)
+		case "iec104":
+			d := o.IEC104
+			if d == nil || d.TypeID == nil || d.CA == nil || d.COT == nil || d.Originator == nil || d.Negative == nil || d.Test == nil {
+				return nil, append(reasons, evidence.WithheldMissingSelector)
 			}
-			bundle = append(bundle, r)
+			if !client.Is4() || s.Transport != "tcp" {
+				reasons = append(reasons, evidence.WithheldCoordinates)
+			}
+			if d.APCIType != "I" {
+				reasons = append(reasons, evidence.WithheldIECNonCommand)
+			}
+			if *d.CA == 65535 {
+				reasons = append(reasons, evidence.WithheldIECBroadcast)
+			}
+			if len(d.Objects) == 0 || uint32(len(d.Objects)) != o.ObjectCount {
+				reasons = append(reasons, evidence.WithheldIncomplete)
+			}
+			base.ICS.TypeIDs = []int{int(*d.TypeID)}
+			base.ICS.CA = []uint16{*d.CA}
+			base.ICS.COT = []int{int(*d.COT)}
+			base.ICS.Originators = []int{int(*d.Originator)}
+			base.ICS.Negative = d.Negative
+			base.ICS.Test = d.Test
+			for i, obj := range d.Objects {
+				if class != rules.ClassAutonomous {
+					for _, requirement := range iecTable {
+						if !requirement.bound(*d.TypeID, obj) && len(requirement.domain(*d.TypeID)) == 0 {
+							reasons = append(reasons, requirement.reason)
+						}
+					}
+				}
+				if obj.IOA == nil || class != rules.ClassAutonomous && obj.Select == nil || obj.Index != uint32(i) {
+					reasons = append(reasons, evidence.WithheldMissingSelector)
+					continue
+				}
+				r := base
+				r.ICS.IOA = []config.IOARange{{Start: *obj.IOA, End: *obj.IOA}}
+				if len(rules.IEC104CommandStates(*d.TypeID)) > 0 {
+					if obj.CommandState == nil || obj.Qualifier == nil {
+						reasons = append(reasons, evidence.WithheldMissingSelector)
+						continue
+					}
+					r.ICS.CommandStates = []int{int(*obj.CommandState)}
+					r.ICS.CommandQualifiers = []int{int(*obj.Qualifier)}
+				}
+				if class != rules.ClassAutonomous {
+					r.ICS.SelectExecute = "execute"
+					if *obj.Select {
+						r.ICS.SelectExecute = "select"
+						reasons = append(reasons, evidence.WithheldIECSBO)
+					}
+				}
+				bundle = append(bundle, r)
+			}
+		case "cip":
+			reasons = append(reasons, evidence.WithheldCIP)
+		default:
+			reasons = append(reasons, evidence.WithheldUnsupported)
 		}
-	case "cip":
-		reasons = append(reasons, evidence.WithheldCIP)
-	default:
-		reasons = append(reasons, evidence.WithheldUnsupported)
 	}
 	if len(bundle) > 128 {
 		reasons = append(reasons, evidence.WithheldBudget)
@@ -435,6 +462,12 @@ var iecTable = []closedRequirement{
 func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 	if len(parents) == 0 {
 		return nil
+	}
+	if class := observationClass(parents[0]); class == rules.ClassSession || class == rules.ClassAutonomous {
+		if parents[0].DNP3 != nil && class == rules.ClassAutonomous {
+			return dnpDomains(parents)
+		}
+		return nil // IEC monitoring values do not authorize control operations.
 	}
 	if parents[0].Modbus != nil {
 		return modbusDomains(parents)

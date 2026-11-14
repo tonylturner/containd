@@ -48,8 +48,8 @@ func inlineEngine(t *testing.T, c CaptureRunner) *Engine {
 	t.Helper()
 	e := engineWithCapture(t, c)
 	e.nfqueueGroup = 101
-	e.iec.injector = &session.Fake{}
-	e.iec.health.clear(faultInjector) // engineWithCapture built a non-inline engine
+	e.sessions.injector = &session.Fake{}
+	e.sessions.health.clear(faultInjector) // engineWithCapture built a non-inline engine
 	e.LoadRules(iecSnapshot("enforce"))
 	return e
 }

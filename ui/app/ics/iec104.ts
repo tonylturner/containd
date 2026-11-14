@@ -5,7 +5,7 @@ import type {
   IEC104Class,
   IOARange,
 } from "../../lib/api";
-import { formatICSMode, parseSelectorCSV, predicatePatch, type ICSModeSelection } from "./ics-shared";
+import { formatICSMode, messageClassError, parseSelectorCSV, predicatePatch, type ICSModeSelection } from "./ics-shared";
 
 // IEC 60870-5-104 rule model for the editors.
 // The client-side checks mirror the server validation ranges so operators see
@@ -88,6 +88,7 @@ export function iec104TypeInfo(typeId: number): IEC104TypeInfo {
 
 /** Text form of the IEC fields, as the editors hold them. */
 export type IEC104Draft = {
+  messageClass: "" | "autonomous" | "session";
   typeIds: string;
   classes: IEC104Class[];
   ca: string;
@@ -112,6 +113,7 @@ export function formatIOARanges(ranges: IOARange[] | undefined): string {
 export function iec104DraftFrom(ics: ICSPredicate | undefined): IEC104Draft {
   const own = ics?.protocol === "iec104" ? ics : undefined;
   return {
+    messageClass: own?.messageClass ?? "",
     typeIds: (own?.typeIds ?? []).join(", "),
     classes: own?.classes ?? [],
     ca: (own?.ca ?? []).join(", "),
@@ -259,6 +261,8 @@ function buildIEC104Predicate(
   action: FirewallRule["action"],
   globalMode?: ICSModeSelection,
 ): { ok: true; ics: ICSPredicate } | { ok: false; error: string } {
+  const classError = messageClassError(draft.messageClass, draft.direction);
+  if (classError) return { ok: false, error: classError };
   const typeIds = parseTypeIds(draft.typeIds);
   if (!typeIds.ok) return typeIds;
   const ca = parseCAs(draft.ca);
@@ -302,6 +306,21 @@ function buildIEC104Predicate(
     }
   }
   const { effectiveMode } = formatICSMode(mode, globalMode);
+  if (draft.messageClass) {
+    if (draft.selectExecute || commandStates.length || commandQualifiers.length) {
+      return { ok: false, error: "Message class cannot combine with command states, qualifiers or select/execute." };
+    }
+    if (draft.messageClass === "session" && (typeIds.value.length || draft.classes.length || ca.value.length || ioa.value.length ||
+      cot.length || originators.length || draft.negative !== "" || draft.test !== "")) {
+      return { ok: false, error: "Session controls have no ASDU selectors. Clear Type IDs, classes, CA, IOA, COT, originators and flags." };
+    }
+    if (draft.messageClass === "autonomous") {
+      if (draft.negative === "true" || draft.classes.some(c => c !== "monitor" && c !== "system") ||
+        typeIds.value.some(t => iec104TypeInfo(t).cls !== "monitor" && t !== 70) || cot.some(c => c < 1 || c > 4)) {
+        return { ok: false, error: "Autonomous requires monitoring types with COT 1–3, or type 70 with COT 4; no negative confirmations." };
+      }
+    }
+  }
   if (action === "ALLOW" && effectiveMode === "enforce") {
     if (draft.classes.includes("unknown")) return { ok: false, error: "Enforce ALLOW cannot include the unknown class." };
     const undecoded = typeIds.value.filter((t) => !iec104TypeInfo(t).descriptor);
@@ -314,6 +333,7 @@ function buildIEC104Predicate(
   }
 
   const ics: ICSPredicate = { protocol: "iec104" };
+  if (draft.messageClass) ics.messageClass = draft.messageClass;
   if (typeIds.value.length > 0) ics.typeIds = typeIds.value;
   if (draft.classes.length > 0) {
     ics.classes = IEC104_CLASSES.filter((c) => draft.classes.includes(c));
@@ -355,6 +375,7 @@ export function summarizeIEC104(ics: ICSPredicate): {
     (ics.typeIds ?? []).length > 0 ? `type ${(ics.typeIds ?? []).join(",")}` : "",
     (ics.classes ?? []).length > 0 ? (ics.classes ?? []).join("|") : "",
     ics.direction ?? "",
+    ics.messageClass ? `messageClass=${ics.messageClass}` : "",
     ics.cot?.length ? `COT ${ics.cot.join(",")}` : "",
     ics.originators?.length ? `OA ${ics.originators.join(",")}` : "",
     ics.negative != null ? `P/N=${ics.negative ? 1 : 0}` : "",

@@ -22,6 +22,8 @@ const warning = {
   message: "no bound address can match identities [historian]; the rule matches nothing until one is bound",
 };
 const preview = {
+  pairing: { paired: 4, unpaired: 3, expired: 2, ambiguous: 1, unsupported: 5, unknown: 6,
+    reasons: ["unpaired", "pairing_expired", "pairing_ambiguous", "pairing_unsupported", "pairing_unknown"] },
   match_count: 1234,
   sample_matches: [
     {
@@ -92,6 +94,12 @@ test("ICS rule preview shows the impact and predicate warnings of the edited rul
 
   const summary = page.getByLabel("Rule impact preview");
   await expect(summary).toContainText("1234 of 5000 recent events match this rule on its own.");
+  const pairing = summary.getByRole("region", { name: "Retained pairing outcomes" });
+  for (const outcome of ["paired", "unpaired", "expired", "ambiguous", "unsupported", "unknown"] as const) {
+    await expect(pairing.locator("dl > div").filter({ has: page.locator("dt", { hasText: new RegExp(`^${outcome}$`, "i") }) }).locator("dd")).toHaveText(String(preview.pairing[outcome]));
+  }
+  await expect(pairing).toContainText("not candidate admission or delivery");
+  await expect(pairing.getByLabel("Pairing reasons")).toContainText("pairing_expired");
   await summary.getByText("Show 1 sample event").click();
   await expect(summary.getByRole("list", { name: "Sample matching events" })).toContainText("10.10.0.5:40100 → 10.20.0.7:502 (tcp)");
   await expect(summary.getByRole("status")).toContainText(`plc-read: ${warning.message}`);

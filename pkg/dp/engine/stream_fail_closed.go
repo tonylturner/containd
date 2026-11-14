@@ -115,6 +115,15 @@ func (e *Engine) failClosed(pkt capture.Packet, state *flow.State, parsed *dpi.P
 		proto = strings.ToLower(scope.ICS.Protocol)
 	}
 	e.closeDeniedTCP(pkt, state, proto, reason)
+	e.recordFailClosedDecision(state, parsed, scope, reason, proto, cause)
+	decisionReason := reasonStreamFailClosed
+	if reason == "state_limit" {
+		decisionReason = reason
+	}
+	return capture.Decision{Action: capture.Drop, Reason: decisionReason}
+}
+
+func (e *Engine) recordFailClosedDecision(state *flow.State, parsed *dpi.ParsedPacket, scope *rules.Entry, reason, proto string, cause error) {
 	e.eventStore.Append(events.Event{
 		FlowID:    state.ID(),
 		Proto:     proto,
@@ -133,11 +142,6 @@ func (e *Engine) failClosed(pkt capture.Packet, state *flow.State, parsed *dpi.P
 			eventfields.KeyError:    cause.Error(),
 		},
 	})
-	decisionReason := reasonStreamFailClosed
-	if reason == "state_limit" {
-		decisionReason = reason
-	}
-	return capture.Decision{Action: capture.Drop, Reason: decisionReason}
 }
 
 // stillDenied keeps a failed stream denied without retrying any block.

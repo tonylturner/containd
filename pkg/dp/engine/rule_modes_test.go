@@ -42,7 +42,7 @@ func TestRuleModesMixedMatrix(t *testing.T) {
 								parsing = "strict"
 							}
 							e.SetICSParsing(map[string]string{proto: parsing})
-							ev := dpi.Event{Proto: proto, Kind: "request", Attributes: map[string]any{"function_code": uint8(3), "apci_type": "I", "type_id": uint8(46), "ca": uint16(1), "apdu_id": "msg", "direction": "request"}}
+							ev := dpi.Event{Proto: proto, Kind: "request", Attributes: map[string]any{"function_code": uint8(3), "apci_type": "I", "type_id": uint8(46), "cause": uint8(6), "ca": uint16(1), "apdu_id": "msg", "direction": "request"}}
 							if strict {
 								ev.Attributes["conformance"] = []string{proto + ".test"}
 							}
@@ -55,13 +55,13 @@ func TestRuleModesMixedMatrix(t *testing.T) {
 									t.Fatalf("drop=%t want %t", drop, wantDrop)
 								}
 							} else {
-								tab := e.iec
+								tab := e.sessions
 								tab.parsing = ics.Parsing(parsing)
 								client := netip.MustParseAddrPort("10.60.60.10:40000")
 								server := netip.MustParseAddrPort("10.30.30.30:2404")
-								s := &iecSession{id: "matrix", client: client, server: server, mode: "enforce", ctx: tab.sessionCtx(client, server)}
+								s := &trackedSession{id: "matrix", client: client, server: server, iecSession: iecSession{mode: "enforce", ctx: tab.sessionCtx(client, server)}}
 								// Two objects in the same APDU still count as one message.
-								j := tab.judgeLocked(s, []dpi.Event{ev, ev}, time.Now())
+								j := tab.iecAdapter.judgeLocked(tab, s, []dpi.Event{ev, ev}, time.Now())
 								if j.denied != wantDrop {
 									t.Fatalf("denied=%t want %t", j.denied, wantDrop)
 								}
@@ -123,9 +123,9 @@ func TestRuleModesInheritInstalledGlobal(t *testing.T) {
 		if got := e.effectiveMode(&snap.Firewall[0]); got != mode {
 			t.Fatalf("generic mode %s want %s", got, mode)
 		}
-		e.iec.mu.Lock()
-		matched, got := e.iec.envelopeLocked(rules.EvalContext{Proto: "tcp", Port: "2404"})
-		e.iec.mu.Unlock()
+		e.sessions.mu.Lock()
+		matched, got := e.sessions.envelopeLocked(rules.EvalContext{Proto: "tcp", Port: "2404"})
+		e.sessions.mu.Unlock()
 		if !matched || got != mode {
 			t.Fatalf("IEC envelope matched=%t mode=%s want %s", matched, got, mode)
 		}

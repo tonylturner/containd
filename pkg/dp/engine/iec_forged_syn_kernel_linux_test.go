@@ -41,15 +41,19 @@ func startIECStation(t *testing.T) *kernelServer {
 	})
 }
 
-// startIECEngine runs the engine with one enforce IEC 104 envelope from the
-// client namespace to the station.
+// startIECEngine runs the engine with an enforce IEC 104 envelope from the
+// client namespace to the station, including explicit S/U-frame permission.
 func startIECEngine(t *testing.T, ctx context.Context) *Engine {
 	t.Helper()
-	return startKernelEngine(t, ctx, rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
+	station := rules.Entry{
 		ID: "iec104-station", Sources: []string{"198.18.50.0/24"}, Destinations: []string{fcServerIP + "/32"},
 		Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(iec104Port)}},
 		ICS:       rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow,
-	}}})
+	}
+	// Message ALLOWs do not authorize session control in either direction.
+	session := station
+	session.ID, session.ICS.MessageClass = "iec104-session", string(rules.ClassSession)
+	return startKernelEngine(t, ctx, rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{station, session}})
 }
 
 // startdt sends STARTDT act and requires STARTDT con.
@@ -80,8 +84,8 @@ func TestIECForgedSYNKernelRestartPickup(t *testing.T) {
 	e := startIECEngine(t, ctx)
 	// The engine stops as a crashed one does: the resets and conntrack
 	// deletes that would close its sessions go nowhere.
-	e.iec.injector = &session.Fake{}
-	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
+	e.sessions.injector = &session.Fake{}
+	e.sessions.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
 
 	const src = "198.18.50.46"
 	fcRun(ctx, t, "ip", "-n", fcClientNS, "addr", "add", src+"/24", "dev", "fcp0")

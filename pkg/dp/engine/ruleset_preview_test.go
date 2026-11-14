@@ -17,7 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-func TestRulesetPreviewEqualsApply(t *testing.T) {
+func TestPairingConsumersRulesetPreviewEqualsApply(t *testing.T) {
 	reservation := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"),
 		Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
 	engineAPI := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}
@@ -62,6 +62,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if preview.Pairing == nil || preview.Pairing.Paired != 0 || preview.Pairing.Unknown != 0 {
+				t.Fatalf("empty-retention pairing: %+v", preview.Pairing)
+			}
 			if *e.compiler != before || e.gate.installed || e.CurrentRules() != nil || applier.ruleset != "" {
 				t.Fatal("preview mutated live enforcement")
 			}
@@ -77,8 +80,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			}
 			applied := e.RulesetStatus().Warnings
 			// modbus-guests: no address is bound to its identity, and the
-			// modbus ALLOW shadows it.
-			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
+			// modbus ALLOW shadows it. Both IEC and Modbus ALLOWs also
+			// report the installed pairing cutover.
+			if len(preview.Warnings) != 4 || !reflect.DeepEqual(preview.Warnings, applied) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
 			for _, re := range []string{

@@ -103,7 +103,7 @@ type iecTelemetry struct {
 	service *flow.Key
 }
 
-func (s *iecSession) telemetry(event events.Event) iecTelemetry {
+func (s *trackedSession) telemetry(event events.Event) iecTelemetry {
 	var service *flow.Key
 	if s.flow != nil {
 		key := s.flow.ServiceKey()
@@ -114,11 +114,14 @@ func (s *iecSession) telemetry(event events.Event) iecTelemetry {
 
 // event builds IEC104 telemetry on the wire session tuple. Callers hold the
 // table lock while snapshotting its private service coordinates.
-func (s *iecSession) event(kind string, attrs map[string]any, now time.Time) iecTelemetry {
+func (s *trackedSession) event(kind string, attrs map[string]any, now time.Time) iecTelemetry {
 	attrs[eventfields.KeySessionID] = s.id
-
+	protocol := sessionProtocol(s.flow)
+	if protocol == "" {
+		protocol = eventfields.ProtoIEC104
+	}
 	return s.telemetry(events.Event{
-		Proto:      eventfields.ProtoIEC104,
+		Proto:      protocol,
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  now.UTC(),
@@ -130,7 +133,7 @@ func (s *iecSession) event(kind string, attrs map[string]any, now time.Time) iec
 	})
 }
 
-func (s *iecSession) sessionEvent(outcome string, extra map[string]any, now time.Time) iecTelemetry {
+func (s *trackedSession) sessionEvent(outcome string, extra map[string]any, now time.Time) iecTelemetry {
 	attrs := map[string]any{eventfields.KeyOutcome: outcome}
 	for k, v := range extra {
 		attrs[k] = v
@@ -146,7 +149,7 @@ var decisionKeys = []string{
 	eventfields.KeyUndecoded,
 }
 
-func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) iecTelemetry {
+func (s *trackedSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) iecTelemetry {
 	attrs := map[string]any{
 		eventfields.KeyDecision: d.decision,
 		eventfields.KeyRuleID:   d.ruleID,

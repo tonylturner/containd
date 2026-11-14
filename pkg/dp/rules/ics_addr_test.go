@@ -84,7 +84,7 @@ func TestEvaluatorMatchesAcceptedICSAddresses(t *testing.T) {
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{tc.spec}}, Action: ActionAllow,
 		}}})
 		decide := func(addr uint32) Action {
-			return ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Spans: []AddressSpan{{Low: addr, High: addr}}}})
+			return ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", MessageClass: ClassRequest, Spans: []AddressSpan{{Low: addr, High: addr}}}})
 		}
 		if decide(tc.low) != ActionAllow || decide(tc.high) != ActionAllow {
 			t.Errorf("%q does not match its ends %d, %d", tc.spec, tc.low, tc.high)
@@ -107,7 +107,7 @@ func TestEvaluatorRefusedICSAddressMatchesNothing(t *testing.T) {
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{"0-65535", tc.spec}}, Action: ActionAllow,
 		}}})
 		for _, addr := range []uint32{0, 5, 256, 512} {
-			if got := ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Spans: []AddressSpan{{Low: addr, High: addr}}}}); got != ActionDeny {
+			if got := ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", MessageClass: ClassRequest, Spans: []AddressSpan{{Low: addr, High: addr}}}}); got != ActionDeny {
 				t.Errorf("addresses [0-65535 %q] at %d = %s, want DENY", tc.spec, addr, got)
 			}
 		}

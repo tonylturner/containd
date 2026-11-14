@@ -3,6 +3,7 @@
 package enforce
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,8 +20,8 @@ func TestShadowWarnings(t *testing.T) {
 		{ID: "allow-dnp3-read", Protocols: tcp("20000"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "dnp3", FunctionCode: []uint8{1}}, Action: rules.ActionAllow},
 		// Shadowed:
 		{ID: "deny-http", SourceZones: []string{"it"}, Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
-		{ID: "reset-https", SourceZones: []string{"dmz"}, Destinations: []string{"10.0.1.0/24"}, Protocols: tcp("443"), Action: rules.ActionReset},
 		{ID: "deny-modbus-write", Protocols: tcp("502"), ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{6}}, Action: rules.ActionDeny},
+		{ID: "reset-https", SourceZones: []string{"dmz"}, Destinations: []string{"10.0.1.0/24"}, Protocols: tcp("443"), Action: rules.ActionReset},
 		// Not shadowed:
 		{ID: "deny-any-zone", Destinations: []string{"10.0.5.7/32"}, Protocols: tcp("80"), Action: rules.ActionDeny},
 		{ID: "deny-wider-net", SourceZones: []string{"it"}, Destinations: []string{"10.0.0.0/8"}, Protocols: tcp("80"), Action: rules.ActionDeny},
@@ -43,6 +44,77 @@ func TestShadowWarnings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("shadowed = %v, want %v", got, want)
 	}
+}
+
+func TestPairingShadowMessageClasses(t *testing.T) {
+	for _, protocol := range []string{"dnp3", "iec104"} {
+		for _, class := range []string{"autonomous", "session"} {
+			for _, inherited := range []bool{false, true} {
+				t.Run(protocol+"/"+class+fmt.Sprint("/inherited=", inherited), func(t *testing.T) {
+					mode := "enforce"
+					if inherited {
+						mode = ""
+					}
+					broad := rules.Entry{ID: "ordinary", Action: rules.ActionAllow,
+						ICS: rules.ICSPredicate{Protocol: protocol, Mode: mode}}
+					explicit := rules.Entry{ID: "explicit", Action: rules.ActionAllow,
+						ICS: rules.ICSPredicate{Protocol: protocol, Mode: mode, MessageClass: class}}
+					snap := &rules.Snapshot{DPIMode: "enforce", Firewall: []rules.Entry{broad, explicit}}
+					if w := shadowWarnings(snap); len(w) != 0 {
+						t.Fatalf("ordinary ALLOW shadows explicit class: %+v", w)
+					}
+					transport := broad
+					transport.ICS = rules.ICSPredicate{}
+					snap.Firewall = []rules.Entry{transport, explicit}
+					want := 1
+					if protocol == "iec104" {
+						want = 0 // IEC policy is a separate partition.
+					}
+					if w := shadowWarnings(snap); len(w) != want {
+						t.Fatalf("transport coverage changed: %+v", w)
+					}
+					snap.Firewall = []rules.Entry{explicit, broad}
+					if unconditional(explicit) {
+						t.Fatal("explicit class is unconditional coverage")
+					}
+					if w := shadowWarnings(snap); len(w) != 0 {
+						t.Fatalf("explicit class shadows ordinary ALLOW: %+v", w)
+					}
+					for _, action := range []rules.Action{rules.ActionDeny, rules.ActionReset} {
+						broad.Action = action
+						snap.Firewall = []rules.Entry{broad, explicit}
+						if w := shadowWarnings(snap); len(w) != 1 || w[0].ShadowedBy != broad.ID {
+							t.Fatalf("%s must cover explicit class: %+v", action, w)
+						}
+					}
+				})
+			}
+		}
+	}
+	t.Run("ordinary-allows", func(t *testing.T) {
+		snap := &rules.Snapshot{DPIMode: "enforce", Firewall: []rules.Entry{
+			{ID: "broad", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3"}},
+			{ID: "read", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{1}}},
+		}}
+		if w := shadowWarnings(snap); len(w) != 1 {
+			t.Fatalf("ordinary ALLOW must cover ordinary ALLOW: %+v", w)
+		}
+		snap.Firewall[1].Action = rules.ActionDeny
+		if w := shadowWarnings(snap); len(w) != 0 {
+			t.Fatalf("ordinary ALLOW must not claim all-class denial coverage: %+v", w)
+		}
+	})
+	t.Run("plain-modbus-and-cip", func(t *testing.T) {
+		for _, protocol := range []string{"", "modbus", "cip"} {
+			snap := &rules.Snapshot{Firewall: []rules.Entry{
+				{ID: "broad", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},
+				{ID: "denial", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: protocol, Mode: "enforce"}},
+			}}
+			if w := shadowWarnings(snap); len(w) != 1 {
+				t.Fatalf("%q changed ordinary coverage: %+v", protocol, w)
+			}
+		}
+	})
 }
 
 func TestShadowUsesOnlyEarlierTerminals(t *testing.T) {

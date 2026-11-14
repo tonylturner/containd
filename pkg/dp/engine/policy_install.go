@@ -131,19 +131,20 @@ func (e *Engine) installAndPublishRules(ctx context.Context, snap *rules.Snapsho
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
 		warnings = e.compiler.RuleWarnings(snap)
-		e.iec.health.clear(faultAddresses)
+		e.sessions.health.clear(faultAddresses)
 	}
+	warnings = append(warnings, pairingCutoverWarnings(snap)...)
 	appliedAt := time.Now().UTC()
 	e.ruleSnap.Install(snap, appliedAt)
 	if e.compiler != nil {
-		acts := e.iec.installPolicy(snap, true)
+		acts := e.sessions.installPolicy(snap, true)
 		// Hook replacement already dropped these skbs. Do not send a
 		// deferred verdict or wait for read-lock-taking callbacks here.
 		e.capture.RetireFlushed()
 		acts.drops = nil
-		e.iec.finish(acts)
+		e.sessions.finish(acts)
 	} else {
-		e.iec.setPolicy(snap)
+		e.sessions.setPolicy(snap)
 	}
 	e.verdictCache.Flush()
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))

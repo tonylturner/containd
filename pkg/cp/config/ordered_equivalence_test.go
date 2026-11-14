@@ -102,7 +102,7 @@ func TestOrderedMigrationEvaluatorCorpus(t *testing.T) {
 									SrcZone: zone, DstZone: "lan", Proto: "tcp", Port: port,
 									Identities: []string{identity}, Now: time.Date(2026, 10, 26, hour, 0, 0, 0, time.UTC)}
 								if fc >= 0 {
-									ctx.ICS = &rules.ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: uint8(fc)}
+									ctx.ICS = &rules.ICSContext{Protocol: "modbus", MessageClass: rules.ClassRequest, HasFunctionCode: true, FunctionCode: uint8(fc)}
 								}
 								wantAction, wantID := legacyDecision(&before, ctx, false)
 								action, winner := ev.EvaluateEnforcing(ctx)
@@ -346,7 +346,7 @@ func TestOrderedMigrationRangerDangerCorpus(t *testing.T) {
 												typeID, ioa := typeID, ioa
 												ctx := base
 												ctx.ICS = &rules.ICSContext{
-													Protocol: "iec104", Direction: direction,
+													Protocol: "iec104", Direction: direction, MessageClass: migrationMessageClass(direction),
 													IEC104: &rules.IEC104Context{
 														APCIType: "I", TypeID: &typeID, CA: &ca, IOA: &ioa,
 													},
@@ -360,7 +360,7 @@ func TestOrderedMigrationRangerDangerCorpus(t *testing.T) {
 									for _, functionCode := range []uint8{3, 6, 16} {
 										ctx := base
 										ctx.ICS = &rules.ICSContext{
-											Protocol: "modbus", HasFunctionCode: true, FunctionCode: functionCode,
+											Protocol: "modbus", MessageClass: rules.ClassRequest, HasFunctionCode: true, FunctionCode: functionCode,
 										}
 										compare(ctx, false)
 									}
@@ -382,7 +382,7 @@ func TestOrderedMigrationRangerDangerCorpus(t *testing.T) {
 						for _, fc := range []uint8{3, 6, 16} {
 							ctx := rules.EvalContext{SrcIP: net.ParseIP(src), DstIP: net.ParseIP("10.40.40.10"), SrcZone: srcZone,
 								DstZone: dstZone, Proto: "tcp", Port: "502",
-								ICS: &rules.ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: fc}}
+								ICS: &rules.ICSContext{Protocol: "modbus", MessageClass: rules.ClassRequest, HasFunctionCode: true, FunctionCode: fc}}
 							wantAction, wantID := legacyDecision(&before, ctx, false)
 							action, winner := ev.EvaluateEnforcing(ctx)
 							if action != wantAction || decisionID(winner) != wantID {
@@ -427,7 +427,7 @@ func TestOrderedMigrationIECCorpus(t *testing.T) {
 		for _, typeID := range []uint8{1, 45, 46, 47} {
 			for _, direction := range []string{"request", "response"} {
 				ctx := rules.EvalContext{Proto: "tcp", Port: "2404",
-					ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction,
+					ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction, MessageClass: migrationMessageClass(direction),
 						IEC104: &rules.IEC104Context{APCIType: "I", TypeID: &typeID, SafeRead: typeID == 1}}}
 				action, winner := ev.EvaluateIEC104Enforcing(ctx)
 				wantAction, wantID := legacyDecision(&before, ctx, true)
@@ -466,7 +466,7 @@ func TestPartialForwardPreservesInspectionAndUnrelatedPolicy(t *testing.T) {
 		{"198.51.100.200", "443", "other-service", 3, rules.ActionAllow},
 	} {
 		ctx := rules.EvalContext{SrcIP: net.ParseIP(p.src), DstIP: net.ParseIP("10.0.0.8"), SrcZone: "wan", DstZone: "lan", Proto: "tcp", Port: p.port,
-			ICS: &rules.ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: p.fc}}
+			ICS: &rules.ICSContext{Protocol: "modbus", MessageClass: rules.ClassRequest, HasFunctionCode: true, FunctionCode: p.fc}}
 		action, winner := ev.EvaluateMessage(ctx, false)
 		if action != p.action || decisionID(winner) != p.id {
 			t.Fatalf("%+v: %s/%s", p, action, decisionID(winner))
@@ -475,4 +475,11 @@ func TestPartialForwardPreservesInspectionAndUnrelatedPolicy(t *testing.T) {
 	if len(config.ForwardWarnings(c)) != 1 || !reflect.DeepEqual(snap.Firewall[0].ViaForwards, []string(nil)) {
 		t.Fatal("partial grant generated or warning missing")
 	}
+}
+
+func migrationMessageClass(direction string) rules.MessageClass {
+	if direction == "response" {
+		return rules.ClassSolicited
+	}
+	return rules.ClassRequest
 }

@@ -22,7 +22,11 @@ func TestTransportLookupDowngradeKeepsReplyIdentity(t *testing.T) {
 			r.authority.check(context.Background())
 			request := transportWire(natEvidence().Original, time.Now(), modbusADU(1, 3, 10, 2))
 			e.handleTransportPacket(request, r.resolve(context.Background(), request, false), nil)
-			first := transportModbusEvents(e)[0]
+			initial := transportModbusEvents(e)
+			if len(initial) != 1 {
+				t.Fatalf("decoded request events = %d, want 1", len(initial))
+			}
+			first := initial[0]
 			f.err = errors.New("permission denied")
 			if status == "not_found" {
 				f.err = conntrack.ErrNotFound
@@ -34,7 +38,11 @@ func TestTransportLookupDowngradeKeepsReplyIdentity(t *testing.T) {
 			}
 			c := r.resolve(context.Background(), reply, status == "admission_timeout")
 			e.handleTransportPacket(reply, c, nil)
-			last := transportModbusEvents(e)[0]
+			all := transportModbusEvents(e)
+			if len(all) != 2 {
+				t.Fatalf("decoded exchange events = %d, want 2", len(all))
+			}
+			last := all[0]
 			if last.TransportConnectionID != first.TransportConnectionID || c.Status != status ||
 				e.AnomalyDetector().PairingStats().Matched != 1 {
 				t.Fatalf("downgrade split first reply: %+v, %+v", first, last)

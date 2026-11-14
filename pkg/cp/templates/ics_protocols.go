@@ -94,11 +94,11 @@ func DNP3SecureOperations() []config.Rule {
 	return []config.Rule{
 		{
 			ID:          "tpl-dnp3-allow-reads",
-			Description: "Allow DNP3 startup operations (FC 0: Confirm, FC 1: Read, FC 20: Enable Unsolicited, FC 21: Disable Unsolicited, FC 23: Delay Measure, FC 24: Record Current Time)",
+			Description: "Allow DNP3 startup operations (FC 1: Read, FC 20: Enable Unsolicited, FC 21: Disable Unsolicited, FC 23: Delay Measure, FC 24: Record Current Time)",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
-				FunctionCode: []uint8{0, 1, 20, 21, 23, 24},
+				FunctionCode: []uint8{1, 20, 21, 23, 24},
 			},
 			Log:    true,
 			Action: config.ActionAllow,
@@ -110,6 +110,42 @@ func DNP3SecureOperations() []config.Rule {
 			ICS:         config.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{2}, Groups: []int{50, 80}},
 			Log:         true,
 			Action:      config.ActionAllow,
+		},
+		{
+			ID:          "tpl-dnp3-session-request",
+			Description: "Allow DNP3 Confirm and link controls from the master; no request grant or unsolicited data allowance",
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
+			ICS: config.ICSPredicate{
+				Protocol:     "dnp3",
+				MessageClass: "session",
+				Direction:    "request",
+			},
+			Log:    true,
+			Action: config.ActionAllow,
+		},
+		{
+			ID:          "tpl-dnp3-session-response",
+			Description: "Allow DNP3 Confirm and link controls from the outstation; no unsolicited data allowance",
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
+			ICS: config.ICSPredicate{
+				Protocol:     "dnp3",
+				MessageClass: "session",
+				Direction:    "response",
+			},
+			Log:    true,
+			Action: config.ActionAllow,
+		},
+		{
+			ID:          "tpl-dnp3-unsolicited",
+			Description: "Allow DNP3 outstation unsolicited responses for master-enabled reporting; this rule does not require a preceding Enable Unsolicited request.",
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
+			ICS: config.ICSPredicate{
+				Protocol:     "dnp3",
+				MessageClass: "autonomous",
+				Direction:    "response",
+			},
+			Log:    true,
+			Action: config.ActionAllow,
 		},
 		{
 			ID:          "tpl-dnp3-deny-dangerous",

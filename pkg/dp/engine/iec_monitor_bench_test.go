@@ -45,8 +45,8 @@ func TestIECMonitorPacketExchange(t *testing.T) {
 			for i := range 8192 {
 				exchange(i)
 			}
-			for _, s := range e.iec.sessions {
-				if s.state != iecEstablished || s.stopParse || s.inspectionLost {
+			for _, s := range e.sessions.sessions {
+				if s.state != sessionEstablished || s.stopParse || s.inspectionLost {
 					t.Fatalf("session stopped decoding: %+v", s)
 				}
 			}
@@ -107,12 +107,17 @@ func newIECPerfExchange(tb testing.TB, mode string, sessions int) (*Engine, func
 	if mode == "monitor" {
 		snap.Firewall = append(snap.Firewall, rules.Entry{ID: "l4", Action: rules.ActionAllow,
 			Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}}})
+	} else {
+		snap.Firewall = append([]rules.Entry{
+			{ID: "session-in", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode, MessageClass: "session", Direction: "request"}},
+			{ID: "session-out", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode, MessageClass: "session", Direction: "response"}},
+		}, snap.Firewall...)
 	}
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		tb.Fatal(err)
 	}
 	now := time.Now()
-	e.iec.now = func() time.Time { return now }
+	e.sessions.now = func() time.Time { return now }
 	type exchange struct {
 		packets [4]capture.Packet
 		step    int

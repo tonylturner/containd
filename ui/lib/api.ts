@@ -79,6 +79,7 @@ export type {
   RuleCount,
   RuleCounters,
   RulePreview,
+  PairingPreview,
   RuleSchedule,
   RuleWarning,
   RuleWarningPredicate,

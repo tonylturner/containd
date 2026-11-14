@@ -14,6 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -202,9 +203,8 @@ func TestReplyEvaluatedWithConnectionOrientation(t *testing.T) {
 // TestPersistentModbusUnderDefaultDeny mirrors the smoke policy: default
 // DENY, an allow for FC3 reads and a deny for FC6 writes from the client
 // to the server, enforce mode. Read replies must not be blocked; the write
-// must drop without a host/service block. The echoed write reply
-// matches the deny rule too, so the write yields two rule hits, both
-// without installing a block on the request tuple.
+// must drop without a host/service block. Its echoed reply is then denied
+// by the retired session, without re-parsing or a second rule hit.
 func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	up := &blockRecorder{}
 	e, err := New(Config{
@@ -237,29 +237,28 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	})
 
 	readReq, readResp := modbusADU(10, 3, 0, 2), []byte{0, 10, 0, 0, 0, 7, 1, 3, 4, 0, 0, 0, 1}
-	e.handlePacket(segment(false, 100, capture.TCPFlagSYN, nil))
-	e.handlePacket(segment(true, 500, capture.TCPFlagSYN|capture.TCPFlagACK, nil))
-	e.handlePacket(segment(false, 100, ackPsh, readReq))
-	e.handlePacket(segment(true, 500, ackPsh, readResp))
+	inlineHandshake(t, e, 41000, 502)
+	sendInline(e, segment(false, 100, ackPsh, readReq))
+	sendInline(e, segment(true, 500, ackPsh, readResp))
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("allowed read or its reply was blocked: %v", got)
 	}
 
 	write6 := modbusADU(11, 6, 1, 0x1234)
-	if d := e.handlePacket(segment(false, 112, ackPsh, write6)); d.Action != capture.Drop {
+	if d := sendInline(e, segment(false, 112, ackPsh, write6)); d.Action != capture.Drop {
 		t.Fatalf("write = %+v, want Drop", d)
 	}
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("DPI blocks after write = %v, want none", got)
 	}
-	if d := e.handlePacket(segment(true, 513, ackPsh, write6)); d.Action != capture.Drop {
+	if d := sendInline(e, segment(true, 513, ackPsh, write6)); d.Action != capture.Drop {
 		t.Fatalf("write reply = %+v, want Drop", d)
 	}
 	if got := up.blockedAfter(e); len(got) != 0 {
 		t.Fatalf("DPI blocks after reply = %v, want none", got)
 	}
-	if got := ruleHits(e, "write-deny"); got != 2 {
-		t.Fatalf("write-deny rule hits = %d, want 2", got)
+	if got := ruleHits(e, "write-deny"); got != 1 {
+		t.Fatalf("write-deny rule hits = %d, want one before session retirement", got)
 	}
 
 	// Event wire fields stay as captured: the reply reads server -> client.
@@ -275,8 +274,8 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 			t.Fatalf("rule hit evaluated with the reply orientation: %+v", ev)
 		}
 	}
-	if replies != 2 {
-		t.Fatalf("reply events = %d, want 2", replies)
+	if replies != 1 {
+		t.Fatalf("decoded reply events = %d, want the allowed reply only", replies)
 	}
 }
 
@@ -308,8 +307,14 @@ func TestModbusResponseDirectionRule(t *testing.T) {
 		t.Fatalf("response rule hits=%d", got)
 	}
 	replies := modbusEventsOldestFirst(e)
-	if len(replies) != 2 || replies[1].Kind != "response" {
-		t.Fatalf("events=%+v", replies)
+	var decoded []events.Event
+	for _, ev := range replies {
+		if ev.Kind == "request" || ev.Kind == "response" {
+			decoded = append(decoded, ev)
+		}
+	}
+	if len(decoded) != 2 || decoded[1].Kind != "response" {
+		t.Fatalf("decoded events=%+v", decoded)
 	}
 }
 

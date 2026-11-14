@@ -3,6 +3,7 @@ package dnp3
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 	"time"
 
@@ -35,13 +36,24 @@ type LinkRange struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
 }
+
+// transportRange preserves retries for authorization without changing the
+// historical event projection's logical segment count and ranges.
+type transportRange struct {
+	LinkRange
+	retry bool
+}
+
+const transportRangeBytes = 24
+
 type transportAssembly struct {
-	data    []byte
-	ranges  []LinkRange
-	last    []byte
-	seq     byte
-	started time.Time
-	badCRC  bool
+	data                   []byte
+	ranges                 []transportRange
+	last                   []byte
+	seq                    byte
+	started                time.Time
+	badCRC, badCoverageCRC bool
+	confirmed, invalid     bool
 }
 type stationContext struct {
 	class                 limits.Class
@@ -80,7 +92,7 @@ func NewDecoderWithClock(now func() time.Time) *Decoder {
 func contextBytes(k stationKey, c *stationContext) int {
 	n := contextCharge + len(k.session) + cap(c.retry)
 	if a := c.transport; a != nil {
-		n += cap(a.data) + cap(a.ranges)*16 + cap(a.last)
+		n += cap(a.data) + cap(a.ranges)*transportRangeBytes + cap(a.last)
 	}
 	return n
 }
@@ -124,13 +136,26 @@ func (d *Decoder) StreamEnded(session string, dir dpi.StreamDir) {
 func stationFor(v dpi.StreamView, f *DNP3Frame) stationKey {
 	return stationKey{v.Session, v.Dir, f.Source, f.Destination, f.Control&ControlDIR != 0}
 }
-func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw []byte, r LinkRange, now time.Time) ([]dpi.Event, error) {
+func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw []byte, r LinkRange, now time.Time, decoded *dpi.DecodedFrame) ([]dpi.Event, error) {
 	k := stationFor(v, f)
+	u := linkUnit(f)
+	decoded.Unit = u
+	if len(f.Data) > 0 {
+		u.LinkOnly = false
+	}
 	var codes, undecoded []string
+	var pending bool
 	if f.badDataCRC {
 		codes = append(codes, "dnp3.data_crc")
 	}
 	linkEvent := func() ([]dpi.Event, error) {
+		if len(codes)+len(undecoded) > 0 || len(f.Data) > 0 {
+			u.shapeErr = fmt.Errorf("%w: %v %v", ErrUnsupportedShape, codes, undecoded)
+		}
+		if pending {
+			decoded.Unit = nil
+			decoded.Pending = true
+		}
 		if len(codes)+len(undecoded) == 0 {
 			return nil, nil
 		}
@@ -178,6 +203,12 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	reserved := before
 	defer func() { d.refund(c.class, reserved-contextBytes(k, c)) }()
 	c.touched = now
+	if a := c.transport; a != nil {
+		a.badCoverageCRC = a.badCoverageCRC || f.badDataCRC
+		if a.confirmed != u.Link.Confirmed {
+			a.invalid = true
+		}
+	}
 	// Only confirmed user-data with FCV has a retry identity. Identical new
 	// unconfirmed FIR+FIN requests are legitimate and are never deduplicated.
 	if f.Control&15 == 3 && f.Control&ControlFCV != 0 {
@@ -185,6 +216,9 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 		if c.retryValid && c.fcb == fcb {
 			if bytes.Equal(c.retry, f.Data) {
 				codes = append(codes, "dnp3.link_duplicate")
+				if err := d.retainRetryRange(c, v, r, &reserved); err != nil {
+					return nil, err
+				}
 			} else {
 				c.transport = nil
 				codes = append(codes, "dnp3.link_retry_conflict")
@@ -211,6 +245,9 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	fir, fin := h&TransportFIR != 0, h&TransportFIN != 0
 	if a := c.transport; a != nil && seq == a.seq && bytes.Equal(a.last, f.Data) {
 		codes = append(codes, "dnp3.transport_duplicate")
+		if err := d.retainRetryRange(c, v, r, &reserved); err != nil {
+			return nil, err
+		}
 		return linkEvent()
 	}
 	if fir {
@@ -218,7 +255,7 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 			codes = append(codes, "dnp3.transport_restart")
 			undecoded = append(undecoded, "dnp3.transport_incomplete")
 		}
-		c.transport = &transportAssembly{seq: seq, started: now}
+		c.transport = &transportAssembly{seq: seq, started: now, confirmed: u.Link.Confirmed, invalid: len(undecoded) > 0}
 	} else if c.transport == nil {
 		codes = append(codes, "dnp3.transport_orphan")
 		undecoded = append(undecoded, "dnp3.transport_incomplete")
@@ -246,7 +283,7 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	}
 	// Reserve exact-size owned storage, accounting for provenance and retry
 	// bytes before allocation. Bounds include empty segments and metadata.
-	needed := len(a.data) + len(f.Data) - 1 + (len(a.ranges)+1)*16 + len(f.Data)
+	needed := len(a.data) + len(f.Data) - 1 + (len(a.ranges)+1)*transportRangeBytes + len(f.Data)
 	local, global := d.reserve(c.class, needed)
 	if !local {
 		c.transport = nil
@@ -261,14 +298,15 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	copy(data, a.data)
 	copy(data[len(a.data):], f.Data[1:])
 	a.data = data
-	ranges := make([]LinkRange, len(a.ranges)+1)
+	ranges := make([]transportRange, len(a.ranges)+1)
 	copy(ranges, a.ranges)
-	ranges[len(a.ranges)] = r
+	ranges[len(a.ranges)] = transportRange{LinkRange: r}
 	a.ranges = ranges
 	a.last = copyBytes(f.Data)
 	a.seq = seq
 	a.badCRC = a.badCRC || f.badDataCRC
 	if !fin {
+		pending = len(codes)+len(undecoded) == 0 && !a.invalid && !a.confirmed && !a.badCRC && !a.badCoverageCRC
 		return linkEvent()
 	}
 	c.transport = nil
@@ -283,16 +321,38 @@ func (d *Decoder) assemble(st *flow.State, v dpi.StreamView, f *DNP3Frame, raw [
 	complete.Data = append([]byte{TransportFIR | TransportFIN}, a.data...)
 	complete.FunctionCode = a.data[1]
 	complete.badDataCRC = a.badCRC
+	unitFrame := complete
+	unitFrame.badDataCRC = a.badCRC || a.badCoverageCRC
+	decoded.Unit = decodeUnit(&unitFrame)
+	unit := decoded.Unit.(*Unit)
+	if a.invalid {
+		unit.shapeErr = fmt.Errorf("%w: inconsistent/restarted transport", ErrInvalidShape)
+	}
+	decoded.Coverage = make([]dpi.CoverageRange, len(a.ranges))
+	for i, r := range a.ranges {
+		decoded.Coverage[i] = dpi.CoverageRange{Start: r.Start, End: r.End}
+	}
+	if err := dpi.ValidateDecodedFrame(*decoded); err != nil {
+		return nil, &dpi.FrameError{Offset: r.Start, Reason: err.Error(), Event: malformedEvent(st, raw, err)}
+	}
 	events := frameEvents(st, &complete, raw)
 	for i := range events {
 		attrs := events[i].Attributes
 		// Events have a separate, bounded lifetime from retained decoder state.
 		// Do not export the backing allocation charged to this assembly.
-		attrs["link_ranges"] = append([]LinkRange(nil), a.ranges...)
-		attrs["transport_segments"] = len(a.ranges)
+		eventRanges := make([]LinkRange, 0, len(a.ranges))
+		for _, r := range a.ranges {
+			if !r.retry {
+				eventRanges = append(eventRanges, r.LinkRange)
+			}
+		}
+		attrs["link_ranges"] = eventRanges
+		attrs["transport_segments"] = len(eventRanges)
 		attrs["stream_session"] = v.Session
 		attrs["stream_direction"] = uint8(v.Dir)
-		d.application(k, c, a.data, attrs, now)
+		if err := d.application(k, c, a.data, attrs, now); err != nil && unit.shapeErr == nil {
+			unit.shapeErr = err
+		}
 		mergeCodes(attrs, eventfields.KeyConformance, codes)
 		mergeCodes(attrs, eventfields.KeyUndecoded, undecoded)
 	}

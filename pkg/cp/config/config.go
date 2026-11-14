@@ -852,6 +852,7 @@ type Protocol struct {
 // It covers modbus, dnp3, cip and iec104.
 // JSON decoding is strict (ics_json.go).
 type ICSPredicate struct {
+	MessageClass  string   `json:"messageClass,omitempty"`  // autonomous | session; omitted = ordinary
 	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, iec104
 	FunctionCode  []uint8  `json:"functionCode,omitempty"`  // function/service codes (all protocols)
 	UnitID        *uint8   `json:"unitId,omitempty"`        // optional Modbus unit id
@@ -892,7 +893,7 @@ type ICSPredicate struct {
 // Empty reports whether the predicate has no packet-matching fields.
 // Mode is an enforcement setting, not a packet predicate.
 func (p ICSPredicate) Empty() bool {
-	return strings.TrimSpace(p.Protocol) == "" && len(p.FunctionCode) == 0 &&
+	return p.MessageClass == "" && strings.TrimSpace(p.Protocol) == "" && len(p.FunctionCode) == 0 &&
 		p.UnitID == nil && len(p.Addresses) == 0 && len(p.ObjectClasses) == 0 &&
 		!p.ReadOnly && !p.WriteOnly && strings.TrimSpace(p.Direction) == "" &&
 		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&

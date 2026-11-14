@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func assertNoIECHolds(t *testing.T, e *Engine) {
@@ -46,8 +47,8 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 			case "deny":
 				h.send(true, append(cmd[4:], iframe(45, 1)...))
 			case "timeout":
-				h.clock = h.clock.Add(iecPendingTimeout)
-				h.e.iec.expire()
+				h.clock = h.clock.Add(sessionPendingTimeout)
+				h.e.sessions.expire()
 			case "rst":
 				// At the server's receive point, before the held bytes.
 				h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq-4, h.sSeq, nil))
@@ -56,7 +57,7 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 			case "verdict":
 				h.e.hooks.onVerdict(pkt.Token, capture.VerdictDrop, capture.ErrQueueClosed)
 			case "queue":
-				h.e.iec.onSourceDown()
+				h.e.sessions.onSourceDown()
 			case "policy":
 				h.policy.matched = false
 				h.e.LoadRules(iecSnapshot("enforce"))
@@ -72,6 +73,45 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 	}
 }
 
+func TestIECPressureProtocolIsolation(t *testing.T) {
+	for _, p := range runtimePairCases()[:2] {
+		t.Run(p.protocol, func(t *testing.T) {
+			e := runtimePairEngine(t, rules.Snapshot{Default: rules.ActionDeny,
+				Firewall: []rules.Entry{runtimePairRule(p, "enforce")}}, true)
+			inlineHandshake(t, e, 41000, p.port)
+			if d := e.HandlePacket(runtimePairPacket(p, false, 100, p.request[:3])); d.Action != capture.Hold {
+				t.Fatal(d)
+			}
+			got := e.IEC104Diagnostics()
+			if got.Limits.Sessions != sessionMaxSessions || got.ActiveSessions != 0 || got.TrackedSessions != 0 ||
+				got.HeldBytes != 0 || got.HeldPackets != 0 || got.OldestPendingSeconds != 0 {
+				t.Fatalf("generic live session leaked into IEC diagnostics: %+v", got)
+			}
+			if got := e.sessions.LimitOccupancy(); got.Entries != 1 || got.Limit != sessionMaxSessions+deniedTCPCapacity {
+				t.Fatalf("aggregate occupancy lost generic live session: %+v", got)
+			}
+		})
+	}
+	t.Run("denied-tuples", func(t *testing.T) {
+		h := newIECHarness(t, "enforce")
+		h.handshake()
+		h.send(true, iframe(46, 1)[:4])
+		before := h.e.IEC104Diagnostics()
+		for port := 1; port <= deniedTCPCapacity; port++ {
+			retainSessionTuple(h.e.sessions, uint16(port), h.clock)
+		}
+		after := h.e.IEC104Diagnostics()
+		if after.Limits.Sessions != sessionMaxSessions || after.TrackedSessions != 1 || after.ActiveSessions != 1 ||
+			after.HeldBytes != before.HeldBytes || after.HeldPackets != before.HeldPackets ||
+			after.OldestPendingSeconds != before.OldestPendingSeconds {
+			t.Fatalf("denied tuples inflated IEC pressure: before=%+v after=%+v", before, after)
+		}
+		if got := h.e.sessions.LimitOccupancy(); got.Entries != deniedTCPCapacity+1 || got.Limit != sessionMaxSessions+deniedTCPCapacity {
+			t.Fatalf("aggregate occupancy lost denied tuples: %+v", got)
+		}
+	})
+}
+
 func TestIECPressureEveryAbortClearsGauges(t *testing.T) {
 	for _, reason := range iecAbortReasons {
 		t.Run(reason.name, func(t *testing.T) {
@@ -79,7 +119,7 @@ func TestIECPressureEveryAbortClearsGauges(t *testing.T) {
 			h.handshake()
 			h.send(true, iframe(46, 1)[:4])
 			before := h.e.IEC104Diagnostics().Aborts[reason.name]
-			table := h.e.iec
+			table := h.e.sessions
 			table.mu.Lock()
 			for _, s := range table.sessions {
 				table.abortLocked(s, reason, "", nil, h.clock)
@@ -96,10 +136,10 @@ func TestIECPressureEveryAbortClearsGauges(t *testing.T) {
 func TestIECPressureTotalsAndWorkerSaturation(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	before := h.e.IEC104Diagnostics()
-	table := h.e.iec
+	table := h.e.sessions
 	table.jobs = newWorker(1)
 	table.jobs.submit(func() {})
-	table.finish(iecActions{jobs: []func(){func() {}}})
+	table.finish(sessionActions{jobs: []func(){func() {}}})
 	table.onVerdict(h.token(), capture.VerdictDrop, errors.New("verdict failed"))
 	table.onVerdict(h.token(), capture.VerdictDrop, capture.ErrQueueClosed)
 	after := h.e.IEC104Diagnostics()
@@ -139,10 +179,10 @@ func TestIECPressureStopAndPrometheus(t *testing.T) {
 	}
 	assertMetric("held_packets", 1)
 	assertMetric("held_bytes", 4)
-	h.e.iec.onSourceDown() // The capture stop/rebuild callback drops the ledger.
+	h.e.sessions.onSourceDown() // The capture stop/rebuild callback drops the ledger.
 	stop, done := make(chan struct{}), make(chan struct{})
 	close(stop)
-	go func() { h.e.iec.run(stop); close(done) }()
+	go func() { h.e.sessions.run(stop); close(done) }()
 	<-done
 	assertNoIECHolds(t, h.e)
 	if p := h.e.IEC104Diagnostics(); p.ActiveSessions != 0 {
@@ -159,23 +199,23 @@ func TestIECPressureInjectorFailures(t *testing.T) {
 	h.handshake()
 	before := h.e.IEC104Diagnostics()
 	h.inj.SetError(errors.New("injection failed"))
-	table := h.e.iec
+	table := h.e.sessions
 	table.mu.Lock()
-	var s *iecSession
+	var s *trackedSession
 	for _, live := range table.sessions {
 		s = live
 	}
 	table.abortLocked(s, abortDeny, "", nil, h.clock)
-	target := s.reset.targets[iecDirClient]
+	target := s.reset.targets[sessionDirClient]
 	table.mu.Unlock()
-	table.sendReset(s, iecDirClient, target.r)
+	table.sendReset(s, sessionDirClient, target.r)
 	if got := h.e.IEC104Diagnostics(); got.InjectorFailures != before.InjectorFailures+1 {
 		t.Fatal(got)
 	}
 
 	unavailable := newIECHarness(t, "enforce")
 	p := unavailable.e.IEC104Diagnostics()
-	unavailable.e.iec.health.fault(faultInjector, "injector unavailable")
+	unavailable.e.sessions.health.fault(faultInjector, "injector unavailable")
 	d := unavailable.e.handlePacket(unavailable.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil))
 	if d.Action != capture.Drop || unavailable.e.IEC104Diagnostics().Aborts["injector"] != p.Aborts["injector"]+1 {
 		t.Fatal(d)

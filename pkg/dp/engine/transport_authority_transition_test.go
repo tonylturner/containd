@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
@@ -31,10 +33,31 @@ func TestTransportEventsDuringApplyKeepIdentity(t *testing.T) {
 	e, r, _ := newTransportTest(t, &transportCTFake{evidence: evidence})
 	ctx := context.Background()
 	r.authority.check(ctx)
+	// The shared stream owner observes a complete handshake. Conntrack joins
+	// the original and SNAT reply tuples without changing their wire identity.
+	for _, p := range []capture.Packet{
+		transportHandshakePacket(evidence.Original, capture.TCPFlagSYN, 100, 0),
+		transportHandshakePacket(evidence.Reply, capture.TCPFlagSYN|capture.TCPFlagACK, 500, 101),
+		transportHandshakePacket(evidence.Original, capture.TCPFlagACK, 101, 501),
+	} {
+		e.handleTransportPacket(p, r.resolve(ctx, p, false), nil)
+	}
 	request := transportWire(evidence.Original, time.Now(), modbusADU(1, 3, 10, 2))
+	request.TCP = capture.TCPMeta{Valid: true, Flags: ackPsh, Seq: 101, Ack: 501}
 	e.handleTransportPacket(request, r.resolve(ctx, request, false), nil)
-	first := transportModbusEvents(e)[0]
+	initial := transportModbusEvents(e)
+	if len(initial) != 1 {
+		t.Fatalf("decoded request events = %d, want 1", len(initial))
+	}
+	first := initial[0]
 	base := &transportBlockingApply{started: make(chan struct{}), release: make(chan struct{})}
+	defer func() {
+		select {
+		case <-base.release:
+		default:
+			close(base.release)
+		}
+	}()
 	applier := &transportApplier{Applier: base, authority: r.authority}
 	done := make(chan error, 1)
 	go func() { done <- applier.Apply(ctx, "rules") }()
@@ -45,14 +68,20 @@ func TestTransportEventsDuringApplyKeepIdentity(t *testing.T) {
 		t.Fatal("scan authorized an unfinished apply")
 	}
 	reply := transportWire(evidence.Reply, time.Now(), []byte{0, 1, 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11})
+	reply.TCP = capture.TCPMeta{Valid: true, Flags: ackPsh, Seq: 501, Ack: 113}
 	e.handleTransportPacket(reply, r.resolve(ctx, reply, false), nil)
 	close(base.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	last := transportModbusEvents(e)[0]
+	all := transportModbusEvents(e)
+	if len(all) != 2 {
+		t.Fatalf("decoded exchange events = %d, want 2", len(all))
+	}
+	last := all[0]
 	if first.TransportConnectionID == "" || last.TransportConnectionID != first.TransportConnectionID ||
-		last.CorrelationStatus != "zone_unverified" || e.AnomalyDetector().PairingStats().Matched != 1 {
+		last.CorrelationStatus != "zone_unverified" || e.AnomalyDetector().PairingStats().Matched != 1 ||
+		last.Attributes["pairing_outcome"] != "paired" {
 		t.Fatalf("apply split the event identity: %+v, %+v", first, last)
 	}
 	for _, summary := range e.Events().Flows(0) {
@@ -60,6 +89,12 @@ func TestTransportEventsDuringApplyKeepIdentity(t *testing.T) {
 			t.Fatal("apply erased rollup identity")
 		}
 	}
+}
+
+func transportHandshakePacket(tuple conntrack.Tuple, flags capture.TCPFlags, seq, ack uint32) capture.Packet {
+	p := transportWire(tuple, time.Now(), nil)
+	p.TCP = capture.TCPMeta{Valid: true, Flags: flags, Seq: seq, Ack: ack}
+	return p
 }
 
 type transportBlockingZones struct {

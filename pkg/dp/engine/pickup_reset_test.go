@@ -37,7 +37,7 @@ func TestPickupResetRefusalIsCountedWithoutEviction(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		client := netip.AddrPortFrom(netip.MustParseAddr("192.0.2.1"), uint16(40000+i))
 		server := netip.MustParseAddrPort("192.0.2.2:2404")
-		p.record(iecKey{client: client, server: server}, resets, &deniedTCP{}, nil, now)
+		p.record(sessionKey{client: client, server: server}, resets, &deniedTCP{}, nil, now)
 	}
 	occupancy := p.LimitOccupancy()
 	if occupancy.Limit != 3 || occupancy.Entries != 3 || occupancy.HighWater != 3 {
@@ -51,9 +51,9 @@ func TestPickupResetRefusalIsCountedWithoutEviction(t *testing.T) {
 
 func newResetFlow(t *testing.T, port uint16) *resetFlow {
 	f := &resetFlow{fcFlow: newModeFlow(t, "enforce", port), inj: &session.Fake{}, deletes: make(chan conntrack.DeleteRequest, 8)}
-	f.e.iec.injector = f.inj
-	f.e.iec.health.clear(faultInjector)
-	f.e.iec.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
+	f.e.sessions.injector = f.inj
+	f.e.sessions.health.clear(faultInjector)
+	f.e.sessions.ctDelete = func(_ context.Context, req conntrack.DeleteRequest) error {
 		f.deletes <- req
 		return nil
 	}
@@ -71,7 +71,12 @@ func (f *resetFlow) handle(pkt capture.Packet) capture.Decision {
 	} else if d.Action == capture.Repeat {
 		v = capture.VerdictRepeat
 	}
-	f.e.hooks.onVerdict(pkt.Token, v, nil)
+	if d.Action != capture.Hold {
+		f.e.hooks.onVerdict(pkt.Token, v, nil)
+	}
+	for _, r := range d.Resolved {
+		f.e.hooks.onVerdict(r.Token, r.Verdict, nil)
+	}
 	return d
 }
 
@@ -109,7 +114,7 @@ func (f *resetFlow) endpoints() (client, server netip.AddrPort) {
 }
 
 // TestPickupResetOnce picks up a connection mid-stream, as after an engine
-// restart: the server's ACK passes, the client's read drops and the
+// restart: the unknown server ACK and the client's read drop and the
 // connection is reset once, at both endpoints, at the sequence numbers the
 // read shows. Later packets of either direction drop without another
 // reset; the client's next connection on the same port is inspected from
@@ -119,11 +124,9 @@ func TestPickupResetOnce(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			f := newResetFlow(t, p.port)
 			const clientSeq, serverSeq = 7000, resyncServerISN + 1
-			if d := f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil)); d.Action != capture.Repeat {
-				t.Fatalf("server ACK of the picked-up connection = %+v, want Repeat", d)
-			}
 			rule := p.name + "-read"
-			f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, clientSeq, serverSeq, ackPsh, p.read(1))), rule, 0)
+			f.pickedUp("server ACK without a known handshake", f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil)), rule, 0)
+			f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, clientSeq, serverSeq, ackPsh, p.read(1))), rule, 1)
 			client, server := f.endpoints()
 			want := []session.Reset{{Src: client, Dst: server, Seq: clientSeq}, {Src: server, Dst: client, Seq: serverSeq}}
 			if got := f.waitResets(2); !reflect.DeepEqual(got, want) {
@@ -162,13 +165,13 @@ func TestPickupResetOnce(t *testing.T) {
 func TestPickupResetFailureIsUnhealthy(t *testing.T) {
 	f := newResetFlow(t, 502)
 	reported := make(chan error, 8)
-	f.e.iec.onError = func(err error) { reported <- err }
+	f.e.sessions.onError = func(err error) { reported <- err }
 	f.inj.SetError(errors.New("sendto: operation not permitted"))
 	f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, 7000, 9000, ackPsh, modbusADU(1, 3, 0, 2))), "modbus-read", 0)
 	f.waitResets(2)
-	f.e.iec.health.mu.Lock()
-	reason := f.e.iec.health.faults[faultReset]
-	f.e.iec.health.mu.Unlock()
+	f.e.sessions.health.mu.Lock()
+	reason := f.e.sessions.health.faults[faultReset]
+	f.e.sessions.health.mu.Unlock()
 	if !strings.Contains(reason, "operation not permitted") || len(reported) != 2 {
 		t.Fatalf("reset fault %q, %d errors reported; want both failed resets reported", reason, len(reported))
 	}
@@ -185,7 +188,7 @@ func TestPickupResetFailureIsUnhealthy(t *testing.T) {
 // when no reset can be sent.
 func TestPickupWithoutInjectorOnlyDrops(t *testing.T) {
 	f := newResetFlow(t, 502)
-	f.e.iec.health.fault(faultInjector, "reset injector unavailable")
+	f.e.sessions.health.fault(faultInjector, "reset injector unavailable")
 	f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, 7000, 9000, ackPsh, modbusADU(1, 3, 0, 2))), "modbus-read", 0)
 	time.Sleep(50 * time.Millisecond)
 	if got := f.inj.Resets(); len(got) != 0 {
@@ -208,8 +211,9 @@ func TestReconnectOnSamePortAfterLostConnection(t *testing.T) {
 			f.syn()
 			f.synAck()
 			f.accept("read", p.read(1))
-			f.accept("read head", p.read(2)[:5])
-			rcvNext := f.isn + f.next // the server's receive point
+			f.respondDNP3Read(1)
+			rcvNext := f.isn + f.next // only released bytes reached the server
+			f.hold("read head", p.read(2)[:5])
 			f.isn, f.next = 400000, 0
 			if d := f.establishedSyn(0); d.Action != capture.Repeat {
 				t.Fatalf("reconnect SYN into the connection = %+v, want Repeat", d)
@@ -239,7 +243,7 @@ func TestReconnectOnSamePortAfterLostConnection(t *testing.T) {
 
 // TestPickupResetAnswersChallengeACK resets a picked-up connection whose
 // server ignores the RST at the read's sequence number: its challenge ACKs
-// get the reset again at their ACK number, at most iecResetRetries times.
+// get the reset again at their ACK number, at most sessionResetRetries times.
 // A packet at the reset's own sequence number, or a RST, gets none.
 func TestPickupResetAnswersChallengeACK(t *testing.T) {
 	f := newResetFlow(t, 502)
@@ -249,11 +253,11 @@ func TestPickupResetAnswersChallengeACK(t *testing.T) {
 	client, server := f.endpoints()
 	f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil))    // at the reset's sequence number
 	f.handle(f.segment(true, serverSeq, clientSeq+40, capture.TCPFlagRST, nil)) // a RST
-	for i := range uint32(iecResetRetries + 2) {
+	for i := range uint32(sessionResetRetries + 2) {
 		f.handle(f.segment(true, serverSeq, clientSeq+12+i, capture.TCPFlagACK, nil)) // challenge ACKs
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for len(f.inj.Resets()) < 2+iecResetRetries && time.Now().Before(deadline) {
+	for len(f.inj.Resets()) < 2+sessionResetRetries && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(50 * time.Millisecond)

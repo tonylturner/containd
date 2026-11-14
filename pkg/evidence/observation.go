@@ -104,7 +104,7 @@ type Quality struct {
 // must not be inferred from an ALLOW, a passive capture or a shadow match.
 type Outcome struct {
 	Decisions []Decision    `json:"decisions"`
-	Delivery  string        `json:"delivery"` // unknown|delivered|blocked
+	Delivery  string        `json:"delivery"` // unknown|blocked
 	Evidence  []EvidenceRef `json:"evidence"`
 }
 
@@ -124,26 +124,31 @@ type Decision struct {
 // Fingerprints bind replay to the decoder/profile and policy snapshot used then.
 // Pointer selectors in protocol records preserve absent versus explicit zero/false.
 type Observation struct {
-	SchemaVersion       string        `json:"schemaVersion"`
-	ID                  string        `json:"id"`
-	DatasetID           string        `json:"datasetId"`
-	Source              Source        `json:"source"`
-	CapturedAt          time.Time     `json:"capturedAt"`
-	IngestedAt          time.Time     `json:"ingestedAt"`
-	ConnectionID        string        `json:"connectionId"`
-	ParentID            string        `json:"parentId"`
-	ParentDigest        string        `json:"parentDigest"` // SHA-256 of canonical decoded parent
-	ObjectCount         uint32        `json:"objectCount"`
-	Authority           Authority     `json:"authority"`
-	Service             ServiceKey    `json:"service"`
-	DecoderVersion      string        `json:"decoderVersion"`
-	ProfileFingerprint  string        `json:"profileFingerprint"`
-	SnapshotFingerprint string        `json:"snapshotFingerprint"`
-	Quality             Quality       `json:"quality"`
-	Modbus              *Modbus       `json:"modbus,omitempty"`
-	DNP3                *DNP3         `json:"dnp3,omitempty"`
-	IEC104              *IEC104       `json:"iec104,omitempty"`
-	CIP                 *CIP          `json:"cip,omitempty"`
-	Outcome             Outcome       `json:"outcome"`
-	Evidence            []EvidenceRef `json:"evidence"`
+	SchemaVersion       string     `json:"schemaVersion"`
+	ID                  string     `json:"id"`
+	DatasetID           string     `json:"datasetId"`
+	Source              Source     `json:"source"`
+	CapturedAt          time.Time  `json:"capturedAt"`
+	IngestedAt          time.Time  `json:"ingestedAt"`
+	ConnectionID        string     `json:"connectionId"`
+	ParentID            string     `json:"parentId"`
+	ParentDigest        string     `json:"parentDigest"` // SHA-256 of canonical decoded parent
+	ObjectCount         uint32     `json:"objectCount"`
+	Authority           Authority  `json:"authority"`
+	Service             ServiceKey `json:"service"`
+	DecoderVersion      string     `json:"decoderVersion"`
+	ProfileFingerprint  string     `json:"profileFingerprint"`
+	SnapshotFingerprint string     `json:"snapshotFingerprint"`
+	Quality             Quality    `json:"quality"`
+	Modbus              *Modbus    `json:"modbus,omitempty"`
+	DNP3                *DNP3      `json:"dnp3,omitempty"`
+	IEC104              *IEC104    `json:"iec104,omitempty"`
+	CIP                 *CIP       `json:"cip,omitempty"`
+	// MessageClass is decoded classification, never transaction authority.
+	MessageClass string `json:"messageClass,omitempty"`
+	// Pairing fields are runtime observations only; offline evidence stays unknown.
+	PairingOutcome string        `json:"pairingOutcome,omitempty"`
+	PairingReason  string        `json:"pairingReason,omitempty"`
+	Outcome        Outcome       `json:"outcome"`
+	Evidence       []EvidenceRef `json:"evidence"`
 }

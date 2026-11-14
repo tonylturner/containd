@@ -9,6 +9,9 @@ func TestICSContextPrecedence(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			first, second := ICSPredicate{Protocol: protocol}, ICSPredicate{Protocol: protocol}
 			a, b := ICSContext{Protocol: protocol}, ICSContext{Protocol: protocol}
+			if protocol != "cip" {
+				a.MessageClass, b.MessageClass = ClassRequest, ClassRequest
+			}
 			switch protocol {
 			case "dnp3":
 				first.Groups, second.Groups = []int{1}, []int{2}

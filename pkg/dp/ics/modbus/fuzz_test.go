@@ -59,6 +59,16 @@ func FuzzParseStream(f *testing.F) {
 
 	state := modbusState()
 	f.Fuzz(func(t *testing.T, data []byte, base uint16) {
-		decodertest.CheckStream(t, NewDecoder(), state, dpi.StreamView{Session: "fuzz", Base: int64(base), Bytes: data})
+		res, _ := decodertest.CheckStream(t, NewDecoder(), state, dpi.StreamView{Session: "fuzz", Base: int64(base), Bytes: data})
+		for _, frame := range res.Frames {
+			if err := dpi.ValidateDecodedFrame(frame); err != nil {
+				t.Fatal(err)
+			}
+			if !frame.Pending {
+				if unit, ok := frame.Unit.(*Unit); !ok || unit == nil {
+					t.Fatal("complete frame without typed unit")
+				}
+			}
+		}
 	})
 }

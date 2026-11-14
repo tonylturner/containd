@@ -39,11 +39,11 @@ func iecEvent(id uint64, kind string, request bool, attrs map[string]any) dpeven
 // Retain the JSON-number cases from the former management-side preview tests.
 func TestPreviewFirewallRuleIEC104(t *testing.T) {
 	events := []dpevents.Event{
-		iecEvent(1, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(1), "ioa": float64(2001)}),
-		iecEvent(2, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(2), "ioa": float64(2001)}),
-		iecEvent(3, "response", false, map[string]any{"apci_type": "I", "direction": "response", "class": "control", "type_id": float64(46), "ca": float64(1), "ioa": float64(2001)}),
+		iecEvent(1, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(1), "ioa": float64(2001), "cause": float64(6)}),
+		iecEvent(2, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(2), "ioa": float64(2001), "cause": float64(6)}),
+		iecEvent(3, "response", false, map[string]any{"apci_type": "I", "direction": "response", "class": "control", "type_id": float64(46), "ca": float64(1), "ioa": float64(2001), "cause": float64(7)}),
 		iecEvent(4, "ics.decision", true, map[string]any{"decision": "allow", "type_id": float64(46), "ca": float64(1), "ioa": float64(2001), "direction": "request"}),
-		iecEvent(5, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(65535), "ioa": float64(2001)}),
+		iecEvent(5, "request", true, map[string]any{"apci_type": "I", "direction": "request", "class": "control", "type_id": float64(46), "ca": float64(65535), "ioa": float64(2001), "cause": float64(6)}),
 		{ID: 6, Proto: "modbus", Kind: "request", Transport: "tcp", SrcIP: "10.60.60.10", DstIP: "10.30.30.30", DstPort: 2404,
 			Attributes: map[string]any{"function_code": float64(46)}},
 	}

@@ -37,30 +37,38 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 // event with conformance or undecoded findings is denied before rule
 // arbitration, with reason nonconformant and scope attribution. In a monitor
 // envelope a deny is would_drop; monitor rules never arbitrate a verdict.
-func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
+func (a *iecAdapter) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
+	ctx := s.ctx
+	ctx.ICS = a.iecContext(ev)
+	d, _ := a.decideContextLocked(s, ev, ctx)
+	return d
+}
+
+// The live gate supplies a typed decoder context. Event-based callers are
+// diagnostic/preview only; neither their decisions nor their JSON mint grants.
+func (a *iecAdapter) decideContextLocked(s *iecSession, ev dpi.Event, ctx rules.EvalContext) (iecDecision, *rules.Entry) {
 	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode, reason: iecEventDenialReason(ev)}
-	if iecStrictPreempts(ev, t.parsing) {
+	var entry *rules.Entry
+	if iecStrictPreempts(ev, a.parsing) {
 		d.reason, d.action = reasonNonconformant, ""
-		if t.policy != nil {
-			if scope := t.policy.IEC104Scope(s.ctx, t.globalMode); scope != nil {
+		if a.policy != nil {
+			if scope := a.policy.IEC104Scope(s.ctx, a.globalMode); scope != nil {
 				d.scopeID = scope.ID
 			}
 		}
 	} else if d.reason == "" {
-		ctx := s.ctx
-		ctx.ICS = t.iecContext(ev)
-		action, entry := rules.ActionDeny, (*rules.Entry)(nil)
-		if t.policy != nil {
-			action, entry = t.policy.EvaluateIEC104(ctx)
+		action := rules.ActionDeny
+		if a.policy != nil {
+			action, entry = a.policy.EvaluateIEC104(ctx)
 		}
 		d.reason = reasonDefault
 		if entry != nil {
 			d.reason, d.ruleID, d.action, d.log = reasonRule, entry.ID, string(entry.Action), entry.Log
-			d.mode = rules.EffectiveMode(entry.ICS.Mode, t.globalMode)
+			d.mode = rules.EffectiveMode(entry.ICS.Mode, a.globalMode)
 		}
 		if action == rules.ActionAllow {
 			d.decision = decisionAllow
-			return d
+			return d, entry
 		}
 	}
 	if s.mode == "enforce" && d.mode == "enforce" {
@@ -68,7 +76,7 @@ func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 	} else {
 		d.decision = decisionWouldDrop
 	}
-	return d
+	return d, entry
 }
 
 // iecEventDenialReason is the pre-rule fail-closed gate shared with preview.
@@ -95,8 +103,8 @@ func iecStrictPreempts(ev dpi.Event, parsing ics.Parsing) bool {
 }
 
 // iecContext builds the rule context of one IEC104 event.
-func (t *iecTable) iecContext(ev dpi.Event) *rules.ICSContext {
-	return iecContextFromDPIEvent(ev, t.safeRead)
+func (a *iecAdapter) iecContext(ev dpi.Event) *rules.ICSContext {
+	return iecContextFromDPIEvent(ev, a.safeRead)
 }
 
 func iecContextFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSContext {
@@ -130,53 +138,56 @@ type iecJudgement struct {
 
 // judgeLocked decides the events of newly framed APDUs; every event is
 // judged, even after a deny.
-func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) iecJudgement {
+func (a *iecAdapter) judgeLocked(t *sessionTable, s *trackedSession, evs []dpi.Event, now time.Time) iecJudgement {
 	var j iecJudgement
 	seen := map[string]map[string]bool{}
 	for _, ev := range evs {
 		if !strings.EqualFold(ev.Proto, iecProtocol) {
 			continue
 		}
-		if t.policy != nil {
-			ctx := s.ctx
-			ctx.ICS = t.iecContext(ev)
-			apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
-			if seen[apdu] == nil {
-				seen[apdu] = map[string]bool{}
-			}
-			for _, entry := range t.policy.MonitorMatches(ctx) {
-				if seen[apdu][entry.ID] {
-					continue
-				}
-				seen[apdu][entry.ID] = true
-				if t.shadow != nil {
-					t.shadow(t.snap, entry)
-				}
-				j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
-			}
-		}
-		d := t.decideLocked(s, ev)
-		s.inventoryDecisionLocked(ev, d)
-		if d.enforced() && !j.denied {
-			j.denied = true
-			j.trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
-		}
-		if d.decision != decisionAllow || d.log {
-			j.events = append(j.events, s.decisionEvent(ev, d, now))
-		}
-		if hasInspectionFindings(ev) {
-			j.findings = append(j.findings, iecFinding{ev: ev, decision: d.decision})
-		}
-		if t.reconnectLocked(s, ev) {
-			j.events = append(j.events, s.sessionEvent(outcomeReconnected, nil, now))
-		}
+		ctx := s.ctx
+		ctx.ICS = t.iecContext(ev)
+		d := t.decideLocked(&s.iecSession, ev)
+		a.judgeDecisionLocked(t, s, ev, ctx, d, seen, &j, now)
 	}
 	return j
 }
 
+func (a *iecAdapter) judgeDecisionLocked(t *sessionTable, s *trackedSession, ev dpi.Event, ctx rules.EvalContext, d iecDecision, seen map[string]map[string]bool, j *iecJudgement, now time.Time) {
+	if t.policy != nil {
+		apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+		if seen[apdu] == nil {
+			seen[apdu] = map[string]bool{}
+		}
+		for _, entry := range t.policy.MonitorMatches(ctx) {
+			if seen[apdu][entry.ID] {
+				continue
+			}
+			seen[apdu][entry.ID] = true
+			if t.shadow != nil {
+				t.shadow(t.snap, entry)
+			}
+			j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
+		}
+	}
+	if d.enforced() && !j.denied {
+		j.denied = true
+		j.trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+	}
+	if d.decision != decisionAllow || d.log {
+		j.events = append(j.events, s.decisionEvent(ev, d, now))
+	}
+	if hasInspectionFindings(ev) {
+		j.findings = append(j.findings, iecFinding{ev: ev, decision: d.decision})
+	}
+	if t.reconnectLocked(s, ev) {
+		j.events = append(j.events, s.sessionEvent(outcomeReconnected, nil, now))
+	}
+}
+
 // reconnectLocked reports the first STARTDT con of a new incarnation of a
 // client/server pair after an abort.
-func (t *iecTable) reconnectLocked(s *iecSession, ev dpi.Event) bool {
+func (t *sessionTable) reconnectLocked(s *trackedSession, ev dpi.Event) bool {
 	if !s.reconnects {
 		return false
 	}

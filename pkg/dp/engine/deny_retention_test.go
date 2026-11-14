@@ -39,6 +39,7 @@ func retentionEvictions(t *testing.T) float64 {
 // forceRetentionEviction fills the actual hard capacity, evicting the original
 // connection. No extra reset jobs are needed for these independent tombstones.
 func forceRetentionEviction(t *testing.T, e *Engine) {
+	forceSessionRetentionEviction(t, e)
 	t.Helper()
 	for port := 1; port <= deniedTCPCapacity; port++ {
 		if e.rememberDeniedTCP(retentionKey(uint16(port)), retentionKey(uint16(port)), false) == nil {
@@ -70,15 +71,17 @@ func TestDenyRetentionRetransmit(t *testing.T) {
 			t.Run(p.name+"/"+removal, func(t *testing.T) {
 				f := newResetFlow(t, p.port)
 				now := time.Now()
-				f.e.deniedTCPNow = func() time.Time { return now }
+				clock := installRetentionClock(f.e, now)
 				pkt := denyRetentionCommand(t, f, p)
 				hits := ruleHits(f.e, p.denied[0].rule)
 				if removal == "capacity eviction" {
 					forceRetentionEviction(t, f.e)
 				} else {
 					now = now.Add(deniedTCPLifetime)
+					clock.Store(now.UnixNano())
 					if removal == "sweep expiry" {
 						f.e.sweepFlows(now)
+						f.e.sessions.expire()
 					}
 				}
 				raw := pkt.Payload
@@ -124,28 +127,31 @@ func TestDenyRetentionReconnect(t *testing.T) {
 			t.Run(p.name+"/"+name, func(t *testing.T) {
 				f := newResetFlow(t, p.port)
 				now := time.Now()
-				f.e.deniedTCPNow = func() time.Time { return now }
+				clock := installRetentionClock(f.e, now)
 				denyRetentionCommand(t, f, p)
 				// Keep the normal 30-second denial cache and failed stream.
 				// Neither may strand this new handshake after 10 seconds.
 				now = now.Add(deniedTCPLifetime)
+				clock.Store(now.UnixNano())
 				if sweep {
 					f.e.sweepFlows(now)
+					f.e.sessions.expire()
 				}
 				f.isn, f.next = 800000, 0
 				f.syn()
 				read := p.read(2)
 				hits := ruleHits(f.e, p.name+"-read")
-				f.accept("read header prefix", read[:3])
+				retentionPrefix(f, "read header prefix", read[:3])
 				if got := ruleHits(f.e, p.name+"-read"); got != hits {
 					t.Fatalf("incomplete header decoded: %d -> %d", hits, got)
 				}
 				f.accept("read header and body tail", read[3:])
+				f.respondDNP3Read(2)
 				if got := ruleHits(f.e, p.name+"-read"); got != hits+1 {
 					t.Fatalf("reconnect read hits %d -> %d, want one", hits, got)
 				}
 				denied := p.denied[0]
-				f.accept("denied header prefix", denied.frame[:3])
+				retentionPrefix(f, "denied header prefix", denied.frame[:3])
 				f.deny("denied command tail", denied.rule, denied.frame[3:])
 			})
 		}
@@ -153,36 +159,60 @@ func TestDenyRetentionReconnect(t *testing.T) {
 }
 
 func TestDenyRetentionFixedLifetime(t *testing.T) {
-	f := newResetFlow(t, 502)
-	now := time.Now()
-	f.e.deniedTCPNow = func() time.Time { return now }
-	pkt := denyRetentionCommand(t, f, resetProtocols()[0])
-	d := f.e.deniedTCPOrder.Front().Value.(*deniedTCP)
-	deadline := d.expires
-	if deadline.Sub(now) != 10*time.Second {
-		t.Fatalf("lifetime = %v", deadline.Sub(now))
+	for _, p := range firstCommandProtocols() {
+		t.Run(p.name, func(t *testing.T) {
+			f := newResetFlow(t, p.port)
+			now := time.Now()
+			clock := installRetentionClock(f.e, now)
+			pkt := denyRetentionCommand(t, f, p)
+			if f.e.sessions.denials.Front() == nil {
+				t.Fatal("missing retained denial")
+			}
+			d := f.e.sessions.denials.Front().Value.(*trackedSession)
+			deadline := d.endedAt.Add(deniedTCPLifetime)
+			if deadline.Sub(now) != 10*time.Second {
+				t.Fatalf("lifetime = %v", deadline.Sub(now))
+			}
+			other := *f.fcFlow
+			other.client++
+			other.next = 0
+			other.syn()
+			other.accept("independent session", p.read(2))
+			other.respondDNP3Read(2)
+			now = now.Add(9 * time.Second)
+			clock.Store(now.UnixNano())
+			if got := f.handle(pkt); got.Action != capture.Drop {
+				t.Fatalf("duplicate = %+v", got)
+			}
+			oldSYN := connSegment(false, f.client, f.port, f.isn, capture.TCPFlagSYN, nil)
+			if got := f.handle(oldSYN); got.Action != capture.Drop {
+				t.Fatalf("old handshake resurrected denied tuple: %+v", got)
+			}
+			forged := connSegment(false, f.client, f.port, f.isn+999, capture.TCPFlagSYN, nil)
+			forged.Mark = 0
+			if got := f.handle(forged); got.Action != capture.Drop {
+				t.Fatalf("unproven handshake resurrected denied tuple: %+v", got)
+			}
+			if d.endedAt.Add(deniedTCPLifetime) != deadline || f.e.sessions.denials.Len() != 1 {
+				t.Fatal("duplicate refreshed the denial")
+			}
+			before := retentionEvictions(t)
+			now = deadline
+			clock.Store(now.UnixNano())
+			f.e.sweepFlows(now)
+			f.e.sessions.expire()
+			if f.e.sessions.denials.Len() != 0 || f.e.sessions.sessions[sessionKey{d.client, d.server}] == d {
+				t.Fatal("tombstone did not expire at its original deadline")
+			}
+			if got := retentionEvictions(t); got != before {
+				t.Fatalf("expiry counted as eviction: %v -> %v", before, got)
+			}
+			other.accept("independent session survives expiry", p.read(3))
+			if len(f.e.deniedTCP) != 0 {
+				t.Fatal("shared session created a parallel denial registry entry")
+			}
+		})
 	}
-	other := *f.fcFlow
-	other.client++
-	other.syn()
-	other.accept("independent session", modbusADU(2, 3, 0, 1))
-	now = now.Add(9 * time.Second)
-	if got := f.handle(pkt); got.Action != capture.Drop {
-		t.Fatalf("duplicate = %+v", got)
-	}
-	if d.expires != deadline || f.e.rememberDeniedTCP(d.key, d.service, false) != nil {
-		t.Fatal("duplicate refreshed the denial")
-	}
-	before := retentionEvictions(t)
-	now = deadline
-	f.e.sweepFlows(now)
-	if len(f.e.deniedTCP) != 0 || f.e.deniedTCPOrder.Len() != 0 || !d.retired {
-		t.Fatal("tombstone did not expire at its original deadline")
-	}
-	if got := retentionEvictions(t); got != before {
-		t.Fatalf("expiry counted as eviction: %v -> %v", before, got)
-	}
-	other.accept("independent session survives expiry", modbusADU(3, 3, 0, 1))
 }
 
 func TestDenyRetentionCapacity(t *testing.T) {
@@ -254,14 +284,19 @@ func TestDenyRetentionConcurrentEvictionPublication(t *testing.T) {
 	f := newResetFlow(t, 502)
 	loadResetPolicy(f.e)
 	now := time.Now()
-	f.e.deniedTCPNow = func() time.Time { return now }
+	installRetentionClock(f.e, now)
 	f.syn()
 	f.accept("read", modbusADU(1, 3, 0, 1))
 	pkt := f.segment(false, f.isn+f.next, 9000, ackPsh, firstCommandProtocols()[0].denied[0].frame)
 
-	// Pause reset preparation at its readiness check, after guard publication.
-	f.e.iec.health.mu.Lock()
-	release := sync.OnceFunc(f.e.iec.health.mu.Unlock)
+	// Stall the worker before reset work starts. Already-started I/O instead
+	// pins the tuple until completion; it cannot be cancelled by eviction.
+	started, resume := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	if !f.e.sessions.jobs.submit(func() { close(started); <-resume }) {
+		t.Fatal("reset worker full")
+	}
+	<-started
 	done := make(chan capture.Decision, 1)
 	finished := make(chan struct{})
 	t.Cleanup(func() {
@@ -276,12 +311,14 @@ func TestDenyRetentionConcurrentEvictionPublication(t *testing.T) {
 		defer close(finished)
 		done <- f.handle(pkt)
 	}()
-	tuple := tcpTupleKey(retentionKey(f.client))
+	client, server := f.endpoints()
+	tuple := sessionKey{client, server}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		f.e.flowMu.Lock()
-		published := f.e.deniedTCP[tuple] != nil
-		f.e.flowMu.Unlock()
+		f.e.sessions.mu.Lock()
+		s := f.e.sessions.sessions[tuple]
+		published := s != nil && s.state == sessionAborted
+		f.e.sessions.mu.Unlock()
 		if published {
 			break
 		}
@@ -317,7 +354,7 @@ func TestDenyRetentionExpiryCancelsQueuedReset(t *testing.T) {
 	f := newResetFlow(t, 502)
 	loadResetPolicy(f.e)
 	now := time.Now()
-	f.e.deniedTCPNow = func() time.Time { return now }
+	clock := installRetentionClock(f.e, now)
 	f.syn()
 	pkt := f.segment(false, f.isn, 9000, ackPsh, firstCommandProtocols()[0].denied[0].frame)
 	pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
@@ -325,7 +362,9 @@ func TestDenyRetentionExpiryCancelsQueuedReset(t *testing.T) {
 		t.Fatalf("denial = %+v", got)
 	}
 	now = now.Add(deniedTCPLifetime)
+	clock.Store(now.UnixNano())
 	f.e.sweepFlows(now)
+	f.e.sessions.expire()
 	f.isn, f.next = 800000, 0
 	f.syn()
 	f.accept("reconnect before old drop completion", modbusADU(3, 3, 0, 1))

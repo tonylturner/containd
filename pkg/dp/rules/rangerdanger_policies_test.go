@@ -64,7 +64,7 @@ func TestRangerDangerUSPolicyOutcomes(t *testing.T) {
 			for _, p := range probes {
 				ctx := rules.EvalContext{SrcZone: p.srcZone, DstZone: p.dstZone, SrcIP: net.ParseIP(p.src), DstIP: net.ParseIP(p.dst), Proto: p.proto, Port: p.port}
 				if p.modbusFC >= 0 {
-					ctx.ICS = &rules.ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: uint8(p.modbusFC), Direction: "request"}
+					ctx.ICS = &rules.ICSContext{Protocol: "modbus", MessageClass: rules.ClassRequest, HasFunctionCode: true, FunctionCode: uint8(p.modbusFC), Direction: "request"}
 				}
 				action, entry := ev.EvaluateMatch(ctx)
 				got := ""

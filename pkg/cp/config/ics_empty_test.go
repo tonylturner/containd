@@ -9,6 +9,7 @@ import (
 func TestICSPredicateEmpty(t *testing.T) {
 	zero, no := uint8(0), false
 	fields := []ICSPredicate{
+		{MessageClass: "autonomous"},
 		{Protocol: "modbus"}, {FunctionCode: []uint8{0}}, {UnitID: &zero},
 		{Addresses: []string{"0"}}, {ObjectClasses: []uint16{0}},
 		{ReadOnly: true}, {WriteOnly: true}, {Direction: "request"},

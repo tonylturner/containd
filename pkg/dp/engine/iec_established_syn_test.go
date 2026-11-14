@@ -20,10 +20,10 @@ func (h *iecHarness) establishedSYN(isn uint32, payload []byte) capture.Packet {
 	return p
 }
 
-func (h *iecHarness) sessionState() (iecState, bool) {
-	h.e.iec.mu.Lock()
-	defer h.e.iec.mu.Unlock()
-	s := h.e.iec.sessions[iecKey{client: netip.MustParseAddrPort("10.60.60.10:40000"), server: netip.MustParseAddrPort("10.30.30.30:2404")}]
+func (h *iecHarness) sessionState() (sessionState, bool) {
+	h.e.sessions.mu.Lock()
+	defer h.e.sessions.mu.Unlock()
+	s := h.e.sessions.sessions[sessionKey{client: netip.MustParseAddrPort("10.60.60.10:40000"), server: netip.MustParseAddrPort("10.30.30.30:2404")}]
 	if s == nil {
 		return 0, false
 	}
@@ -95,7 +95,7 @@ func TestIECEstablishedSYNOnSessionStates(t *testing.T) {
 	if d := h.e.handlePacket(h.establishedSYN(777, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECClosed {
 		t.Fatalf("SYN into the connection on the closed session = %+v, want Accept by %s", d, reasonIECClosed)
 	}
-	if st, _ := h.sessionState(); st != iecClosed {
+	if st, _ := h.sessionState(); st != sessionClosed {
 		t.Fatalf("session state %d, want closed", st)
 	}
 
@@ -114,7 +114,7 @@ func TestIECEstablishedSYNOnSessionStates(t *testing.T) {
 	if d := h.e.handlePacket(h.establishedSYN(100, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECAccept {
 		t.Fatalf("learn SYN = %+v, want Accept by %s", d, reasonIECAccept)
 	}
-	if st, ok := h.sessionState(); !ok || st != iecSynSent {
+	if st, ok := h.sessionState(); !ok || st != sessionSynSent {
 		t.Fatalf("learn session state %d (%v), want opened", st, ok)
 	}
 }

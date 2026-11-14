@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -12,8 +13,13 @@ import (
 
 // ruleSnapshots publishes an immutable snapshot and its compiled evaluator
 // together. Readers never compile rules or see mismatched generations.
-type ruleSnapshots struct{ current atomic.Pointer[compiledRules] }
+type ruleSnapshots struct {
+	current   atomic.Pointer[compiledRules]
+	publishMu sync.Mutex
+	nextEpoch rulesEpoch
+}
 type compiledRules struct {
+	epoch     rulesEpoch
 	snapshot  *rules.Snapshot
 	evaluator *rules.Evaluator
 	shadow    *shadowState
@@ -22,16 +28,12 @@ type compiledRules struct {
 var emptyRulesEvaluator = rules.NewEvaluator(nil)
 
 func (r *ruleSnapshots) Store(snap *rules.Snapshot) {
-	r.current.Store(&compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap)})
+	r.publish(snap, nil, false)
 }
 
 // Update publishes resolver inputs without resetting install counters.
 func (r *ruleSnapshots) Update(snap *rules.Snapshot) {
-	next := &compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap)}
-	if old := r.current.Load(); old != nil {
-		next.shadow = old.shadow
-	}
-	r.current.Store(next)
+	r.publish(snap, nil, true)
 }
 
 func (r *ruleSnapshots) Load() *rules.Snapshot {
@@ -49,5 +51,19 @@ func (r *ruleSnapshots) Evaluator() *rules.Evaluator {
 }
 
 func (r *ruleSnapshots) Install(snap *rules.Snapshot, since time.Time) {
-	r.current.Store(&compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap), shadow: newShadowState(snap, since)})
+	r.publish(snap, newShadowState(snap, since), false)
+}
+
+// Every publication allocates under the same lock, independently of the public
+// snapshot version. Compilation and Store cannot reorder concurrent epochs.
+func (r *ruleSnapshots) publish(snap *rules.Snapshot, shadow *shadowState, preserveCounters bool) {
+	r.publishMu.Lock()
+	defer r.publishMu.Unlock()
+	if preserveCounters {
+		if old := r.current.Load(); old != nil {
+			shadow = old.shadow
+		}
+	}
+	r.nextEpoch++
+	r.current.Store(&compiledRules{epoch: r.nextEpoch, snapshot: snap, evaluator: rules.NewEvaluator(snap), shadow: shadow})
 }

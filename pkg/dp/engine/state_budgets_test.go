@@ -33,7 +33,9 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 	const offered = 88 // More than ten times the directional flow-slot limit.
 	c := &stateBudgetClock{}
 	c.nanos.Store(time.Now().UnixNano())
-	e := stateBudgetEngine(t, limits.Limits{MaxFlows: 8, MaxTopTalkers: 2, MaxInspectionBytes: 65536}, limits.NewLedger(c.now), c)
+	// Isolate flow-slot churn from inspection refusal: four full shared
+	// session/decoder owners need more than the old directional streams.
+	e := stateBudgetEngine(t, limits.Limits{MaxFlows: 8, MaxTopTalkers: 2, MaxInspectionBytes: 256 << 10}, limits.NewLedger(c.now), c)
 	want := map[stateBudgetHit]uint64{}
 	var legacy, observed bool
 	for wave := range 3 {
@@ -52,7 +54,7 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 					expected = capture.Drop
 				}
 				if d.Action != expected || !admitted && enforce && d.Reason != "state_limit" {
-					t.Fatalf("wave %d identity %d packet %d: %+v want %v", wave, i, pi, d, expected)
+					t.Fatalf("wave %d identity %d packet %d: %+v want %v; budget=%+v", wave, i, pi, d, expected, e.budget.Status())
 				}
 				if !admitted {
 					m := limits.ModeMonitor
@@ -86,9 +88,9 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 		if packets != int64((wave+1)*offered*4) {
 			t.Fatalf("packet accounting under refusal: %d", packets)
 		}
-		c.advance(6 * time.Minute) // Both the 30 s opening TTL and 5 min established TTL.
+		c.advance(sessionIdleTTL + time.Minute) // Both flow TTLs and the shared session owner.
 		e.sweepFlows(c.now())
-		e.iec.expire()
+		e.sessions.expire()
 		assertStateBudgetCaps(t, e)
 		if e.LimitOccupancy().Entries != 0 {
 			t.Fatal("expired flows retained")
@@ -113,9 +115,9 @@ func testStateBudgetHeadroom(t *testing.T) {
 	// used by both managers. Observe may retain only 3072 of the 4096 bytes.
 	const charge = 1 + limits.HeldPacketHeaderAllowanceBytes + limits.HeldTokenMetadataBytes
 	for i := range 88 {
-		e.iec.mu.Lock()
-		ok := e.iec.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false)
-		e.iec.mu.Unlock()
+		e.sessions.mu.Lock()
+		ok := e.sessions.holdCreditLocked(capture.NewToken(1, uint32(i+1)), 1, false, "iec104")
+		e.sessions.mu.Unlock()
 		if ok != (i < 3) {
 			t.Fatalf("monitor token %d admitted=%t", i, ok)
 		}
@@ -124,9 +126,9 @@ func testStateBudgetHeadroom(t *testing.T) {
 			t.Fatal("monitor consumed reserved headroom")
 		}
 	}
-	e.iec.mu.Lock()
-	ok := e.iec.holdCreditLocked(capture.NewToken(2, 1), 1, true)
-	e.iec.mu.Unlock()
+	e.sessions.mu.Lock()
+	ok := e.sessions.holdCreditLocked(capture.NewToken(2, 1), 1, true, "iec104")
+	e.sessions.mu.Unlock()
 	if !ok || e.budget.Status().InUse != 4*charge {
 		t.Fatal("monitor flood starved enforcement")
 	}
@@ -366,7 +368,7 @@ func testStateBudgetReconfigure(t *testing.T) {
 	defer release()
 	e.dpiMgr = dpi.NewManager(gate)
 	e.dpiMgr.SetResources(e.inspectionResources())
-	e.iec.dpi = e.dpiMgr
+	e.sessions.dpi = e.dpiMgr
 	p := stateBudgetTrace(0, true, c.now())[0]
 	if d := e.HandlePacket(p); d.Action != capture.Repeat {
 		t.Fatal(d)
@@ -447,10 +449,10 @@ func testStateBudgetRebind(t *testing.T) {
 	}
 	legacy, observer := e.dpiMgr, e.observation
 	for i := range 3 {
-		b, table, epoch := e.budget, e.iec, e.epoch.Load()
+		b, table, epoch := e.budget, e.sessions, e.epoch.Load()
 		tok := capture.NewToken(uint64(i+1), 1)
 		table.mu.Lock()
-		ok := table.holdCreditLocked(tok, 1, true)
+		ok := table.holdCreditLocked(tok, 1, true, "iec104")
 		table.mu.Unlock()
 		if !ok {
 			t.Fatal("hold admission")
@@ -458,20 +460,39 @@ func testStateBudgetRebind(t *testing.T) {
 		assertStateBudgetCaps(t, e)
 		old := e.hooks
 		old.onSource(capture.SourceEvent{Generation: uint64(i + 1), Terminal: true, Err: capture.ErrQueueClosed})
+		if i == 0 {
+			// Losing the inline source must revoke the live enforcing stream,
+			// including its grant, while retaining configuration owners.
+			if after := b.Status().InUse; after >= baseline {
+				t.Fatal("source loss retained live enforcing inspection", b.Status())
+			} else {
+				baseline = after
+			}
+			table.mu.Lock()
+			for _, s := range table.sessions {
+				if s.mode == "enforce" && s.state != sessionAborted {
+					t.Error("source loss left live enforcing authority")
+				}
+			}
+			if table.pairingTotal != 0 {
+				t.Error("source loss retained request grants")
+			}
+			table.mu.Unlock()
+		}
 		if b.Status().InUse != baseline {
 			t.Fatal("source flush changed non-held owner credit", b.Status())
 		}
 		if err := e.RetryProtection(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if e.epoch.Load() != epoch+1 || e.budget != b || e.iec != table || old == e.hooks || e.dpiMgr != legacy || e.observation != observer {
+		if e.epoch.Load() != epoch+1 || e.budget != b || e.sessions != table || old == e.hooks || e.dpiMgr != legacy || e.observation != observer {
 			t.Fatal("capture retry rebuilt configuration owners or did not rebind")
 		}
 		// Reusing a kernel packet ID in a new capture generation must not allow
 		// an old completion to refund its credit.
 		next := capture.NewToken(uint64(i+2), 1)
 		table.mu.Lock()
-		ok = table.holdCreditLocked(next, 1, true)
+		ok = table.holdCreditLocked(next, 1, true, "iec104")
 		table.mu.Unlock()
 		if !ok {
 			t.Fatal("new generation admission")
