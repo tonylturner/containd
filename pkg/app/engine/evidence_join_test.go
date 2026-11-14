@@ -31,7 +31,7 @@ func TestDS34ConsumersEvidenceOutcomeJoinNeverFabricatesDelivery(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := "session/c/0"
-			attrs := map[string]any{eventfields.KeyAPDUID: id, eventfields.KeyDecision: tc.outcome, eventfields.KeyOutcome: tc.outcome, "delivery": tc.outcome, eventfields.KeyMode: "monitor"}
+			attrs := map[string]any{eventfields.KeyAPDUID: id, eventfields.KeyDecision: tc.outcome, eventfields.KeyOutcome: tc.outcome, eventfields.KeyMode: "monitor"}
 			// Outcomes may precede decode; neither order implies forwarding.
 			a.watch.offer(nil, []dpi.Event{{Proto: "iec104", Kind: tc.kind, Attributes: attrs}})
 			state := flow.NewState(flow.Key{SrcIP: net.ParseIP("192.0.2.1"), DstIP: net.ParseIP("192.0.2.2"), SrcPort: 40000, DstPort: 2404, Proto: 6}, time.Now())
