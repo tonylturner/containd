@@ -64,7 +64,13 @@ components:
       example: '0123456789abcdef.42'
     IEC104Pressure:
       type: object
-      description: Observational pressure; totals persist until the engine process restarts.
+      description: >-
+        Observational pressure. Session and held-packet gauges count IEC 104 only.
+        The 4096-slot live-session pool is shared by inspected protocols; generic
+        denied tuples have a separate 16384-entry, 10-second bound excluded from
+        these gauges. State-limit occupancy combines both pools (maximum 20480
+        under iec_sessions). Abort and enforcement I/O totals are shared
+        process-lifetime counters.
       required: [heldPackets, heldBytes, oldestPendingSeconds, activeSessions, trackedSessions, limits, aborts, resetWorkerRejections, verdictFailures, injectorFailures]
       properties:
         heldPackets: { type: integer, minimum: 0 }
@@ -580,6 +586,18 @@ components:
           properties:
             observation_only: {type: boolean, description: True only for passive observation decoding; no verdict authority.}
             binding_source: {type: string, enum: [observation]}
+            message_class:
+              type: string
+              enum: [request, solicited, autonomous, session, unknown]
+              description: Runtime ICS classification; not transaction or delivery authority.
+            pairing_outcome:
+              type: string
+              enum: [paired, unpaired, expired, ambiguous, unsupported, unknown]
+              description: Retained runtime outcome; monitor observations do not authorize enforce traffic.
+            pairing_reason:
+              type: string
+              description: Bounded runtime pairing code, not delivery evidence.
+              enum: [paired, unpaired, pairing_expired, pairing_ambiguous, pairing_unsupported, pairing_unknown, pairing_mismatch, autonomous_rule_required, session_rule_required, message_timeout, state_limit]
         timestamp: {type: string, format: date-time}
         srcIp: {type: string}
         dstIp: {type: string}
@@ -719,7 +737,16 @@ components:
         ICS predicate of a firewall rule. Decoding is strict: unknown keys
         (exact spelling) and duplicate keys are rejected. `{}` is a pure
         L3/L4 rule. Semantic values need `protocol`. OR within a list, AND
-        across fields; an absent field matches any value.
+        across fields. Omitted messageClass on an enforcing ALLOW covers ordinary
+        request/solicited classes only, not autonomous data or session controls.
+        Other absent selectors match any value. Modbus/DNP3/IEC enforce requests
+        require an explicit ICS ALLOW; default/plain ALLOW cannot mint grants.
+        Replies need a compatible allowed request in the same observed TCP session;
+        unpaired, expired, ambiguous, mismatched or unsupported replies reset it.
+        IEC replies additionally require response-rule ALLOW. Monitor verdicts
+        are unchanged. A decoded descriptor does not establish enforcing support:
+        IEC reset-process105 is unsupported; tolerant parsing cannot authorize
+        unsupported procedures or profile-invalid gated units.
 
         New lists reject null, empty arrays and null items on create/replace;
         omit for ANY. The general /firewall/rules/{id} merge PATCH uses null
@@ -772,6 +799,21 @@ components:
           type: string
           enum: [modbus, dnp3, iec104, cip]
           description: 'Unsupported names return 400: rule <id> ics protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
+        messageClass:
+          type: string
+          enum: [autonomous, session]
+          description: >-
+            DNP3/IEC 104 only; requires protocol and direction. Autonomous requires
+            response. Omission on an enforcing ALLOW covers ordinary request/solicited
+            classes only. Station, CA and point selectors remain optional where
+            applicable. Session controls have no application object selectors;
+            DNP3 may select FC0 (Confirm), or omit for link controls too.
+            Autonomous DNP3 may select only FC130. Neither explicit class accepts
+            writeOnly, unitId, CIP selectors, selectExecute, commandStates or
+            commandQualifiers, even with zero/false values. Session rejects
+            addresses, groups, variations and IEC ASDU selectors by presence.
+            IEC autonomous permits monitor types with COT1-3 or type70/COT4,
+            never negative confirmations.
         functionCode:
           description: >
             Function/service codes (not iec104). Accepted forms: integer
@@ -1064,6 +1106,9 @@ components:
     LearnDNP3:
       additionalProperties: false
       properties:
+        applicationUns:
+          type: boolean
+          description: Decoded application UNS flag, including explicit false.
         functionCode:
           type: integer
         master:
@@ -1375,6 +1420,15 @@ components:
     LearnObservation:
       additionalProperties: false
       properties:
+        messageClass:
+          type: string
+          description: Decoded classification, not transaction authority.
+        pairingOutcome:
+          type: string
+          description: Retained runtime stamp; offline evidence does not certify live pairing.
+        pairingReason:
+          type: string
+          description: Retained runtime reason, not delivery evidence.
         authority:
           $ref: '#/components/schemas/LearnAuthority'
         capturedAt:
@@ -1468,6 +1522,11 @@ components:
           type: array
         delivery:
           type: string
+          enum: [unknown, blocked]
+          description: >-
+            No supported capture mode proves delivery. ALLOW, NF_REPEAT submission,
+            passive observation and predicate matches are not delivered evidence.
+            The delivered value is neither emitted nor accepted for normalized evidence.
         evidence:
           items:
             $ref: '#/components/schemas/LearnEvidenceRef'
@@ -1727,6 +1786,10 @@ components:
       - transport
       type: object
     LearnVersions:
+      description: >-
+        Current evaluator is ics-5 and generator exact-10. Proofs bound to different
+        versions are withheld or recertified. Resolved historical staging retries
+        may reconcile identical candidate rules only, never introduce missing rules.
       additionalProperties: false
       properties:
         decoder:
@@ -1923,6 +1986,23 @@ components:
             backend: {type: string}
             listenAddress: {type: string}
             listenPort: {type: integer}
+    PairingPreview:
+      type: object
+      required: [paired, unpaired, expired, ambiguous, unsupported, unknown, reasons]
+      description: >-
+        Runtime stamps on predicate-selected retained ICS events, not candidate
+        admission or delivery. Unstamped or inconsistent historical evidence is
+        unknown. Reasons are bounded distinct codes without session/request IDs.
+        Ruleset previews count each selected event once, independent of overlap;
+        they do not replay grants or predict candidate admission.
+      properties:
+        paired: {type: integer, minimum: 0}
+        unpaired: {type: integer, minimum: 0}
+        expired: {type: integer, minimum: 0}
+        ambiguous: {type: integer, minimum: 0}
+        unsupported: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+        reasons: {type: array, uniqueItems: true, items: {type: string}}
     RulePreviewResponse:
       description: Counts matches of this one rule in isolation, not its effect in ordered policy.
       type: object
@@ -1944,13 +2024,15 @@ components:
           allOf:
           - {$ref: '#/components/schemas/ICSCoverageRule'}
           description: Coverage of the previewed rule under the running engine; omitted for a rule without an ICS protocol.
+        pairing: {$ref: '#/components/schemas/PairingPreview'}
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
           description: >-
             Reports a rule that matches nothing under the running identity bindings and zone
             interfaces, or whose addresses share no family, which explains its zero matches.
-            Omitted when there are none.
+            Also reports hard-cutover request pairing and explicit autonomous/session
+            permissions, even with no retained events. Omitted when there are none.
     AVConfig:
       description: >-
         Antivirus settings. A stored failOpenIcs still loads and is ignored; scan.icsZones and
@@ -2378,6 +2460,18 @@ components:
           properties:
             observation_only: {type: boolean}
             binding_source: {type: string, enum: [observation]}
+            message_class:
+              type: string
+              enum: [request, solicited, autonomous, session, unknown]
+              description: Runtime ICS classification; not transaction or delivery authority.
+            pairing_outcome:
+              type: string
+              enum: [paired, unpaired, expired, ambiguous, unsupported, unknown]
+              description: Retained runtime outcome; monitor observations do not authorize enforce traffic.
+            pairing_reason:
+              type: string
+              description: Bounded runtime pairing code, not delivery evidence.
+              enum: [paired, unpaired, pairing_expired, pairing_ambiguous, pairing_unsupported, pairing_unknown, pairing_mismatch, autonomous_rule_required, session_rule_required, message_timeout, state_limit]
         FlowID: {type: string}
         transportConnectionId: {type: string, description: Local transport connection incarnation established from verified evidence and retained across later evidence failures; independent of FlowID and protocol session handles.}
         correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
@@ -3680,7 +3774,7 @@ components:
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
-          description: Rules of the installed ruleset that match nothing or that an ALLOW shadows; omitted when there are none.
+          description: Installed predicate/shadow warnings and hard-cutover request pairing and explicit autonomous/session requirements (including boot replay); omitted when there are none.
       type: object
     SchedulePlannerStatus:
       type: object
@@ -3748,6 +3842,9 @@ components:
         (shadowedBy), of any deciding action. Inspection warnings (inspection) name
         disabled DPI, a disabled decoder or an overlapping IP/CIDR exclusion;
         uninspectable enforce transport traffic is dropped until repaired.
+        Inspection also reports request-pairing cutover, missing explicit enforcing
+        ICS request ALLOWs and explicit autonomous/session-rule requirements.
+        Cutover occurs at boot replay as well as commit, even without retained events.
       properties:
         ruleId: {type: string}
         predicate:
@@ -3832,6 +3929,7 @@ components:
       type: object
     RulesICSPredicate:
       properties:
+        messageClass: {type: string, enum: [autonomous, session], description: "Compiled DNP3/IEC104 selector; requires Protocol and Direction. Omitted on enforcing ALLOW means ordinary request/solicited classes only."}
         Addresses: {items: {type: string}, type: array}
         Direction: {type: string}
         FunctionCode: {format: byte, type: string}
@@ -7835,10 +7933,11 @@ paths:
                         enum: [refuse, open, pass]
                         description: The scanning gate's admission state sampled at request time and compiled into the preview; omitted when enforcement is disabled.
                       gateAdmitReason: {type: string, description: What the sampled admission means for the candidate's gated connections; omitted when enforcement is disabled}
+                  pairing: {$ref: '#/components/schemas/PairingPreview'}
                   warnings:
                     type: array
                     items: {$ref: '#/components/schemas/RuleWarning'}
-                    description: Candidate rules that match nothing or that an ALLOW shadows, in rule ID order; omitted when there are none.
+                    description: Candidate predicate/shadow warnings and hard-cutover request pairing and explicit class requirements, even without retained events; omitted when there are none.
                   icsCoverage:
                     type: array
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
