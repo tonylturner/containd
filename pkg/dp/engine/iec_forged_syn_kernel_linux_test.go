@@ -41,15 +41,19 @@ func startIECStation(t *testing.T) *kernelServer {
 	})
 }
 
-// startIECEngine runs the engine with one enforce IEC 104 envelope from the
-// client namespace to the station.
+// startIECEngine runs the engine with an enforce IEC 104 envelope from the
+// client namespace to the station, including explicit S/U-frame permission.
 func startIECEngine(t *testing.T, ctx context.Context) *Engine {
 	t.Helper()
-	return startKernelEngine(t, ctx, rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
+	station := rules.Entry{
 		ID: "iec104-station", Sources: []string{"198.18.50.0/24"}, Destinations: []string{fcServerIP + "/32"},
 		Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(iec104Port)}},
 		ICS:       rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow,
-	}}})
+	}
+	// Message ALLOWs do not authorize session control in either direction.
+	session := station
+	session.ID, session.ICS.MessageClass = "iec104-session", string(rules.ClassSession)
+	return startKernelEngine(t, ctx, rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{station, session}})
 }
 
 // startdt sends STARTDT act and requires STARTDT con.
