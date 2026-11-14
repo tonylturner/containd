@@ -104,7 +104,7 @@ type Quality struct {
 // must not be inferred from an ALLOW, a passive capture or a shadow match.
 type Outcome struct {
 	Decisions []Decision    `json:"decisions"`
-	Delivery  string        `json:"delivery"` // unknown|delivered|blocked
+	Delivery  string        `json:"delivery"` // unknown|blocked
 	Evidence  []EvidenceRef `json:"evidence"`
 }
 
