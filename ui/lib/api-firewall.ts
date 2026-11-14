@@ -19,9 +19,11 @@ export type Protocol = {
   port?: string;
 };
 
-/** Effective predicate: omit a selector to match any value. */
+/** Effective predicate; messageClass omission has enforce-mode semantics. */
 export type ICSPredicate = {
   protocol?: string;
+  /** DNP3/IEC 104 only; requires direction (autonomous is response-only). */
+  messageClass?: "autonomous" | "session";
   functionCode?: number[];
   unitId?: number;
   addresses?: string[];
@@ -186,8 +188,20 @@ export type RulePreview = {
   time_range: { start: string; end: string } | null;
   total_events: number;
   warnings?: RuleWarning[];
+  pairing?: PairingPreview;
   /** The candidate's ICS coverage under the running settings; absent without an ICS protocol. */
   icsCoverage?: ICSCoverageRule;
+};
+
+/** Retained runtime stamps, not candidate authorization or delivery. */
+export type PairingPreview = {
+  paired: number;
+  unpaired: number;
+  expired: number;
+  ambiguous: number;
+  unsupported: number;
+  unknown: number;
+  reasons: string[];
 };
 
 /**

@@ -278,7 +278,12 @@ exclusions never lower a rule. Coverage appears in:
 Generic inline ICS streams in an enforce scope also fail closed on framing,
 reassembly, decoder faults and retained inspection budget exhaustion
 (`state_limit`), as described above. Outside an enforce scope,
-a parse failure alone does not block delivery. Strict parsing can additionally
+a parse failure alone does not block delivery. Modbus, DNP3 and IEC 104 additionally
+buffer complete units and require explicit request permissions, compatible
+solicited replies and explicit autonomous/session class rules. Unsupported
+procedures or profile-invalid gated units reset the enforcing session even with
+tolerant parsing. See [reply pairing](ics-dpi.md#enforce-mode-reply-pairing-and-upgrade-cutover)
+for hard-cutover warnings, procedure support and deadlines. Strict parsing can additionally
 deny decoded messages with conformance or undecoded findings; see
 [ICS DPI](ics-dpi.md).
 

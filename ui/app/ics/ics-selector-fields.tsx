@@ -2,6 +2,7 @@
 
 import { UNSUPPORTED_UNIT_ID, type GenericSelectorDraft } from "./ics-shared";
 import { Disclosure } from "../../components/Disclosure";
+import { ICSMessageClass } from "./ics-message-class";
 
 /** Shared by both rule editors; blank selectors mean ANY. */
 export function ICSSelectorFields({
@@ -19,9 +20,11 @@ export function ICSSelectorFields({
     : protocol === "cip"
       ? [["instances", "Instances (0-65535)"], ["attributes", "Attributes (0-65535)"], ["tags", "Tag paths"]] as const
       : [];
-  const advancedSet = fields.some(([key]) => draft[key].trim() !== "") || draft.direction !== "";
+  const advancedSet = fields.some(([key]) => draft[key].trim() !== "") || draft.direction !== "" || (protocol === "dnp3" && draft.messageClass !== "");
   return (
     <div className="space-y-3">
+      {protocol === "dnp3" && <ICSMessageClass value={draft.messageClass} direction={draft.direction}
+        onChange={messageClass => onChange({ ...draft, messageClass })} disabled={disabled} />}
       {(protocol === "dnp3" || protocol === "cip") && unitId !== "" && (
         <div className="space-y-2">
           <p role="alert" className="text-sm text-red-400">{UNSUPPORTED_UNIT_ID}</p>

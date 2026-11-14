@@ -852,6 +852,12 @@ The response contains `heldPackets`, `heldBytes`, `oldestPendingSeconds`,
 the engine process lifetime. `trackedSessions` includes closed sessions and tombstones, whereas
 `activeSessions` counts live incarnations and replacement handshakes. Verdict
 failures cover the shared inline pipeline (excluding intentional queue closure).
+Session and held-packet gauges count IEC 104 only. The sessions limit is the
+4,096-slot live-session pool shared by the inspected protocols; generic
+denied-tuple tombstones have a separate 16,384-entry, 10-second bound and are
+excluded from IEC gauges. State-limit occupancy reports both pools together,
+with a maximum of 20,480 under the existing `iec_sessions` table label.
+Abort and enforcement I/O totals are shared process-lifetime counters.
 See [IEC 104 holdback diagnostics](ics-dpi.md#iec-104-holdback-diagnostics) for
 bounds and counting semantics; the OpenAPI schema lists every field and reason.
 In combined `all` mode, the management `/metrics` serves these dataplane series

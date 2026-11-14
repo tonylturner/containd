@@ -4,13 +4,73 @@ import { openEditor } from "./fixtures/ics-editor";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`message class editor with ${colorScheme} preference`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+    await openEditor(page, "ics", { protocol: "dnp3", messageClass: "session", direction: "request" });
+    const form = page.locator("div.fixed.inset-0");
+    await expect(form.getByLabel("Message class")).toHaveValue("session");
+    await expect(form.getByLabel("Direction", { exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`message-class-${colorScheme}.png`), animations: "disabled" });
+  });
+}
 
 for (const surface of ["ics", "firewall"]) {
   const save = surface === "ics" ? "Save filter" : "Save changes";
+  for (const protocol of ["dnp3", "iec104"]) {
+    for (const messageClass of ["autonomous", "session"] as const) {
+      test(`${surface}: ${protocol} ${messageClass} previews, saves and clears`, async ({ page }) => {
+        const seen = await openEditor(page, surface, { protocol, direction: "response", messageClass });
+        const form = page.locator("div.fixed.inset-0");
+        await expect(form.getByLabel("Message class")).toHaveValue(messageClass);
+        if (protocol === "dnp3") await expect(form.getByRole("button", { name: "Advanced protocol fields", exact: true })).toHaveAttribute("aria-expanded", "true");
+        await form.getByRole("button", { name: "Preview impact" }).click();
+        await expect.poll(() => seen.previews.length).toBe(1);
+        expect(seen.previews[0].ics).toMatchObject({ protocol, messageClass, direction: "response" });
+        expect(seen.previews[0].ics).not.toHaveProperty("writeOnly");
+        await form.getByRole("button", { name: save }).click();
+        await expect.poll(() => seen.patches.length).toBe(1);
+        expect(seen.previews[0].ics).toEqual(effectivePredicate(seen.patches[0].ics));
+        expect(seen.saved().ics?.messageClass).toBe(messageClass);
+        const loaded = page.waitForResponse(r => new URL(r.url()).pathname === "/api/v1/firewall/rules");
+        await page.reload();
+        await loaded;
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        await expect(form.getByLabel("Message class")).toHaveValue(messageClass);
+        await form.getByLabel("Message class").selectOption("");
+        await form.getByRole("button", { name: "Preview impact" }).click();
+        await expect.poll(() => seen.previews.length).toBe(2);
+        await form.getByRole("button", { name: save }).click();
+        await expect.poll(() => seen.patches.length).toBe(2);
+        expect(seen.patches[1].ics.messageClass).toBeNull();
+        expect(seen.previews[1].ics?.messageClass).toBeUndefined();
+        expect(seen.saved().ics?.messageClass).toBeUndefined();
+      });
+    }
+    test(`${surface}: ${protocol} class requires direction and autonomous requires response`, async ({ page }) => {
+      const seen = await openEditor(page, surface, { protocol });
+      const form = page.locator("div.fixed.inset-0");
+      await form.getByLabel("Message class").selectOption("session");
+      await expect(form.getByRole("alert")).toContainText("explicit direction");
+      await form.getByRole("button", { name: "Preview impact" }).click();
+      await form.getByRole("button", { name: save }).click();
+      expect(seen.patches).toEqual([]);
+      expect(seen.previews).toEqual([]);
+      await form.getByLabel("Direction", { exact: true }).selectOption("request");
+      await form.getByLabel("Message class").selectOption("autonomous");
+      await expect(form.getByRole("alert")).toContainText("response direction");
+      await form.getByRole("button", { name: "Preview impact" }).click();
+      await form.getByRole("button", { name: save }).click();
+      expect(seen.patches).toEqual([]);
+      expect(seen.previews).toEqual([]);
+    });
+  }
   for (const [text, codes] of [["", undefined], [" ", undefined], ["3,", [3]], [",,3,,", [3]], ["0", [0]]] as const) {
     test(`${surface}: ${JSON.stringify(text)} preview equals save`, async ({ page }) => {
       const seen = await openEditor(page, surface, { protocol: "modbus", direction: "request" });
       const form = page.locator("div.fixed.inset-0");
+      await expect(form.getByLabel("Message class")).toHaveCount(0);
       await form.getByPlaceholder("3, 16").fill(text);
       await form.getByRole("button", { name: "Preview impact" }).click();
       await expect.poll(() => seen.previews.length).toBe(1);

@@ -4,7 +4,7 @@ import {
   type ICSCoverageReport,
   type ICSCoverageRule,
 } from "./api-ics-coverage";
-import type { RuleWarning } from "./api-firewall";
+import type { PairingPreview, RuleWarning } from "./api-firewall";
 
 import type { ApiResult, ConfigSnapshot, DataPlaneConfig } from "./api";
 
@@ -20,6 +20,7 @@ export type RulesetPreview = {
     gateAdmitReason?: string;
   };
   warnings?: RuleWarning[];
+  pairing?: PairingPreview;
   /** Static coverage of the candidate's ICS rules; GET /dataplane/ics-coverage is the UI's source. */
   icsCoverage?: ICSCoverageRule[];
   // The preview also carries engineStatus; GET /dataplane/ruleset/status is the UI's source.

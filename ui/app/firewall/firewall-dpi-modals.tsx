@@ -309,7 +309,7 @@ export function ICSDPIConfigModal({
                       }))}
                       className="rounded-xs border bg-(--surface2) px-2 py-1.5 text-xs text-(--text) outline-hidden focus-visible:ring-2 focus-visible:ring-(--amber)"
                     >
-                      <option value="tolerant">Inspect supported messages (tolerant)</option>
+                      <option value="tolerant">Decode tolerantly (runtime safety still applies)</option>
                       <option value="strict">Treat unrecognized messages as violations (strict)</option>
                     </select>
                   </label>
@@ -424,13 +424,16 @@ export function ICSDPIConfigModal({
           ))}
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
-          Inspect supported messages to apply rules to recognized content and alert on the rest.
+          Tolerant decoding reports unrecognized content; it does not authorize unsupported procedures.
           Strict parsing treats unrecognized or nonconformant messages as violations.
           Enforce blocks these violations; Monitor reports what would be dropped without blocking.
-          Lost message boundaries and integrity faults reset the connection in both modes when enforcing.
+          In enforcing Modbus, DNP3 and IEC 104 sessions, unsupported procedures, profile-invalid units,
+          lost boundaries and integrity faults reset the connection under either parsing setting.
           <details className="mt-2">
             <summary className="cursor-pointer">Technical details</summary>
-            Saved parsing values: <code>tolerant</code> inspects supported messages; <code>strict</code> blocks unrecognized messages when enforcing.
+            Saved parsing values: <code>tolerant</code> keeps decoded observations;
+            <code>strict</code> treats unrecognized content as a violation. Neither bypasses request pairing,
+            explicit class rules or runtime safety checks. Monitor verdicts are unchanged.
           </details>
         </div>
 
