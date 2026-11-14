@@ -12,6 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -26,8 +27,7 @@ type sessionActions struct {
 	drops            []capture.Resolution // held tokens to drop
 	events           []iecTelemetry
 	jobs             []func()
-	inventoryObserve []*iecInventoryCommand
-	learnerDelivery  []*iecInventoryCommand
+	inventoryObserve []inventory.IEC104Observation
 	// retired reports that the tuple's connection ended or a new one
 	// started on it, so the engine ends the connection's conformance
 	// alert identity.
@@ -39,7 +39,6 @@ func (a *sessionActions) merge(b sessionActions) {
 	a.events = append(a.events, b.events...)
 	a.jobs = append(a.jobs, b.jobs...)
 	a.inventoryObserve = append(a.inventoryObserve, b.inventoryObserve...)
-	a.learnerDelivery = append(a.learnerDelivery, b.learnerDelivery...)
 	a.retired = a.retired || b.retired
 }
 
@@ -65,7 +64,6 @@ func (t *sessionTable) abortLocked(s *trackedSession, reason *iecAbortReason, tr
 	if t.detached || s.state == sessionAborted {
 		return acts
 	}
-	acts.merge(t.iecAdapter.endLocked(t, s))
 	acts.retired = true
 	t.countAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
@@ -263,7 +261,9 @@ func (t *sessionTable) apply(acts sessionActions) {
 
 // finish emits events and queues jobs; drops were resolved by the caller.
 func (t *sessionTable) finish(acts sessionActions) {
-	t.iecAdapter.finishDelivery(acts)
+	for _, observation := range acts.inventoryObserve {
+		t.inventory.ObserveIEC104(observation)
+	}
 	if len(acts.events) > 0 {
 		t.emit(acts.events)
 	}
@@ -308,7 +308,6 @@ func (t *sessionTable) onVerdict(tok capture.Token, v capture.Verdict, err error
 	if s != nil && t.sessions[sessionKey{s.client, s.server}] == s && s.mode == "enforce" && (s.state == sessionEstablished || s.state == sessionSynSent) && (err != nil || v != expected) {
 		acts.merge(t.abortLocked(s, abortTransport, "", nil, now))
 	}
-	t.iecAdapter.verdictLocked(t, tok, v, err, &acts)
 	if s := t.held[tok]; s != nil {
 		t.unholdLocked(s, tok)
 	}

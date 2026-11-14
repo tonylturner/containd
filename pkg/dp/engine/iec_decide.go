@@ -170,7 +170,6 @@ func (a *iecAdapter) judgeDecisionLocked(t *sessionTable, s *trackedSession, ev 
 			j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
 		}
 	}
-	s.inventoryDecisionLocked(ev, d)
 	if d.enforced() && !j.denied {
 		j.denied = true
 		j.trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)

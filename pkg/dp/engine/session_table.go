@@ -348,7 +348,7 @@ func (t *sessionTable) expire() {
 			if s.pairing != nil {
 				s.pairing.expire(now)
 			}
-			t.iecAdapter.expireLocked(t, s, &acts, now)
+			s.expireAPCILocked(&acts, now)
 			if len(s.held) > 0 && now.Sub(s.held[0].since) > sessionPendingTimeout {
 				acts.merge(t.abortLocked(s, abortTimeout, "", nil, now))
 			} else if now.Sub(s.lastSeen) > sessionIdleTTL {
@@ -377,8 +377,7 @@ func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionAc
 		s.clearInspectionBytes()
 		return sessionActions{}
 	}
-	acts := t.iecAdapter.endLocked(t, s)
-	acts.retired = true
+	acts := sessionActions{retired: true}
 	if s.state == sessionAborted {
 		t.tombstones--
 		t.removeDenialLocked(s)
@@ -420,7 +419,6 @@ func (t *sessionTable) evictTombstoneLocked() sessionActions {
 // run drives the timers until stop is closed.
 func (t *sessionTable) run(stop <-chan struct{}) {
 	defer func() {
-		t.iecAdapter.stopDelivery(t)
 		t.mu.Lock()
 		t.pressureOffline = true
 		t.mu.Unlock()

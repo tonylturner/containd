@@ -87,6 +87,7 @@ func (t *sessionTable) inspectionLimitLocked(s *trackedSession, cur *heldPacket,
 }
 
 func (s *trackedSession) clearInspectionBytes() {
+	s.apci = nil
 	if s.pairing != nil {
 		s.pairing.close()
 	}
@@ -124,7 +125,6 @@ func (s *trackedSession) releaseInspection() {
 // stopInspection is generation retirement, not a capture rebind. It runs
 // after consumers/completions join, including generations never started.
 func (t *sessionTable) stopInspection() {
-	t.iecAdapter.stopDelivery(t)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.flushHeldCreditsLocked(0)

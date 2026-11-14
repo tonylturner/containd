@@ -14,6 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
+	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -23,7 +24,7 @@ const (
 	iecProtocol = "iec104"
 )
 
-// iecAdapter contains the IEC104 policy and delivery-evidence binding. The
+// iecAdapter contains the IEC104 policy and observation binding. The
 // session owner's single lock protects it and each session's protocol state.
 // It owns no TCP tracker, sequence space, held credits or settlement lock.
 type iecAdapter struct {
@@ -35,11 +36,9 @@ type iecAdapter struct {
 	hasSessions bool
 	gatedPolicy *rules.Evaluator
 	// parsing is resolved for each packet; changes do not retire sessions.
-	parsing         ics.Parsing
-	inventory       iecInventoryInput
-	inventoryTokens map[capture.Token]*trackedSession
-	learnDelivery   func(string)
-	shadow          func(*rules.Snapshot, *rules.Entry)
+	parsing   ics.Parsing
+	inventory iecInventoryInput
+	shadow    func(*rules.Snapshot, *rules.Entry)
 }
 
 // iecSession is the protocol state of an incarnation. ctx is opener-oriented;
@@ -49,7 +48,6 @@ type iecSession struct {
 	mode       string
 	reconnects bool // first STARTDT con counts as a reconnect
 	apci       *anomaly.IEC104APCI
-	inventory  *iecInventoryLedger
 }
 
 // iecPolicy is the IEC104 part of the rule evaluator.
@@ -89,8 +87,7 @@ func newIECTable(globalMode string, zones *zoneCache) *sessionTable {
 		reconnect:    make(map[string]time.Time),
 		pickups:      newPickupResets(),
 
-		iecAdapter: iecAdapter{globalMode: globalMode, newPolicy: newRulesPolicy, safeRead: iec104.SafeRead,
-			inventoryTokens: make(map[capture.Token]*trackedSession)},
+		iecAdapter: iecAdapter{globalMode: globalMode, newPolicy: newRulesPolicy, safeRead: iec104.SafeRead},
 	}
 }
 
@@ -194,41 +191,27 @@ func dirLetter(dir int) byte {
 	return eventfields.DirServer
 }
 
-// The adapter callbacks below are invoked only under sessionTable.mu. They
-// preserve protocol observation ordering without owning transport state.
-func (a *iecAdapter) packetLocked(t *sessionTable, s *trackedSession, cur *heldPacket, acts *sessionActions) {
-	if sessionProtocol(s.flow) != iecProtocol {
-		return
-	}
-	t.inventoryPacketLocked(s, cur, acts)
+type iecInventoryInput interface {
+	ObserveIEC104(inventory.IEC104Observation)
 }
 
-func (a *iecAdapter) expireLocked(t *sessionTable, s *trackedSession, acts *sessionActions, now time.Time) {
-	if sessionProtocol(s.flow) != iecProtocol {
-		return
-	}
-	s.expireAPCILocked(acts, now)
-	t.expireInventoryLocked(s, acts, now)
-}
-
-func (a *iecAdapter) endLocked(t *sessionTable, s *trackedSession) sessionActions {
-	acts := t.endInventoryLocked(s)
-	s.apci = nil
-	return acts
-}
-
-func (a *iecAdapter) stopParseLocked(s *trackedSession) { s.apci = nil }
-
-func (a *iecAdapter) verdictLocked(t *sessionTable, tok capture.Token, v capture.Verdict, err error, acts *sessionActions) {
-	t.inventoryVerdictLocked(tok, v, err, acts)
-}
-
-func (a *iecAdapter) frameLocked(t *sessionTable, s *trackedSession, dir int, f dpi.DecodedFrame, cur *heldPacket, acts *sessionActions, now time.Time) {
+// frameLocked collects protocol observations under the session lock. Inventory
+// consumers receive immutable observations only after that lock is released.
+func (a *iecAdapter) frameLocked(s *trackedSession, dir int, f dpi.DecodedFrame, acts *sessionActions, now time.Time) {
 	if sessionProtocol(s.flow) != iecProtocol {
 		return
 	}
 	s.observeAPCILocked(dir, f, acts, now)
-	t.observeInventoryLocked(s, dir, f, cur, acts, now)
+	if a.inventory == nil {
+		return
+	}
+	o, ok := inventory.IEC104ObservationFromEvents(f.Events)
+	if !ok {
+		return
+	}
+	o.SessionID, o.Controlling, o.Controlled = s.id, s.client, s.server
+	o.ControlDirection, o.Time = dir == sessionDirClient, now
+	acts.inventoryObserve = append(acts.inventoryObserve, o)
 }
 
 // installLocked changes only protocol policy; the owner applies the resulting
@@ -250,11 +233,6 @@ func (a *iecAdapter) installLocked(snap *rules.Snapshot) (active, otherICS bool)
 		}
 	}
 	return active, otherICS
-}
-
-func (a *iecAdapter) notifyLocked(tok capture.Token) bool {
-	_, ok := a.inventoryTokens[tok]
-	return ok
 }
 
 func (a *iecAdapter) acceptsSYN(state *flow.State) bool {

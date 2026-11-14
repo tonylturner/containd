@@ -233,9 +233,7 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 	case reopensLocked(s, dir, pkt):
 		return t.reopenLocked(s, dir, pkt, state, now)
 	default:
-		res := t.livePacketLocked(s, dir, pkt, state, now)
-		res.decision.Notify = res.decision.Notify || t.iecAdapter.notifyLocked(pkt.Token)
-		return res, true
+		return t.livePacketLocked(s, dir, pkt, state, now), true
 	}
 }
 
@@ -691,8 +689,7 @@ func (t *sessionTable) dropHeldLocked(s *trackedSession, dir int) []capture.Reso
 }
 
 func (t *sessionTable) closeLocked(s *trackedSession, now time.Time) sessionActions {
-	acts := t.iecAdapter.endLocked(t, s)
-	acts.retired = true
+	acts := sessionActions{retired: true}
 	s.state, s.endedAt = sessionClosed, now
 	t.dpi.EndStream(s.id)
 	s.clearInspectionBytes()
@@ -724,11 +721,7 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 		if cur.off < 0 {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
 		}
-		// A below-floor retransmission is not parseable, but still carries
-		// bytes of any command awaiting its original verdict completion.
-		res := dropped(reasonIECInvalid)
-		t.iecAdapter.packetLocked(t, s, cur, &res.acts)
-		return res
+		return dropped(reasonIECInvalid)
 	}
 	start, fresh, err := d.bytes.Add(cur.off, pkt.Payload)
 	if err != nil {
@@ -748,7 +741,6 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 	}
 	d.seq.Advance(d.bytes.Next())
 	var res sessionResult
-	t.iecAdapter.packetLocked(t, s, cur, &res.acts)
 	if len(fresh) > 0 && !s.stopParse {
 		denied, trigger, failed := t.inspectLocked(s, dir, pkt, state, start, fresh, &res, now)
 		if enforce && (denied || failed) {
@@ -828,7 +820,7 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 	}
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
-		t.iecAdapter.frameLocked(t, s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
+		t.iecAdapter.frameLocked(s, dir, f, &res.acts, now)
 		t.observePairingLocked(s, dir, f, now)
 		if s.mode == "monitor" && sessionProtocol(s.flow) != iecProtocol && !f.Pending {
 			if compiled := t.ruleOwner.current.Load(); compiled != nil {
@@ -878,7 +870,6 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 }
 
 func (t *sessionTable) stopParseLocked(s *trackedSession) {
-	t.iecAdapter.stopParseLocked(s)
 	if !s.stopParse {
 		s.stopParse = true
 		t.dpi.EndStream(s.id)

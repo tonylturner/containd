@@ -40,9 +40,6 @@ func (e *Engine) initSessions(cfg Config) {
 		t.pickups.ledger = e.ledger
 	}
 	t.inventory = e.inventory
-	t.learnDelivery = func(id string) {
-		e.recordLearnOutcome([]dpi.Event{{Proto: "iec104", Kind: "evidence.delivery", Attributes: map[string]any{"apdu_id": id, "delivery": "delivered"}, Timestamp: time.Now().UTC()}})
-	}
 	t.dpi = e.dpiMgr
 	t.health = health
 	t.emit = emit
