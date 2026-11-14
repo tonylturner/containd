@@ -138,6 +138,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if ((normalized.ioa?.length ?? 0) === 0) delete normalized.ioa;
   if (!normalized.direction) delete normalized.direction;
   if (!normalized.mode) delete normalized.mode;
+  if (!normalized.messageClass) delete normalized.messageClass;
   if (normalized.unitId == null) delete normalized.unitId;
   if (!normalized.protocol) delete normalized.protocol;
 
