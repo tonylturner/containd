@@ -139,6 +139,7 @@ export function selectorFieldError(protocol: string, codes: string, unit: string
 export const GENERIC_SELECTOR_FIELDS = ["masters", "outstations", "groups", "variations", "instances", "attributes", "tags"] as const;
 export type GenericSelectorDraft = Record<typeof GENERIC_SELECTOR_FIELDS[number], string> & {
   direction: "" | "request" | "response";
+  messageClass: "" | "autonomous" | "session";
 };
 
 export function genericSelectorDraftFrom(ics?: ICSPredicate): GenericSelectorDraft {
@@ -147,6 +148,7 @@ export function genericSelectorDraftFrom(ics?: ICSPredicate): GenericSelectorDra
     groups: (ics?.groups ?? []).join(", "), variations: (ics?.variations ?? []).join(", "),
     instances: (ics?.instances ?? []).join(", "), attributes: (ics?.attributes ?? []).join(", "),
     tags: (ics?.tags ?? []).join(", "), direction: ics?.direction ?? "",
+    messageClass: ics?.messageClass ?? "",
   };
 }
 
@@ -209,6 +211,19 @@ export function buildICSRuleUpdate(
     if (uid != null) ics.unitId = uid;
   }
   if (protocol === "dnp3") {
+    const error = messageClassError(selectors.messageClass, selectors.direction);
+    if (error) throw new Error(error);
+    if (selectors.messageClass) {
+      if (writeOnly) throw new Error("Message class cannot combine with write-only.");
+      // The API rejects writeOnly by presence for explicit message classes.
+      delete ics.writeOnly;
+      ics.messageClass = selectors.messageClass;
+      const allowedCode = selectors.messageClass === "session" ? 0 : 130;
+      if (codes.some(code => code !== allowedCode)) throw new Error(`This message class permits only function code ${allowedCode}, or omit codes.`);
+      if (selectors.messageClass === "session" && (addressList.length || selectors.groups.trim() || selectors.variations.trim())) {
+        throw new Error("Session controls have no application object selectors. Clear groups, variations and point indexes.");
+      }
+    }
     for (const key of ["masters", "outstations", "groups", "variations"] as const) {
       const values = parseSelectorCSV(selectors[key], key, key === "masters" || key === "outstations" ? 65519 : 255);
       if (values.length) ics[key] = values;
@@ -243,7 +258,14 @@ export function summarizeGenericICS(ics: ICSPredicate, includeCodes = true): str
     if (ics[key]?.length) parts.push(`${key}=${ics[key]?.join(", ")}`);
   }
   if (ics.direction) parts.push(ics.direction);
+  if (ics.messageClass) parts.push(`messageClass=${ics.messageClass}`);
   if (ics.readOnly) parts.push("read-only");
   if (ics.writeOnly) parts.push("write-only");
   return parts.join(" · ");
+}
+
+export function messageClassError(messageClass: string, direction: string): string | null {
+  if (messageClass && !direction) return "Message class requires an explicit direction.";
+  if (messageClass === "autonomous" && direction !== "response") return "Autonomous message class requires response direction.";
+  return null;
 }

@@ -91,6 +91,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   }
   const record = value as Record<string, unknown>;
   const normalized: ICSPredicate = {
+    messageClass: record.messageClass === "autonomous" || record.messageClass === "session" ? record.messageClass : undefined,
     protocol:
       typeof record.protocol === "string" && record.protocol.trim() !== ""
         ? record.protocol.trim()

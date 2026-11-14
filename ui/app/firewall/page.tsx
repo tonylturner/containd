@@ -41,6 +41,7 @@ import { DPIConfigSection } from "./firewall-dpi-config";
 import { FirewallEnforcementControl } from "./firewall-enforcement-control";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
+import { PairingPreviewSummary } from "./firewall-pairing-preview";
 import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ruleset-status";
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
@@ -538,6 +539,7 @@ export default function FirewallPage() {
           </div>
         )}
         <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
+        <PairingPreviewSummary pairing={rulesetPreview?.pairing} />
         {rulesetPreview?.ruleset && (
           <section aria-label="Advanced" className="mt-4 text-xs text-(--text)">
             <h3 className="mb-2 font-semibold">Advanced</h3>

@@ -3,6 +3,7 @@
 import { useId } from "react";
 import { InfoTip } from "../../components/InfoTip";
 import { Disclosure } from "../../components/Disclosure";
+import { ICSMessageClass } from "./ics-message-class";
 import type { IEC104Class } from "../../lib/api";
 import {
   IEC104_CLASSES,
@@ -53,6 +54,7 @@ export function IEC104Fields({
 
   return (
     <div className="space-y-3">
+      <ICSMessageClass value={draft.messageClass} direction={draft.direction} onChange={value => set("messageClass", value)} disabled={disabled} />
       <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
@@ -114,6 +116,7 @@ export function IEC104Fields({
         <div>
           <label className={LABEL}>Direction</label>
           <select
+            aria-label="Direction"
             value={draft.direction}
             onChange={(e) => set("direction", e.target.value as IEC104Draft["direction"])}
             disabled={disabled}

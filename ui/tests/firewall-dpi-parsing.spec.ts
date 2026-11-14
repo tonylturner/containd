@@ -82,7 +82,8 @@ test("missing parsing displays tolerant and saves without synthesizing defaults"
   for (const [, label] of protocols) {
     await expect(modal(page).getByLabel(`${label} parsing`)).toHaveValue("tolerant");
   }
-  await expect(modal(page)).toContainText("Inspect supported messages to apply rules");
+  await expect(modal(page)).toContainText("it does not authorize unsupported procedures");
+  await expect(modal(page)).toContainText("reset the connection under either parsing setting");
   await modal(page).getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0]).toEqual(dataplane);
