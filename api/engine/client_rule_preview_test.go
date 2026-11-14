@@ -19,11 +19,11 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestClientPreviewRule(t *testing.T) {
+func TestDS34ConsumersClientPreviewRule(t *testing.T) {
 	entry := rules.Entry{ID: "candidate", SourceZones: []string{"control"}, DestZones: []string{"plant"},
-		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}}}
+		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", MessageClass: "autonomous", Direction: "response", TypeIDs: []int{1}}}
 	request := engine.PreviewRuleRequest{Entry: entry, ForwardMatches: map[string]rules.ForwardMatch{"candidate": {Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp", ListenPort: 1502}}}
-	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}},
+	want := engine.PreviewRuleResponse{Pairing: &engine.PairingPreview{Unpaired: 2, Unknown: 1, Reasons: []string{"autonomous_rule_required", "pairing_unknown"}}, MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}},
 		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
 			Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}},
 		ICSCoverage: &coverage.Rule{RuleID: "candidate", Protocol: "iec104", Mode: "enforce", State: coverage.NotEnforcing,

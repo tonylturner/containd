@@ -25,7 +25,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-func TestRulesetPreviewHandler(t *testing.T) {
+func TestDS34ConsumersRulesetPreviewHandler(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, DPIEnabled: true, EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
 	cfg.Firewall.Rules = []config.Rule{
@@ -47,6 +47,9 @@ func TestRulesetPreviewHandler(t *testing.T) {
 	var preview engine.RulesetPreview
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if preview.Pairing == nil {
+		t.Fatal("pairing omitted from ruleset preview")
 	}
 	want, err := enforce.NewCompilerWithSettings(compilerSettings(cfg.DataPlane), nil).CompileFirewall(&preview.Snapshot)
 	if err != nil || preview.Ruleset != want || preview.Runtime.IEC104EnvelopeOpen {
@@ -88,7 +91,7 @@ func TestRulesetPreviewSettingsMapping(t *testing.T) {
 	}
 }
 
-func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
+func TestDS34ConsumersRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 	for _, runningEnabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("running-enforcement=%v", runningEnabled), func(t *testing.T) {
 			dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: runningEnabled}})
@@ -106,6 +109,9 @@ func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 			var got map[string]json.RawMessage
 			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if _, exists := got["pairing"]; !exists {
+				t.Fatal("disabled preview omitted pairing")
 			}
 			if _, exists := got["ruleset"]; exists {
 				t.Fatalf("disabled candidate returned a ruleset: %s", rec.Body.String())

@@ -17,7 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-func TestRulesetPreviewEqualsApply(t *testing.T) {
+func TestDS34ConsumersRulesetPreviewEqualsApply(t *testing.T) {
 	reservation := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"),
 		Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
 	engineAPI := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}
@@ -61,6 +61,9 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 			preview, err := e.PreviewRuleset(snap, settings)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if preview.Pairing == nil || preview.Pairing.Paired != 0 || preview.Pairing.Unknown != 0 {
+				t.Fatalf("empty-retention pairing: %+v", preview.Pairing)
 			}
 			if *e.compiler != before || e.gate.installed || e.CurrentRules() != nil || applier.ruleset != "" {
 				t.Fatal("preview mutated live enforcement")
