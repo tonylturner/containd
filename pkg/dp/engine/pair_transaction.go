@@ -19,8 +19,9 @@ type pairOperation struct {
 	nonAdmit bool
 }
 type pairJournal[K protocolPairKey, S any] struct {
-	created, removed []*pairGrant[K, S]
-	evicted          int
+	created, removed               []*pairGrant[K, S]
+	evicted                        int
+	storageCreated, storageRemoved []*limits.Lease
 }
 
 func releasePairGrant[K protocolPairKey, S any](g *pairGrant[K, S]) {
@@ -48,7 +49,7 @@ func (b *pairLedger[K, S]) transact(ops []pairOperation, now time.Time) pairReas
 	if len(ops) == 0 {
 		return pairOK
 	}
-	n := int64(len(b.grants)+len(ops)+pairSessionCap) * 256
+	n := int64(len(b.grants)+len(b.markers)+len(ops)+1) * 256
 	credit, ok := b.resources.Budget.Reserve(b.class(), limits.CategoryPairing, n)
 	if !ok {
 		return stateLimit
@@ -63,6 +64,7 @@ func (b *pairLedger[K, S]) transact(ops []pairOperation, now time.Time) pairReas
 	markerBacking := b.markers
 	markers := slices.Clone(markerBacking)
 	oldLease := b.markerLease
+	oldGrantLease, oldLost := b.grantLease, b.storageLost
 	total := 0
 	if b.total != nil {
 		total = *b.total
@@ -85,6 +87,9 @@ func (b *pairLedger[K, S]) transact(ops []pairOperation, now time.Time) pairReas
 	}
 	b.journal = nil
 	if why == pairOK {
+		for _, lease := range journal.storageRemoved {
+			lease.Release()
+		}
 		for _, g := range journal.removed {
 			releasePairGrant(g)
 		}
@@ -96,6 +101,9 @@ func (b *pairLedger[K, S]) transact(ops []pairOperation, now time.Time) pairReas
 	for _, g := range journal.created {
 		releasePairGrant(g)
 	}
+	for _, lease := range journal.storageCreated {
+		lease.Release()
+	}
 	// Restore the retained, already charged backing stores, not the transient
 	// snapshot whose reservation is refunded on return.
 	clear(b.grants)
@@ -106,10 +114,8 @@ func (b *pairLedger[K, S]) transact(ops []pairOperation, now time.Time) pairReas
 	}
 	b.markers = markerBacking
 	copy(b.markers, markers)
-	if oldLease == nil && b.markerLease != nil {
-		b.markerLease.Release()
-	}
 	b.markerLease = oldLease
+	b.grantLease, b.storageLost = oldGrantLease, oldLost
 	if b.total != nil {
 		*b.total = total
 	}

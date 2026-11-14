@@ -41,7 +41,7 @@ func TestDS34Modes(t *testing.T) {
 								if d := e.HandlePacket(req); d.Action != capture.Repeat {
 									t.Fatalf("request=%+v", d)
 								}
-								if e.sessions.pairingTotal != 1 || len(e.sessions.held) != 0 {
+								if e.sessions.pairingTotal+e.sessions.pairingObserve != 1 || len(e.sessions.held) != 0 {
 									t.Fatal("request not recorded by the single ledger, or monitor held a token")
 								}
 								rep := runtimePairPacket(p, true, 500, p.reply)

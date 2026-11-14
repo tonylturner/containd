@@ -54,7 +54,7 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 					expected = capture.Drop
 				}
 				if d.Action != expected || !admitted && enforce && d.Reason != "state_limit" {
-					t.Fatalf("wave %d identity %d packet %d: %+v want %v", wave, i, pi, d, expected)
+					t.Fatalf("wave %d identity %d packet %d: %+v want %v; budget=%+v", wave, i, pi, d, expected, e.budget.Status())
 				}
 				if !admitted {
 					m := limits.ModeMonitor

@@ -4,6 +4,7 @@ package engine
 import (
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
@@ -12,6 +13,39 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestPairMarkerStorageAccounting(t *testing.T) {
+	r := pairResources()
+	b := newPairing("modbus", r, false, nil).(*pairLedger[modbusPairKey, modbus.PairShape])
+	now := time.Unix(1000, 0)
+	if why := b.apply(pairMB(pairRead(1)), dpi.ClientToServer, requestPermit{}, now); why != pairOK {
+		t.Fatal(why)
+	}
+	if b.markerLease != nil || cap(b.markers) != 0 || b.grantLease.Size() != int64(cap(b.grants))*8 {
+		t.Fatal("first grant pre-reserved marker storage")
+	}
+	b.expire(now.Add(time.Minute))
+	if b.markerLease.Size() != int64(cap(b.markers))*int64(unsafe.Sizeof(pairMarker[modbusPairKey]{})) {
+		t.Fatal("marker capacity not charged at its actual size")
+	}
+	// Grow marker storage inside a release transaction, then fail it. Neither
+	// its replacement capacity nor its charge may survive rollback.
+	q := pairRead(2)
+	b.apply(pairMB(q), dpi.ClientToServer, requestPermit{}, now)
+	before := r.Budget.Status().InUse
+	if why := b.transact([]pairOperation{
+		{frame: pairMB(q), dir: dpi.ClientToServer},
+	}, now); why != pairAmbiguous {
+		t.Fatal(why)
+	}
+	if r.Budget.Status().InUse != before || len(b.markers) != 1 || len(b.grants) != 1 {
+		t.Fatal("marker rollback changed retained accounting")
+	}
+	b.close()
+	if r.Budget.Status().InUse != 0 {
+		t.Fatal("marker or grant backing leaked")
+	}
+}
 
 func pairResources() limits.Resources { return limits.NewResources(limits.NewBudget(16<<20), nil) }
 func pairMB(s modbus.PairShape) dpi.DecodedFrame {

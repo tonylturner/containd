@@ -142,16 +142,17 @@ type sessionTable struct {
 	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
 	pressureOffline bool
 
-	ruleOwner    *ruleSnapshots
-	snap         *rules.Snapshot
-	sessions     map[sessionKey]*trackedSession
-	tombstones   int
-	denials      list.List // Modbus/DNP3 tombstones, not a second tuple registry
-	heldTotal    int
-	pairingTotal int
-	held         map[capture.Token]*trackedSession
-	aborts       map[capture.Token]*abortTxn
-	reconnect    map[string]time.Time // client IP + server → aborted at
+	ruleOwner      *ruleSnapshots
+	snap           *rules.Snapshot
+	sessions       map[sessionKey]*trackedSession
+	tombstones     int
+	denials        list.List // Modbus/DNP3 tombstones, not a second tuple registry
+	heldTotal      int
+	pairingTotal   int
+	pairingObserve int
+	held           map[capture.Token]*trackedSession
+	aborts         map[capture.Token]*abortTxn
+	reconnect      map[string]time.Time // client IP + server → aborted at
 }
 
 func addrPort(ip net.IP, port uint16) (netip.AddrPort, bool) {

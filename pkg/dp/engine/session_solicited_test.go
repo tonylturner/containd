@@ -102,7 +102,7 @@ func testDS34SolicitedRuntime(t *testing.T, p runtimePairCase) {
 					}
 				}
 				if fate == "monitor-only" {
-					if e.sessions.pairingTotal != 1 {
+					if e.sessions.pairingObserve != 1 {
 						t.Fatal("monitor did not use its observe ledger")
 					}
 					snap.Firewall[0].ICS.Mode = "enforce"

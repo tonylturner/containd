@@ -30,6 +30,7 @@ const (
 )
 const pairSessionCap = 64
 const pairGlobalCap = 16384
+const pairObserveCap = pairGlobalCap * 3 / 4
 
 type protocolPairKey interface{ comparable }
 type pairProgress struct {
@@ -84,6 +85,8 @@ type pairLedger[K protocolPairKey, S any] struct {
 	grants      []*pairGrant[K, S]
 	markers     []pairMarker[K]
 	markerLease *limits.Lease
+	grantLease  *limits.Lease
+	storageLost bool
 	journal     *pairJournal[K, S]
 }
 
@@ -107,6 +110,9 @@ func (b *pairLedger[K, S]) class() limits.Class {
 }
 func (b *pairLedger[K, S]) inspect(f dpi.DecodedFrame, dir dpi.StreamDir, now time.Time) (rules.MessageClass, pairReason) {
 	b.expire(now)
+	if b.storageLost {
+		return rules.ClassUnknown, stateLimit
+	}
 	class, k, s, reason := b.adapter.Classify(f, dir)
 	if reason != pairOK {
 		return class, reason
@@ -146,6 +152,9 @@ func (b *pairLedger[K, S]) reply(k K, s S) (int, pairProgress, bool, pairReason)
 }
 func (b *pairLedger[K, S]) apply(f dpi.DecodedFrame, dir dpi.StreamDir, permit requestPermit, now time.Time) pairReason {
 	b.expire(now)
+	if b.storageLost {
+		return stateLimit
+	}
 	class, k, s, reason := b.adapter.Classify(f, dir)
 	if reason != pairOK {
 		return reason
@@ -162,9 +171,13 @@ func (b *pairLedger[K, S]) apply(f dpi.DecodedFrame, dir dpi.StreamDir, permit r
 					b.remove(i)
 					continue
 				}
-				b.mark(b.grants[i].Key, pairAmbiguous)
+				if !b.mark(b.grants[i].Key, pairAmbiguous) {
+					return stateLimit
+				}
 				b.remove(i)
-				b.mark(k, pairAmbiguous)
+				if !b.mark(k, pairAmbiguous) {
+					return stateLimit
+				}
 				return pairAmbiguous
 			}
 		}
@@ -187,21 +200,16 @@ func (b *pairLedger[K, S]) apply(f dpi.DecodedFrame, dir dpi.StreamDir, permit r
 	}
 }
 func (b *pairLedger[K, S]) add(k K, s S, permit requestPermit, now time.Time) pairReason {
-	if b.markerLease == nil {
-		lease, ok := b.resources.Budget.Reserve(b.class(), limits.CategoryPairing, pairSessionCap*limits.PairingMetadataBytes)
-		if !ok {
-			return stateLimit
-		}
-		b.markerLease = lease
-		b.markers = make([]pairMarker[K], 0, pairSessionCap)
-		b.grants = make([]*pairGrant[K, S], 0, pairSessionCap)
-	}
 	n := limits.PairingMetadataBytes + b.adapter.Charge(s) + pairContextsCharge(permit.Contexts)
 	lease, ok := b.resources.Budget.Reserve(b.class(), limits.CategoryPairing, n)
 	if !ok {
 		return stateLimit
 	}
-	if b.total != nil && *b.total >= pairGlobalCap && len(b.grants) < pairSessionCap {
+	capacity := pairGlobalCap
+	if b.observe {
+		capacity = pairObserveCap
+	}
+	if b.total != nil && *b.total >= capacity && len(b.grants) < pairSessionCap {
 		lease.Release()
 		return stateLimit
 	}
@@ -213,13 +221,20 @@ func (b *pairLedger[K, S]) add(k K, s S, permit requestPermit, now time.Time) pa
 				oldest = i
 			}
 		}
-		b.mark(b.grants[oldest].Key, pairExpired)
+		if !b.mark(b.grants[oldest].Key, pairExpired) {
+			lease.Release()
+			return stateLimit
+		}
 		b.remove(oldest)
 		if b.journal != nil {
 			b.journal.evicted++
 		} else {
 			b.resources.Ledger.Record(limits.TableInspection, limits.ReasonEvicted, limits.Mode(b.mode()))
 		}
+	}
+	if !pairGrow(&b.grants, &b.grantLease, b.resources, b.class(), b.journal) {
+		lease.Release()
+		return stateLimit
 	}
 	g := &pairGrant[K, S]{Key: k, Request: b.adapter.Copy(s), Permit: requestPermit{Epoch: permit.Epoch, Contexts: pairCopyContexts(permit.Contexts)},
 		Observe: b.observe, Created: now, Expires: now.Add(b.adapter.Lifetime(s)), lease: lease}
@@ -283,12 +298,17 @@ func (b *pairLedger[K, S]) remove(i int) {
 		*b.total--
 	}
 }
-func (b *pairLedger[K, S]) mark(k K, reason pairReason) {
+func (b *pairLedger[K, S]) mark(k K, reason pairReason) bool {
+	if !pairGrow(&b.markers, &b.markerLease, b.resources, b.class(), b.journal) {
+		b.storageLost = true
+		return false
+	}
 	if len(b.markers) == pairSessionCap {
 		copy(b.markers, b.markers[1:])
 		b.markers = b.markers[:pairSessionCap-1]
 	}
 	b.markers = append(b.markers, pairMarker[K]{k, reason})
+	return true
 }
 func (b *pairLedger[K, S]) mode() string {
 	if b.observe {
@@ -312,6 +332,11 @@ func (b *pairLedger[K, S]) close() {
 		b.markerLease.Release()
 		b.markerLease = nil
 	}
+	if b.grantLease != nil {
+		b.grantLease.Release()
+		b.grantLease = nil
+	}
+	b.storageLost = false
 	b.markers = nil
 	b.grants = nil
 }
