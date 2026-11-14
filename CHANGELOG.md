@@ -82,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reply-pairing smoke tooling uses `scripts/smoke-pairing.sh`,
   `test/pairing/` and `PAIRING_*` environment variables.
+- Document the reply-pairing transport envelope, whole-fragment DNP3 holding
+  and the delivery, envelope and management smoke checks.
 - Separate DNP3 Secure Operations Confirm/link session rules and explicit
   unsolicited permission. Learner suggestions retain autonomous/session
   message classes and recertify or withhold older proofs. Rule and ruleset

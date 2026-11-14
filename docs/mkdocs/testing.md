@@ -378,6 +378,47 @@ Exit 1 is a failed check and exit 2 a prerequisite or harness failure. The
 evidence directory holds client keys and profiles; keep it private. Setup is in
 [`test/remote-access/README.md`](https://github.com/tonylturner/containd/blob/main/test/remote-access/README.md).
 
+## Reply-Pairing Smoke
+
+Run the live TCP/NFQUEUE checks from the repository root:
+
+```sh
+bash scripts/smoke-pairing.sh delivery
+bash scripts/smoke-pairing.sh envelope
+bash scripts/smoke-pairing.sh management
+```
+
+- `delivery` verifies allowed and denied Modbus, DNP3 and IEC 104 units at
+  receiver interfaces, correlating carrying bytes with successful NFQUEUE
+  verdict submissions. Denied-unit bytes must not arrive.
+- `envelope` exercises split writes, Nagle/delayed ACK, slow readers, receiver
+  windows and independent flows. Outside-envelope profiles must reset both
+  peers without leaking incomplete units; matched monitor controls must
+  deliver. See the [measured transport envelope](ics-dpi.md#enforce-mode-reply-pairing-and-upgrade-cutover).
+- `management` checks login and management reservation during enforcement,
+  engine outage, engine-only restart, full service restart with persisted
+  configuration replay, and policy churn. It also checks cutover warnings,
+  rejection of old classless permissions and fresh explicit-rule reconnects.
+  This is boot replay, not an upgrade from a published old executable.
+
+Requires Go, Python 3, Docker and Compose with `interface_name` support.
+Each invocation builds the current engine and pinned j60870 peer into private
+image tags, creates a unique `pairing-*` project with unused private subnets
+and a fresh data volume, and publishes **no host ports**. Exit traps remove
+only its own containers, networks, volumes and image tags; existing
+deployments are untouched.
+
+`PAIRING_RESULTS` selects an empty evidence directory (default
+`build/<project>`). Keep it private: it contains configuration snapshots,
+receiver-interface pcaps, correlated NFQUEUE syscall evidence, case logs,
+metrics, ruleset status, `manifest.json`, `result.json` and Compose logs.
+Header-only captures fail the checks.
+
+Exit 0 means checks and cleanup succeeded. Exit 1 covers assertion failures,
+a nonempty evidence directory or cleanup failure; exit 2 rejects a missing
+or invalid subcommand. Other setup or command failures retain their nonzero
+status, and interrupts use 130 (INT) or 143 (TERM). No nonzero exit is a pass.
+
 ## Selecting Tests
 
 | Change | Checks |

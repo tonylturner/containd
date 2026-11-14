@@ -169,13 +169,28 @@ complete allowed-unit coverage: a forbidden or incomplete coalesced tail holds
 the packet, including its otherwise allowed prefix. TCP retransmissions do not
 create another grant or advance a reply twice.
 
-**Every byte of an IEC unit must reach the firewall within the 1 s hold.** This
-is separate from the longer reply lifetime. Split writes, Nagle/delayed ACK,
-small windows, slow readers or ACK-dependent device behavior can prevent a
-complete unit arriving before the hold expires and reset the session.
+**Every byte of a gated unit—Modbus ADU, DNP3 application fragment or IEC APDU—must
+reach the firewall within the 1 s hold.** This is separate from the longer reply
+lifetime. Split writes, Nagle/delayed ACK, small windows, slow readers or
+ACK-dependent device behavior can prevent a complete unit arriving before the
+hold expires and reset the session.
 `TCP_NODELAY` does not guarantee arrival within 1 s. This is not a TCP proxy and
 it does not synthesize ACKs. Test real peers, gateways and fragmentation patterns
 before enforcing; decoded support alone does not establish transport compatibility.
+
+The following times were measured in **one isolated Linux TCP/NFQUEUE test
+setup**, not latency or compatibility guarantees. Reset times are arrival at
+master / outstation, measured from the first captured carrying byte.
+
+| Profile | Measured outcome |
+| --- | --- |
+| Enforce DNP3, one-byte writes, 5 ms spacing, `TCP_NODELAY` | Outside envelope: sender flight stalls before the whole unit reaches the gate. Reset at 1.0404 / 1.0403 s; zero request bytes at outstation. |
+| Enforce DNP3, 2048-byte application fragment (2411 link bytes), minimum advertised window 1152 bytes, receive buffer 2304 bytes | Outside envelope: receiver window stalls before the whole fragment reaches the gate. Reset at 1.0453 / 1.0451 s; zero response bytes at master. |
+| Enforce IEC 104, one-byte writes, 5 ms spacing, `TCP_NODELAY` | Outside envelope: sender flight cannot complete the held unit. Reset at 1.0947 / 1.0945 s; zero request bytes at outstation. |
+| Enforce IEC 104, unmodified pinned j60870, one-byte writes without inter-write sleeps | Inside measured envelope: STARTDT and complete 16-byte positive ACT_CON; response at 60.8 ms. |
+
+Matched monitor controls delivered complete requests and responses for all
+three outside-envelope profiles without whole-unit holding.
 
 ### Shadow evidence and applied-policy counters
 
@@ -727,8 +742,10 @@ application responses. Events for a completed transport fragment ride on its
 finishing link frame; `link_ranges` identifies the constituent physical link
 frames, while `raw_hex` remains the finishing physical frame rather than a
 synthesized application payload. Application fragments are decoded
-independently: earlier TCP packets are not held back and whole-response
-prevention is not atomic. Point records preserve indices only when present
+independently. DNP3 enforcement holds every carrying packet until its
+application fragment is complete and authorized. Earlier authorized
+application fragments may already have arrived; whole responses are not
+atomic. Point records preserve indices only when present
 (absence is not index zero); group 12 variation 1 CROBs expose their encoded
 control, operation, trip/close, queue/clear, count, on/off times and status.
 The fragment event carries `coverage_incomplete: true` when the object walk
