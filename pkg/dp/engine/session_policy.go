@@ -55,13 +55,7 @@ func (t *sessionTable) genericUnitPolicyLocked(s *trackedSession, dir int, f dpi
 		// Decode-and-decide covers every decoded message, including procedures
 		// unsupported by the pairing table. This projection is observational:
 		// observePairingLocked independently requires typed request authority.
-		state := &flow.State{Key: s.flow.ServiceKey()}
-		if (state.Key.Dir == flow.DirReverse) != (dir == sessionDirSrv) {
-			state.Key = state.Key.Reversed()
-		}
-		for _, ev := range f.Events {
-			objects = append(objects, project.Objects(state, ev, nil)...)
-		}
+		objects = observedPolicyObjects(s, dir, f.Events)
 	} else {
 		objects, err = project.UnitObjects(f.Unit, class, dpiDir(dir))
 	}
@@ -80,6 +74,18 @@ func (t *sessionTable) genericUnitPolicyLocked(s *trackedSession, dir int, f dpi
 		return permit, false, pairMismatch
 	}
 	if err != nil || len(objects) == 0 {
+		// Decoded facts may attribute a winning explicit veto, never authorize
+		// unsupported content. Typed classification remains unknown here.
+		for _, object := range observedPolicyObjects(s, dir, f.Events) {
+			object.MessageClass = rules.ClassUnknown
+			ctx := s.ctx
+			ctx.Now, ctx.ICS = now, &object
+			action, entry := compiled.evaluator.EvaluateMessage(ctx, false)
+			if entry != nil && entry.ICS.Protocol == object.Protocol && action != rules.ActionAllow {
+				j.contexts, j.entries = append(j.contexts, ctx), append(j.entries, entry)
+				j.denied, j.matched, res.policyReason = true, entry, reasonDPIDeny
+			}
+		}
 		res.messages = append(res.messages, j)
 		return permit, false, pairUnsupported
 	}
@@ -108,6 +114,18 @@ func (t *sessionTable) genericUnitPolicyLocked(s *trackedSession, dir int, f dpi
 	}
 	res.messages = append(res.messages, j)
 	return permit, j.nonAdmit, why
+}
+
+func observedPolicyObjects(s *trackedSession, dir int, events []dpi.Event) []rules.ICSContext {
+	state := &flow.State{Key: s.flow.ServiceKey()}
+	if (state.Key.Dir == flow.DirReverse) != (dir == sessionDirSrv) {
+		state.Key = state.Key.Reversed()
+	}
+	var objects []rules.ICSContext
+	for _, ev := range events {
+		objects = append(objects, project.Objects(state, ev, nil)...)
+	}
+	return objects
 }
 
 func (e *Engine) recordSessionMessages(state *flow.State, pkt *dpi.ParsedPacket, res sessionResult) {

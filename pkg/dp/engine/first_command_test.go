@@ -294,10 +294,10 @@ func (f *fcFlow) deny(what, rule string, payload []byte) {
 func (f *fcFlow) denyAt(off uint32, what, rule string, payload []byte) {
 	f.t.Helper()
 	hits := ruleHits(f.e, rule)
-	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny && d.Reason != string(pairMismatch) && d.Reason != string(pairUnsupported) {
+	if d := f.decide(off, ackPsh, payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
 		f.t.Fatalf("%s at offset %d: decision = %+v, want Drop by %s", what, off, d, reasonDPIDeny)
 	}
-	if got := ruleHits(f.e, rule); got != hits+1 && !(rule == "modbus-diag-deny" && got == hits) {
+	if got := ruleHits(f.e, rule); got != hits+1 {
 		f.t.Fatalf("%s: rule %s hits %d -> %d, want one more", what, rule, hits, got)
 	}
 	f.denies++

@@ -265,9 +265,13 @@ func TestModbusExceptionReplyNotEnforced(t *testing.T) {
 		clientToServer("read", "502", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, Direction: "request"}))
 
 	inlineHandshake(t, e, 41000, 502)
-	sendInline(e, connSegment(false, 41000, 502, 100, ackPsh, modbusADU(10, 3, 0, 2)))
+	if d := sendInline(e, connSegment(false, 41000, 502, 100, ackPsh, modbusADU(10, 3, 0, 2))); d.Action != capture.Repeat {
+		t.Fatalf("allowed request: %+v", d)
+	}
 	// Exception 0x83, code 2 (illegal data address).
-	sendInline(e, connSegment(true, 41000, 502, 500, ackPsh, []byte{0, 10, 0, 0, 0, 3, 1, 0x83, 2}))
+	if d := sendInline(e, connSegment(true, 41000, 502, 500, ackPsh, []byte{0, 10, 0, 0, 0, 3, 1, 0x83, 2})); d.Action != capture.Repeat {
+		t.Fatalf("paired exception reply: %+v", d)
+	}
 	if got := decodedProtocolEvents(e, "modbus"); got != 2 {
 		t.Fatalf("modbus events = %d, want 2", got)
 	}

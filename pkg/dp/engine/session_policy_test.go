@@ -91,3 +91,15 @@ func TestDS34SharedPolicyTelemetry(t *testing.T) {
 		}
 	}
 }
+
+func TestExplicitDenyOfUnsupportedFunctionAttribution(t *testing.T) {
+	f := newFCFlow(t, "ok", 502)
+	f.syn()
+	before := ruleHits(f.e, "modbus-diag-deny")
+	d := f.decide(0, ackPsh, modbusADU(101, 8, 0, 0xA537))
+	after := ruleHits(f.e, "modbus-diag-deny")
+	t.Logf("FC8 with explicit DENY rule: %+v, rule hits %d -> %d", d, before, after)
+	if after != before+1 {
+		t.Errorf("explicit DENY rule got no hit; decision reason=%s", d.Reason)
+	}
+}
