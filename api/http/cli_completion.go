@@ -281,6 +281,7 @@ var firewallICSFieldHints = map[string][]string{
 	"--ca":                 {"<addresses_csv>"},
 	"--ioa":                {"<ranges_csv>"},
 	"--direction":          {"request", "response"},
+	"--message-class":      {"autonomous", "session"},
 	"--masters":            {"<stations_csv>"},
 	"--outstations":        {"<stations_csv>"},
 	"--groups":             {"<groups_csv>"},
