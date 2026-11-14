@@ -13,7 +13,7 @@ import (
 
 func (e *Engine) rawSessionOwnsConnection(pkt capture.Packet, incoming *flow.Connection) bool {
 	t := e.sessions
-	if t == nil {
+	if t == nil || pkt.Proto != 6 {
 		return false
 	}
 	t.mu.Lock()

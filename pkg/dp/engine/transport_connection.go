@@ -176,7 +176,7 @@ func (e *Engine) sessionOwnsConnection(pkt capture.Packet, incoming *flow.Connec
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.hasSessions {
+	if !t.hasSessions || pkt.Proto != 6 {
 		return false
 	}
 	state := wireServiceState(pkt)
@@ -195,7 +195,7 @@ func (e *Engine) sessionOwnsState(pkt capture.Packet, state *flow.State) bool {
 }
 
 func (t *sessionTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bool {
-	if !t.hasSessions {
+	if !t.hasSessions || state.ServiceKey().Proto != 6 {
 		return false
 	}
 	src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
@@ -210,7 +210,7 @@ func (t *sessionTable) ownsStateLocked(pkt capture.Packet, state *flow.State) bo
 	if !srcOK || !dstOK {
 		// Non-IPv4 traffic is table-owned only inside an enforce
 		// envelope. This query has no actions or session mutations.
-		_, owned := t.nonIPv4Locked(state)
+		_, owned := t.nonIPv4Locked(pkt, state)
 		return owned
 	}
 	if session, _ := t.lookupLocked(src, dst); session != nil {

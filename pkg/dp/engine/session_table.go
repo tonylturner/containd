@@ -61,6 +61,7 @@ type trackedSession struct {
 	inspectionLost   bool
 	id               string
 	flow             *flow.State // immutable service key captured at creation; client/server stay in packet space
+	inline           bool        // admission source, independent of the policy's envelope mode
 	client           netip.AddrPort
 	server           netip.AddrPort
 	state            sessionState
@@ -286,7 +287,7 @@ func (t *sessionTable) installPolicy(snap *rules.Snapshot, abortPartial bool) se
 			continue
 		}
 		ctx := t.sessionContext(s)
-		matched, mode := t.envelopeLocked(ctx)
+		matched, mode := t.effectiveModeLocked(ctx, s.flow, s.inline)
 		switch {
 		case abortPartial && s.mode == "enforce" && s.partial():
 			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))

@@ -12,7 +12,7 @@ import (
 )
 
 func sessionProtocol(s *flow.State) string {
-	if s == nil {
+	if s == nil || s.ServiceKey().Proto != 6 {
 		return ""
 	}
 	switch servicePort(s, nil) {

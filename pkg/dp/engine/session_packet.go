@@ -174,7 +174,7 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, okDst := addrPort(pkt.DstIP, pkt.DstPort)
 	if !okSrc || !okDst {
-		return t.nonIPv4Locked(state)
+		return t.nonIPv4Locked(pkt, state)
 	}
 	s, dir := t.lookupPacketLocked(src, dst, state)
 	var retired sessionActions
@@ -223,7 +223,7 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 	}
 	switch {
 	case synRST(pkt.TCP.Flags):
-		return t.synRSTLocked(s, state)
+		return t.synRSTLocked(s, pkt, state)
 	case s == nil:
 		return t.newPacketLocked(pkt, src, dst, state, now)
 	case s.state == sessionAborted:
@@ -240,9 +240,9 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 }
 
 // nonIPv4Locked drops IPv6 traffic inside an enforce envelope.
-func (t *sessionTable) nonIPv4Locked(state *flow.State) (sessionResult, bool) {
+func (t *sessionTable) nonIPv4Locked(pkt capture.Packet, state *flow.State) (sessionResult, bool) {
 	ctx := t.stateContext(state)
-	matched, mode := t.envelopeLocked(ctx)
+	matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
 	if !matched || mode != "enforce" {
 		return sessionResult{}, false
 	}
@@ -259,12 +259,12 @@ func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&cap
 // resets. An enforcing session or envelope drops it; monitor sessions
 // observe it without changing delivery, and untracked monitor traffic passes
 // like every other monitor packet not observed from its SYN.
-func (t *sessionTable) synRSTLocked(s *trackedSession, state *flow.State) (sessionResult, bool) {
+func (t *sessionTable) synRSTLocked(s *trackedSession, pkt capture.Packet, state *flow.State) (sessionResult, bool) {
 	if s != nil {
-		_, mode := t.envelopeLocked(t.sessionContext(s))
+		_, mode := t.effectiveModeLocked(t.sessionContext(s), s.flow, s.inline)
 		return invalidSession(mode), true
 	}
-	matched, mode := t.envelopeLocked(t.stateContext(state))
+	matched, mode := t.effectiveModeLocked(t.stateContext(state), state, pkt.Token.Inline())
 	if !matched {
 		return sessionResult{}, false
 	}
@@ -291,12 +291,9 @@ func opens(mode string, pkt capture.Packet) bool {
 func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, state *flow.State, now time.Time) (sessionResult, bool) {
 	if isSYN(pkt.TCP.Flags) && t.iecAdapter.acceptsSYN(state) {
 		ctx := t.stateContext(state)
-		matched, mode := t.envelopeLocked(ctx)
+		matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
 		if !matched {
 			return sessionResult{}, false
-		}
-		if !pkt.Token.Inline() && sessionProtocol(state) != iecProtocol {
-			mode = "monitor"
 		}
 		if !opens(mode, pkt) {
 			if len(pkt.Payload) > 0 {
@@ -311,12 +308,9 @@ func (t *sessionTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPo
 		client, server = dst, src
 	}
 	ctx := t.stateContext(state)
-	matched, mode := t.envelopeLocked(ctx)
+	matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
 	if !matched {
 		return sessionResult{}, false
-	}
-	if !pkt.Token.Inline() && sessionProtocol(state) != iecProtocol {
-		mode = "monitor"
 	}
 	if mode == "monitor" && sessionProtocol(state) != iecProtocol && len(pkt.Payload) > 0 {
 		return t.observePickupLocked(client, server, ctx, pkt, state, now), true
@@ -354,6 +348,7 @@ func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.Add
 	if n == nil {
 		return t.admissionLimitLocked(mode)
 	}
+	n.inline = pkt.Token.Inline()
 	if err := t.allocateDirLocked(n, sessionDirClient, pkt.TCP.Seq); err != nil {
 		n.releaseInspection()
 		return t.admissionLimitLocked(mode)
@@ -387,6 +382,7 @@ func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.
 	if s == nil {
 		return t.admissionLimitLocked("enforce")
 	}
+	s.inline = pkt.Token.Inline()
 	t.sessions[sessionKey{client: client, server: server}] = s
 	dir := sessionDirSrv
 	if fromClient {
@@ -413,7 +409,7 @@ func (t *sessionTable) midstreamLocked(client, server netip.AddrPort, ctx rules.
 // next incarnation, or its RST refusing that SYN (refuses), passes.
 func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
 	ctx := t.sessionContext(s)
-	_, currentMode := t.envelopeLocked(ctx)
+	_, currentMode := t.effectiveModeLocked(ctx, s.flow, s.inline)
 	tombstone := accepted(reasonIECTombstone)
 	if currentMode == "enforce" {
 		tombstone = dropped(reasonIECTombstone)
@@ -429,7 +425,7 @@ func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt cap
 		if s.next != nil && s.next.dirs[sessionDirClient].isn == pkt.TCP.Seq {
 			return accepted(reasonIECAccept), true
 		}
-		matched, mode := t.envelopeLocked(ctx)
+		matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
 		if !matched {
 			acts := t.deleteLocked(sessionKey{client: s.client, server: s.server}, s)
 			return sessionResult{acts: acts}, false
@@ -448,9 +444,9 @@ func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt cap
 // closedPacketLocked passes the payload-free tail of a closed session and
 // lets a new SYN open the next incarnation (opens).
 func (t *sessionTable) closedPacketLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
-	if dir == sessionDirClient && isSYN(pkt.TCP.Flags) && pkt.TCP.Seq != s.dirs[sessionDirClient].isn {
+	if dir == sessionDirClient && isSYN(pkt.TCP.Flags) && (s.dirs[sessionDirClient] == nil || pkt.TCP.Seq != s.dirs[sessionDirClient].isn) {
 		ctx := t.stateContext(state)
-		matched, mode := t.envelopeLocked(ctx)
+		matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
 		if !matched {
 			acts := t.deleteLocked(sessionKey{client: s.client, server: s.server}, s)
 			return sessionResult{acts: acts}, false
@@ -459,7 +455,7 @@ func (t *sessionTable) closedPacketLocked(s *trackedSession, dir int, pkt captur
 			return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
 		}
 	}
-	_, mode := t.envelopeLocked(t.sessionContext(s))
+	_, mode := t.effectiveModeLocked(t.sessionContext(s), s.flow, s.inline)
 	if len(pkt.Payload) > 0 && mode == "enforce" {
 		return dropped(reasonIECClosed), true
 	}
@@ -479,7 +475,12 @@ func reopensLocked(s *trackedSession, dir int, pkt capture.Packet) bool {
 // connection's SYN proposes. No old history retires until a peer SYN-ACK
 // validates the proposal.
 func (t *sessionTable) reopenLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
-	return t.openLocked(s, s.client, s.server, t.stateContext(state), s.mode, pkt, state, now), true
+	ctx := t.stateContext(state)
+	matched, mode := t.effectiveModeLocked(ctx, state, pkt.Token.Inline())
+	if !matched {
+		return sessionResult{acts: t.deleteLocked(sessionKey{s.client, s.server}, s)}, false
+	}
+	return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
 }
 
 // handshakeLocked follows the SYN and SYN-ACK of a live incarnation. A
@@ -496,7 +497,7 @@ func (t *sessionTable) handshakeLocked(s *trackedSession, dir int, pkt capture.P
 	c2s := s.dirs[sessionDirClient]
 	switch {
 	case dir == sessionDirClient && f&capture.TCPFlagACK == 0:
-		if seq == c2s.isn {
+		if c2s != nil && seq == c2s.isn {
 			return accepted(reasonIECAccept)
 		}
 		if s.dirs[sessionDirSrv] != nil {
@@ -508,7 +509,7 @@ func (t *sessionTable) handshakeLocked(s *trackedSession, dir int, pkt capture.P
 			}
 			return accepted(reasonIECAccept)
 		}
-	case dir == sessionDirSrv && f&capture.TCPFlagACK != 0 && pkt.TCP.Ack == c2s.isn+1:
+	case c2s != nil && dir == sessionDirSrv && f&capture.TCPFlagACK != 0 && pkt.TCP.Ack == c2s.isn+1:
 		if s2c := s.dirs[sessionDirSrv]; s2c == nil {
 			if err := t.allocateDirLocked(s, sessionDirSrv, seq); err != nil {
 				return t.inspectionLimitLocked(s, &heldPacket{tok: pkt.Token, dir: dir}, now)
