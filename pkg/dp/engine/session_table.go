@@ -368,6 +368,9 @@ func (t *sessionTable) expire() {
 }
 
 func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionActions {
+	if t.sessions[key] != s {
+		return sessionActions{}
+	}
 	if s.resetIO != nil {
 		// Keep the tuple reserved until old reset/conntrack I/O finishes.
 		// New handshakes wait outside mu; authority is revoked immediately.

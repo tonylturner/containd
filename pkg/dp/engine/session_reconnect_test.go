@@ -149,3 +149,64 @@ func TestDS34ReconnectLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestHalfCloseDropCompletionAbortsSession(t *testing.T) {
+	f := newResetFlow(t, 502)
+	f.syn()
+	f.accept("allowed request", modbusADU(1, 3, 0, 2))
+	f.hold("second request prefix", modbusADU(2, 3, 0, 2)[:3])
+	d := f.handle(f.segment(false, f.isn+f.next, resyncServerISN, finAck, nil))
+	t.Logf("FIN decision=%+v", d)
+	client, server := f.endpoints()
+	tab := f.e.sessions
+	tab.mu.Lock()
+	s, _ := tab.lookupLocked(client, server)
+	state := s.state
+	tab.mu.Unlock()
+	reply := []byte{0, 1, 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11}
+	rd := f.handle(f.segment(true, resyncServerISN, f.isn+f.next+1, ackPsh, reply))
+	t.Logf("state after FIN=%d reply decision=%+v", state, rd)
+	if state == sessionAborted || rd.Action != capture.Repeat {
+		t.Errorf("half-close with a dropped incomplete unit aborted the session; paired reply=%+v", rd)
+	}
+}
+
+func TestReplacedSessionAbortedAsOrphan(t *testing.T) {
+	f := newResetFlow(t, 502)
+	f.syn()
+	f.accept("authorized opener", modbusADU(1, 3, 0, 2))
+	f.hold("second request prefix", modbusADU(2, 3, 0, 2)[:3])
+	tab := f.e.sessions
+	client, server := f.endpoints()
+	tab.mu.Lock()
+	old, _ := tab.lookupLocked(client, server)
+	tab.mu.Unlock()
+	if d := f.handle(f.segment(false, 800000, 0, capture.TCPFlagSYN, nil)); d.Action != capture.Repeat {
+		t.Fatal(d)
+	}
+	d := f.handle(f.segment(true, resyncServerISN+1000, 800000, capture.TCPFlagSYN|capture.TCPFlagACK, nil))
+	if d.Action != capture.Repeat || len(d.Resolved) != 1 {
+		t.Fatal(d)
+	}
+	tab.mu.Lock()
+	current, _ := tab.lookupLocked(client, server)
+	orphan := old.state == sessionAborted && current != old
+	tombstones, denials, live := tab.tombstones, tab.denials.Len(), len(tab.sessions)
+	listed := old.denialOrder != nil
+	tab.mu.Unlock()
+	t.Logf("old.state=%d tombstones=%d denials=%d sessions=%d oldInDenialFIFO=%t", old.state, tombstones, denials, live, listed)
+	if orphan || tombstones != 0 || denials != 0 {
+		t.Errorf("replaced session was aborted after leaving the table: tombstones=%d denials=%d (sessions=%d)", tombstones, denials, live)
+	}
+	// The orphan is not in t.sessions, so expire() can never retire it.
+	tab.mu.Lock()
+	tab.now = func() time.Time { return time.Now().Add(time.Hour) }
+	tab.mu.Unlock()
+	tab.expire()
+	tab.mu.Lock()
+	after := tab.denials.Len()
+	tab.mu.Unlock()
+	if after != 0 {
+		t.Errorf("orphan denial survived expiry: denials=%d fullLocked skew=%d", after, after)
+	}
+}

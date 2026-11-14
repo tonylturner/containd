@@ -683,6 +683,7 @@ func (t *sessionTable) dropHeldLocked(s *trackedSession, dir int) []capture.Reso
 		t.heldTotal--
 		s.heldBytes -= int(h.end - h.off)
 		out = append(out, capture.Resolution{Token: h.tok, Verdict: capture.VerdictDrop})
+		t.rememberTokenLocked(s, h.tok, capture.VerdictDrop)
 	}
 	s.held = kept
 	return out
@@ -947,6 +948,8 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 					txn.pending++
 				}
 			}
+			res.decision.Resolved = append(res.decision.Resolved, acts.drops...)
+			acts.drops = nil
 			res.acts.merge(acts)
 		} else {
 			d.forwarded = max(d.forwarded, cur.end)

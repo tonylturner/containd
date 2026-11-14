@@ -305,7 +305,7 @@ func (t *sessionTable) onVerdict(tok capture.Token, v capture.Verdict, err error
 	t.countVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
-	if s != nil && s.mode == "enforce" && (s.state == sessionEstablished || s.state == sessionSynSent) && (err != nil || v != expected) {
+	if s != nil && t.sessions[sessionKey{s.client, s.server}] == s && s.mode == "enforce" && (s.state == sessionEstablished || s.state == sessionSynSent) && (err != nil || v != expected) {
 		acts.merge(t.abortLocked(s, abortTransport, "", nil, now))
 	}
 	t.iecAdapter.verdictLocked(t, tok, v, err, &acts)
