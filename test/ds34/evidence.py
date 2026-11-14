@@ -5,6 +5,11 @@ import json
 import re
 import struct
 
+HOLD_SECONDS = 1.0
+SWEEP_SECONDS = 0.1
+TRANSIT_TOLERANCE_SECONDS = 0.2
+RESET_DEADLINE_SECONDS = HOLD_SECONDS + SWEEP_SECONDS + TRANSIT_TOLERANCE_SECONDS
+
 
 def packets(path):
     raw = path.read_bytes()
@@ -34,13 +39,13 @@ def field_for(receiver):
 
 
 def request_rejected(case):
-    return (case["fate"] == "denied-request" or case.get("kind") == "timeout" or
+    return (case.get("boundary") == "request" or case["fate"] == "denied-request" or case.get("kind") == "timeout" or
             case.get("kind") == "session" and not case.get("explicit", True))
 
 
 def denied_delivery(case, receiver):
     if receiver == "master":
-        return case["expect"] == "deny"
+        return case["expect"] in ("deny", "reset")
     return case["fate"] == "missing" or request_rejected(case)
 
 
@@ -67,7 +72,7 @@ def check_pcaps(out, cases):
             if case.get("kind") == "timeout" and receiver == "master":
                 writes = [p for p in rows if p["src"] == port and p["payload"]]
                 resets = [p for p in rows if p["dst"] == port and p["flags"] & 4]
-                if not writes or not resets or not 1.0 <= resets[0]["time"] - writes[0]["time"] <= 1.3:
+                if not writes or not resets or not HOLD_SECONDS <= resets[0]["time"] - writes[0]["time"] <= RESET_DEADLINE_SECONDS:
                     failures.append(f"case {case['id']}: reset not within hold deadline plus sweep allowance")
             if case.get("independent"):
                 collateral = [p for p in rows if p[field_for(receiver)] == port + 1000 and p["payload"]]
@@ -96,6 +101,51 @@ def check_pcaps(out, cases):
                 if not syn or syn[0]["window"] > 1152:
                     failures.append(f"case {case['id']}: minimum-window control not established: {syn}")
     (out / "tcp-evidence.json").write_text(json.dumps(summary, indent=2) + "\n")
+    failures += check_boundaries(out, cases, summary)
+    return failures
+
+
+def check_boundaries(out, cases, captures):
+    """Require receiver silence and timely incoming resets in BOTH namespaces."""
+    failures, evidence = [], []
+    for case in cases:
+        direction = case.get("boundary")
+        if not direction:
+            continue
+        receiver = "outstation" if direction == "request" else "master"
+        sender = "master" if direction == "request" else "outstation"
+        sent = [row for row in captures[sender] if row[field_for(receiver)] == case["port"] and row["payload"]]
+        arrived = [row for row in captures[receiver] if row[field_for(receiver)] == case["port"] and row["payload"]]
+        entry = {"id": case["id"], "name": case["name"], "receiver": receiver,
+                 "receiver_payload_bytes": sum(len(row["payload"]) // 2 for row in arrived),
+                 "reset_seconds": {}, "reset_deadline_seconds": RESET_DEADLINE_SECONDS}
+        if arrived:
+            failures.append(f"case {case['id']}: outside-envelope unit leaked to {receiver}")
+        if not sent:
+            failures.append(f"case {case['id']}: no carrying bytes in sender capture")
+        else:
+            first_byte = min(row["time"] for row in sent)
+            for side in ("master", "outstation"):
+                resets = [row for row in captures[side] if row[field_for(side)] == case["port"] and row["flags"] & 4]
+                if not resets:
+                    failures.append(f"case {case['id']}: missing incoming reset at {side}")
+                    continue
+                elapsed = min(row["time"] for row in resets) - first_byte
+                entry["reset_seconds"][side] = elapsed
+                if not HOLD_SECONDS <= elapsed <= RESET_DEADLINE_SECONDS:
+                    failures.append(f"case {case['id']}: {side} reset outside hold+sweep+transit bound: {elapsed:.6f}s")
+        controls = [row for row in cases if row.get("control_for") == case["name"]]
+        if len(controls) != 1:
+            failures.append(f"case {case['id']}: requires exactly one paired monitor control")
+        else:
+            control = controls[0]
+            entry["monitor_control_id"] = control["id"]
+            profile = ("protocol", "host", "fate", "kind", "step", "delay", "nodelay", "window")
+            if (not control.get("monitor") or control["expect"] != "pass" or
+                any(control.get(key) != case.get(key) for key in profile)):
+                failures.append(f"case {case['id']}: monitor control does not preserve the sender/receiver profile")
+        evidence.append(entry)
+    (out / "boundary-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return failures
 
 

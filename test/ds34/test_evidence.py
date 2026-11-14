@@ -3,8 +3,9 @@ import pathlib
 import struct
 import tempfile
 import unittest
+from copy import deepcopy
 
-from evidence import packets
+from evidence import check_boundaries, packets
 
 
 class CaptureTests(unittest.TestCase):
@@ -62,6 +63,60 @@ class VerdictTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual((rows[0]["src"], rows[0]["seq"], rows[0]["payload"], rows[0]["verdict"]),
                              (42000, 1234, "616263", 4))
+
+
+class BoundaryTests(unittest.TestCase):
+    def fixtures(self, direction):
+        name = f"outside envelope: {direction}"
+        case = {"id": 8, "port": 42008, "name": name, "protocol": "dnp3", "host": "192.0.2.1",
+                "fate": "allowed", "expect": "reset", "boundary": direction, "step": 1}
+        control = {**case, "id": 28, "port": 42028, "name": "monitor control", "expect": "pass",
+                   "boundary": None, "monitor": True, "control_for": name}
+        request = {"time": 10.0, "src": 42008, "dst": 20000, "flags": 24, "payload": "01"}
+        response = {**request, "src": 20000, "dst": 42008}
+        master_reset = {**response, "time": 11.05, "flags": 4, "payload": ""}
+        outstation_reset = {**request, "time": 11.06, "flags": 4, "payload": ""}
+        captures = {"master": [master_reset], "outstation": [outstation_reset]}
+        captures["master" if direction == "request" else "outstation"].append(
+            request if direction == "request" else response)
+        return [case, control], captures
+
+    def check(self, cases, captures):
+        with tempfile.TemporaryDirectory() as folder:
+            return check_boundaries(pathlib.Path(folder), cases, captures)
+
+    def test_request_and_response_boundaries(self):
+        for direction in ("request", "response"):
+            with self.subTest(direction=direction):
+                self.assertEqual(self.check(*self.fixtures(direction)), [])
+
+    def test_each_incoming_reset_is_required(self):
+        for side in ("master", "outstation"):
+            with self.subTest(side=side):
+                cases, captures = self.fixtures("request")
+                captures[side] = [row for row in captures[side] if not row["flags"] & 4]
+                self.assertTrue(any("missing incoming reset" in failure for failure in self.check(cases, captures)))
+
+    def test_early_and_late_resets_fail(self):
+        for elapsed in (0.99, 1.31):
+            with self.subTest(elapsed=elapsed):
+                cases, captures = self.fixtures("response")
+                captures["master"][0]["time"] = 10.0 + elapsed
+                self.assertTrue(any("outside hold+sweep+transit" in failure for failure in self.check(cases, captures)))
+
+    def test_receiver_bytes_fail(self):
+        for direction in ("request", "response"):
+            with self.subTest(direction=direction):
+                cases, captures = self.fixtures(direction)
+                sender, receiver = (("master", "outstation") if direction == "request" else ("outstation", "master"))
+                captures[receiver].append(deepcopy(captures[sender][-1]))
+                self.assertTrue(any("leaked" in failure for failure in self.check(cases, captures)))
+
+    def test_control_must_exist_and_preserve_profile(self):
+        cases, captures = self.fixtures("response")
+        self.assertTrue(any("exactly one" in failure for failure in self.check(cases[:1], captures)))
+        cases[1]["step"] = 3
+        self.assertTrue(any("does not preserve" in failure for failure in self.check(cases, captures)))
 
 
 if __name__ == "__main__":

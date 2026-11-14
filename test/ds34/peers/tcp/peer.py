@@ -81,13 +81,17 @@ def serve_connection(c, addr, protocol):
             response = dnp3.link_frame(0x53, 1, 10, b"\x40\xc0\x81\x00\x00")
         c.sendall(response)
         log(event="response-write", peer=addr, wire=response.hex())
+        if case.get("boundary") == "response":
+            c.recv(1)
+            raise AssertionError("outside-envelope session ended without a reset")
         if case.get("kind") == "confirm":
             _, confirm = dnp3.read_frame(c)
             assert confirm[2] == 0, confirm.hex()
             log(event="confirm", peer=addr, wire=confirm.hex())
         time.sleep(0.1)
     except (OSError, ConnectionError) as exc:
-        log(event="server-error", peer=addr, error=str(exc))
+        event = "server-reset" if case.get("boundary") and isinstance(exc, ConnectionResetError) else "server-error"
+        log(event=event, peer=addr, error=str(exc))
     finally:
         c.close()
 
@@ -140,6 +144,7 @@ def client(case):
         held.sendall(q[:1])
     start = time.monotonic()
     got = b""
+    reset_seen = False
     try:
         if case["fate"] != "missing":
             step = case.get("step", len(q))
@@ -158,6 +163,7 @@ def client(case):
             s.sendall(dnp3.master_request(0, 0, b""))
         log(event="received", wire=got.hex(), elapsed=time.monotonic() - start)
     except OSError as exc:
+        reset_seen = isinstance(exc, ConnectionResetError)
         log(event="client-error", error=str(exc), elapsed=time.monotonic() - start, wire=got.hex())
     finally:
         s.close()
@@ -172,6 +178,8 @@ def client(case):
         assert got == r, f"positive response {len(got)}/{len(r)} bytes"
     else:
         assert not got, f"denied response delivered {got.hex()}"
+    if case.get("boundary"):
+        assert reset_seen, "outside-envelope client did not receive a connection reset"
 
 
 if __name__ == "__main__":

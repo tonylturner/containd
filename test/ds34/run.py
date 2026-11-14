@@ -158,6 +158,28 @@ def sample_metrics(stop, samples):
         stop.wait(0.1)
 
 
+def execute_case(api, original, cases, failures, proto, variant):
+    case = {"id": len(cases), "protocol": proto, "host": WAN + ".10", "port": 42000 + len(cases), **variant}
+    cfg = policy(original, case["fate"], explicit=case.get("explicit", True))
+    if case.get("monitor"):
+        cfg["dataplane"]["dpiMode"] = "monitor"
+        for rule in cfg["firewall"]["rules"]:
+            rule["ics"]["mode"] = "monitor"
+    api.install(cfg)
+    if case.get("upstream"):
+        case["host"] = WAN + ".11"
+    save("case.json", case)
+    cases.append(case)
+    save("cases.json", cases)
+    try:
+        result = call("master", "python3", "/fixtures/ds34/peers/tcp/peer.py", "client", json.dumps(case))
+        (OUT / f"case-{case['id']}.log").write_bytes(result)
+    except subprocess.CalledProcessError as exc:
+        (OUT / f"case-{case['id']}.log").write_bytes(exc.stdout + exc.stderr)
+        failures.append(f"case {case['id']}: {proto} {variant}: peer assertion failed")
+    time.sleep(0.2)
+
+
 def run(mode):
     ready()
     save("manifest.json", {"project": PROJECT, "source": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
@@ -222,6 +244,7 @@ def run(mode):
             for i in range(8):
                 api.install(policy(original, explicit=bool(i % 2)))
                 operator_check(f"churn-{i}")
+        extra_controls = []
         for proto in PORTS:
             if mode == "delivery":
                 variants = [{"fate": f, "expect": "pass" if f == "allowed" else "deny"}
@@ -230,14 +253,23 @@ def run(mode):
                 variants = [{"fate": "allowed", "expect": "pass", **opts} for opts in
                             ({"step": 3}, {"step": 1}, {"step": 3, "nodelay": False}, {"slow": True},
                              {"independent": True}, {"step": 3, "delayed_ack": True})]
+                if proto in ("dnp3", "iec104"):
+                    name = f"outside envelope: {proto} one-byte writes slower than sender flight"
+                    variants[1].update(expect="reset", boundary="request", name=name)
+                    extra_controls.append((proto, {**variants[1], "expect": "pass", "monitor": True,
+                                                   "boundary": None, "control_for": name,
+                                                   "name": f"monitor control: {proto} one-byte writes"}))
                 variants += [{"fate": "allowed", "expect": "deny", "step": 3, "delay": 1.2, "kind": "timeout"}]
                 if proto == "iec104":
                     variants += [{"fate": "allowed", "expect": "pass", "step": 1, "delay": 0, "upstream": True}]
                 if proto != "modbus":
                     variants += [{"fate": "missing", "expect": "pass", "kind": "autonomous"}]
                 if proto == "dnp3":
-                    variants += [{"fate": "allowed", "expect": "pass", "window": True, "kind": "large"},
-                                 {"fate": "allowed", "expect": "pass", "window": True, "kind": "large", "monitor": True},
+                    name = "outside envelope: DNP3 fragment exceeds minimum receiver window"
+                    variants += [{"fate": "allowed", "expect": "reset", "window": True, "kind": "large",
+                                  "boundary": "response", "name": name},
+                                 {"fate": "allowed", "expect": "pass", "window": True, "kind": "large", "monitor": True,
+                                  "control_for": name, "name": "monitor control: DNP3 fragment at minimum receiver window"},
                                  {"fate": "allowed", "expect": "pass", "kind": "confirm"},
                                  {"fate": "allowed", "expect": "deny", "kind": "confirmed-link"}]
             else:
@@ -250,31 +282,21 @@ def run(mode):
             if proto == "iec104" and mode != "envelope":
                 variants += [{"fate": "allowed", "expect": "pass", "step": 1, "delay": 0, "upstream": True}]
             for variant in variants:
-                case = {"id": len(cases), "protocol": proto, "host": WAN + ".10", "port": 42000 + len(cases), **variant}
-                cfg = policy(original, case["fate"], explicit=case.get("explicit", True))
-                if case.get("monitor"):
-                    cfg["dataplane"]["dpiMode"] = "monitor"
-                    for rule in cfg["firewall"]["rules"]:
-                        rule["ics"]["mode"] = "monitor"
-                api.install(cfg)
-                if case.get("upstream"):
-                    case["host"] = WAN + ".11"
-                save("case.json", case)
-                cases.append(case)
-                save("cases.json", cases)
-                try:
-                    result = call("master", "python3", "/fixtures/ds34/peers/tcp/peer.py", "client", json.dumps(case))
-                    (OUT / f"case-{case['id']}.log").write_bytes(result)
-                except subprocess.CalledProcessError as exc:
-                    (OUT / f"case-{case['id']}.log").write_bytes(exc.stdout + exc.stderr)
-                    failures.append(f"case {case['id']}: {proto} {variant}: peer assertion failed")
-                time.sleep(0.2)
+                execute_case(api, original, cases, failures, proto, variant)
+        # Append new controls to keep existing case IDs and traffic profiles stable.
+        for proto, variant in extra_controls:
+            execute_case(api, original, cases, failures, proto, variant)
         time.sleep(1.3)
         peer_log = compose("logs", "--no-color", "outstation", stdout=subprocess.PIPE).stdout
         (OUT / "peer.log").write_bytes(peer_log)
         for case in cases:
             if case.get("kind") == "confirm" and not any('"event": "confirm"' in line and str(case["port"]) in line for line in peer_log.decode().splitlines()):
                 failures.append(f"case {case['id']}: outstation never received application Confirm")
+            if case.get("boundary"):
+                records = [line.partition("|")[2].strip() for line in peer_log.decode().splitlines()]
+                records = [json.loads(line) for line in records if line.startswith("{")]
+                if not any(row.get("event") == "server-reset" and row["peer"][1] == case["port"] for row in records):
+                    failures.append(f"case {case['id']}: outstation socket never received a connection reset")
         limits = json.loads(internal("/internal/diagnostics/state-limits"))
         save("state-limits.json", limits)
         assert 0 < limits["budget"]["highWater"] <= limits["budget"]["limit"], limits
