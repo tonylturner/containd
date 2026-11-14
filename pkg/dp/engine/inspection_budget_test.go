@@ -106,8 +106,11 @@ func TestIECInspectionBudgetRefusalDisposition(t *testing.T) {
 					t.Fatal("budget exhaustion did not use the bound abort")
 				}
 			}
-			if budget.Status().InUse != limits.IECSessionMetadataBytes {
-				t.Fatal("IEC refusal retained credit beyond terminal session metadata")
+			// The fixed token-owner history survives aborts to attribute late
+			// callbacks. No stream, grant or held-payload credit may survive.
+			metadata := limits.IECSessionMetadataBytes + before.ByCategory["pairing"]
+			if budget.Status().InUse != metadata {
+				t.Fatalf("IEC refusal retained credit beyond session/token metadata: %+v", budget.Status())
 			}
 			h.e.Close()
 			if budget.Status().InUse != 0 {

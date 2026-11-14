@@ -13,11 +13,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 func cappedFlowEngine(t *testing.T, slots int) *Engine {
 	t.Helper()
-	e, err := New(Config{Limits: limits.Limits{MaxFlows: slots}, DPIEnabled: true})
+	e, err := New(Config{Limits: limits.Limits{MaxFlows: slots}, DPIEnabled: true, ResetInjector: &session.Fake{}})
 	if err != nil {
 		t.Fatal(err)
 	}

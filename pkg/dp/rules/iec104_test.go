@@ -52,6 +52,8 @@ func euPolicy() *Snapshot {
 		Firewall: []Entry{
 			{ID: "l4-any-2404", Protocols: []Protocol{{Name: "tcp", Port: "2404"}}, Action: ActionAllow},
 			iecEntry("cc-rtu-iec104-session", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "enforce"}),
+			iecEntry("cc-rtu-iec104-telemetry", ActionAllow, ICSPredicate{ReadOnly: true, MessageClass: "autonomous", Mode: "enforce"}),
+			iecEntry("cc-rtu-iec104-link", ActionAllow, ICSPredicate{ReadOnly: true, MessageClass: "session", Mode: "enforce"}),
 			iecEntry("cc-rtu-breaker-command", ActionAllow, ICSPredicate{
 				TypeIDs: []int{46}, Classes: []string{"control"}, Direction: "request",
 				CA: []uint16{1}, IOA: []IOARange{{Start: 2001, End: 2001}}, Mode: "enforce",
@@ -65,6 +67,17 @@ func euPolicy() *Snapshot {
 // sessionCtx builds the opener-oriented session tuple that L4 supplies
 // for every IEC event, whatever the wire direction.
 func sessionCtx(direction string, obj IEC104Context) EvalContext {
+	// These evaluator fixtures supply the already-classified runtime message.
+	class := ClassRequest
+	if direction == "response" {
+		class = ClassSolicited
+	}
+	if obj.Class == "monitor" {
+		class = ClassAutonomous
+	}
+	if obj.APCIType == "S" || obj.APCIType == "U" {
+		class = ClassSession
+	}
 	return EvalContext{
 		SrcZone: "lan4",
 		DstZone: "lan1",
@@ -72,7 +85,7 @@ func sessionCtx(direction string, obj IEC104Context) EvalContext {
 		DstIP:   net.ParseIP(iecServer),
 		Proto:   "tcp",
 		Port:    "2404",
-		ICS:     &ICSContext{Protocol: ProtocolIEC104, Direction: direction, IEC104: &obj},
+		ICS:     &ICSContext{Protocol: ProtocolIEC104, Direction: direction, MessageClass: class, IEC104: &obj},
 	}
 }
 
@@ -96,13 +109,13 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 		rule      string
 	}{
 		{"GI request", "request", iFrame(100, "system", 1, 0, true), ActionAllow, "cc-rtu-iec104-session"},
-		{"single-point monitor telemetry", "response", iFrame(1, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
+		{"single-point monitor telemetry", "response", iFrame(1, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-telemetry"},
 		{"step-position GI telemetry", "response", iFrame(5, "monitor", 1, 1301, true), ActionAllow, "cc-rtu-iec104-session"},
-		{"monitor telemetry", "response", iFrame(13, "monitor", 1, 4001, true), ActionAllow, "cc-rtu-iec104-session"},
-		{"timed single-point monitor telemetry", "response", iFrame(30, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-session"},
-		{"timed step-position telemetry", "response", iFrame(32, "monitor", 1, 1301, true), ActionAllow, "cc-rtu-iec104-session"},
-		{"S-frame", "request", IEC104Context{APCIType: "S", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
-		{"STOPDT act", "request", IEC104Context{APCIType: "U", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-session"},
+		{"monitor telemetry", "response", iFrame(13, "monitor", 1, 4001, true), ActionAllow, "cc-rtu-iec104-telemetry"},
+		{"timed single-point monitor telemetry", "response", iFrame(30, "monitor", 1, 1002, true), ActionAllow, "cc-rtu-iec104-telemetry"},
+		{"timed step-position telemetry", "response", iFrame(32, "monitor", 1, 1301, true), ActionAllow, "cc-rtu-iec104-telemetry"},
+		{"S-frame", "request", IEC104Context{APCIType: "S", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-link"},
+		{"STOPDT act", "request", IEC104Context{APCIType: "U", Class: "system", SafeRead: true}, ActionAllow, "cc-rtu-iec104-link"},
 		{"allowed breaker command", "request", iFrame(46, "control", 1, 2001, false), ActionAllow, "cc-rtu-breaker-command"},
 		{"wrong CA", "request", iFrame(46, "control", 2, 2001, false), ActionDeny, "deny-other-iec104"},
 		{"wrong IOA", "request", iFrame(46, "control", 1, 2002, false), ActionDeny, "deny-other-iec104"},
@@ -116,7 +129,13 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			action, entry := ev.EvaluateIEC104(sessionCtx(tc.direction, tc.obj))
+			ctx := sessionCtx(tc.direction, tc.obj)
+			if tc.name == "step-position GI telemetry" {
+				// This evaluator fixture represents a paired GI data stage,
+				// unlike the independently authorized spontaneous rows.
+				ctx.ICS.MessageClass = ClassSolicited
+			}
+			action, entry := ev.EvaluateIEC104(ctx)
 			if action != tc.want || entry == nil || entry.ID != tc.rule {
 				id := "<nil>"
 				if entry != nil {
@@ -130,7 +149,7 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 
 func TestMonitorClassAndGIEnforcePolicy(t *testing.T) {
 	evaluator := NewEvaluator(&Snapshot{Firewall: []Entry{
-		iecEntry("monitor", ActionAllow, ICSPredicate{Classes: []string{"monitor"}, Direction: "response", Mode: "enforce"}),
+		iecEntry("monitor", ActionAllow, ICSPredicate{Classes: []string{"monitor"}, Direction: "response", MessageClass: "autonomous", Mode: "enforce"}),
 		iecEntry("gi", ActionAllow, ICSPredicate{TypeIDs: []int{100}, ReadOnly: true, Mode: "enforce"}),
 		iecEntry("deny-other", ActionDeny, ICSPredicate{Mode: "enforce"}),
 	}})
@@ -158,7 +177,7 @@ func TestMonitorClassAndGIEnforcePolicy(t *testing.T) {
 
 func TestEvaluateIEC104NoMatchIsDeny(t *testing.T) {
 	snap := euPolicy()
-	snap.Firewall = snap.Firewall[:4] // drop the explicit deny; Default stays ALLOW
+	snap.Firewall = snap.Firewall[:len(snap.Firewall)-1] // drop the explicit deny; Default stays ALLOW
 	ev := NewEvaluator(snap)
 	if action, entry := ev.EvaluateIEC104(sessionCtx("request", iFrame(45, "control", 1, 2001, false))); action != ActionDeny || entry != nil {
 		t.Fatalf("no match = %s, %v; want DENY, nil", action, entry)

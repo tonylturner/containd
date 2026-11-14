@@ -113,7 +113,7 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 			SrcZone: "lan4", DstZone: "lan1",
 			SrcIP: net.ParseIP("10.60.60.10"), DstIP: net.ParseIP("10.30.30.30"),
 			Proto: "tcp", Port: "2404",
-			ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction, IEC104: &obj},
+			ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction, MessageClass: pipelineMessageClass(direction), IEC104: &obj},
 		}
 	}
 	u8 := func(v uint8) *uint8 { return &v }
@@ -182,6 +182,11 @@ func TestIEC104MonitorClassAndGIKeepPolicySessionAllowed(t *testing.T) {
 	     "sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],
 	     "protocols":[{"name":"tcp","port":"2404"}],
 	     "ics":{"protocol":"iec104","classes":["monitor"],"direction":"response","mode":"enforce"},
+	     "action":"ALLOW"},
+	    {"id":"spontaneous","sourceZones":["lan4"],"destZones":["lan1"],
+	     "sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],
+	     "protocols":[{"name":"tcp","port":"2404"}],
+	     "ics":{"protocol":"iec104","classes":["monitor"],"direction":"response","messageClass":"autonomous","mode":"enforce"},
 	     "action":"ALLOW"},
 	    {"id":"gi","sourceZones":["lan4"],"destZones":["lan1"],
 	     "sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],
@@ -258,11 +263,15 @@ func TestIEC104MonitorClassAndGIKeepPolicySessionAllowed(t *testing.T) {
 					ctx.IOA = &v
 				}
 				direction, _ := eventfields.String(attrs, eventfields.KeyDirection)
+				class := pipelineMessageClass(direction)
+				if cot, ok := eventfields.Uint8(attrs, eventfields.KeyCause); ok && cot == 3 {
+					class = rules.ClassAutonomous
+				}
 				evalCtx := rules.EvalContext{
 					SrcZone: "lan4", DstZone: "lan1",
 					SrcIP: net.ParseIP("10.60.60.10"), DstIP: net.ParseIP("10.30.30.30"),
 					Proto: "tcp", Port: "2404",
-					ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction, IEC104: &ctx},
+					ICS: &rules.ICSContext{Protocol: "iec104", Direction: direction, MessageClass: class, IEC104: &ctx},
 				}
 				action, entry := evaluator.EvaluateIEC104(evalCtx)
 				if ev.Kind == eventfields.KindUnsupported {
@@ -303,4 +312,12 @@ func catPipeline(frames ...[]byte) []byte {
 		out = append(out, frame...)
 	}
 	return out
+}
+
+// Evaluator-only pipeline fixtures stand in for the runtime pairing gate.
+func pipelineMessageClass(direction string) rules.MessageClass {
+	if direction == "response" {
+		return rules.ClassSolicited
+	}
+	return rules.ClassRequest
 }

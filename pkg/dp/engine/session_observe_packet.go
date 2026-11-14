@@ -91,6 +91,11 @@ func (t *sessionTable) resumeObservationLocked(s *trackedSession, dir int, pkt c
 	if s.mode != "monitor" || sessionProtocol(s.flow) == iecProtocol {
 		return nil
 	}
+	if s.inspectionLost {
+		// A budget refusal is terminal for this observation incarnation.
+		// Resuming after pressure subsides would silently hide the lost range.
+		return nil
+	}
 	if s.stopParse {
 		// The old decoder, ranges and observe grants were retired together.
 		// A later aligned packet may resume passive inspection, as before,

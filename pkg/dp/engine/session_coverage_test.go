@@ -14,6 +14,7 @@ import (
 )
 
 func TestDS34Gate(t *testing.T) {
+	t.Run("inline-direction-splits", testDS34RuntimeSplits)
 	for _, dir := range []int{sessionDirClient, sessionDirSrv} {
 		t.Run(dirName(dir), func(t *testing.T) {
 			h := newIECHarness(t, "enforce")

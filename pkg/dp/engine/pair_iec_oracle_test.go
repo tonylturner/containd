@@ -27,6 +27,8 @@ type iecStageOracle struct {
 }
 
 func TestDS34IEC104(t *testing.T) {
+	t.Run("mismatch-and-stages", testDS34IECMismatchStages)
+	t.Run("inline-solicited", func(t *testing.T) { testDS34SolicitedRuntime(t, runtimePairCases()[2]) })
 	t.Run("stage-table", func(t *testing.T) {
 		now := time.Unix(1, 0)
 		for _, row := range iecProcedures {

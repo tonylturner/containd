@@ -583,7 +583,8 @@ func (t *sessionTable) livePacketLocked(s *trackedSession, dir int, pkt capture.
 func refuses(s *trackedSession, dir int, pkt capture.Packet) bool {
 	f := pkt.TCP.Flags
 	return dir == sessionDirSrv && f&capture.TCPFlagRST != 0 && f&capture.TCPFlagACK != 0 &&
-		len(pkt.Payload) == 0 && pkt.TCP.Ack == s.dirs[sessionDirClient].isn+1
+		len(pkt.Payload) == 0 && s.dirs[sessionDirClient] != nil && s.dirs[sessionDirClient].hasISN &&
+		pkt.TCP.Ack == s.dirs[sessionDirClient].isn+1
 }
 
 // ackLocked releases history the receiver of direction dir acknowledged, up

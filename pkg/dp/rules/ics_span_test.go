@@ -77,7 +77,7 @@ func TestICSAddressSpanSemantics(t *testing.T) {
 func TestEvaluatorRangeCrossingRead(t *testing.T) {
 	unit := uint8(1)
 	read := func(first, last uint32) EvalContext {
-		return EvalContext{ICS: &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 3, UnitID: &unit, Direction: "request",
+		return EvalContext{ICS: &ICSContext{Protocol: "modbus", MessageClass: ClassRequest, HasFunctionCode: true, FunctionCode: 3, UnitID: &unit, Direction: "request",
 			Spans: []AddressSpan{span(first, last)}}}
 	}
 	allow := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{{

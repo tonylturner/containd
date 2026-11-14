@@ -33,7 +33,9 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 	const offered = 88 // More than ten times the directional flow-slot limit.
 	c := &stateBudgetClock{}
 	c.nanos.Store(time.Now().UnixNano())
-	e := stateBudgetEngine(t, limits.Limits{MaxFlows: 8, MaxTopTalkers: 2, MaxInspectionBytes: 65536}, limits.NewLedger(c.now), c)
+	// Isolate flow-slot churn from inspection refusal: four full shared
+	// session/decoder owners need more than the old directional streams.
+	e := stateBudgetEngine(t, limits.Limits{MaxFlows: 8, MaxTopTalkers: 2, MaxInspectionBytes: 256 << 10}, limits.NewLedger(c.now), c)
 	want := map[stateBudgetHit]uint64{}
 	var legacy, observed bool
 	for wave := range 3 {
@@ -86,7 +88,7 @@ func testStateBudgetChurn(t *testing.T, mode string) {
 		if packets != int64((wave+1)*offered*4) {
 			t.Fatalf("packet accounting under refusal: %d", packets)
 		}
-		c.advance(6 * time.Minute) // Both the 30 s opening TTL and 5 min established TTL.
+		c.advance(sessionIdleTTL + time.Minute) // Both flow TTLs and the shared session owner.
 		e.sweepFlows(c.now())
 		e.sessions.expire()
 		assertStateBudgetCaps(t, e)
@@ -458,6 +460,25 @@ func testStateBudgetRebind(t *testing.T) {
 		assertStateBudgetCaps(t, e)
 		old := e.hooks
 		old.onSource(capture.SourceEvent{Generation: uint64(i + 1), Terminal: true, Err: capture.ErrQueueClosed})
+		if i == 0 {
+			// Losing the inline source must revoke the live enforcing stream,
+			// including its grant, while retaining configuration owners.
+			if after := b.Status().InUse; after >= baseline {
+				t.Fatal("source loss retained live enforcing inspection", b.Status())
+			} else {
+				baseline = after
+			}
+			table.mu.Lock()
+			for _, s := range table.sessions {
+				if s.mode == "enforce" && s.state != sessionAborted {
+					t.Error("source loss left live enforcing authority")
+				}
+			}
+			if table.pairingTotal != 0 {
+				t.Error("source loss retained request grants")
+			}
+			table.mu.Unlock()
+		}
 		if b.Status().InUse != baseline {
 			t.Fatal("source flush changed non-held owner credit", b.Status())
 		}
