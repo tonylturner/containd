@@ -218,9 +218,6 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 	}
 	s := o.Service
 	class := observationClass(o)
-	if s.Direction == "response" && class != rules.ClassAutonomous && class != rules.ClassSession {
-		return nil, append(reasons, WithheldPairing)
-	}
 	// Monitoring and system ASDUs are not command relations. Classify them
 	// before applying command direction, selector, value or qualifier checks.
 	if class != rules.ClassAutonomous && class != rules.ClassSession && s.Protocol == "iec104" && o.IEC104 != nil && o.IEC104.TypeID != nil && iec104.ClassOf(*o.IEC104.TypeID) != "control" {

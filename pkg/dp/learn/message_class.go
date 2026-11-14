@@ -13,10 +13,6 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-// WithheldPairing is not a failed predicate replay: retained response facts
-// without runtime pairing authority cannot certify solicited admission.
-const WithheldPairing evidence.WithheldReason = "pairing_unknown_or_unsupported"
-
 func classificationEvent(o evidence.Observation) dpi.Event {
 	ev := dpi.Event{Proto: o.Service.Protocol, Kind: o.Service.Direction, Attributes: map[string]any{}}
 	a := ev.Attributes
