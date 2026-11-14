@@ -69,6 +69,13 @@ numbers, timestamps and periodic sample counts need not be byte-identical;
 `stages.tsv` and `oracle.json` must be. Run logs and output directories are not
 build context.
 
+To regenerate the derived tables and oracle from the committed captures without
+Docker or new measurements:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 test/ds34/peers/iec104/analyze.py test/ds34/peers/iec104
+```
+
 ## Oracle and evidence format
 
 `oracle.json` is the strict version-1 replay interface:
@@ -82,20 +89,30 @@ holding exactly one complete APDU. Directions are master-to-station `request`
 and station-to-master `response`, including autonomous and control frames.
 Every byte, including APCI counters, P/N/T, S/E, addresses, qualifiers, values
 and timestamps, is retained from the verified capture. No timestamp or counter
-normalization is performed. Rejected and unsupported episodes remain only in
-the stage table and full capture evidence, not this replay interface.
+normalization is performed. Unsupported episodes remain only in the stage
+table and full capture evidence, not this replay interface.
 
-The replay export is a **fixed deterministic subset**, not every positive
-observation: all c104 positive I-frame episodes; Java positive I-frame episodes
-except its wall-clock clock-sync replies; the C sample's initial Type45
-execute-without-selection episode; one actual STARTDT/STOPDT/TESTFR pair from
-each peer; and c104's complete autonomous startup, including S acknowledgements.
+The replay export contains **261 sequences**: 81 positive/control sequences
+and 180 rejected episodes (95 Java, 85 c104). It is a **fixed deterministic
+subset**, not every observation: all c104 positive I-frame episodes; Java
+positive I-frame episodes except its wall-clock clock-sync replies; the C
+sample's initial Type45 execute-without-selection episode; one actual
+STARTDT/STOPDT/TESTFR pair from each peer; and c104's complete autonomous
+startup, including S acknowledgements.
+Rejected episodes are also exported when at least one reply has error COT44–47
+(either P/N value) or negative ACT_CON (COT7, P/N=N), subject to the same
+byte-stability exclusions. The complete ordered I-frame episode is retained,
+not just the qualifying reply.
 Later C I-frame episodes have periodic-dependent APCI counters, and C/Java
 clock replies contain current time. Those observations stay intact in the
 stage table and wire evidence rather than being rewritten for repeatability.
+This excludes **all lib60870 error episodes**, including its direct Type47/44N
+and GI100/46N replies. The per-peer totals are 4 lib60870, 118 Java and 139 c104.
 The JSON includes all fourteen command types, GI, counter, Read, clock and test
 positive witnesses, plus monitoring/initialization and S/U frames. It does not
-invent positive Reset105 or negative peer witnesses.
+invent positive Reset105 or unwitnessed errors. Exported negative shapes include
+Java's direct 44N, c104's standalone 7N, and c104's ordered 7N then 44P/46P/47P.
+There is no captured COT45 witness.
 
 Sequence IDs `STACK-case-NNN` resolve to `STACK.wire.tsv:case=NNN`; control
 exchange IDs and `c104-startup-autonomous` resolve to the peer's wire table
@@ -171,7 +188,7 @@ S acknowledgement. Each run drives 135 requests per controlled station
 
 ## Observed coverage
 
-The oracle has 441 rows: 147 per stack, including rejected and unsupported
+The stage table has 441 rows: 147 per stack, including rejected and unsupported
 procedures. In the table, numbers are **reply** COTs; `N` is the P/N bit.
 `R44` means rejected with unknown-type COT44; `U` means unsupported/no response.
 For S/E commands, `7 / 7,10` means select confirmation / execute stages.

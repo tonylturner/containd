@@ -93,7 +93,7 @@ FIELDS = [
 def replay_sequences(stack, peer, cases, rows):
     """Export a fixed byte-stable profile, without rewriting any APDU field."""
     sequences = []
-    observed = {row["case"] for row in rows if row["status"] == "observed"}
+    statuses = {row["case"]: row["status"] for row in rows}
     all_units = [unit for case in cases for unit in case["units"]]
 
     def frame(direction, data):
@@ -103,7 +103,20 @@ def replay_sequences(stack, peer, cases, rows):
         }
 
     for case in cases:
-        if case["type"] == "0" or case["id"] not in observed:
+        if case["type"] == "0":
+            continue
+        status = statuses.get(case["id"])
+        if status != "observed" and not (
+            status == "rejected-by-stack"
+            and any(
+                direction == "RX"
+                and unit["kind"] == "I"
+                and (
+                    44 <= unit["cot"] <= 47 or (unit["cot"] == 7 and unit["pn"] == "N")
+                )
+                for direction, _, unit in case["units"]
+            )
+        ):
             continue
         # The C sample's later I frames carry periodic-dependent APCI counters.
         # Its clock and Java's clock also replace timestamps with wall time.
