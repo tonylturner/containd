@@ -54,26 +54,29 @@ const (
 
 // trackedSession owns one TCP session incarnation, from its SYN.
 type trackedSession struct {
-	iecSession     // protocol state; transport identity, ranges and credits live here
-	pairing        sessionPairing
-	memory         *flow.InspectionMemory
-	inspectionLost bool
-	id             string
-	flow           *flow.State // immutable service key captured at creation; client/server stay in packet space
-	client         netip.AddrPort
-	server         netip.AddrPort
-	state          sessionState
-	lastSeen       time.Time
-	endedAt        time.Time // closed or aborted
-	dirs           [2]*sessionDir
-	held           []*heldPacket
-	heldBytes      int
-	stopParse      bool // monitor envelope: parsing stopped after a stream error
-	reset          *connReset
-	next           *trackedSession // new incarnation whose handshake is pending
-	tokens         [pairSessionCap]sessionToken
-	tokenNext      int
-	tokenLease     *limits.Lease
+	iecSession       // protocol state; transport identity, ranges and credits live here
+	pairing          sessionPairing
+	memory           *flow.InspectionMemory
+	inspectionLost   bool
+	id               string
+	flow             *flow.State // immutable service key captured at creation; client/server stay in packet space
+	client           netip.AddrPort
+	server           netip.AddrPort
+	state            sessionState
+	lastSeen         time.Time
+	endedAt          time.Time // closed or aborted
+	dirs             [2]*sessionDir
+	held             []*heldPacket
+	heldBytes        int
+	stopParse        bool // monitor envelope: parsing stopped after a stream error
+	reset            *connReset
+	resetIO          chan struct{} // I/O completion barrier, never grant authority
+	retireAfterReset bool
+	nonAdmit         bool            // an aborted ordinary non-admission repeats to kernel policy
+	next             *trackedSession // new incarnation whose handshake is pending
+	tokens           [pairSessionCap]sessionToken
+	tokenNext        int
+	tokenLease       *limits.Lease
 }
 
 // sessionDir is one direction of a session (client→server or server→client).
@@ -362,6 +365,13 @@ func (t *sessionTable) expire() {
 }
 
 func (t *sessionTable) deleteLocked(key sessionKey, s *trackedSession) sessionActions {
+	if s.resetIO != nil {
+		// Keep the tuple reserved until old reset/conntrack I/O finishes.
+		// New handshakes wait outside mu; authority is revoked immediately.
+		s.retireAfterReset = true
+		s.clearInspectionBytes()
+		return sessionActions{}
+	}
 	acts := t.iecAdapter.endLocked(t, s)
 	acts.retired = true
 	if s.state == sessionAborted {

@@ -164,6 +164,14 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 		return t.nonIPv4Locked(state)
 	}
 	s, dir := t.lookupPacketLocked(src, dst, state)
+	for s != nil && s.resetIO != nil && replacementHandshake(s, dir, pkt) {
+		done := s.resetIO
+		t.mu.Unlock()
+		<-done
+		t.mu.Lock()
+		s, dir = t.lookupPacketLocked(src, dst, state)
+		now = t.now()
+	}
 	defer func() {
 		if !handled {
 			return
@@ -188,6 +196,11 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 			s.flow.InlinePolicy.Store(&copy)
 		}
 		s.ctx = t.sessionContext(s)
+		if !synRST(pkt.TCP.Flags) {
+			if res, ok := t.replacementLocked(s, dir, pkt, now); ok {
+				return res, true
+			}
+		}
 	}
 	switch {
 	case synRST(pkt.TCP.Flags):
@@ -202,7 +215,7 @@ func (t *sessionTable) packet(pkt capture.Packet, state *flow.State, parsing ics
 		return t.reopenLocked(s, dir, pkt, state, now)
 	default:
 		res := t.livePacketLocked(s, dir, pkt, state, now)
-		res.decision.Notify = t.iecAdapter.notifyLocked(pkt.Token)
+		res.decision.Notify = res.decision.Notify || t.iecAdapter.notifyLocked(pkt.Token)
 		return res, true
 	}
 }
@@ -320,7 +333,7 @@ func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.Add
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
 	key := sessionKey{client: client, server: server}
 	switch {
-	case prev != nil && prev.state == sessionAborted:
+	case prev != nil && (prev.state == sessionAborted || prev.state == sessionEstablished):
 		prev.next.releaseInspection()
 		prev.next = n // the tombstone retires once the handshake validates
 	default:
@@ -328,7 +341,7 @@ func (t *sessionTable) openLocked(prev *trackedSession, client, server netip.Add
 		prev.releaseInspection()
 	}
 	res := accepted(reasonIECAccept)
-	res.acts.retired = true // a new connection on the tuple: the previous one is over
+	res.acts.retired = prev == nil || prev.state == sessionClosed
 	return res
 }
 
@@ -374,6 +387,9 @@ func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt cap
 	tombstone := accepted(reasonIECTombstone)
 	if currentMode == "enforce" {
 		tombstone = dropped(reasonIECTombstone)
+		if s.nonAdmit {
+			tombstone.decision = nonAdmitDecision(pkt)
+		}
 	}
 	f := pkt.TCP.Flags
 	if dir == sessionDirClient && isSYN(f) {
@@ -392,27 +408,6 @@ func (t *sessionTable) tombstonePacketLocked(s *trackedSession, dir int, pkt cap
 			return tombstone, true
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
-	}
-	if n := s.next; n != nil && f&capture.TCPFlagSYN == 0 && refuses(n, dir, pkt) {
-		// The server refused the next incarnation: the tombstone stays,
-		// and the client's next SYN opens another.
-		s.next = nil
-		n.releaseInspection()
-		return accepted(reasonIECClosed), true
-	}
-	if n := s.next; dir == sessionDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
-		pkt.TCP.Ack == n.dirs[sessionDirClient].isn+1 && len(pkt.Payload) == 0 {
-		if err := t.allocateDirLocked(n, sessionDirSrv, pkt.TCP.Seq); err != nil {
-			s.next = nil
-			n.releaseInspection()
-			return t.admissionLimitLocked(n.mode), true
-		}
-		n.state, n.lastSeen = sessionEstablished, now
-		t.tombstones--
-		t.sessions[sessionKey{client: s.client, server: s.server}] = n
-		s.next = nil
-		s.releaseInspection()
-		return accepted(reasonIECAccept), true
 	}
 	if currentMode == "enforce" {
 		tombstone.acts = t.challengeLocked(s, dir, pkt, now)
@@ -451,18 +446,10 @@ func reopensLocked(s *trackedSession, dir int, pkt capture.Packet) bool {
 }
 
 // reopenLocked ends an established incarnation whose tuple a new
-// connection's SYN reopens. An enforce incarnation aborts: the SYN drops,
-// both endpoints are reset, and the client's retransmitted SYN opens the
-// next incarnation from the tombstone. A monitor incarnation closes, and the
-// SYN opens the next one at once.
+// connection's SYN proposes. No old history retires until a peer SYN-ACK
+// validates the proposal.
 func (t *sessionTable) reopenLocked(s *trackedSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (sessionResult, bool) {
-	if s.mode == "enforce" {
-		return droppedWith(reasonIECAbort, t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)), true
-	}
-	acts := t.closeLocked(s, now)
-	res, ok := t.closedPacketLocked(s, dir, pkt, state, now)
-	res.acts.merge(acts)
-	return res, ok
+	return t.openLocked(s, s.client, s.server, t.stateContext(state), s.mode, pkt, state, now), true
 }
 
 // handshakeLocked follows the SYN and SYN-ACK of a live incarnation. A
@@ -689,6 +676,9 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 	d := s.dirs[dir]
 	enforce := s.mode == "enforce"
 	cur := t.current(s, dir, pkt, now)
+	if enforce && d.finFwd && cur.end > d.forwarded {
+		return droppedWith(reasonIECInvalid, t.abortLocked(s, abortTransport, "", cur, now))
+	}
 	if cur.off < 0 || cur.off < d.bytes.Floor() {
 		// Before the stream, or overlapping bytes whose identity was
 		// released: not provably identical, so never forwarded.
@@ -912,6 +902,16 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 		res.decision.Action, res.decision.Reason = capture.Accept, reasonIECAccept
 		if d.nonAdmitting(cur.off, cur.end) {
 			res.decision = nonAdmitWithResolved(pkt, res.decision.Resolved)
+			res.decision.Notify = true
+			s.nonAdmit = true
+			acts := t.abortLocked(s, abortDeny, "", cur, now)
+			if txn := t.aborts[cur.tok]; txn != nil {
+				for _, r := range res.decision.Resolved {
+					t.aborts[r.Token] = txn
+					txn.pending++
+				}
+			}
+			res.acts.merge(acts)
 		} else {
 			d.forwarded = max(d.forwarded, cur.end)
 		}

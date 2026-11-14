@@ -117,6 +117,9 @@ func (t *sessionTable) answerPickupChallenge(pkt capture.Packet) {
 		t.pickups.forget(sessionKey{client: src, server: dst}, sessionKey{client: dst, server: src})
 		return
 	}
+	if !resetChallengeACK(pkt) {
+		return
+	}
 	now := time.Now()
 	key, from := sessionKey{client: src, server: dst}, sessionDirClient
 	r, entry, ok := t.pickups.challenge(key, from, pkt.TCP, now)

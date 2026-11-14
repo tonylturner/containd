@@ -51,11 +51,11 @@ type resetTarget struct {
 }
 
 // challenge answers a challenge ACK (RFC 5961) that target from sent after
-// its reset: any of its packets that carries ACK and no RST. The reset
+// its reset: a payload-free ACK, never a retransmitted application segment. The reset
 // goes again at the ACK number, at most sessionResetRetries times, within
 // sessionResetWindow of the last one. It returns the reset to send.
 func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (session.Reset, bool) {
-	if c == nil || tcp.Flags&capture.TCPFlagACK == 0 || tcp.Flags&capture.TCPFlagRST != 0 {
+	if c == nil || tcp.Flags&capture.TCPFlagACK == 0 || tcp.Flags&(capture.TCPFlagRST|capture.TCPFlagSYN|capture.TCPFlagFIN|capture.TCPFlagPSH) != 0 {
 		return session.Reset{}, false
 	}
 	tr := &c.targets[from]
@@ -65,6 +65,11 @@ func (c *connReset) challenge(from int, tcp capture.TCPMeta, now time.Time) (ses
 	tr.retries++
 	tr.r.Seq = tcp.Ack
 	return tr.r, true
+}
+
+func resetChallengeACK(pkt capture.Packet) bool {
+	return pkt.TCP.Valid && len(pkt.Payload) == 0 && pkt.TCP.Flags&capture.TCPFlagACK != 0 &&
+		pkt.TCP.Flags&(capture.TCPFlagSYN|capture.TCPFlagFIN|capture.TCPFlagRST|capture.TCPFlagPSH) == 0
 }
 
 // sendRST sends one reset. A failure makes enforcement unhealthy.

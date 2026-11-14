@@ -12,6 +12,9 @@ import (
 )
 
 func sessionProtocol(s *flow.State) string {
+	if s == nil {
+		return ""
+	}
 	switch servicePort(s, nil) {
 	case ics.ModbusPort:
 		return "modbus"

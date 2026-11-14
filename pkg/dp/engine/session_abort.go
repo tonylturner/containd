@@ -93,6 +93,8 @@ func (t *sessionTable) abortLocked(s *trackedSession, reason *iecAbortReason, tr
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
+	s.next.releaseInspection()
+	s.next = nil
 	s.clearInspectionBytes()
 	t.dpi.EndStream(s.id)
 	if t.markAbort != nil {
@@ -171,7 +173,7 @@ func (t *sessionTable) resetJob(s *trackedSession) func() {
 	if s.flow != nil {
 		connection = s.flow.Connection.Load()
 	}
-	return func() {
+	return t.resetWork(s, func() {
 		for _, target := range []int{sessionDirSrv, sessionDirClient} {
 			t.mu.Lock()
 			tr := s.reset.targets[target]
@@ -183,24 +185,35 @@ func (t *sessionTable) resetJob(s *trackedSession) func() {
 		t.mu.Lock()
 		established := s.reset.targets[sessionDirSrv].valid
 		t.mu.Unlock()
-		if established {
+		if established && t.health.injectorReady() {
 			t.deleteConntrack(s.client, s.server, connection, "iec104 abort "+s.id)
 		}
-	}
+	}, func() {
+		t.mu.Lock()
+		var events []iecTelemetry
+		for _, target := range targetNames {
+			events = append(events, s.sessionEvent("unavailable", map[string]any{eventfields.KeyTarget: target}, t.now()))
+		}
+		t.mu.Unlock()
+		t.emit(events)
+	})
 }
 
 // sendReset sends one RST and reports it. A failure keeps the session
 // dropped and makes enforcement unhealthy.
 func (t *sessionTable) sendReset(s *trackedSession, target int, r session.Reset) {
-	err := t.sendRST(r)
+	outcome := "unavailable"
+	err := errInjectorUnavailable
+	if t.health.injectorReady() {
+		err = t.sendRST(r)
+		outcome = resetOutcome(err)
+	}
 	t.mu.Lock()
 	now := t.now()
 	s.reset.targets[target].sent = now
 	t.mu.Unlock()
 	extra := map[string]any{eventfields.KeyTarget: targetNames[target]}
-	outcome := outcomeResetSent
 	if err != nil {
-		outcome = outcomeResetFailed
 		pressureTotals.injector.Add(1)
 		metrics.IEC104InjectorFailuresTotal.Inc()
 		extra[eventfields.KeyError] = err.Error()
@@ -214,11 +227,14 @@ func (t *sessionTable) sendReset(s *trackedSession, target int, r session.Reset)
 // challengeLocked answers a challenge ACK from a reset target of an aborted
 // session (connReset.challenge).
 func (t *sessionTable) challengeLocked(s *trackedSession, from int, pkt capture.Packet, now time.Time) sessionActions {
+	if !resetChallengeACK(pkt) {
+		return sessionActions{}
+	}
 	r, ok := s.reset.challenge(from, pkt.TCP, now)
 	if !ok {
 		return sessionActions{}
 	}
-	return sessionActions{jobs: []func(){func() { t.sendReset(s, from, r) }}}
+	return sessionActions{jobs: []func(){t.resetWork(s, func() { t.sendReset(s, from, r) }, nil)}}
 }
 
 // apply carries out actions after the session lock is released: drops are

@@ -232,6 +232,15 @@ func TestDenyConcurrentRetransmit(t *testing.T) {
 			if got := f.waitResets(2); len(got) != 2 {
 				t.Fatalf("reset attempts %d, want one pair", len(got))
 			}
+			// Force the ordering that used to fail only on fast native runs:
+			// an identical payload retry after both initial resets completed.
+			if d := f.handle(pkt); d.Action != capture.Drop {
+				t.Fatalf("post-reset denied retransmission = %+v", d)
+			}
+			drainResetWorker(t, f.e)
+			if got := f.inj.Resets(); len(got) != 2 {
+				t.Fatalf("payload retry was mistaken for a challenge ACK: %+v", got)
+			}
 			if len(f.up.calls) != 0 {
 				t.Fatal("DPI installed a block")
 			}

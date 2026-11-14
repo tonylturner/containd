@@ -116,9 +116,12 @@ func (s *trackedSession) telemetry(event events.Event) iecTelemetry {
 // table lock while snapshotting its private service coordinates.
 func (s *trackedSession) event(kind string, attrs map[string]any, now time.Time) iecTelemetry {
 	attrs[eventfields.KeySessionID] = s.id
-
+	protocol := sessionProtocol(s.flow)
+	if protocol == "" {
+		protocol = eventfields.ProtoIEC104
+	}
 	return s.telemetry(events.Event{
-		Proto:      eventfields.ProtoIEC104,
+		Proto:      protocol,
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  now.UTC(),
