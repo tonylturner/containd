@@ -53,6 +53,12 @@ func covers(a, d rules.Entry) bool {
 	if !messageClassesCover(a, d) {
 		return false
 	}
+	return TransportScopeCovers(a, d)
+}
+
+// TransportScopeCovers reports L3/L4 scope containment only. Identity, schedule
+// and application predicates must be checked separately by callers.
+func TransportScopeCovers(a, d rules.Entry) bool {
 	return zonesCover(a.ViaForwards, d.ViaForwards) && zonesCover(a.SourceZones, d.SourceZones) && zonesCover(a.DestZones, d.DestZones) &&
 		prefixesCover(a.Sources, d.Sources) && prefixesCover(a.Destinations, d.Destinations) &&
 		protocolsCover(a.Protocols, d.Protocols)
