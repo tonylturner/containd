@@ -38,7 +38,17 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 // arbitration, with reason nonconformant and scope attribution. In a monitor
 // envelope a deny is would_drop; monitor rules never arbitrate a verdict.
 func (a *iecAdapter) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
+	ctx := s.ctx
+	ctx.ICS = a.iecContext(ev)
+	d, _ := a.decideContextLocked(s, ev, ctx)
+	return d
+}
+
+// The live gate supplies a typed decoder context. Event-based callers are
+// diagnostic/preview only; neither their decisions nor their JSON mint grants.
+func (a *iecAdapter) decideContextLocked(s *iecSession, ev dpi.Event, ctx rules.EvalContext) (iecDecision, *rules.Entry) {
 	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode, reason: iecEventDenialReason(ev)}
+	var entry *rules.Entry
 	if iecStrictPreempts(ev, a.parsing) {
 		d.reason, d.action = reasonNonconformant, ""
 		if a.policy != nil {
@@ -47,9 +57,7 @@ func (a *iecAdapter) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 			}
 		}
 	} else if d.reason == "" {
-		ctx := s.ctx
-		ctx.ICS = a.iecContext(ev)
-		action, entry := rules.ActionDeny, (*rules.Entry)(nil)
+		action := rules.ActionDeny
 		if a.policy != nil {
 			action, entry = a.policy.EvaluateIEC104(ctx)
 		}
@@ -60,7 +68,7 @@ func (a *iecAdapter) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 		}
 		if action == rules.ActionAllow {
 			d.decision = decisionAllow
-			return d
+			return d, entry
 		}
 	}
 	if s.mode == "enforce" && d.mode == "enforce" {
@@ -68,7 +76,7 @@ func (a *iecAdapter) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 	} else {
 		d.decision = decisionWouldDrop
 	}
-	return d
+	return d, entry
 }
 
 // iecEventDenialReason is the pre-rule fail-closed gate shared with preview.
@@ -137,41 +145,45 @@ func (a *iecAdapter) judgeLocked(t *sessionTable, s *trackedSession, evs []dpi.E
 		if !strings.EqualFold(ev.Proto, iecProtocol) {
 			continue
 		}
-		if t.policy != nil {
-			ctx := s.ctx
-			ctx.ICS = t.iecContext(ev)
-			apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
-			if seen[apdu] == nil {
-				seen[apdu] = map[string]bool{}
-			}
-			for _, entry := range t.policy.MonitorMatches(ctx) {
-				if seen[apdu][entry.ID] {
-					continue
-				}
-				seen[apdu][entry.ID] = true
-				if t.shadow != nil {
-					t.shadow(t.snap, entry)
-				}
-				j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
-			}
-		}
+		ctx := s.ctx
+		ctx.ICS = t.iecContext(ev)
 		d := t.decideLocked(&s.iecSession, ev)
-		s.inventoryDecisionLocked(ev, d)
-		if d.enforced() && !j.denied {
-			j.denied = true
-			j.trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
-		}
-		if d.decision != decisionAllow || d.log {
-			j.events = append(j.events, s.decisionEvent(ev, d, now))
-		}
-		if hasInspectionFindings(ev) {
-			j.findings = append(j.findings, iecFinding{ev: ev, decision: d.decision})
-		}
-		if t.reconnectLocked(s, ev) {
-			j.events = append(j.events, s.sessionEvent(outcomeReconnected, nil, now))
-		}
+		a.judgeDecisionLocked(t, s, ev, ctx, d, seen, &j, now)
 	}
 	return j
+}
+
+func (a *iecAdapter) judgeDecisionLocked(t *sessionTable, s *trackedSession, ev dpi.Event, ctx rules.EvalContext, d iecDecision, seen map[string]map[string]bool, j *iecJudgement, now time.Time) {
+	if t.policy != nil {
+		apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+		if seen[apdu] == nil {
+			seen[apdu] = map[string]bool{}
+		}
+		for _, entry := range t.policy.MonitorMatches(ctx) {
+			if seen[apdu][entry.ID] {
+				continue
+			}
+			seen[apdu][entry.ID] = true
+			if t.shadow != nil {
+				t.shadow(t.snap, entry)
+			}
+			j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
+		}
+	}
+	s.inventoryDecisionLocked(ev, d)
+	if d.enforced() && !j.denied {
+		j.denied = true
+		j.trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+	}
+	if d.decision != decisionAllow || d.log {
+		j.events = append(j.events, s.decisionEvent(ev, d, now))
+	}
+	if hasInspectionFindings(ev) {
+		j.findings = append(j.findings, iecFinding{ev: ev, decision: d.decision})
+	}
+	if t.reconnectLocked(s, ev) {
+		j.events = append(j.events, s.sessionEvent(outcomeReconnected, nil, now))
+	}
 }
 
 // reconnectLocked reports the first STARTDT con of a new incarnation of a

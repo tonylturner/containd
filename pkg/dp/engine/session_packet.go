@@ -34,13 +34,14 @@ const (
 // carried out after the session lock is released; drops of held tokens are
 // already in decision.Resolved.
 type sessionResult struct {
-	decision   capture.Decision
-	inspect    []dpi.Event  // decoder events, recorded like any DPI events
-	findings   []iecFinding // judged events with conformance findings
-	acts       sessionActions
-	stateLimit bool
-	failure    pairReason
-	ruleHits   []sessionRuleHit
+	decision     capture.Decision
+	inspect      []dpi.Event  // decoder events, recorded like any DPI events
+	findings     []iecFinding // judged events with conformance findings
+	acts         sessionActions
+	stateLimit   bool
+	failure      pairReason
+	messages     []sessionMessageDecision
+	policyReason string
 }
 
 func accepted(reason string) sessionResult {
@@ -65,6 +66,13 @@ func droppedWith(reason string, acts sessionActions) sessionResult {
 	res.decision.Resolved = acts.drops
 	acts.drops = nil
 	res.acts = acts
+	return res
+}
+
+func (res sessionResult) aborting(reason string, acts sessionActions) sessionResult {
+	res.decision = capture.Decision{Action: capture.Drop, Reason: reason, Resolved: acts.drops}
+	acts.drops = nil
+	res.acts.merge(acts)
 	return res
 }
 
@@ -115,9 +123,7 @@ func (e *Engine) handleSessionPacket(pkt capture.Packet, state *flow.State) (cap
 	if len(res.inspect) > 0 {
 		e.RecordDPIEvents(state, &parsed, res.inspect)
 	}
-	for _, hit := range res.ruleHits {
-		e.recordRuleHit(hit.evaluator, hit.context, hit.entry, state)
-	}
+	e.recordSessionMessages(state, &parsed, res)
 	for _, f := range res.findings {
 		e.recordConformanceAlert(state, &parsed, f.ev, iecConformanceAction(res.decision, f.decision))
 	}
@@ -726,22 +732,28 @@ func (t *sessionTable) dataLocked(s *trackedSession, dir int, pkt capture.Packet
 					reason = abortBound
 				}
 			}
-			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
-			r.inspect, r.findings, r.stateLimit, r.ruleHits = res.inspect, res.findings, res.stateLimit, res.ruleHits
+			r := res.aborting(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
+			if failed && sessionProtocol(s.flow) != iecProtocol {
+				r.decision.Reason = reasonStreamFailClosed
+			}
 			if r.stateLimit {
 				r.decision.Reason = "state_limit"
 			}
 			if res.failure != "" {
 				r.decision.Reason = string(res.failure)
 			}
-			res.acts.merge(r.acts)
-			r.acts = res.acts
+			if res.policyReason != "" {
+				r.decision.Reason = res.policyReason
+			}
 			return r
 		}
 	}
 	if !enforce {
 		d.forwarded = max(d.forwarded, cur.end)
 		res.decision = capture.Decision{Action: capture.Accept, Reason: reasonIECAccept}
+		if d.nonAdmitting(cur.off, cur.end) {
+			res.decision = nonAdmitDecision(pkt)
+		}
 		return res
 	}
 	return t.releaseLocked(s, dir, pkt, cur, res, now)
@@ -790,6 +802,20 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 	for _, f := range ir.Frames {
 		t.iecAdapter.frameLocked(t, s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
 		t.observePairingLocked(s, dir, f, now)
+		if s.mode == "monitor" && sessionProtocol(s.flow) != iecProtocol && !f.Pending {
+			if compiled := t.ruleOwner.current.Load(); compiled != nil {
+				class, _ := s.pairing.inspect(f, dpiDir(dir), now)
+				_, nonAdmit, _ := t.genericUnitPolicyLocked(s, dir, f, class, false, compiled, now, res)
+				if nonAdmit {
+					for i := range d.frames {
+						p := &d.frames[i]
+						if frameCarries(f, p.start, p.end) {
+							p.nonAdmit = true
+						}
+					}
+				}
+			}
+		}
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
 	}
@@ -800,8 +826,10 @@ func (t *sessionTable) inspectLocked(s *trackedSession, dir int, pkt capture.Pac
 		judged = append(judged, ir.Events[len(ir.Events)-1]) // the error's malformed event
 	}
 	j := iecJudgement{}
-	if sessionProtocol(s.flow) == iecProtocol {
+	if sessionProtocol(s.flow) == iecProtocol && s.mode != "enforce" {
 		j = t.iecAdapter.judgeLocked(t, s, judged, now)
+	} else if sessionProtocol(s.flow) == iecProtocol && streamErr && len(ir.Events) > 0 {
+		j = t.iecAdapter.judgeLocked(t, s, ir.Events[len(ir.Events)-1:], now)
 	}
 	res.acts.events = append(res.acts.events, j.events...)
 	res.findings = append(res.findings, j.findings...)
@@ -845,19 +873,17 @@ func (t *sessionTable) releaseLocked(s *trackedSession, dir int, pkt capture.Pac
 			}
 		}
 		if remaining >= sessionMaxHeldPerSession || bytes+len(pkt.Payload) > sessionMaxHeldBytes || t.heldTotal-len(s.held)+remaining >= sessionMaxHeldGlobal {
-			return droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
+			return res.aborting(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		}
 		if !t.holdCreditLocked(cur.tok, len(pkt.Payload), true, sessionProtocol(s.flow)) {
 			t.ledger.Record(limits.TableInspection, limits.ReasonRefused, limits.ModeEnforce)
-			r := droppedWith("state_limit", t.abortLocked(s, abortBound, "", cur, now))
+			r := res.aborting("state_limit", t.abortLocked(s, abortBound, "", cur, now))
 			r.stateLimit = true
 			return r
 		}
 	}
 	if why := t.commitUnitsLocked(s, dir, cur, now); why != pairOK {
-		r := droppedWith(string(why), t.abortLocked(s, abortDeny, "", cur, now))
-		r.inspect, r.findings, r.ruleHits = res.inspect, res.findings, res.ruleHits
-		return r
+		return res.aborting(string(why), t.abortLocked(s, abortDeny, "", cur, now))
 	}
 	kept := s.held[:0]
 	finReleased := false

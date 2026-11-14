@@ -71,6 +71,7 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 						f.e.SetICSParsing(map[string]string{p.name: parsing})
 						dec := map[string]dpi.StreamDecoder{"modbus": modbus.NewDecoder(), "dnp3": dnp3.NewDecoder(), "cip": cip.NewDecoder()}[p.name]
 						f.e.dpiMgr = dpi.NewManager(findingDecoder{dec})
+						f.e.sessions.dpi = f.e.dpiMgr
 						f.syn()
 						payload := p.read(1)
 						if decodedDeny {
@@ -253,6 +254,7 @@ func TestStrictFindingsBeforeAllowAndAfterDecodedDeny(t *testing.T) {
 	f := newFCFlow(t, "ok", 502)
 	f.e.SetICSParsing(map[string]string{"modbus": "strict"})
 	f.e.dpiMgr = dpi.NewManager(findingDecoder{modbus.NewDecoder()})
+	f.e.sessions.dpi = f.e.dpiMgr
 	f.syn()
 	payload := append(modbusADU(1, 3, 0, 2), modbusADU(2, 6, 1, 2)...)
 	if got := f.decide(0, ackPsh, payload); got.Action != capture.Drop || got.Reason != reasonNonconformant {
@@ -268,6 +270,7 @@ func TestStrictFindingsBeforeAllowAndAfterDecodedDeny(t *testing.T) {
 func TestConformanceAlertReportsFailClosedOutcome(t *testing.T) {
 	f := newFCFlow(t, "ok", 502)
 	f.e.dpiMgr = dpi.NewManager(findingDecoder{modbus.NewDecoder()})
+	f.e.sessions.dpi = f.e.dpiMgr
 	f.syn()
 	payload := append(modbusADU(1, 3, 0, 2), []byte{0, 2, 0, 0, 255, 255}...)
 	if got := f.decide(0, ackPsh, payload); got.Action != capture.Drop || got.Reason != reasonStreamFailClosed {

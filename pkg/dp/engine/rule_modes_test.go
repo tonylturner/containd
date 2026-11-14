@@ -42,7 +42,7 @@ func TestRuleModesMixedMatrix(t *testing.T) {
 								parsing = "strict"
 							}
 							e.SetICSParsing(map[string]string{proto: parsing})
-							ev := dpi.Event{Proto: proto, Kind: "request", Attributes: map[string]any{"function_code": uint8(3), "apci_type": "I", "type_id": uint8(46), "ca": uint16(1), "apdu_id": "msg", "direction": "request"}}
+							ev := dpi.Event{Proto: proto, Kind: "request", Attributes: map[string]any{"function_code": uint8(3), "apci_type": "I", "type_id": uint8(46), "cause": uint8(6), "ca": uint16(1), "apdu_id": "msg", "direction": "request"}}
 							if strict {
 								ev.Attributes["conformance"] = []string{proto + ".test"}
 							}

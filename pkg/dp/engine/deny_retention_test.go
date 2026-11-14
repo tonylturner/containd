@@ -157,6 +157,9 @@ func TestDenyRetentionFixedLifetime(t *testing.T) {
 	now := time.Now()
 	f.e.deniedTCPNow = func() time.Time { return now }
 	pkt := denyRetentionCommand(t, f, resetProtocols()[0])
+	if f.e.deniedTCPOrder.Front() == nil {
+		t.Fatal("missing retained denial")
+	}
 	d := f.e.deniedTCPOrder.Front().Value.(*deniedTCP)
 	deadline := d.expires
 	if deadline.Sub(now) != 10*time.Second {

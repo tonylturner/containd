@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/project"
 	"github.com/tonylturner/containd/pkg/dp/limits"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -22,19 +21,30 @@ func (t *sessionTable) prepareUnitsLocked(s *trackedSession, dir int, frames []d
 	if compiled == nil {
 		return pairUnknown
 	}
+	failure := pairOK
 	for _, f := range frames {
 		if f.Pending {
 			continue
 		}
 		class, why := s.pairing.inspect(f, dpiDir(dir), now)
-		if why == pairUnsupported || class == rules.ClassSolicited && (why == pairUnpaired || why == pairExpired || why == pairAmbiguous) {
-			stampPairing(f.Events, class, why)
-			return why
+		permit, nonAdmit, policyWhy := t.unitPolicyLocked(s, dir, f, class, why == pairOK, compiled, now, res)
+		if policyWhy != pairOK {
+			stampPairing(f.Events, class, policyWhy)
+			if failure == pairOK {
+				failure = policyWhy
+			}
+			continue
 		}
-		permit, nonAdmit, why := t.unitPolicyLocked(s, dir, f, class, compiled, now, res)
-		stampPairing(f.Events, class, why)
 		if why != pairOK {
-			return why
+			stampPairing(f.Events, class, why)
+			if failure == pairOK {
+				failure = why
+			}
+			continue
+		}
+		stampPairing(f.Events, class, why)
+		if failure != pairOK {
+			continue
 		}
 		owned, lease, why := s.pairing.retain(f, dpiDir(dir))
 		if why != pairOK {
@@ -57,52 +67,58 @@ func (t *sessionTable) prepareUnitsLocked(s *trackedSession, dir int, frames []d
 			}
 		}
 	}
-	return pairOK
+	return failure
 }
 
-func (t *sessionTable) unitPolicyLocked(s *trackedSession, dir int, f dpi.DecodedFrame, class rules.MessageClass, compiled *compiledRules, now time.Time, res *sessionResult) (requestPermit, bool, pairReason) {
-	permit := requestPermit{Epoch: compiled.epoch}
-	if t.parsing == ics.Strict {
-		for _, ev := range f.Events {
-			if hasInspectionFindings(ev) {
-				return permit, false, pairUnsupported
-			}
-		}
+func (t *sessionTable) unitPolicyLocked(s *trackedSession, dir int, f dpi.DecodedFrame, class rules.MessageClass, paired bool, compiled *compiledRules, now time.Time, res *sessionResult) (requestPermit, bool, pairReason) {
+	if sessionProtocol(s.flow) != iecProtocol {
+		return t.genericUnitPolicyLocked(s, dir, f, class, paired, compiled, now, res)
 	}
+	permit := requestPermit{Epoch: compiled.epoch}
 	objects, err := project.UnitObjects(f.Unit, class, dpiDir(dir))
 	if err != nil || len(objects) == 0 {
+		// Unsupported content is never authorized by its event projection.
+		// Retain its diagnostic rule/conformance evidence, then fail closed.
+		j := t.iecAdapter.judgeLocked(t, s, f.Events, now)
+		res.acts.events = append(res.acts.events, j.events...)
+		res.findings = append(res.findings, j.findings...)
 		return permit, false, pairUnsupported
 	}
 	nonAdmit := false
+	why := pairOK
+	seen := map[string]map[string]bool{}
+	j := iecJudgement{}
 	for i := range objects {
 		ctx := s.ctx
 		ctx.Now, ctx.ICS = now, &objects[i]
-		action, entry := compiled.evaluator.EvaluateMessage(ctx, class == rules.ClassSolicited)
-		if ctx.ICS.Protocol == iecProtocol {
-			action, entry = t.policy.EvaluateIEC104(ctx)
-		} else {
-			res.ruleHits = append(res.ruleHits, sessionRuleHit{compiled.evaluator, ctx, entry})
+		var ev dpi.Event
+		if i < len(f.Events) {
+			ev = f.Events[i]
 		}
+		if hasInspectionFindings(ev) {
+			ctx.ICS.IEC104.SafeRead = false
+		}
+		d, entry := t.decideContextLocked(&s.iecSession, ev, ctx)
+		if i < len(f.Events) {
+			t.judgeDecisionLocked(t, s, ev, ctx, d, seen, &j, now)
+		}
+		allowed := d.decision == decisionAllow
 		explicit := entry != nil && entry.ICS.Protocol == ctx.ICS.Protocol
 		switch {
-		case class == rules.ClassAutonomous && (action != rules.ActionAllow || !explicit || entry.ICS.MessageClass != string(class)):
-			return permit, false, autonomousRequired
-		case class == rules.ClassSession && (action != rules.ActionAllow || !explicit || entry.ICS.MessageClass != string(class)):
-			return permit, false, sessionRequired
-		case action != rules.ActionAllow && (explicit || ctx.ICS.Protocol == iecProtocol):
-			return permit, false, pairMismatch
-		case action != rules.ActionAllow || class == rules.ClassRequest && !explicit:
+		case class == rules.ClassAutonomous && (!allowed || !explicit || entry.ICS.MessageClass != string(class)):
+			why = autonomousRequired
+		case class == rules.ClassSession && (!allowed || !explicit || entry.ICS.MessageClass != string(class)):
+			why = sessionRequired
+		case !allowed:
+			why = pairMismatch
+		case class == rules.ClassRequest && !explicit:
 			nonAdmit = true
 		}
 		permit.Contexts = append(permit.Contexts, ctx)
 	}
-	return permit, nonAdmit, pairOK
-}
-
-type sessionRuleHit struct {
-	evaluator *rules.Evaluator
-	context   rules.EvalContext
-	entry     *rules.Entry
+	res.acts.events = append(res.acts.events, j.events...)
+	res.findings = append(res.findings, j.findings...)
+	return permit, nonAdmit, why
 }
 
 func frameCarries(f dpi.DecodedFrame, start, end int64) bool {
