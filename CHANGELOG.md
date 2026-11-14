@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First published Docker Desktop lab figures for routed Modbus, DNP3 and IEC 104
+  through NFQUEUE (monitor DPI off/on and inline enforcement) in the
+  performance documentation.
 - Reproducible routed Modbus, DNP3 and IEC 104 measurement harness with matched
   NFQUEUE monitor DPI off/on and separate inline-enforcement series, bounded
   Docker Desktop resources with a 4 GiB VM available-memory guard,
