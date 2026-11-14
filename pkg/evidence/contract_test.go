@@ -144,3 +144,14 @@ func TestDatasetWatchJSONRoundTrip(t *testing.T) {
 		t.Fatalf("dataset/watch changed: %s", data)
 	}
 }
+
+func TestDS34ConsumersDeliveryEvidence(t *testing.T) {
+	for _, value := range []string{"unknown", "blocked", "delivered"} {
+		o := observation()
+		o.Outcome.Delivery = value
+		err := o.ValidateEnvelope()
+		if (err != nil) != (value == "delivered") {
+			t.Fatalf("delivery %q: %v", value, err)
+		}
+	}
+}

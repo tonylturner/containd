@@ -16,7 +16,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestICSSelectorCreateCommitReload(t *testing.T) {
+func TestDS34ConsumersICSSelectorCreateCommitReload(t *testing.T) {
 	resetTestRateLimiters()
 	path := filepath.Join(t.TempDir(), "config.db")
 	store, err := config.NewSQLiteStore(path)
@@ -35,6 +35,8 @@ func TestICSSelectorCreateCommitReload(t *testing.T) {
 	engine := &stageEngine{mockEngine: &mockEngine{}}
 	server := newTestServerWithEngine(store, nil, engine)
 	predicates := []config.ICSPredicate{
+		{Protocol: "iec104", MessageClass: "session", Direction: "request"},
+		{Protocol: "dnp3", MessageClass: "autonomous", Direction: "response", FunctionCode: []uint8{130}},
 		{Protocol: "modbus", FunctionCode: []uint8{0}, UnitID: new(uint8(0)), Addresses: []string{"0"}},
 		{Protocol: "iec104", TypeIDs: []int{45}, Classes: []string{"control"}, CA: []uint16{0},
 			IOA: []config.IOARange{{Start: 0, End: 0}}, COT: []int{1, 63}, Originators: []int{0},

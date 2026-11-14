@@ -57,6 +57,10 @@ func helpCommand(r *Registry) Command {
 		fmt.Fprintln(out, "Tips:")
 		fmt.Fprintln(out, "  - Commands are appliance-style and match longest prefix.")
 		fmt.Fprintln(out, "  - Use quotes for arguments with spaces.")
+		fmt.Fprintln(out, "  - ICS add/set: --message-class autonomous|session requires DNP3 or IEC 104 and --direction request|response (autonomous: response).")
+		fmt.Fprintln(out, "  - In enforce, an ordinary ALLOW permits requests and paired solicited replies, not autonomous data or session controls.")
+		fmt.Fprintln(out, "  - preview firewall ics-rule <id> <action> <protocol> [selectors] reports predicate matches separately from retained pairing outcomes; neither proves delivery.")
+		fmt.Fprintln(out, "  - preview firewall ruleset reports the candidate ruleset and cutover warnings without applying it.")
 		return nil
 	}
 }

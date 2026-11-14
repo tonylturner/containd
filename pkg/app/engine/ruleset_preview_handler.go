@@ -48,6 +48,7 @@ func previewRulesetHandler(dp *engine.Engine) http.HandlerFunc {
 		if !req.Config.DataPlane.Enforcement {
 			writeJSON(w, engine.RulesetPreview{
 				Snapshot: req.Snapshot,
+				Pairing:  dp.PreviewPairing(&req.Snapshot),
 				Runtime:  engine.RulesetPreviewRuntime{Reason: "Enforcement is disabled; nothing would be applied"},
 			})
 			return

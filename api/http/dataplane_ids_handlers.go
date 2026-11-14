@@ -73,6 +73,9 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 		if len(preview.Warnings) > 0 {
 			resp["warnings"] = preview.Warnings
 		}
+		if preview.Pairing != nil {
+			resp["pairing"] = preview.Pairing
+		}
 		// Static candidate coverage; engineStatus carries the applied one.
 		if cov := coverage.Evaluate(&preview.Snapshot, cfg.DataPlane.CoverageSettings()); len(cov) > 0 {
 			resp["icsCoverage"] = cov

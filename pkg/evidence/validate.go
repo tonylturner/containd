@@ -29,6 +29,9 @@ func (o Observation) ValidateEnvelope() error {
 	default:
 		return fmt.Errorf("unsupported coordinate space %q", o.Service.Coordinates)
 	}
+	if o.Outcome.Delivery != "" && o.Outcome.Delivery != "unknown" && o.Outcome.Delivery != "blocked" {
+		return fmt.Errorf("unsupported delivery evidence %q", o.Outcome.Delivery)
+	}
 	count := 0
 	for _, present := range []bool{o.Modbus != nil, o.DNP3 != nil, o.IEC104 != nil, o.CIP != nil} {
 		if present {

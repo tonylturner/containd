@@ -147,11 +147,6 @@ func (j *evidenceJoin) accept(batch evidenceBatch) {
 				if outcome == "dropped" {
 					e.outcome.Delivery = "blocked"
 				}
-			case "evidence.delivery":
-				delivery, _ := eventfields.String(ev.Attributes, "delivery")
-				if delivery == "delivered" {
-					e.outcome.Delivery = "delivered"
-				}
 			}
 			j.account(id)
 		}

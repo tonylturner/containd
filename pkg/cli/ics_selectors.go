@@ -14,6 +14,12 @@ import (
 // remains authoritative on the server, including cross-field constraints.
 func applyICSSelector(p *config.ICSPredicate, flag, value string) error {
 	switch flag {
+	case "--message-class":
+		if value != "autonomous" && value != "session" {
+			return fmt.Errorf("%s requires autonomous or session", flag)
+		}
+		p.MessageClass = value
+		return nil
 	case "--negative", "--test":
 		if value != "true" && value != "false" {
 			return fmt.Errorf("%s requires true or false", flag)

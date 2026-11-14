@@ -25,7 +25,7 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
-func TestExactIECMonitoringWithheldOnlyAsNonCommand(t *testing.T) {
+func TestExactIECMonitoringClassRelation(t *testing.T) {
 	for _, direction := range []string{"request", "response"} {
 		t.Run(direction, func(t *testing.T) {
 			o := evidence.Observation{
@@ -44,8 +44,12 @@ func TestExactIECMonitoringWithheldOnlyAsNonCommand(t *testing.T) {
 				},
 			}
 			bundle, reasons := learn.GenerateRelation(o)
-			if len(bundle) != 0 || !slices.Equal(reasons, []evidence.WithheldReason{evidence.WithheldIECNonCommand}) {
-				t.Fatalf("monitoring ASDU: rules=%v reasons=%v", bundle, reasons)
+			if direction == "request" {
+				if len(bundle) != 0 || !slices.Equal(reasons, []evidence.WithheldReason{evidence.WithheldIECNonCommand}) {
+					t.Fatalf("monitoring request: rules=%v reasons=%v", bundle, reasons)
+				}
+			} else if len(bundle) != 1 || len(reasons) != 0 || bundle[0].ICS.MessageClass != "autonomous" {
+				t.Fatalf("monitoring response: rules=%v reasons=%v", bundle, reasons)
 			}
 		})
 	}
@@ -121,7 +125,7 @@ func TestExactDNPHeaderBundleAndFailedReplayRetention(t *testing.T) {
 	o.Modbus = nil
 	o.Service.Protocol, o.Service.ServerPort = "dnp3", 20000
 	o.ObjectCount = 2
-	o.DNP3 = &evidence.DNP3{Master: ptr(uint16(1)), Outstation: ptr(uint16(2)), FunctionCode: ptr(uint8(1)), Objects: []evidence.DNP3Object{
+	o.DNP3 = &evidence.DNP3{ApplicationUNS: ptr(false), Master: ptr(uint16(1)), Outstation: ptr(uint16(2)), FunctionCode: ptr(uint8(1)), Objects: []evidence.DNP3Object{
 		{Index: 0, Group: ptr(uint8(20)), Variation: ptr(uint8(1)), Qualifier: ptr(uint8(0)), Count: ptr(uint32(1)), Spans: []evidence.Span{{First: 4, Last: 4, Role: "target"}}},
 		{Index: 1, Group: ptr(uint8(30)), Variation: ptr(uint8(2)), Qualifier: ptr(uint8(0)), Count: ptr(uint32(1)), Spans: []evidence.Span{{First: 7, Last: 7, Role: "target"}}},
 	}}

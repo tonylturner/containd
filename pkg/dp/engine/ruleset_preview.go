@@ -30,6 +30,7 @@ type RulesetPreview struct {
 	// Warnings lists the rules of the candidate that match nothing (see
 	// enforce.RuleWarnings); omitted when there are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
+	Pairing  *PairingPreview       `json:"pairing,omitempty"`
 }
 
 // PreviewRuleset compiles an isolated candidate with the queue ownership and
@@ -93,5 +94,5 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 		return RulesetPreview{}, err
 	}
 	warnings := append(comp.RuleWarnings(&snap), pairingCutoverWarnings(&snap)...)
-	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime, Warnings: warnings}, nil
+	return RulesetPreview{Snapshot: snap, Ruleset: ruleset, Runtime: runtime, Warnings: warnings, Pairing: e.PreviewPairing(&snap)}, nil
 }

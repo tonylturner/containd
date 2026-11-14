@@ -15,14 +15,13 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-func TestEvidenceOutcomeJoinNeverFabricatesDelivery(t *testing.T) {
+func TestDS34ConsumersEvidenceOutcomeJoinNeverFabricatesDelivery(t *testing.T) {
 	for _, tc := range []struct {
 		kind, outcome, delivery string
 	}{
 		{eventfields.KindDecision, "would_allow", "unknown"},
 		{eventfields.KindVerdict, "would_drop", "unknown"},
 		{eventfields.KindVerdict, "dropped", "blocked"},
-		{"evidence.delivery", "delivered", "delivered"},
 	} {
 		t.Run(tc.outcome, func(t *testing.T) {
 			a := newEvidenceTestAPI(t)
