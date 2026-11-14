@@ -208,3 +208,70 @@ func testIECSettledVariants(t *testing.T) {
 		}
 	})
 }
+
+func repeatedIECEngine(t *testing.T) (*Engine, runtimePairCase) {
+	p := runtimePairCases()[2]
+	e := runtimePairEngine(t, rules.Snapshot{Default: rules.ActionDeny, DPIMode: "enforce", Firewall: []rules.Entry{runtimePairRule(p, "enforce")}}, true)
+	inlineHandshake(t, e, 41000, p.port)
+	return e, p
+}
+
+// A positively confirmed execute must not block another command when ACT_TERM is omitted.
+func TestIECRepeatedExecuteWithoutTermination(t *testing.T) {
+	e, p := repeatedIECEngine(t)
+	if d := sendInline(e, runtimePairPacket(p, false, 100, p.request)); d.Action != capture.Repeat {
+		t.Fatalf("first execute=%+v", d)
+	}
+	if d := sendInline(e, runtimePairPacket(p, true, 500, p.reply)); d.Action != capture.Repeat {
+		t.Fatalf("ACT_CON=%+v", d)
+	}
+	d := sendInline(e, runtimePairPacket(p, false, 100+uint32(len(p.request)), p.request))
+	t.Logf("second execute after ACT_CON, no ACT_TERM: %+v", d)
+	if d.Action != capture.Repeat {
+		t.Errorf("allowed repeat command reset the session: %+v", d)
+	}
+}
+
+func TestIECRepeatedSelectBeforeOperate(t *testing.T) {
+	e, p := repeatedIECEngine(t)
+	client, server := uint32(100), uint32(500)
+	for range 2 {
+		for _, value := range []byte{0x82, 2} {
+			q, r := apdu(46, 6, 1, 101, value), apdu(46, 7, 1, 101, value)
+			if d := sendInline(e, runtimePairPacket(p, false, client, q)); d.Action != capture.Repeat {
+				t.Fatalf("select/execute request: %+v", d)
+			}
+			if d := sendInline(e, runtimePairPacket(p, true, server, r)); d.Action != capture.Repeat {
+				t.Fatalf("select/execute confirmation: %+v", d)
+			}
+			client += uint32(len(q))
+			server += uint32(len(r))
+		}
+	}
+}
+
+func TestIECReplacementRetiresOptionalTermination(t *testing.T) {
+	now := time.Unix(1000, 0)
+	b := newPairing("iec104", pairResources(), false, nil)
+	defer b.close()
+	q := iec104.PairShape{Format: "I", TypeID: 46, Cause: 6, CA: 1, Objects: []iec104.Object{{IOA: 101, ValueBits: 2}}}
+	r := iecPairAdapter{}.Copy(q)
+	r.Cause = 7
+	for _, unit := range []struct {
+		shape iec104.PairShape
+		dir   dpi.StreamDir
+	}{{q, dpi.ClientToServer}, {r, dpi.ServerToClient}, {q, dpi.ClientToServer}} {
+		if why := b.apply(pairIE(unit.shape), unit.dir, requestPermit{}, now); why != pairOK {
+			t.Fatal(why)
+		}
+	}
+	r.Cause = 10
+	if _, why := b.inspect(pairIE(r), dpi.ServerToClient, now); why != pairMismatch {
+		t.Fatalf("old optional termination retained authority: %s", why)
+	}
+	// The replacement is still unconfirmed: a concurrent duplicate remains
+	// ambiguous rather than silently replacing the outstanding command.
+	if why := b.apply(pairIE(q), dpi.ClientToServer, requestPermit{}, now); why != pairAmbiguous {
+		t.Fatal("unconfirmed duplicate was not ambiguous", why)
+	}
+}

@@ -138,6 +138,7 @@ func (iecPairAdapter) Advance(q iec104.PairShape, p pairProgress, r iec104.PairS
 				return p, true, pairOK
 			}
 			p.Phase = 1
+			p.Replaceable = row.DataCauseLow == 0
 			return p, false, pairOK
 		}
 		if p.Phase == 1 && r.Cause == 10 && row.Termination {
