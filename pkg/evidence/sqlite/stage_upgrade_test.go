@@ -24,17 +24,17 @@ func check(t *testing.T, err error) {
 func meta() evidence.Dataset {
 	return evidence.Dataset{Source: evidence.SourcePCAP, CaptureSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DecoderVersion: "ics-1", ProfileFingerprint: "profile", SnapshotFingerprint: "snapshot"}
 }
-func TestOlderResolvedProofSurvivesUpgrade(t *testing.T) {
+func TestDS34ConsumersStageUpgrade(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending", true: "completed"}[complete], func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "upgrade.db")
-			// Seed a historically valid proof from a generator that ignored gaps.
-			oldVersion := learn.GeneratorVersion + "-historical"
-			if oldVersion == learn.GeneratorVersion {
+			// Seed a historically valid proof from a different evaluator.
+			oldVersion := learn.EvaluatorVersion + "-historical"
+			if oldVersion == learn.EvaluatorVersion {
 				t.Fatal("fixture version must differ")
 			}
-			s, e := sqlite.Open(path, sqlite.Options{CompatibleProof: func(v learn.Versions) bool { return v.Generator == oldVersion }})
+			s, e := sqlite.Open(path, sqlite.Options{CompatibleProof: func(v learn.Versions) bool { return v.Evaluator == oldVersion }})
 			check(t, e)
 			ds, e := s.CreateDataset(ctx, meta())
 			check(t, e)
@@ -54,7 +54,7 @@ func TestOlderResolvedProofSurvivesUpgrade(t *testing.T) {
 			}
 			digest, e := evidence.EvidenceDigest([]evidence.Observation{p})
 			check(t, e)
-			content := learn.SuggestionContent{Versions: learn.Versions{Schema: learn.SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: oldVersion, Evaluator: learn.EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: bundle, RequiresCoordinateReview: true}
+			content := learn.SuggestionContent{Versions: learn.Versions{Schema: learn.SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: learn.GeneratorVersion, Evaluator: oldVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: bundle, RequiresCoordinateReview: true}
 			v, e := s.PutDraft(ctx, learn.Suggestion{DatasetID: ds.ID, Content: content})
 			check(t, e)
 			proof := learn.Certification{ContentID: v.ID, EvidenceDigest: digest, Versions: content.Versions, CertifiedAt: time.Now(), ParentRefs: []evidence.EvidenceRef{{DatasetID: ds.ID, ObservationID: p.ID}}, Positive: learn.ReplayTotals{Total: 1, Passed: 1}, Negative: learn.ReplayTotals{Total: 1, Passed: 1}}
@@ -74,10 +74,15 @@ func TestOlderResolvedProofSurvivesUpgrade(t *testing.T) {
 			defer s.Close()
 			expired, e := s.GetSuggestion(ctx, v.ID)
 			check(t, e)
-			t.Logf("live suggestion after upgrade: %s", expired.Status)
+			if expired.Status != learn.SuggestionExpired {
+				t.Fatalf("stale evaluator remained stageable: %s", expired.Status)
+			}
+			if _, err := s.ResolveForStage(ctx, learn.ApplyRequest{RequestID: "new-after-upgrade", Selections: req.Selections}); err == nil {
+				t.Fatal("new staging accepted a stale evaluator proof")
+			}
 			frozen, e := s.ResolveForStage(ctx, req)
 			check(t, e)
-			t.Logf("retry returned %d suggestions; generator=%s, compatible=%v, binding=%v", len(frozen), frozen[0].Content.Versions.Generator, learn.CompatibleVersions(frozen[0].Proof.Versions), frozen[0].Proof.ValidateBinding(frozen[0].Content))
+			t.Logf("retry returned %d suggestions; evaluator=%s, compatible=%v, binding=%v", len(frozen), frozen[0].Content.Versions.Evaluator, learn.CompatibleVersions(frozen[0].Proof.Versions), frozen[0].Proof.ValidateBinding(frozen[0].Content))
 			if len(frozen) != 1 || !frozen[0].StageReconcileOnly {
 				t.Fatal("incompatible snapshot can introduce candidate rules")
 			}

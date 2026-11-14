@@ -10,7 +10,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/dp/ics/project"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/evidence"
 )
@@ -52,12 +51,15 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 	}
 	evaluator := rules.NewEvaluator(&snapshot)
 	accepts := func(o evidence.Observation) (bool, error) {
-		contexts, err := project.Observation(o)
+		if !parentComplete(o) || !o.Quality.Decoded || len(o.Quality.Conformance)+len(o.Quality.Undecoded)+len(o.Quality.Loss) != 0 {
+			return false, nil
+		}
+		contexts, err := observationContexts(o)
 		if err != nil {
 			return false, err
 		}
 		if len(contexts) == 0 {
-			return false, fmt.Errorf("no projected contexts")
+			return false, nil
 		}
 		for _, context := range contexts {
 			if evaluator.AnyMatch(context) == nil {
@@ -89,7 +91,7 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 		}
 		proof.Positive.Total++
 		accepted, projectionErr := accepts(o)
-		eligible := parentComplete(o) && o.Quality.Decoded && len(o.Quality.Conformance)+len(o.Quality.Undecoded)+len(o.Quality.Loss) == 0
+		eligible := pairingCertifiable(o)
 		if accepted && eligible && projectionErr == nil {
 			proof.Positive.Passed++
 		} else {
@@ -225,7 +227,30 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 			p.Service.Transport = "tcp"
 		}
 	})
-	add("direction", func(p *evidence.Observation) { p.Service.Direction = "response" })
+	add("direction", func(p *evidence.Observation) {
+		if p.Service.Direction == "response" {
+			p.Service.Direction = "request"
+		} else {
+			p.Service.Direction = "response"
+		}
+	})
+	if class := observationClass(o); class == rules.ClassSession || class == rules.ClassAutonomous {
+		add("message_class", func(p *evidence.Observation) { p.MessageClass = "unknown" })
+		if class == rules.ClassSession {
+			if d := o.DNP3; d != nil {
+				if d.Master != nil {
+					add("master", func(p *evidence.Observation) { *p.DNP3.Master++ })
+				}
+				if d.Outstation != nil {
+					add("outstation", func(p *evidence.Observation) { *p.DNP3.Outstation++ })
+				}
+				if d.FunctionCode != nil {
+					add("function", func(p *evidence.Observation) { *p.DNP3.FunctionCode++ })
+				}
+			}
+			return
+		}
+	}
 	switch {
 	case o.Modbus != nil:
 		if o.Modbus.FunctionCode != nil && *o.Modbus.FunctionCode == 5 {
@@ -416,7 +441,9 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 				}
 			}
 			add(fmt.Sprintf("missing_ioa_%d", i), func(p *evidence.Observation) { p.IEC104.Objects[i].IOA = nil })
-			add(fmt.Sprintf("select_execute_%d", i), func(p *evidence.Observation) { *p.IEC104.Objects[i].Select = !*p.IEC104.Objects[i].Select })
+			if obj.Select != nil {
+				add(fmt.Sprintf("select_execute_%d", i), func(p *evidence.Observation) { *p.IEC104.Objects[i].Select = !*p.IEC104.Objects[i].Select })
+			}
 		}
 	}
 }

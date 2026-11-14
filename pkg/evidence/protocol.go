@@ -26,10 +26,11 @@ type Modbus struct {
 // DNP3 keeps station roles and ordered object headers together, never a product
 // of independent group/variation/index lists or points borrowed from a reply.
 type DNP3 struct {
-	Master       *uint16      `json:"master,omitempty"`
-	Outstation   *uint16      `json:"outstation,omitempty"`
-	FunctionCode *uint8       `json:"functionCode,omitempty"`
-	Objects      []DNP3Object `json:"objects"`
+	ApplicationUNS *bool        `json:"applicationUns,omitempty"`
+	Master         *uint16      `json:"master,omitempty"`
+	Outstation     *uint16      `json:"outstation,omitempty"`
+	FunctionCode   *uint8       `json:"functionCode,omitempty"`
+	Objects        []DNP3Object `json:"objects"`
 }
 
 // DNP3Object is an ordered parent header with its own qualifier and targets.

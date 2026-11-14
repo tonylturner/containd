@@ -97,6 +97,11 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			parents = append(parents, o)
 			continue
 		}
+		o.MessageClass = string(project.MessageClass(ev))
+		if ds.Source == evidence.SourceLive {
+			o.PairingOutcome, _ = eventfields.String(ev.Attributes, "pairing_outcome")
+			o.PairingReason, _ = eventfields.String(ev.Attributes, "pairing_reason")
+		}
 		a := ev.Attributes
 		o.Quality.Conformance, _ = eventfields.Strings(a, eventfields.KeyConformance)
 		o.Quality.Undecoded, _ = eventfields.Strings(a, eventfields.KeyUndecoded)
@@ -137,7 +142,7 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			o.Modbus = m
 			o.ObjectCount = uint32(max(1, len(m.Spans)))
 		case "dnp3":
-			d := &evidence.DNP3{FunctionCode: bytePtr(a, eventfields.KeyFunctionCode)}
+			d := &evidence.DNP3{ApplicationUNS: boolPtr(a, "application_uns"), FunctionCode: bytePtr(a, eventfields.KeyFunctionCode)}
 			d.Master, d.Outstation = project.DNP3Stations(a)
 			headers, ok := project.DNP3Headers(a["objects"])
 			if !ok {
@@ -205,7 +210,7 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 					CA    *uint16
 					Count uint32
 				}{iec.TypeID, iec.CA, o.ObjectCount})
-				if left != right {
+				if left != right || p.MessageClass != o.MessageClass || p.PairingOutcome != o.PairingOutcome || p.PairingReason != o.PairingReason {
 					p.Quality.Complete = false
 				}
 				p.IEC104.Objects = append(p.IEC104.Objects, iec.Objects...)
