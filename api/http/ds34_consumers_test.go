@@ -26,3 +26,21 @@ func TestDS34ConsumersRuleAPI(t *testing.T) {
 		t.Fatalf("preview roundtrip: %d %s entry=%+v", rec.Code, rec.Body, eng.entry)
 	}
 }
+
+func TestDS34ConsumersRulesetAPI(t *testing.T) {
+	pairing := &dpengine.PairingPreview{
+		Paired: 1, Unpaired: 2, Expired: 3, Ambiguous: 4, Unsupported: 5, Unknown: 6,
+		Reasons: []string{"paired", "unpaired", "pairing_expired", "pairing_ambiguous", "pairing_unsupported", "pairing_unknown"},
+	}
+	eng := &rulesetPreviewEngine{mockEngine: &mockEngine{}, result: dpengine.RulesetPreview{
+		Ruleset: "engine-compiled", Pairing: pairing,
+	}}
+	cfg := config.DefaultConfig()
+	server := newTestServerWithEngine(&mockStore{cfg: cfg}, nil, eng)
+	rec := requestStage(t, server, http.MethodGet, "/dataplane/ruleset", nil)
+	var got dpengine.RulesetPreview
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil ||
+		!reflect.DeepEqual(got.Pairing, pairing) || got.Ruleset != eng.result.Ruleset || eng.cfg == nil {
+		t.Fatalf("ruleset preview roundtrip: %d %s forwarded=%+v", rec.Code, rec.Body, eng.cfg)
+	}
+}
